@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import {
   APP_CONNECTION_STATE,
   APP_CONNECTION_STATE_SLUG,
@@ -6,13 +8,36 @@ import {
   APP_SCAFFOLD_STATUS,
 } from './lib/app-metadata';
 import { CAVE_CLIENT_BOUNDARY } from './lib/cave-client-boundary';
+import { canUseTauriCommands, fallbackAppIdentity, readAppIdentity } from './lib/desktop-host';
 
 export function App() {
+  const [appIdentity, setAppIdentity] = useState(fallbackAppIdentity);
+
+  useEffect(() => {
+    if (!canUseTauriCommands()) {
+      return;
+    }
+
+    let isCurrent = true;
+
+    void readAppIdentity()
+      .then((identity) => {
+        if (isCurrent) {
+          setAppIdentity(identity);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
   return (
     <div className="app-shell" data-scaffold-fingerprint={APP_METADATA.fingerprint}>
       <header className="app-header">
         <p className="eyebrow">Phase 0 desktop scaffold</p>
-        <h1>{APP_METADATA.name}</h1>
+        <h1>{appIdentity.name}</h1>
         <p className="lede">Production scaffolding for the future OpenCoven desktop chat client.</p>
       </header>
 
@@ -48,9 +73,10 @@ export function App() {
           <h2 id="integration-boundary-heading">Integration boundary</h2>
           <p>
             Future Cave integration must import only from{' '}
-            <code>{CAVE_CLIENT_BOUNDARY.packageName}</code> once that public package ships.
+            <code>{CAVE_CLIENT_BOUNDARY.packageName}</code>.
           </p>
           <p>{CAVE_CLIENT_BOUNDARY.note}</p>
+          <p>{CAVE_CLIENT_BOUNDARY.verification}</p>
         </section>
 
         <aside className="panel" aria-labelledby="desktop-identity-heading">
@@ -58,11 +84,11 @@ export function App() {
           <dl className="identity-list">
             <div>
               <dt>Bundle identifier</dt>
-              <dd>{APP_METADATA.identifier}</dd>
+              <dd>{appIdentity.identifier}</dd>
             </div>
             <div>
               <dt>Phase</dt>
-              <dd>{APP_METADATA.phase}</dd>
+              <dd>{appIdentity.phase}</dd>
             </div>
           </dl>
         </aside>

@@ -9,7 +9,7 @@
     "pnpm": "10.34.0"
   },
   "scripts": {
-    "install:clean": "pnpm install --frozen-lockfile",
+    "install:clean": "corepack pnpm install --frozen-lockfile",
     "dev": "vite",
     "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
     "build": "vite build",
@@ -17,7 +17,7 @@
     "lint": "biome check package.json biome.json tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts index.html README.md docs/developer-toolchains.md src e2e",
     "format": "biome format --write package.json biome.json tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts index.html README.md docs/developer-toolchains.md src e2e",
     "format:check": "biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false package.json biome.json tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts index.html README.md docs/developer-toolchains.md src e2e",
-    "test": "pnpm test:unit",
+    "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "cargo:check": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets",

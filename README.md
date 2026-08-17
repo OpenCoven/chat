@@ -11,8 +11,11 @@ are not implemented in this phase.
 - No direct arbitrary HTTP calls are implemented.
 - No credentials, localStorage canonical data, or secret handling ship in Phase 0.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
-- Future Cave integration must use the public `@opencoven/cave-client` package
-  when it is published; Phase 0 only documents that seam.
+- Future Cave integration must use only the public `@opencoven/cave-client`
+  package boundary.
+- Until package publication is explicitly approved, the cross-repository canary
+  installs packed `@opencoven/cave-client` tarballs into a temporary copy
+  instead of adding a source-relative or absolute path dependency.
 
 ## Prerequisites
 
@@ -57,6 +60,7 @@ The current application renders:
 - the OpenCoven Chat product identity
 - a visible unavailable Cave connection state
 - an accessible placeholder status region
+- a typed, non-secret desktop identity seam through the `app_identity` Tauri command
 - a documented future Cave client boundary
 - the desktop bundle identifier and scaffold phase
 

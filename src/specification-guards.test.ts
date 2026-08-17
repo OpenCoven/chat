@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 type CapabilityFile = {
@@ -9,6 +9,8 @@ type CapabilityFile = {
 };
 
 type PackageManifest = {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
 };
 
@@ -20,6 +22,35 @@ function readText(relativePath: string) {
 
 function readJson<T>(relativePath: string) {
   return JSON.parse(readText(relativePath)) as T;
+}
+
+function listRuntimeSourceFiles(relativePath: string): string[] {
+  const absolutePath = resolve(projectRoot, relativePath);
+  const entries = readdirSync(absolutePath);
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const childRelativePath = `${relativePath}/${entry}`;
+    const childAbsolutePath = resolve(projectRoot, childRelativePath);
+    const stats = statSync(childAbsolutePath);
+
+    if (stats.isDirectory()) {
+      files.push(...listRuntimeSourceFiles(childRelativePath));
+      continue;
+    }
+
+    if (
+      !/\.(ts|tsx)$/.test(entry) ||
+      /\.test\.(ts|tsx)$/.test(entry) ||
+      childRelativePath.endsWith('vite-env.d.ts')
+    ) {
+      continue;
+    }
+
+    files.push(childRelativePath);
+  }
+
+  return files.sort();
 }
 
 describe('Phase 0 specification guards', () => {
@@ -92,7 +123,48 @@ describe('Phase 0 specification guards', () => {
     expect(playwrightConfig).toContain("const previewUrl = 'http://127.0.0.1:4174';");
     expect(playwrightConfig).toMatch(/reuseExistingServer:\s*false/);
     expect(playwrightConfig).toMatch(/command:\s*'corepack pnpm build && corepack pnpm preview'/);
+    expect(packageManifest.scripts?.['install:clean']).toBe(
+      'corepack pnpm install --frozen-lockfile',
+    );
+    expect(packageManifest.scripts?.test).toBe('vitest run');
     expect(packageManifest.scripts?.preview).toContain('--port 4174');
+  });
+
+  it('keeps runtime source free from ad hoc Cave networking primitives', () => {
+    const disallowedPatterns = [
+      /\bfetch\s*\(/,
+      /\bHeaders\b/,
+      /\bAuthorization\b/,
+      /\bBearer\b/,
+      /https?:\/\//,
+    ];
+
+    const violations: string[] = [];
+
+    for (const file of listRuntimeSourceFiles('src')) {
+      const source = readText(file);
+
+      for (const pattern of disallowedPatterns) {
+        if (pattern.test(source)) {
+          violations.push(`${file}: ${pattern}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('documents the package boundary without a local cave-client dependency', () => {
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const readme = readText('README.md');
+    const boundary = readText('src/lib/cave-client-boundary.ts');
+
+    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toBeUndefined();
+    expect(packageManifest.devDependencies?.['@opencoven/cave-client']).toBeUndefined();
+    expect(boundary).toContain('cross-repository canary verifies packed');
+    expect(boundary).toContain('instead of adding a local path dependency');
+    expect(readme).toContain('cross-repository canary');
+    expect(readme).toContain('packed `@opencoven/cave-client` tarballs');
   });
 
   it('runs the desktop entrypoint in CI with Linux Tauri dependencies', () => {

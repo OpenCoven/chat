@@ -25,11 +25,13 @@ describe('App', () => {
       .getByRole('heading', { name: 'Integration boundary' })
       .closest('section');
 
+    expect(boundary).toHaveTextContent('Future Cave integration must import only from');
+    expect(boundary).toHaveTextContent('@opencoven/cave-client');
     expect(boundary).toHaveTextContent(
-      'Future Cave integration must import only from @opencoven/cave-client once that public package ships.',
+      'Phase 0 documents the typed package boundary only; runtime code still avoids private Cave schemas and source-relative SDK links.',
     );
     expect(boundary).toHaveTextContent(
-      'Phase 0 intentionally avoids unpublished Cave client dependencies and private schemas.',
+      'Until package publication is explicitly approved, the cross-repository canary verifies packed @opencoven/cave-client tarballs in a temporary install copy instead of adding a local path dependency.',
     );
   });
 

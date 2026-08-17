@@ -14,10 +14,20 @@ export const APP_CONNECTION_SUMMARY =
 export const APP_SCAFFOLD_STATUS =
   'Application scaffold ready. Pairing, canonical reads, and chat behavior are intentionally not implemented.';
 
-export const APP_METADATA = Object.freeze({
+export type AppIdentity = Readonly<{
+  name: string;
+  identifier: string;
+  phase: string;
+}>;
+
+export const APP_IDENTITY: AppIdentity = Object.freeze({
   name: 'OpenCoven Chat',
   identifier: 'ai.opencoven.chat',
   phase: 'phase-0-scaffold',
+});
+
+export const APP_METADATA = Object.freeze({
+  ...APP_IDENTITY,
   version: '0.1.0',
   fingerprint: 'ai.opencoven.chat:phase-0-scaffold:0.1.0',
 });
