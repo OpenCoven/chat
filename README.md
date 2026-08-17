@@ -68,6 +68,18 @@ The current application renders:
 
 Anything beyond that is intentionally deferred to later beads.
 
+## GitHub Actions repository variables
+
+The contract canary workflow has no mutable fallback for external checkouts.
+Configure these GitHub Actions repository variables on the Chat repository with
+reviewed immutable 40-character commit SHAs:
+
+- `OPENCOVEN_SDK_REVIEWED_REVISION`
+- `OPENCOVEN_CAVE_REVIEWED_REVISION`
+
+Local explicit-root canary runs still use
+`pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
+
 ## CI coverage
 
 `.github/workflows/ci.yml` runs:
@@ -78,7 +90,7 @@ Anything beyond that is intentionally deferred to later beads.
 - Vite production builds for Playwright smoke and `pnpm app:build`
 - Playwright smoke coverage
 - `pnpm app:build` on Ubuntu with the Linux Tauri system dependencies installed
-- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts
+- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts pinned by reviewed repository variables
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

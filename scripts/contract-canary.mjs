@@ -1,17 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultSdkRoot = resolve(root, '.cross-repo', 'sdk');
 const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
-const defaultArtifactRoot = resolve(root, '.artifacts', 'contract-canary');
+const artifactBaseRoot = resolve(root, '.artifacts', 'contract-canary');
+const defaultArtifactName = 'default';
+const safeArtifactNamePattern = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 function printUsage() {
   process.stdout.write(
     [
-      'usage: contract-canary.mjs [--sdk-root <path>] [--cave-root <path>] [--artifact-root <path>]',
+      'usage: contract-canary.mjs [--sdk-root <path>] [--cave-root <path>] [--artifact-name <safe-child-name>]',
       '',
       'Packs the reviewed SDK packages, installs their tarballs into an isolated',
       'Chat canary harness, compiles Chat-owned code against the public',
@@ -22,11 +25,46 @@ function printUsage() {
   );
 }
 
-function parseArgs(argv) {
+function assertConfinedArtifactRoot(targetPath) {
+  const normalizedArtifactBaseRoot = resolve(artifactBaseRoot);
+  const normalizedRepositoryRoot = resolve(root);
+  const normalizedTargetPath = resolve(targetPath);
+  const normalizedHomeDirectory = resolve(homedir());
+  const relativeToArtifactBase = relative(normalizedArtifactBaseRoot, normalizedTargetPath);
+
+  if (
+    normalizedTargetPath === resolve('/') ||
+    normalizedTargetPath === normalizedHomeDirectory ||
+    normalizedTargetPath === normalizedRepositoryRoot ||
+    normalizedTargetPath === resolve(normalizedRepositoryRoot, '..') ||
+    relativeToArtifactBase.length === 0 ||
+    relativeToArtifactBase === '..' ||
+    relativeToArtifactBase.startsWith(`..${sep}`) ||
+    relativeToArtifactBase.split(sep).includes('..')
+  ) {
+    throw new Error(
+      `Artifact cleanup path must stay inside a child of ${normalizedArtifactBaseRoot}.`,
+    );
+  }
+}
+
+export function resolveContractCanaryArtifactRoot(artifactName = defaultArtifactName) {
+  if (!safeArtifactNamePattern.test(artifactName)) {
+    throw new Error(
+      `Artifact name "${artifactName}" must be a safe child name using only letters, digits, ".", "_" or "-".`,
+    );
+  }
+
+  const artifactRoot = resolve(artifactBaseRoot, artifactName);
+  assertConfinedArtifactRoot(artifactRoot);
+  return artifactRoot;
+}
+
+export function parseArgs(argv) {
   const options = {
     sdkRoot: resolve(process.env.OPENCOVEN_SDK_ROOT ?? defaultSdkRoot),
     caveRoot: resolve(process.env.OPENCOVEN_CAVE_ROOT ?? defaultCaveRoot),
-    artifactRoot: resolve(process.env.OPENCOVEN_CHAT_CANARY_ARTIFACT_ROOT ?? defaultArtifactRoot),
+    artifactName: process.env.OPENCOVEN_CHAT_CANARY_ARTIFACT_NAME ?? defaultArtifactName,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -41,7 +79,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (argument === '--sdk-root' || argument === '--cave-root' || argument === '--artifact-root') {
+    if (argument === '--sdk-root' || argument === '--cave-root' || argument === '--artifact-name') {
       const value = argv[index + 1];
 
       if (value === undefined) {
@@ -53,7 +91,7 @@ function parseArgs(argv) {
       } else if (argument === '--cave-root') {
         options.caveRoot = resolve(value);
       } else {
-        options.artifactRoot = resolve(value);
+        options.artifactName = value;
       }
 
       index += 1;
@@ -63,6 +101,7 @@ function parseArgs(argv) {
     throw new Error(`Unknown argument: ${argument}`);
   }
 
+  options.artifactRoot = resolveContractCanaryArtifactRoot(options.artifactName);
   return options;
 }
 
@@ -106,15 +145,14 @@ function createPublicPackageOverrides(tarballs) {
   };
 }
 
-function packPublicPackages(sdkRoot, tarballRoot) {
+function packPublicPackages(sdkRoot, manifestPath) {
   const packScript = resolve(sdkRoot, 'scripts', 'pack-public-packages.mjs');
-  const manifestPath = resolve(tarballRoot, 'tarballs.json');
 
   requirePath(packScript, 'SDK pack-public-packages script');
 
   run(
     process.execPath,
-    [packScript, '--output-dir', tarballRoot, '--json-file', manifestPath],
+    [packScript, '--artifact-name', 'contract-canary', '--json-file', manifestPath],
     sdkRoot,
   );
 
@@ -226,50 +264,56 @@ process.stdout.write('Chat contract canary passed.\\n');
   );
 }
 
-const options = parseArgs(process.argv.slice(2));
-const caveFixturePath = resolve(
-  options.caveRoot,
-  'src',
-  'lib',
-  'server',
-  'client-v1',
-  'contract-fixture.json',
-);
-const caveDigestPath = resolve(
-  options.caveRoot,
-  'src',
-  'lib',
-  'server',
-  'client-v1',
-  'contract-fixture.sha256',
-);
-const tarballRoot = resolve(options.artifactRoot, 'sdk-tarballs');
-const harnessRoot = resolve(options.artifactRoot, 'chat-harness');
-const sdkVerifyContracts = resolve(options.sdkRoot, 'scripts', 'verify-contracts.mjs');
+export function main(argv = process.argv.slice(2)) {
+  const options = parseArgs(argv);
+  const caveFixturePath = resolve(
+    options.caveRoot,
+    'src',
+    'lib',
+    'server',
+    'client-v1',
+    'contract-fixture.json',
+  );
+  const caveDigestPath = resolve(
+    options.caveRoot,
+    'src',
+    'lib',
+    'server',
+    'client-v1',
+    'contract-fixture.sha256',
+  );
+  const tarballManifestPath = resolve(options.artifactRoot, 'sdk-tarballs.json');
+  const harnessRoot = resolve(options.artifactRoot, 'chat-harness');
+  const sdkVerifyContracts = resolve(options.sdkRoot, 'scripts', 'verify-contracts.mjs');
 
-requirePath(options.sdkRoot, 'SDK root');
-requirePath(options.caveRoot, 'Cave root');
-requirePath(caveFixturePath, 'Cave authority fixture');
-requirePath(caveDigestPath, 'Cave authority fixture digest');
-requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
+  requirePath(options.sdkRoot, 'SDK root');
+  requirePath(options.caveRoot, 'Cave root');
+  requirePath(caveFixturePath, 'Cave authority fixture');
+  requirePath(caveDigestPath, 'Cave authority fixture digest');
+  requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
 
-try {
-  rmSync(options.artifactRoot, { force: true, recursive: true });
-  mkdirSync(options.artifactRoot, { recursive: true });
+  try {
+    rmSync(options.artifactRoot, { force: true, recursive: true });
+    mkdirSync(options.artifactRoot, { recursive: true });
 
-  run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
+    run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
-  const tarballs = packPublicPackages(options.sdkRoot, tarballRoot);
+    const tarballs = packPublicPackages(options.sdkRoot, tarballManifestPath);
 
-  createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
-  runPnpm(isolatedInstallArgs(), harnessRoot);
+    createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
+    runPnpm(isolatedInstallArgs(), harnessRoot);
 
-  if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {
-    throw new Error('Packed @opencoven/cave-client unexpectedly installed source files.');
+    if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {
+      throw new Error('Packed @opencoven/cave-client unexpectedly installed source files.');
+    }
+
+    runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
+    runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
+  } finally {
+    rmSync(options.artifactRoot, { force: true, recursive: true });
   }
+}
 
-  runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
-  runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
-} finally {
-  rmSync(options.artifactRoot, { force: true, recursive: true });
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
 }
