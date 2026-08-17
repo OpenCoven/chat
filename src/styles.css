@@ -1,10 +1,59 @@
+/*
+ * OpenCoven Chat visual foundation.
+ *
+ * Implements the approved visual direction from
+ * docs/superpowers/specs/2026-08-10-opencoven-chat-design.md: near-black
+ * ritual-tech surfaces, cyan circuitry and focus accents, violet depth and
+ * selection, restrained sacred geometry in ambient surfaces.
+ *
+ * The direction also says what to avoid, and that constraint is doing as much
+ * work here as the palette: no terminal cosplay. No scan lines, no monospace
+ * body text, no perpetual animation. Atmosphere comes from depth and colour,
+ * not from pretending to be a CRT.
+ *
+ * Every colour below is a token. Later phases add conversations, familiars,
+ * and cards on top of this file, and a raw hex buried in a component is how a
+ * palette stops being a palette. src/styles.test.ts enforces that.
+ */
+
 :root {
   color-scheme: dark;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Surfaces: near-black, separated by depth rather than by borders alone. */
+  --surface-void: #07060b;
+  --surface-base: #0d0a13;
+  --surface-raised: #141020;
+
+  /* Text. Every pair below is verified against AA in src/styles.test.ts. */
+  --text-primary: #f4f1fa;
+  --text-secondary: #cdc2e4;
+  --text-muted: #a596c6;
+
+  /* Cyan: circuitry and focus. Reserved for attention and interaction, so it
+     keeps meaning something. It is not a decorative accent. */
+  --accent-cyan: #67e8f9;
+  --accent-cyan-dim: #22d3ee;
+
+  /* Violet: depth and selection. */
+  --accent-violet: #a78bfa;
+  --accent-violet-deep: #2c1c3f;
+
+  --line-subtle: rgba(205, 194, 228, 0.12);
+  --line-strong: rgba(205, 194, 228, 0.24);
+
+  --shadow-panel: 0 18px 48px rgba(3, 2, 5, 0.45);
+  --radius-panel: 1rem;
+  --radius-pill: 999px;
+
+  /* Inter is not bundled, so the system face is what actually renders on most
+     machines. It is listed first to say so honestly rather than implying a
+     webfont that never loads. */
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  background: #110d17;
-  color: #f7f5fb;
+  background: var(--surface-base);
+  color: var(--text-primary);
 }
 
 * {
@@ -15,7 +64,22 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at top, #2c1c3f 0%, #110d17 55%, #09070d 100%);
+
+  /*
+   * Restrained sacred geometry: a hexagonal field, held at an opacity where it
+   * reads as texture rather than pattern, over violet depth falling to
+   * near-black. Two layers, both static.
+   */
+  background-color: var(--surface-void);
+  background-image:
+    repeating-linear-gradient(60deg, rgba(167, 139, 250, 0.045) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(-60deg, rgba(167, 139, 250, 0.045) 0 1px, transparent 1px 46px),
+    radial-gradient(
+      ellipse at 50% -10%,
+      var(--accent-violet-deep) 0%,
+      var(--surface-base) 55%,
+      var(--surface-void) 100%
+    );
 }
 
 button,
@@ -25,17 +89,42 @@ select {
   font: inherit;
 }
 
-#root {
-  min-height: 100vh;
+/*
+ * Cyan focus accent, applied once and globally.
+ *
+ * :focus-visible rather than :focus, so a mouse click does not leave a ring
+ * behind. The outline is offset so it never sits on top of the element's own
+ * border, which is what makes it legible on the panels below.
+ */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+::selection {
+  background: rgba(167, 139, 250, 0.32);
+  color: var(--text-primary);
 }
 
 code {
   font-family: SFMono-Regular, ui-monospace, monospace;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--line-subtle);
+  border-radius: 0.35rem;
+  background: rgba(103, 232, 249, 0.06);
+  color: var(--accent-cyan);
+  font-size: 0.92em;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 .app-shell {
   display: grid;
   gap: 1.5rem;
+  align-content: start;
   min-height: 100vh;
   padding: 2rem;
 }
@@ -43,65 +132,167 @@ code {
 .app-header {
   display: grid;
   gap: 0.5rem;
+  max-width: 60rem;
 }
 
 .app-header h1 {
   margin: 0;
   font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
 }
 
 .eyebrow {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
   margin: 0;
-  color: #bca7de;
-  font-size: 0.95rem;
-  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* A single circuit trace leading into the eyebrow. One mark, not a motif. */
+.eyebrow::before {
+  content: "";
+  width: 1.75rem;
+  height: 1px;
+  flex: none;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan-dim));
 }
 
 .lede {
   margin: 0;
   max-width: 48rem;
-  color: #dfd3ef;
+  color: var(--text-secondary);
+  font-size: 1.05rem;
 }
 
 .app-main {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  /* Cards in a row share a height. Ragged bottoms read as unfinished, and the
+     grid is what makes the alignment free. */
+  align-items: stretch;
 }
 
 .panel {
+  position: relative;
+  overflow: hidden;
   padding: 1.5rem;
-  border: 1px solid rgba(223, 211, 239, 0.15);
-  border-radius: 1rem;
-  background: rgba(17, 13, 23, 0.78);
-  box-shadow: 0 18px 48px rgba(3, 2, 5, 0.32);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(160deg, var(--surface-raised) 0%, var(--surface-base) 100%);
+  box-shadow: var(--shadow-panel);
+}
+
+/* A cyan trace along the top edge, brightest at the left. */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    var(--accent-cyan-dim) 0%,
+    rgba(34, 211, 238, 0.15) 30%,
+    transparent 70%
+  );
 }
 
 .panel h2 {
   margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.panel p {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+}
+
+.panel p:last-child {
+  margin-bottom: 0;
 }
 
 .panel-heading {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
   align-items: center;
   justify-content: space-between;
+  /* The badge drops below rather than squeezing the heading into a two-line
+     wrap. A narrow card is the common case, not the exception. */
+  flex-wrap: wrap;
 }
 
+.panel-heading h2 {
+  margin-bottom: 0;
+}
+
+/*
+ * Connection state.
+ *
+ * The badge is decorative and aria-hidden; the accessible state lives in the
+ * adjacent output element. State is carried by a word, never by colour alone,
+ * so the dot is reinforcement rather than the signal.
+ */
 .state-badge {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex: none;
   padding: 0.3rem 0.7rem;
-  border: 1px solid rgba(244, 174, 92, 0.32);
-  border-radius: 999px;
-  background: rgba(244, 174, 92, 0.12);
-  color: #ffd7a7;
-  font-size: 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: rgba(165, 150, 198, 0.1);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.state-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+/* Connected is the only state that draws the eye, and it is unreachable in
+   Phase 0. The rule exists so the token is defined where the state is. */
+.state-badge[data-connection-state="connected"] {
+  border-color: rgba(103, 232, 249, 0.35);
+  background: rgba(103, 232, 249, 0.1);
+  color: var(--accent-cyan);
+}
+
+.state-badge[data-connection-state="connected"] .state-dot {
+  background: var(--accent-cyan);
+  animation: connection-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes connection-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(103, 232, 249, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 0.28rem rgba(103, 232, 249, 0);
+  }
 }
 
 .connection-summary {
-  margin: 0;
-  color: #f0e6ff;
+  display: block;
+  margin: 0.85rem 0 0;
+  color: var(--text-secondary);
 }
 
 .identity-list {
@@ -116,12 +307,55 @@ code {
 }
 
 .identity-list dt {
-  color: #bca7de;
+  color: var(--text-muted);
+  font-size: 0.8rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .identity-list dd {
   margin: 0;
+  color: var(--text-primary);
+  font-family: SFMono-Regular, ui-monospace, monospace;
+  font-size: 0.92rem;
+}
+
+/*
+ * Reduced motion removes nonessential movement, per the approved direction.
+ * The pulse is the only animation in the app, and it is nonessential: the
+ * state is already a word.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Increased contrast strengthens the lines and lifts muted text. The ambient
+ * geometry is the first thing to go: texture is the least useful pixel on the
+ * screen for someone who asked for more contrast.
+ */
+@media (prefers-contrast: more) {
+  :root {
+    --text-muted: #cdc2e4;
+    --line-subtle: rgba(205, 194, 228, 0.32);
+    --line-strong: rgba(205, 194, 228, 0.5);
+  }
+
+  body {
+    background-image: none;
+  }
+
+  .panel {
+    background: var(--surface-base);
+  }
 }
 
 @media (max-width: 640px) {

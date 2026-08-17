@@ -1,5 +1,13 @@
 export const APP_CONNECTION_STATE = 'Unavailable';
 
+/**
+ * Lowercase form of the connection state, used as a styling hook.
+ *
+ * Derived rather than written twice: a hand-kept duplicate is how the badge
+ * ends up styled for a state the app is not in.
+ */
+export const APP_CONNECTION_STATE_SLUG = APP_CONNECTION_STATE.toLowerCase();
+
 export const APP_CONNECTION_SUMMARY =
   'Unavailable — Phase 0 intentionally does not connect to Cave yet.';
 

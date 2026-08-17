@@ -39,6 +39,21 @@ describe('App', () => {
     expect(screen.getByText(APP_SCAFFOLD_STATUS)).toBeVisible();
   });
 
+  it('keeps the connection badge decorative', () => {
+    // The badge carries a colour dot. Colour is reinforcement, so the state
+    // must stay readable from the output element alone and the dot must not
+    // reach the accessibility tree as a second, conflicting announcement.
+    const { container } = render(<App />);
+
+    const badge = container.querySelector('.state-badge');
+
+    expect(badge).toHaveAttribute('aria-hidden', 'true');
+    expect(badge?.querySelector('.state-dot')).not.toBeNull();
+    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      APP_CONNECTION_SUMMARY,
+    );
+  });
+
   it('exposes a stable scaffold fingerprint for preview smoke checks', () => {
     const { container } = render(<App />);
 

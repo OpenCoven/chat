@@ -1,5 +1,6 @@
 import {
   APP_CONNECTION_STATE,
+  APP_CONNECTION_STATE_SLUG,
   APP_CONNECTION_SUMMARY,
   APP_METADATA,
   APP_SCAFFOLD_STATUS,
@@ -19,7 +20,17 @@ export function App() {
         <section className="panel" aria-labelledby="connection-state-heading">
           <div className="panel-heading">
             <h2 id="connection-state-heading">Connection state</h2>
-            <span className="state-badge" aria-hidden="true">
+            {/*
+              Decorative. The accessible state is the output below, so the dot
+              reinforces a word that is already there rather than carrying the
+              meaning on colour alone.
+            */}
+            <span
+              className="state-badge"
+              data-connection-state={APP_CONNECTION_STATE_SLUG}
+              aria-hidden="true"
+            >
+              <span className="state-dot" />
               {APP_CONNECTION_STATE}
             </span>
           </div>
