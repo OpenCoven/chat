@@ -2,7 +2,7 @@
 
 **Status:** Approved design
 **Date:** 2026-08-16
-**Repositories:** `OpenCoven/chat-ios` (new), `OpenCoven/sdk`, `OpenCoven/coven-cave`, `OpenCoven/chat-relay` (new)
+**Repositories:** `OpenCoven/chat-ios` (new), `OpenCoven/sdk`, `OpenCoven/coven-cave`, `OpenCoven/coven-pocket`, `OpenCoven/chat-relay` (new)
 **Amends:** `2026-08-10-opencoven-chat-design.md`
 
 ## Summary
@@ -68,6 +68,51 @@ automatic resubmission.
 This amendment does not apply to the desktop client, which remains read-only
 when disconnected.
 
+## Relationship to Coven Pocket
+
+`OpenCoven/coven-pocket` is an existing OpenCoven iOS application on the same
+stack this design selected: SwiftUI over Rust via UniFFI, with an XCFramework
+pipeline and CI already in place. Its M2 "Companion mode" milestone is complete
+and includes a user-managed overlay transport to a loopback-bound daemon
+listener, a versioned pairing handshake, remote attach with live events and
+approvals, and bounds-checked familiar roster handling.
+
+Chat iOS does not rebuild any of that, and does not live inside Pocket either.
+
+### What Is Shared
+
+The engine-independent transport and pairing code is extracted from Pocket into
+permissively licensed crates in the SDK repository, and Pocket is migrated to
+consume them. Pocket's existing test suite passing against the extracted crates
+is the proof that the extraction is faithful rather than a fork.
+
+### What Is Not Shared
+
+The two apps target different authorities. Pocket speaks `coven.daemon.v1` to
+the Coven daemon. Chat speaks `/api/client/v1` to Cave. Cave's canonical
+conversation model, rich message semantics, outbox, and doorbell push are new
+work regardless.
+
+### The Licensing Constraint
+
+Coven Pocket is GPL-3.0-only because it links `claurst-*` crates from
+coven-code, a GPL-3.0 derivative of upstream Claurst. OpenCoven does not hold
+full copyright on that upstream code and cannot unilaterally relicense it.
+Pocket's own licensing decision record blocks App Store distribution pending a
+GPLv3 §7 additional permission from every copyright holder.
+
+This design targets App Store distribution. Therefore:
+
+**`chat-ios` must link no GPL-licensed code.** It must never depend on
+`claurst-*`, on `coven-pocket-ffi`, or on any crate that does. This is a
+release-blocking constraint, not a preference, and CI must enforce it rather
+than rely on review.
+
+The extraction is clean because the modules being moved import no `claurst`
+code and are solely authored by OpenCoven, so OpenCoven may license them under
+the SDK's terms. The implementation plan verifies both properties before moving
+any file, and records the origin and relicensing grant in a `NOTICE`.
+
 ## Product Decisions
 
 | Area | Decision |
@@ -81,6 +126,8 @@ when disconnected.
 | Notifications | Content-free doorbell relay |
 | Action scope | Full parity with desktop v1 |
 | Core ownership | `cave-core` serves iOS now; desktop migrates only after proof |
+| Shared code | Transport and pairing extracted from Coven Pocket into SDK crates |
+| Licensing | `chat-ios` links no GPL code; extracted crates match SDK terms |
 
 ## Transport
 
@@ -134,13 +181,23 @@ types, or thinks about an address again.
 A Rust crate at `crates/cave-core` in the SDK repository. Phase 7's `cave-563z7`
 already anticipates publishing Rust crates from this repository.
 
-It owns everything that is protocol rather than presentation:
+It builds on two crates extracted from Coven Pocket and published alongside it:
+
+- **`coven-transport`** — the endpoint candidate model, racing, per-network
+  selection memory, TLS pinning, and the short-lived-connection HTTP strategy
+  suited to a phone that goes quiet in the background.
+- **`coven-pairing`** — the versioned handshake, grant exchange, and the
+  `SecretStore` trait.
+
+Both are authority-agnostic: they know how to reach and authenticate against a
+loopback-bound service over a user-managed overlay, and nothing about Cave or
+the Coven daemon specifically.
+
+`cave-core` itself owns everything that is Cave protocol rather than
+presentation:
 
 - contract types validated against the exported v1 fixture
-- the endpoint candidate model, racing, per-network selection memory, and TLS
-  pinning
-- pairing-grant exchange
-- authenticated HTTP and SSE transport
+- authenticated HTTP and SSE transport over `coven-transport`
 - typed stream reduction: monotonic event IDs, duplicate events as no-ops,
   cursor checkpointing
 - resume, replay-gap detection, and fallback to canonical reload
@@ -163,7 +220,13 @@ line at phase 0 is cheap; retrofitting it is not.
 
 The `OpenCoven/chat-ios` repository. A separate repository because the `chat`
 repository root is a pnpm/Tauri project, and an Xcode workspace grafted onto it
-fights both toolchains and both CI configurations.
+fights both toolchains and both CI configurations. It is also separate from
+`coven-pocket`, which is a different product with a different authority, a
+different release cadence, and a GPL license that would block App Store
+distribution.
+
+It reuses Pocket's XCFramework and UniFFI bindgen pipeline as a **pattern**,
+copied and adapted, not as a dependency.
 
 It owns:
 
@@ -360,9 +423,11 @@ One test asserts the delivered payload contains no content.
 
 ## Program Relationship
 
-Three components exist that the current eight-phase program does not cover: the
+Five components exist that the current eight-phase desktop program does not
+cover: the extracted `coven-transport` and `coven-pairing` crates, the
 `cave-core` crate, the `chat-ios` repository, and the doorbell relay. Cave gains
-the setup wizard, QR enrollment, and device registration.
+the setup wizard, QR enrollment, and device registration. Coven Pocket is
+modified once, in Phase A, to consume the extracted crates.
 
 ### The Proof Gate
 
@@ -382,50 +447,60 @@ honest.
 
 ## Delivery Sequence
 
-This design spans four components and is too large for a single implementation
-plan. It decomposes into phases that are additive and independently testable,
-mirroring how the desktop program is structured. Cave's existing behavior and
-the desktop client continue working throughout.
+This design spans five components and is far too large for a single
+implementation plan. It decomposes into phases that are additive and
+independently testable, mirroring how the desktop program is structured. Each
+phase gets its own plan document. Cave's existing behavior, the desktop client,
+and Coven Pocket all continue working throughout.
 
-### Phase A: `cave-core` Foundation
+### Phase A: Extraction
 
-Create the crate, contract types validated against the exported v1 fixture, the
-error envelope, authenticated transport, and the UniFFI scaffold. Prove it
+Verify provenance and engine-independence of the Pocket modules being moved.
+Create `coven-transport` and `coven-pairing` in the SDK under the SDK's license
+with a `NOTICE` recording origin and grant. Migrate Coven Pocket to consume
+them. **Pocket's existing test suite passing unchanged is the phase gate** — it
+is what distinguishes an extraction from a fork.
+
+### Phase B: `cave-core` Foundation
+
+Create the crate over the extracted transport: contract types validated against
+the exported v1 fixture, the error envelope, and the UniFFI scaffold. Prove it
 compiles for macOS, Linux, and Windows. Stand up the differential test harness
 against the TypeScript client.
 
-### Phase B: Enrollment Authority
+### Phase C: Enrollment Authority
 
 Cave's overlay probe, guided setup, reachability self-verification, QR payload
 generation, and push device registration. The relay service, deployed and
 rate-limited.
 
-### Phase C: iOS Shell and Canonical Reads
+### Phase D: iOS Shell and Canonical Reads
 
-The SwiftUI application, Keychain adapter, enrollment by QR scan, candidate
-racing with per-network memory, connection states, and cached canonical reads
-with revision ordering.
+The `chat-ios` repository with its own XCFramework pipeline and the CI check
+that fails the build on any GPL dependency. The SwiftUI application, Keychain
+adapter, enrollment by QR scan, candidate racing, connection states, and cached
+canonical reads with revision ordering.
 
-### Phase D: Send, Stream, and Recovery
+### Phase E: Send, Stream, and Recovery
 
 Composer, send, stop, retry, typed SSE, cursor checkpointing, background and
 foreground resume, reconciliation, and the durable outbox.
 
-### Phase E: Rich Content and Actions
+### Phase F: Rich Content and Actions
 
 The marker AST and every native renderer, attachments, attention responses,
 GitHub actions, task handoffs, and conversation management.
 
-### Phase F: Notifications, Lifecycle, and Hardening
+### Phase G: Notifications, Lifecycle, and Hardening
 
 Doorbell emission and delivery, background refresh, accessibility, the device
 matrix, and the security review.
 
-### Phase G: Release
+### Phase H: Release
 
 TestFlight, App Store submission, and staged rollout.
 
-The proof gate is evaluated after Phase G, not before.
+The proof gate is evaluated after Phase H, not before.
 
 ## Success Criteria
 
@@ -450,4 +525,8 @@ The work is complete when:
 - `overlay unavailable` and `Cave unreachable` are distinguishable to the user.
 - Differential tests show identical behavior between `cave-core` and the
   TypeScript client.
+- Coven Pocket's test suite passes unchanged against the extracted crates, and
+  transport and pairing exist in exactly one place.
+- CI fails the `chat-ios` build if any GPL-licensed crate enters its dependency
+  graph.
 - Accessibility, contract, integration, and device-matrix gates pass.
