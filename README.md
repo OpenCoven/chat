@@ -68,17 +68,17 @@ The current application renders:
 
 Anything beyond that is intentionally deferred to later beads.
 
-## GitHub Actions repository variables
+## Reviewed counterpart lock
 
-The contract canary workflow has no mutable fallback for external checkouts.
-Configure these GitHub Actions repository variables on the Chat repository with
-reviewed immutable 40-character commit SHAs:
-
-- `OPENCOVEN_SDK_REVIEWED_REVISION`
-- `OPENCOVEN_CAVE_REVIEWED_REVISION`
+`contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
+immutable 40-character commit SHAs. CI reads that tracked lock, checks out those
+exact revisions, rejects dirty SDK or Cave checkouts, and verifies the
+checked-out HEADs before running the canary.
 
 Local explicit-root canary runs still use
-`pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
+`pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,
+and the script rejects staged, unstaged, or untracked changes before it
+verifies that the checked-out HEADs match the tracked lock.
 
 ## CI coverage
 
@@ -90,7 +90,7 @@ Local explicit-root canary runs still use
 - Vite production builds for Playwright smoke and `pnpm app:build`
 - Playwright smoke coverage
 - `pnpm app:build` on Ubuntu with the Linux Tauri system dependencies installed
-- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts pinned by reviewed repository variables
+- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts pinned by `contract-canary.lock.json`
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

@@ -1,23 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import {
-  prepareArtifactDirectory,
-  removeArtifactPath,
-  resolveArtifactDirectory,
-} from './artifact-directory.mjs';
+import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultSdkRoot = resolve(root, '.cross-repo', 'sdk');
 const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
-const defaultArtifactName = 'default';
+const defaultLockPath = resolve(root, 'contract-canary.lock.json');
+const reviewedRevisionPattern = /^[0-9a-f]{40}$/i;
 
 function printUsage() {
   process.stdout.write(
     [
-      'usage: contract-canary.mjs [--sdk-root <path>] [--cave-root <path>] [--artifact-name <safe-child-name>]',
+      'usage: contract-canary.mjs [--sdk-root <path>] [--cave-root <path>]',
       '',
       'Packs the reviewed SDK packages, installs their tarballs into an isolated',
       'Chat canary harness, compiles Chat-owned code against the public',
@@ -28,54 +25,163 @@ function printUsage() {
   );
 }
 
-function resolveContractCanaryArtifactContext(
-  repositoryRoot = root,
-  artifactName = defaultArtifactName,
-) {
-  return resolveArtifactDirectory({
-    repositoryRoot,
-    parentSegments: ['contract-canary'],
-    parentLabel: 'Artifact directory',
-    artifactName,
-  });
+function validateLockEntry(lockData, key, expectedRepository) {
+  const entry = lockData[key];
+
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new Error(`contract-canary.lock.json ${key} entry must be an object.`);
+  }
+
+  if (entry.repository !== expectedRepository) {
+    throw new Error(`contract-canary.lock.json ${key}.repository must be ${expectedRepository}.`);
+  }
+
+  if (!reviewedRevisionPattern.test(entry.revision ?? '')) {
+    throw new Error(
+      `contract-canary.lock.json ${key}.revision must be an immutable 40-character commit SHA.`,
+    );
+  }
+
+  return {
+    repository: entry.repository,
+    revision: entry.revision,
+  };
 }
 
-export function resolveContractCanaryArtifactRoot(
-  artifactName = defaultArtifactName,
-  options = {},
-) {
-  return resolveContractCanaryArtifactContext(options.repositoryRoot, artifactName).artifactPath;
+export function readContractCanaryLock(lockPath = defaultLockPath) {
+  requirePath(lockPath, 'Contract canary lock');
+
+  const lockData = JSON.parse(readFileSync(lockPath, 'utf8'));
+
+  if (lockData.version !== 1) {
+    throw new Error('contract-canary.lock.json version must be 1.');
+  }
+
+  return {
+    path: lockPath,
+    sdk: validateLockEntry(lockData, 'sdk', 'OpenCoven/sdk'),
+    cave: validateLockEntry(lockData, 'cave', 'OpenCoven/coven-cave'),
+  };
 }
 
-export function prepareContractCanaryArtifactRoot(
-  artifactName = defaultArtifactName,
-  options = {},
-) {
-  return prepareArtifactDirectory({
-    repositoryRoot: options.repositoryRoot ?? root,
-    parentSegments: ['contract-canary'],
-    parentLabel: 'Artifact directory',
-    artifactName,
-  }).artifactPath;
+function readGitHead(repositoryRoot, label) {
+  requirePath(repositoryRoot, label);
+
+  return run('git', ['-C', repositoryRoot, 'rev-parse', 'HEAD'], root, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  }).trim();
 }
 
-export function removeContractCanaryArtifactRoot(artifactRoot, options = {}) {
-  const context = resolveContractCanaryArtifactContext(
-    options.repositoryRoot ?? root,
-    defaultArtifactName,
+function readGitStatusPorcelain(repositoryRoot, label) {
+  requirePath(repositoryRoot, label);
+
+  return run(
+    'git',
+    ['-C', repositoryRoot, 'status', '--porcelain=v1', '--untracked-files=all'],
+    root,
+    {
+      stdio: 'pipe',
+      encoding: 'utf8',
+    },
   );
+}
 
-  removeArtifactPath(artifactRoot, {
-    artifactBasePath: context.parentPath,
-    artifactBaseRealPath: context.parentRealPath,
-  });
+function summarizeGitStatus(statusOutput) {
+  const summary = {
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+  };
+
+  for (const line of statusOutput.split('\n')) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const [indexStatus = ' ', worktreeStatus = ' '] = line;
+
+    if (indexStatus === '?' && worktreeStatus === '?') {
+      summary.untracked += 1;
+      continue;
+    }
+
+    if (indexStatus !== ' ') {
+      summary.staged += 1;
+    }
+
+    if (worktreeStatus !== ' ') {
+      summary.unstaged += 1;
+    }
+  }
+
+  return summary;
+}
+
+function formatDirtySummary(summary) {
+  const parts = [];
+
+  if (summary.staged > 0) {
+    parts.push(`${summary.staged} staged change${summary.staged === 1 ? '' : 's'}`);
+  }
+
+  if (summary.unstaged > 0) {
+    parts.push(`${summary.unstaged} unstaged change${summary.unstaged === 1 ? '' : 's'}`);
+  }
+
+  if (summary.untracked > 0) {
+    parts.push(`${summary.untracked} untracked item${summary.untracked === 1 ? '' : 's'}`);
+  }
+
+  return parts.join(', ');
+}
+
+export function assertCleanGitCheckout(repositoryRoot, label) {
+  const summary = summarizeGitStatus(readGitStatusPorcelain(repositoryRoot, label));
+
+  if (summary.staged === 0 && summary.unstaged === 0 && summary.untracked === 0) {
+    return summary;
+  }
+
+  throw new Error(
+    `${label} at ${repositoryRoot} is dirty (${formatDirtySummary(summary)}). ` +
+      'Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
+  );
+}
+
+export function assertCleanContractCanaryCheckouts({ sdkRoot, caveRoot }) {
+  return {
+    sdk: assertCleanGitCheckout(sdkRoot, 'SDK checkout'),
+    cave: assertCleanGitCheckout(caveRoot, 'Cave checkout'),
+  };
+}
+
+export function assertContractCanaryCheckoutHeads(lock, { sdkRoot, caveRoot }) {
+  const sdkHead = readGitHead(sdkRoot, 'SDK root');
+  const caveHead = readGitHead(caveRoot, 'Cave root');
+
+  if (sdkHead !== lock.sdk.revision) {
+    throw new Error(
+      `SDK checkout HEAD ${sdkHead} does not match locked reviewed revision ${lock.sdk.revision}.`,
+    );
+  }
+
+  if (caveHead !== lock.cave.revision) {
+    throw new Error(
+      `Cave checkout HEAD ${caveHead} does not match locked reviewed revision ${lock.cave.revision}.`,
+    );
+  }
+
+  return {
+    sdkHead,
+    caveHead,
+  };
 }
 
 export function parseArgs(argv) {
   const options = {
     sdkRoot: resolve(process.env.OPENCOVEN_SDK_ROOT ?? defaultSdkRoot),
     caveRoot: resolve(process.env.OPENCOVEN_CAVE_ROOT ?? defaultCaveRoot),
-    artifactName: process.env.OPENCOVEN_CHAT_CANARY_ARTIFACT_NAME ?? defaultArtifactName,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -90,7 +196,7 @@ export function parseArgs(argv) {
       continue;
     }
 
-    if (argument === '--sdk-root' || argument === '--cave-root' || argument === '--artifact-name') {
+    if (argument === '--sdk-root' || argument === '--cave-root') {
       const value = argv[index + 1];
 
       if (value === undefined) {
@@ -99,10 +205,8 @@ export function parseArgs(argv) {
 
       if (argument === '--sdk-root') {
         options.sdkRoot = resolve(value);
-      } else if (argument === '--cave-root') {
-        options.caveRoot = resolve(value);
       } else {
-        options.artifactName = value;
+        options.caveRoot = resolve(value);
       }
 
       index += 1;
@@ -112,7 +216,6 @@ export function parseArgs(argv) {
     throw new Error(`Unknown argument: ${argument}`);
   }
 
-  options.artifactRoot = resolveContractCanaryArtifactRoot(options.artifactName);
   return options;
 }
 
@@ -156,16 +259,23 @@ function createPublicPackageOverrides(tarballs) {
   };
 }
 
-function packPublicPackages(sdkRoot, manifestPath) {
-  const packScript = resolve(sdkRoot, 'scripts', 'pack-public-packages.mjs');
+function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
+  const packageArtifactsModule = resolve(sdkRoot, 'scripts', 'package-artifacts.mjs');
 
-  requirePath(packScript, 'SDK pack-public-packages script');
+  requirePath(packageArtifactsModule, 'SDK package-artifacts script');
+  mkdirSync(destinationRoot, { recursive: true });
 
-  run(
-    process.execPath,
-    [packScript, '--artifact-name', 'contract-canary', '--json-file', manifestPath],
-    sdkRoot,
-  );
+  const evaluator = [
+    "import { writeFileSync } from 'node:fs';",
+    `import { packPublicPackages } from ${JSON.stringify(pathToFileURL(packageArtifactsModule).href)};`,
+    `const tarballs = packPublicPackages({`,
+    `  root: ${JSON.stringify(sdkRoot)},`,
+    `  destinationRoot: ${JSON.stringify(destinationRoot)},`,
+    `});`,
+    `writeFileSync(${JSON.stringify(manifestPath)}, JSON.stringify(tarballs, null, 2) + '\\n');`,
+  ].join('\n');
+
+  run(process.execPath, ['--input-type=module', '--eval', evaluator], sdkRoot);
 
   return JSON.parse(readFileSync(manifestPath, 'utf8'));
 }
@@ -277,6 +387,7 @@ process.stdout.write('Chat contract canary passed.\\n');
 
 export function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
+  const lock = readContractCanaryLock();
   const caveFixturePath = resolve(
     options.caveRoot,
     'src',
@@ -293,22 +404,31 @@ export function main(argv = process.argv.slice(2)) {
     'client-v1',
     'contract-fixture.sha256',
   );
-  const tarballManifestPath = resolve(options.artifactRoot, 'sdk-tarballs.json');
-  const harnessRoot = resolve(options.artifactRoot, 'chat-harness');
   const sdkVerifyContracts = resolve(options.sdkRoot, 'scripts', 'verify-contracts.mjs');
 
   requirePath(options.sdkRoot, 'SDK root');
   requirePath(options.caveRoot, 'Cave root');
+  assertCleanContractCanaryCheckouts(options);
+  assertContractCanaryCheckoutHeads(lock, options);
   requirePath(caveFixturePath, 'Cave authority fixture');
   requirePath(caveDigestPath, 'Cave authority fixture digest');
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
 
+  let artifactContext;
+
   try {
-    prepareContractCanaryArtifactRoot(options.artifactName);
+    artifactContext = createOwnedTempDirectory({
+      prefix: 'opencoven-chat-contract-canary',
+    });
+
+    const artifactRoot = artifactContext.rootPath;
+    const tarballManifestPath = resolve(artifactRoot, 'sdk-tarballs.json');
+    const tarballRoot = resolve(artifactRoot, 'sdk-tarballs');
+    const harnessRoot = resolve(artifactRoot, 'chat-harness');
 
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
-    const tarballs = packPublicPackages(options.sdkRoot, tarballManifestPath);
+    const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
 
     createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
     runPnpm(isolatedInstallArgs(), harnessRoot);
@@ -320,7 +440,9 @@ export function main(argv = process.argv.slice(2)) {
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
   } finally {
-    removeContractCanaryArtifactRoot(options.artifactRoot);
+    if (artifactContext !== undefined) {
+      cleanupOwnedTempRoot(artifactContext);
+    }
   }
 }
 
