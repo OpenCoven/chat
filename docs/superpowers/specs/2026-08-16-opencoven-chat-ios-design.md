@@ -87,7 +87,7 @@ under one timeout budget spanning all three phases, classifying failure
 precisely — refused, timed out, unresolvable, or failed — rather than
 collapsing everything into "error". It caps response bodies at 64 KiB against a
 hostile endpoint and extracts JSON tolerantly without slice-panicking on
-malformed framing. It carries fourteen tests covering exactly those hazards.
+malformed framing. It carries sixteen tests covering exactly those hazards.
 
 That becomes `coven-transport` in the SDK, and Pocket migrates to consume it.
 Pocket's existing test suite passing unchanged is the proof that the extraction
