@@ -46,6 +46,7 @@ pnpm exec playwright install chromium
 | `pnpm lint` | Run Biome checks |
 | `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
+| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Pack reviewed SDK tarballs and verify the Cave authority fixture through the public `@opencoven/cave-client` entry point |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
@@ -77,6 +78,7 @@ Anything beyond that is intentionally deferred to later beads.
 - Vite production builds for Playwright smoke and `pnpm app:build`
 - Playwright smoke coverage
 - `pnpm app:build` on Ubuntu with the Linux Tauri system dependencies installed
+- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

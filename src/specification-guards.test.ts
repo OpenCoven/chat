@@ -190,4 +190,29 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toContain('patchelf');
     expect(workflow).toMatch(/- run: pnpm app:build/);
   });
+
+  it('defines a reproducible cross-repository packed-package canary', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const canaryScript = readText('scripts/contract-canary.mjs');
+
+    expect(packageManifest.scripts?.['test:contract-canary']).toBe(
+      'node ./scripts/contract-canary.mjs',
+    );
+    expect(workflow).toMatch(/name:\s*Contract canary/);
+    expect(workflow).toContain('repository: OpenCoven/sdk');
+    expect(workflow).toContain('path: .cross-repo/sdk');
+    expect(workflow).toContain('repository: OpenCoven/coven-cave');
+    expect(workflow).toContain('path: .cross-repo/coven-cave');
+    expect(workflow).toContain('ref: main');
+    expect(workflow).toContain('working-directory: .cross-repo/sdk');
+    expect(workflow).toContain(
+      'pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave',
+    );
+    expect(canaryScript).toContain('pack-public-packages.mjs');
+    expect(canaryScript).toContain('verify-contracts.mjs');
+    expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
+    expect(canaryScript).toContain('minimumClientVersion');
+    expect(canaryScript).toContain('digest mismatch');
+  });
 });

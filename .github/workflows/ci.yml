@@ -41,6 +41,36 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
 
+  contract-canary:
+    name: Contract canary
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenCoven/sdk
+          ref: main
+          path: .cross-repo/sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenCoven/coven-cave
+          ref: main
+          path: .cross-repo/coven-cave
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install SDK dependencies
+        working-directory: .cross-repo/sdk
+        run: pnpm install --frozen-lockfile
+      - name: Run contract canary
+        run: pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave
+
   desktop:
     name: Desktop build
     runs-on: ubuntu-latest
