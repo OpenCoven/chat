@@ -564,14 +564,31 @@ foreground resume, reconciliation, and the durable outbox.
 The marker AST and every native renderer, attachments, attention responses,
 GitHub actions, task handoffs, and conversation management.
 
-### Phase G: Notifications, Lifecycle, and Hardening
+### Phase G1: The Doorbell Relay, Emission, and Delivery
 
 The doorbell relay service, deployed and rate-limited. Doorbell emission from
-Cave and delivery to the device. Background refresh, accessibility, the device
-matrix, and the security review.
+Cave and delivery to the device.
 
-The relay is the only OpenCoven-operated component in this design, and its
-hosting platform is an open decision to be made at the start of this phase.
+The relay is the only OpenCoven-operated component in this design. Its hosting
+platform was an open decision to be made at the start of this phase, and is
+**decided: Cloudflare Workers with one Durable Object per topic.** The relay's
+job is a keyed lookup and one outbound request, which does not justify an
+always-on machine; per-topic Durable Objects put the registration, the
+rate-limit bucket, and the replay nonces in one place with no global instance
+to serialise on.
+
+One design point is settled here that the phrase "content-free push" does not
+by itself decide. iOS throttles silent background pushes and guarantees no
+delivery, so the doorbell is an **alert push carrying `mutable-content` and a
+localization key rather than a sentence**. The app's notification service
+extension fetches canonical content from Cave over the overlay and rewrites the
+notification before it is shown; an unreachable Cave leaves the localized
+placeholder standing. The relay's payload is byte-identical for every ping it
+has ever sent, so it still learns nothing.
+
+### Phase G2: Lifecycle and Hardening
+
+Background refresh, accessibility, the device matrix, and the security review.
 
 ### Phase H: Release
 
@@ -583,6 +600,12 @@ Phase D is split into D1 and D2 because it spans a new repository, two additive
 SDK changes, a foreign-function bridge, a build pipeline, and a full read path.
 Each half produces working, testable software on its own, which a single plan
 covering all of it would not.
+
+Phase G is split for the same reason. G1 spans a new repository, a deployed
+service, a Cave emission path, and a second iOS target, and ends with a phone
+that buzzes. G2 is auditing and fixing what seven phases built, and shares
+nothing with the relay but a phase number. A single gate covering both would
+hold a working notification path hostage to an accessibility finding.
 
 ## Success Criteria
 
