@@ -1,0 +1,131 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  background: #110d17;
+  color: #f7f5fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #2c1c3f 0%, #110d17 55%, #09070d 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+code {
+  font-family: SFMono-Regular, ui-monospace, monospace;
+}
+
+.app-shell {
+  display: grid;
+  gap: 1.5rem;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.app-header {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+}
+
+.eyebrow {
+  margin: 0;
+  color: #bca7de;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lede {
+  margin: 0;
+  max-width: 48rem;
+  color: #dfd3ef;
+}
+
+.app-main {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.panel {
+  padding: 1.5rem;
+  border: 1px solid rgba(223, 211, 239, 0.15);
+  border-radius: 1rem;
+  background: rgba(17, 13, 23, 0.78);
+  box-shadow: 0 18px 48px rgba(3, 2, 5, 0.32);
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.panel-heading {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.state-badge {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(244, 174, 92, 0.32);
+  border-radius: 999px;
+  background: rgba(244, 174, 92, 0.12);
+  color: #ffd7a7;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.connection-summary {
+  margin: 0;
+  color: #f0e6ff;
+}
+
+.identity-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.identity-list div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.identity-list dt {
+  color: #bca7de;
+  font-weight: 600;
+}
+
+.identity-list dd {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 1.25rem;
+  }
+}
