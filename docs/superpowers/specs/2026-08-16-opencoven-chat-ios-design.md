@@ -81,10 +81,17 @@ Chat iOS does not rebuild any of that, and does not live inside Pocket either.
 
 ### What Is Shared
 
-The engine-independent transport and pairing code is extracted from Pocket into
-permissively licensed crates in the SDK repository, and Pocket is migrated to
-consume them. Pocket's existing test suite passing against the extracted crates
-is the proof that the extraction is faithful rather than a fork.
+One thing: the **reachability and HTTP transport primitive**. Pocket's
+`daemon.rs` resolves, connects, and performs a single short-lived HTTP exchange
+under one timeout budget spanning all three phases, classifying failure
+precisely — refused, timed out, unresolvable, or failed — rather than
+collapsing everything into "error". It caps response bodies at 64 KiB against a
+hostile endpoint and extracts JSON tolerantly without slice-panicking on
+malformed framing. It carries fourteen tests covering exactly those hazards.
+
+That becomes `coven-transport` in the SDK, and Pocket migrates to consume it.
+Pocket's existing test suite passing unchanged is the proof that the extraction
+is faithful rather than a fork.
 
 ### What Is Not Shared
 
@@ -92,6 +99,18 @@ The two apps target different authorities. Pocket speaks `coven.daemon.v1` to
 the Coven daemon. Chat speaks `/api/client/v1` to Cave. Cave's canonical
 conversation model, rich message semantics, outbox, and doorbell push are new
 work regardless.
+
+**Pairing is also not shared, because Pocket has none.** Pocket sends no
+`Authorization` header and holds no credential; its security rests entirely on
+the user-managed tunnel, and its roadmap still lists an authenticated remote
+listener as upstream design. Cave's pairing — single-use grant, scoped
+revocable bearer, Keychain storage, TLS pinning — is built fresh in Phase C
+against Cave's authority. No `coven-pairing` crate is created speculatively.
+
+The version-handshake *shape* in `daemon.rs` — classify a health response as
+compatible, version-mismatched, or not-our-service — is a useful precedent for
+Cave's own compatibility negotiation, but the payloads differ enough that it is
+reimplemented rather than abstracted.
 
 ### The Licensing Constraint
 
@@ -126,7 +145,7 @@ any file, and records the origin and relicensing grant in a `NOTICE`.
 | Notifications | Content-free doorbell relay |
 | Action scope | Full parity with desktop v1 |
 | Core ownership | `cave-core` serves iOS now; desktop migrates only after proof |
-| Shared code | Transport and pairing extracted from Coven Pocket into SDK crates |
+| Shared code | HTTP transport primitive extracted from Coven Pocket; pairing built fresh |
 | Licensing | `chat-ios` links no GPL code; extracted crates match SDK terms |
 
 ## Transport
@@ -181,17 +200,20 @@ types, or thinks about an address again.
 A Rust crate at `crates/cave-core` in the SDK repository. Phase 7's `cave-563z7`
 already anticipates publishing Rust crates from this repository.
 
-It builds on two crates extracted from Coven Pocket and published alongside it:
+It builds on **`coven-transport`**, extracted from Coven Pocket: the
+short-lived-connection HTTP strategy suited to a phone that goes quiet in the
+background, one timeout budget spanning resolve/connect/exchange, precise
+failure classification, response-size capping, and tolerant JSON extraction.
 
-- **`coven-transport`** — the endpoint candidate model, racing, per-network
-  selection memory, TLS pinning, and the short-lived-connection HTTP strategy
-  suited to a phone that goes quiet in the background.
-- **`coven-pairing`** — the versioned handshake, grant exchange, and the
-  `SecretStore` trait.
+`coven-transport` is authority-agnostic and FFI-agnostic. It contains no UniFFI
+derives, so the shared crate stays consumable by non-UniFFI callers — including
+the desktop Tauri host if the proof gate ever passes. Each application's FFI
+layer defines its own UniFFI types and converts.
 
-Both are authority-agnostic: they know how to reach and authenticate against a
-loopback-bound service over a user-managed overlay, and nothing about Cave or
-the Coven daemon specifically.
+Phase B extends `coven-transport` additively with TLS and certificate pinning,
+which Pocket does not need (its tunnel provides the encryption) but Cave
+requires. Phase B also adds the endpoint candidate model and per-network
+selection memory.
 
 `cave-core` itself owns everything that is Cave protocol rather than
 presentation:
@@ -423,9 +445,9 @@ One test asserts the delivered payload contains no content.
 
 ## Program Relationship
 
-Five components exist that the current eight-phase desktop program does not
-cover: the extracted `coven-transport` and `coven-pairing` crates, the
-`cave-core` crate, the `chat-ios` repository, and the doorbell relay. Cave gains
+Four components exist that the current eight-phase desktop program does not
+cover: the extracted `coven-transport` crate, the `cave-core` crate, the
+`chat-ios` repository, and the doorbell relay. Cave gains
 the setup wizard, QR enrollment, and device registration. Coven Pocket is
 modified once, in Phase A, to consume the extracted crates.
 
@@ -447,7 +469,8 @@ honest.
 
 ## Delivery Sequence
 
-This design spans five components and is far too large for a single
+This design spans four new components plus a change to Coven Pocket, and is far
+too large for a single
 implementation plan. It decomposes into phases that are additive and
 independently testable, mirroring how the desktop program is structured. Each
 phase gets its own plan document. Cave's existing behavior, the desktop client,
@@ -455,18 +478,20 @@ and Coven Pocket all continue working throughout.
 
 ### Phase A: Extraction
 
-Verify provenance and engine-independence of the Pocket modules being moved.
-Create `coven-transport` and `coven-pairing` in the SDK under the SDK's license
-with a `NOTICE` recording origin and grant. Migrate Coven Pocket to consume
-them. **Pocket's existing test suite passing unchanged is the phase gate** — it
-is what distinguishes an extraction from a fork.
+Verify provenance and engine-independence of the Pocket code being moved.
+Create `coven-transport` in the SDK under the SDK's license, with a `NOTICE`
+recording origin and relicensing grant. Migrate Coven Pocket to consume it,
+keeping Pocket's daemon-specific health parsing and UniFFI types in Pocket.
+**Pocket's existing test suite passing unchanged is the phase gate** — it is
+what distinguishes an extraction from a fork.
 
 ### Phase B: `cave-core` Foundation
 
-Create the crate over the extracted transport: contract types validated against
-the exported v1 fixture, the error envelope, and the UniFFI scaffold. Prove it
-compiles for macOS, Linux, and Windows. Stand up the differential test harness
-against the TypeScript client.
+Extend `coven-transport` with TLS, certificate pinning, the endpoint candidate
+model, and per-network selection memory. Create `cave-core` over it: contract
+types validated against the exported v1 fixture, the error envelope, and the
+UniFFI scaffold. Prove both compile for macOS, Linux, and Windows. Stand up the
+differential test harness against the TypeScript client.
 
 ### Phase C: Enrollment Authority
 
@@ -525,8 +550,8 @@ The work is complete when:
 - `overlay unavailable` and `Cave unreachable` are distinguishable to the user.
 - Differential tests show identical behavior between `cave-core` and the
   TypeScript client.
-- Coven Pocket's test suite passes unchanged against the extracted crates, and
-  transport and pairing exist in exactly one place.
+- Coven Pocket's test suite passes unchanged against `coven-transport`, and the
+  reachability/HTTP primitive exists in exactly one place.
 - CI fails the `chat-ios` build if any GPL-licensed crate enters its dependency
   graph.
 - Accessibility, contract, integration, and device-matrix gates pass.
