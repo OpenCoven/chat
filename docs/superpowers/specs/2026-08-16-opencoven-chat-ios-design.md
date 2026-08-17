@@ -519,8 +519,21 @@ Tauri host able to consume `cave-core` without dragging in FFI scaffolding.
 ### Phase C: Enrollment Authority
 
 Cave's overlay probe, guided setup, reachability self-verification, QR payload
-generation, and push device registration. The relay service, deployed and
-rate-limited.
+generation, and push device registration storage.
+
+Depends on the desktop program's Phase 1 (`cave-9pifu` and
+`2026-08-15-phase-1-discovery-pairing.md`) having landed, because enrollment
+extends that pairing flow rather than reimplementing it. As of 2026-08-16 Cave
+has no `/api/client/v1` surface at all, so this phase is blocked until it does.
+
+Overlay detection covers Tailscale plus a manual path where the user supplies a
+hostname and Cave verifies it. Detecting every provider is not the value;
+proving an address actually reaches this instance is, and the manual path
+delivers that for Cloudflare Tunnel and anything else.
+
+The relay service is **not** built here. Nothing sends a ping until Phase G, and
+Cave's device-registration endpoint stores an opaque topic and secret without
+needing the relay to exist.
 
 ### Phase D: iOS Shell and Canonical Reads
 
@@ -541,8 +554,12 @@ GitHub actions, task handoffs, and conversation management.
 
 ### Phase G: Notifications, Lifecycle, and Hardening
 
-Doorbell emission and delivery, background refresh, accessibility, the device
+The doorbell relay service, deployed and rate-limited. Doorbell emission from
+Cave and delivery to the device. Background refresh, accessibility, the device
 matrix, and the security review.
+
+The relay is the only OpenCoven-operated component in this design, and its
+hosting platform is an open decision to be made at the start of this phase.
 
 ### Phase H: Release
 
