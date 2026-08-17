@@ -10,6 +10,7 @@ import {
 } from './lib/app-metadata';
 import { CAVE_CLIENT_BOUNDARY } from './lib/cave-client-boundary';
 import { type DesktopHost, desktopHost } from './lib/desktop-host';
+import { normalizeRejectionMessage } from './lib/rejection-message';
 
 const BROWSER_PREVIEW_SOURCE = 'Browser preview fallback';
 const DESKTOP_IDENTITY_SOURCE = 'Native app_identity command';
@@ -47,10 +48,7 @@ function nativeIdentityLoadingView(): DesktopIdentityView {
 }
 
 function nativeIdentityFailureView(error: unknown): DesktopIdentityView {
-  const detail =
-    error instanceof Error && error.message.trim().length > 0
-      ? error.message.trim()
-      : 'The native app_identity command failed.';
+  const detail = normalizeRejectionMessage(error, 'The native app_identity command failed.');
 
   return {
     identity: null,
