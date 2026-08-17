@@ -1,7 +1,7 @@
 use serde::Serialize;
 
-pub const APP_NAME: &str = "OpenCoven Chat";
-pub const APP_IDENTIFIER: &str = "ai.opencoven.chat";
+pub const APP_NAME: &str = env!("OPENCOVEN_PRODUCT_NAME");
+pub const APP_IDENTIFIER: &str = env!("OPENCOVEN_APP_IDENTIFIER");
 pub const APP_PHASE: &str = "phase-0-scaffold";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -116,6 +116,17 @@ describe('Phase 0 specification guards', () => {
     expect(buildScript).toMatch(/AppManifest::new\(\)\s*\.commands\(&\["app_identity"\]\)/);
   });
 
+  it('derives native identity name and identifier from tauri.conf.json', () => {
+    const buildScript = readText('src-tauri/build.rs');
+    const metadata = readText('src-tauri/src/metadata.rs');
+
+    expect(buildScript).toContain('cargo:rerun-if-changed=tauri.conf.json');
+    expect(buildScript).toContain('OPENCOVEN_PRODUCT_NAME');
+    expect(buildScript).toContain('OPENCOVEN_APP_IDENTIFIER');
+    expect(metadata).toContain('env!("OPENCOVEN_PRODUCT_NAME")');
+    expect(metadata).toContain('env!("OPENCOVEN_APP_IDENTIFIER")');
+  });
+
   it('pins Playwright to a dedicated fresh preview server', () => {
     const playwrightConfig = readText('playwright.config.ts');
     const packageManifest = readJson<PackageManifest>('package.json');

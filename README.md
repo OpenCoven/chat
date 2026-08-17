@@ -58,9 +58,10 @@ pnpm exec playwright install chromium
 The current application renders:
 
 - the OpenCoven Chat product identity
+- an explicitly labeled browser preview fallback identity when Tauri is absent
 - a visible unavailable Cave connection state
 - an accessible placeholder status region
-- a typed, non-secret desktop identity seam through the `app_identity` Tauri command
+- a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
 - a documented future Cave client boundary
 - the desktop bundle identifier and scaffold phase
 

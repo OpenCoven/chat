@@ -1,8 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import { APP_IDENTITY, type AppIdentity } from './app-metadata';
+import { type AppIdentity, PREVIEW_APP_IDENTITY } from './app-metadata';
 
 export type InvokeCommand = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+export type DesktopHost = Readonly<{
+  canUseTauriCommands: () => boolean;
+  readAppIdentity: () => Promise<AppIdentity>;
+  previewAppIdentity: () => AppIdentity;
+}>;
 
 const APP_IDENTITY_COMMAND = 'app_identity';
 
@@ -40,6 +45,12 @@ export function canUseTauriCommands() {
   return scope.__TAURI__ !== undefined || scope.__TAURI_INTERNALS__ !== undefined;
 }
 
-export function fallbackAppIdentity(): AppIdentity {
-  return APP_IDENTITY;
+export function previewAppIdentity(): AppIdentity {
+  return PREVIEW_APP_IDENTITY;
 }
+
+export const desktopHost: DesktopHost = Object.freeze({
+  canUseTauriCommands,
+  readAppIdentity,
+  previewAppIdentity,
+});

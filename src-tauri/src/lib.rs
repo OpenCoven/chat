@@ -17,26 +17,23 @@ pub fn run() {
 
 #[cfg(test)]
 mod smoke_tests {
-    use super::{app_identity, registered_command_names, AppIdentity};
+    use super::{app_identity, registered_command_names, APP_PHASE};
     use serde_json::json;
 
     #[test]
     fn reports_the_application_identity() {
+        let config = serde_json::from_str::<serde_json::Value>(include_str!("../tauri.conf.json"))
+            .expect("tauri config should stay valid json");
         let identity = app_identity();
 
-        assert_eq!(
-            identity,
-            AppIdentity {
-                name: "OpenCoven Chat",
-                identifier: "ai.opencoven.chat",
-                phase: "phase-0-scaffold",
-            },
-        );
+        assert_eq!(identity.name, config["productName"].as_str().unwrap());
+        assert_eq!(identity.identifier, config["identifier"].as_str().unwrap());
+        assert_eq!(identity.phase, APP_PHASE);
         assert_eq!(
             json!(identity),
             json!({
-              "name": "OpenCoven Chat",
-              "identifier": "ai.opencoven.chat",
+              "name": config["productName"].as_str().unwrap(),
+              "identifier": config["identifier"].as_str().unwrap(),
               "phase": "phase-0-scaffold"
             }),
         );
