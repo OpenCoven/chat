@@ -4,6 +4,12 @@ export type OwnedTempDirectoryContext = {
   rootRealPath: string;
   rootDevice: number;
   rootInode: number;
+  /**
+   * Unguessable value written into the root at creation and verified before
+   * cleanup. Device and inode cannot distinguish a recreated directory that
+   * reused the freed inode number, which Linux does routinely.
+   */
+  rootStamp: string;
   path: string;
 };
 
