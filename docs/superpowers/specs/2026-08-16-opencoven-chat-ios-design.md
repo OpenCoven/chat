@@ -535,12 +535,24 @@ The relay service is **not** built here. Nothing sends a ping until Phase G, and
 Cave's device-registration endpoint stores an opaque topic and secret without
 needing the relay to exist.
 
-### Phase D: iOS Shell and Canonical Reads
+### Phase D1: iOS Foundation
 
-The `chat-ios` repository with its own XCFramework pipeline and the CI check
-that fails the build on any GPL dependency. The SwiftUI application, Keychain
-adapter, enrollment by QR scan, candidate racing, connection states, and cached
-canonical reads with revision ordering.
+The `chat-ios` repository, its `chat-ios-ffi` UniFFI crate over `cave-core` and
+`coven-transport`, the XCFramework pipeline, CI including the check that fails
+the build on any GPL dependency, and the Keychain adapter. Two additive SDK
+changes land here because D1 is the first consumer that needs them: POST support
+in `coven-transport`, and the enrollment payload decoder in `cave-core`, whose
+round-trip vectors must match Cave's.
+
+Deliverable: an app that builds, links the Rust core, and stores a secret
+correctly.
+
+### Phase D2: Enrollment and Canonical Reads
+
+QR scan, the enrollment flow through grant exchange, the connection state
+machine, canonical reads, the revision-ordered cache, and the SwiftUI shell.
+
+Deliverable: install, enroll by scanning, and read your canonical history.
 
 ### Phase E: Send, Stream, and Recovery
 
@@ -566,6 +578,11 @@ hosting platform is an open decision to be made at the start of this phase.
 TestFlight, App Store submission, and staged rollout.
 
 The proof gate is evaluated after Phase H, not before.
+
+Phase D is split into D1 and D2 because it spans a new repository, two additive
+SDK changes, a foreign-function bridge, a build pipeline, and a full read path.
+Each half produces working, testable software on its own, which a single plan
+covering all of it would not.
 
 ## Success Criteria
 
