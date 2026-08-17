@@ -128,6 +128,55 @@ describe('contract canary temp directory safety', () => {
     expect(() => cleanupOwnedTempRoot(artifactDirectory)).toThrow(/changed identity/);
   });
 
+  test('rejects cleanup when a recreated root reuses the freed inode number', () => {
+    // The test above depends on the platform allocating a fresh inode for the
+    // recreated directory. macOS does; Linux hands back the inode it just
+    // freed, so dev/ino match and an inode-only guard waves the impostor
+    // through. That divergence is why this passed locally and failed in CI.
+    //
+    // This one removes the platform from the equation: it recreates the root
+    // and then rewrites the recorded dev/ino to whatever the new directory
+    // actually has, which is exactly what inode reuse produces. Anything that
+    // still refuses is refusing on evidence other than the inode.
+    const artifactDirectory = createOwnedTempDirectory({
+      prefix: 'opencoven-chat-contract-canary-test',
+    });
+    createdTempDirectories.push(artifactDirectory);
+
+    rmSync(artifactDirectory.rootPath, { force: true, recursive: true });
+    mkdirSync(artifactDirectory.rootPath, { recursive: true, mode: 0o700 });
+
+    const impostorStats = lstatSync(artifactDirectory.rootPath);
+    const withReusedInode = {
+      ...artifactDirectory,
+      rootDevice: impostorStats.dev,
+      rootInode: impostorStats.ino,
+    };
+
+    expect(() => cleanupOwnedTempRoot(withReusedInode)).toThrow(/changed identity/);
+  });
+
+  test('rejects cleanup when the ownership stamp is a symlink to a matching value', () => {
+    // A stamp that is read through a symlink could be satisfied by a file the
+    // attacker controls elsewhere. The stamp must be a plain file in the root.
+    const artifactDirectory = createOwnedTempDirectory({
+      prefix: 'opencoven-chat-contract-canary-test',
+    });
+    createdTempDirectories.push(artifactDirectory);
+
+    const scratchRoot = mkdtempSync(resolve(tmpdir(), 'opencoven-chat-contract-canary-spec-'));
+    scratchRoots.push(scratchRoot);
+
+    const forgedStamp = resolve(scratchRoot, 'forged-stamp');
+    writeFileSync(forgedStamp, artifactDirectory.rootStamp);
+
+    const stampPath = resolve(artifactDirectory.rootPath, '.opencoven-owned-temp');
+    rmSync(stampPath, { force: true });
+    symlinkSync(forgedStamp, stampPath);
+
+    expect(() => cleanupOwnedTempRoot(artifactDirectory)).toThrow(/changed identity/);
+  });
+
   test('removes nested symlinks without following them during cleanup', () => {
     const artifactDirectory = createOwnedTempDirectory({
       prefix: 'opencoven-chat-contract-canary-test',

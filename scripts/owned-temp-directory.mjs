@@ -5,16 +5,32 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmdirSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, resolve } from 'node:path';
 
 const safeChildSegmentPattern = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const safePrefixPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Name of the ownership stamp written into every owned root.
+ *
+ * Device and inode alone cannot establish that a directory is still the one we
+ * created. Linux readily hands the just-freed inode number to the next
+ * directory made at the same path, so a root that was deleted and recreated
+ * between creation and cleanup can present identical dev/ino. macOS usually
+ * allocates a fresh inode, which is why this only ever failed in CI.
+ *
+ * The stamp closes that gap: an attacker or a stray process can reproduce a
+ * path and even an inode number, but not an unguessable value it never saw.
+ */
+const ownershipStampName = '.opencoven-owned-temp';
 
 function lstatIfExists(path) {
   try {
@@ -67,6 +83,30 @@ function ensureOwnedChildDirectories(rootPath, childSegments) {
   return currentPath;
 }
 
+/**
+ * Read the ownership stamp out of a directory.
+ *
+ * Returns undefined when it is absent or is not a plain file, so a symlink
+ * planted where the stamp belongs can never be followed and read.
+ */
+function readOwnershipStamp(directoryPath) {
+  const stampPath = resolve(directoryPath, ownershipStampName);
+  const stats = lstatIfExists(stampPath);
+
+  if (stats === undefined || stats.isSymbolicLink() || !stats.isFile()) {
+    return undefined;
+  }
+
+  return readFileSync(stampPath, 'utf8');
+}
+
+/** Fail unless the directory carries the stamp this context wrote. */
+function assertOwnershipStamp(directoryPath, context, whenLabel) {
+  if (readOwnershipStamp(directoryPath) !== context.rootStamp) {
+    throw new Error(`Owned temp root changed identity ${whenLabel}: ${directoryPath}`);
+  }
+}
+
 function assertOwnedRootStillMatches(context) {
   const stats = lstatIfExists(context.rootPath);
 
@@ -85,6 +125,10 @@ function assertOwnedRootStillMatches(context) {
   if (stats.dev !== context.rootDevice || stats.ino !== context.rootInode) {
     throw new Error(`Owned temp root changed identity before cleanup: ${context.rootPath}`);
   }
+
+  // Checked after dev/ino rather than instead of it: the cheap check rejects
+  // the common case, and this one rejects the case dev/ino cannot see.
+  assertOwnershipStamp(context.rootPath, context, 'before cleanup');
 
   const rootRealPath = realpathSync(context.rootPath);
 
@@ -129,12 +173,18 @@ export function createOwnedTempDirectory({ prefix, childSegments = [] } = {}) {
     throw new Error(`Owned temp root must be a directory: ${rootPath}`);
   }
 
+  // Written before any child directory exists, so a root is never observable
+  // in a state where it looks owned and is not.
+  const rootStamp = randomUUID();
+  writeFileSync(resolve(rootPath, ownershipStampName), rootStamp, { mode: 0o600 });
+
   return {
     parentPath,
     rootPath,
     rootRealPath: realpathSync(rootPath),
     rootDevice: rootStats.dev,
     rootInode: rootStats.ino,
+    rootStamp,
     path: ensureOwnedChildDirectories(rootPath, childSegments),
   };
 }
@@ -162,6 +212,10 @@ export function cleanupOwnedTempRoot(context) {
   if (renamedStats.dev !== context.rootDevice || renamedStats.ino !== context.rootInode) {
     throw new Error(`Owned temp cleanup root changed identity after rename: ${deletingRoot}`);
   }
+
+  // The rename moved a directory; confirm it is still ours before the
+  // recursive delete, which is the only irreversible step in this file.
+  assertOwnershipStamp(deletingRoot, context, 'after rename');
 
   removePathWithoutFollowingSymlinks(deletingRoot);
 }
