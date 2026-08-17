@@ -213,6 +213,29 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toMatch(/- run: pnpm app:build/);
   });
 
+  it('proves the packed harness installs with no network access', () => {
+    // The offline install is the assertion, and the warm pass exists only so
+    // that assertion is about the tarballs rather than about whether a fresh
+    // runner's store happened to be seeded.
+    //
+    // The tempting fix for the CI failure was to drop --offline, which would
+    // have gone green and silently stopped checking that the packed packages
+    // are self-contained. This guard makes that regression fail here.
+    const canaryScript = readText('scripts/contract-canary.mjs');
+
+    expect(canaryScript).toContain("offline ? '--offline' : '--prefer-offline'");
+    expect(canaryScript).toContain('installHarnessOfflineAfterWarming');
+
+    const warmIndex = canaryScript.indexOf('isolatedInstallArgs({ offline: false })');
+    const offlineIndex = canaryScript.indexOf('isolatedInstallArgs({ offline: true })');
+
+    expect(warmIndex, 'the warm pass is missing').toBeGreaterThan(-1);
+    expect(offlineIndex, 'the offline assertion is missing').toBeGreaterThan(-1);
+    expect(warmIndex, 'the offline assertion must run after the warm pass').toBeLessThan(
+      offlineIndex,
+    );
+  });
+
   it('defines a reproducible cross-repository packed-package canary', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const packageManifest = readJson<PackageManifest>('package.json');

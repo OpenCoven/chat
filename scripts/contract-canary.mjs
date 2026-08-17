@@ -237,16 +237,41 @@ function runPnpm(args, cwd, options = {}) {
   return run('corepack', ['pnpm@10.34.0', ...args], cwd, options);
 }
 
-function isolatedInstallArgs() {
+function isolatedInstallArgs({ offline }) {
   return [
     '--ignore-workspace',
     '--config.inject-workspace-packages=false',
     '--config.link-workspace-packages=false',
     '--config.prefer-workspace-packages=false',
     'install',
-    '--offline',
+    // The warm pass may reach the registry for metadata the store lacks; the
+    // asserting pass may not reach it at all.
+    offline ? '--offline' : '--prefer-offline',
     '--ignore-scripts',
   ];
+}
+
+/**
+ * Install the harness twice: once warm, once offline.
+ *
+ * The offline install is the assertion. It proves every dependency the packed
+ * tarballs pull in is genuinely present in the store, so nothing is being
+ * resolved from the network behind the canary's back.
+ *
+ * But an offline install can only assert that once the store actually holds
+ * those dependencies, and a fresh CI runner's store does not. That is what
+ * failed here: a transitive @types/node had no metadata in the runner's
+ * mirror, so the offline install failed on an absence that says nothing about
+ * the tarballs.
+ *
+ * Warming first separates the two questions. The warm pass is allowed to fetch
+ * what it is missing; the offline pass then has to succeed with no network at
+ * all, which is the property worth checking. Dropping --offline entirely would
+ * have made the failure go away and taken the guarantee with it.
+ */
+function installHarnessOfflineAfterWarming(harnessRoot) {
+  runPnpm(isolatedInstallArgs({ offline: false }), harnessRoot);
+  runPnpm(isolatedInstallArgs({ offline: true }), harnessRoot);
 }
 
 function createPublicPackageOverrides(tarballs) {
@@ -431,7 +456,7 @@ export function main(argv = process.argv.slice(2)) {
     const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
 
     createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
-    runPnpm(isolatedInstallArgs(), harnessRoot);
+    installHarnessOfflineAfterWarming(harnessRoot);
 
     if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {
       throw new Error('Packed @opencoven/cave-client unexpectedly installed source files.');
