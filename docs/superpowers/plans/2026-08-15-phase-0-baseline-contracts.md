@@ -4,7 +4,7 @@
 
 **Goal:** Establish clean implementation branches, reproducible toolchains, deterministic Cave and Coven contract artifacts, public TypeScript package boundaries, and stale-contract CI before any supported client route ships.
 
-**Architecture:** Coven Cave and Coven Core remain the contract authorities. Cave exports a deterministic `/api/client/v1` fixture; Coven exposes `coven.daemon.v1` through an owner-adjacent `coven-client` Rust crate. The new SDK repository consumes authority fixtures into transport-neutral TypeScript packages, and Chat consumes `@opencoven/cave-client` through a constrained Tauri adapter rather than copying schemas or issuing arbitrary HTTP requests.
+**Architecture:** Coven Cave and Coven Core remain the contract authorities. Cave exports a deterministic `/api/client/v1` fixture; Coven exposes `coven.daemon.v1` through an owner-adjacent `coven-client` Rust crate. The new SDK repository consumes authority fixtures into transport-neutral TypeScript packages, and Chat documents the typed `@opencoven/cave-client` boundary and constrained Tauri adapter surface rather than copying schemas or issuing arbitrary HTTP requests before package publication is explicitly approved.
 
 **Tech Stack:** Cave: Next.js 16.2.12, React 19.2.8, TypeScript 6.0.3, Node 24, pnpm 10.34.0. Chat: React 19.2.8, TypeScript 6.0.3, Vite, Vitest, Playwright, Tauri 2.11.x, Rust. SDK: TypeScript 6.0.3, Zod 4, pnpm workspaces, tsup, Vitest. Coven: Rust 2021, Cargo.
 
@@ -20,7 +20,7 @@
 
 ### Cave
 
-- Create `src/lib/server/client-v1/contract.ts` — v1 constants, scopes, DTOs, parsers, fixture builder.
+- Create `src/lib/server/client-v1/contract.ts` — v1 constants, scopes, foundation DTOs, parsers, fixture builder.
 - Create `src/lib/server/client-v1/responses.ts` — stable success/error envelopes.
 - Create `src/lib/server/client-v1/contract.test.ts` — parser, compatibility, and envelope tests.
 - Create `src/lib/server/client-v1/contract-fixture.json` — generated public fixture.
@@ -167,10 +167,11 @@ export type ClientV1ErrorCode =
   | "internal_error";
 ```
 
-Fixture construction must be a pure exported function returning health, error,
-credential, familiar, project, conversation-list, conversation-detail, and
-stream-event examples. Unknown additive response fields remain acceptable;
-missing required fields do not.
+Fixture construction must be a pure exported function returning the
+foundation-only Phase 0 examples: `status`, `identity`, `revision`, `cursor`,
+and generic success/error envelopes. Pairing request DTO examples plus broader
+Phase 1-4 route payloads were deliberately deferred. Unknown additive response
+fields remain acceptable; missing required fields do not.
 
 - [ ] **Step 4: Write the exporter and determinism test**
 
@@ -263,8 +264,10 @@ expect(error).toMatchObject({
 
 Copy Cave's generated fixture and digest exactly into
 `packages/cave/fixtures/`. Copy the reviewed Coven fixture set into
-`packages/coven/fixtures/`. Tests compare bytes and expected digests; they do
-not import authority source code.
+`packages/coven/fixtures/`. Tests compare bytes and expected digests; runtime
+packages and tests do not import authority source code or use source-relative
+links. A development-only fixture import command may copy generated authority
+artifacts and digests into the SDK workspace.
 
 - [ ] **Step 4: Implement package boundaries**
 
@@ -298,7 +301,10 @@ Expected: all pass against packed artifacts.
 - [ ] **Step 1: Create the approved package manifest**
 
 Pin Node `>=24.18.0 <25`, pnpm `10.34.0`, TypeScript `6.0.3`, React `19.2.8`,
-Tauri `2.11.x`, and the approved `0.1.x` `@opencoven/cave-client` release.
+and Tauri `2.11.x`. Until package publication is explicitly approved, Chat
+documents the `@opencoven/cave-client` boundary and the canary verifies packed
+`0.1.x` tarball integration in a temporary install copy instead of adding a
+source-relative or absolute path dependency.
 
 - [ ] **Step 2: Write failing React and Rust smoke tests**
 
@@ -313,9 +319,10 @@ headers, bearer, or generic fetch method.
 
 - [ ] **Step 4: Write package-fixture adapter tests**
 
-Test successful additive parsing, missing required fields, wrong major version,
-structured errors, non-JSON responses, aborts, and timeouts through
-`@opencoven/cave-client`.
+When packed `@opencoven/cave-client` tarballs are available through the canary,
+test successful additive parsing, missing required fields, wrong major
+version, structured errors, non-JSON responses, aborts, and timeouts through
+that package boundary without source-relative links.
 
 - [ ] **Step 5: Run Chat gates**
 
@@ -391,8 +398,10 @@ pnpm build
 1. Cave contract, deterministic export, and CI wiring.
 2. Coven `coven-client` `0.1.x` extraction.
 3. SDK workspace, fixture ingestion, and package verification.
-4. Publish or otherwise make the reviewed `0.1.x` TypeScript packages available.
-5. Chat scaffold pinned to `@opencoven/cave-client`.
+4. Keep the reviewed `0.1.x` TypeScript packages at the documented package
+   boundary and verify packed tarball installs without publishing.
+5. Chat scaffold documents and then consumes `@opencoven/cave-client` only when
+   publication is explicitly approved.
 6. Cross-repository packed-package canary.
 
 ## Commit Checkpoints
@@ -413,7 +422,9 @@ Do not combine authority, SDK, and Chat changes in one commit or repository.
 - Every implementation branch started from a recorded clean base.
 - Contract export is byte-identical across consecutive runs.
 - Chat and SDK reject deliberately stale fixture digests.
-- Chat parses the authority fixture only through `@opencoven/cave-client`.
+- Chat documents the authority fixture boundary only through
+  `@opencoven/cave-client` until publication is explicitly approved, and the
+  canary verifies packed tarball integration separately.
 - Packed SDK packages expose only declared entry points and examples compile.
 - `coven-client` passes existing CLI API behavior through the extracted crate.
 - No raw private Cave route, arbitrary HTTP URL, bearer header, or server

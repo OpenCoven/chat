@@ -1,0 +1,21 @@
+[package]
+name = "opencoven-chat"
+version = "0.1.0"
+description = "OpenCoven Chat desktop scaffold"
+edition = "2021"
+rust-version = "1.95.0"
+
+[lib]
+name = "opencoven_chat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+serde_json = "=1.0.145"
+tauri-build = { version = "=2.6.2", features = [] }
+
+[dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+tauri = { version = "=2.11.2", features = [] }
+
+[dev-dependencies]
+serde_json = "=1.0.145"
