@@ -65,6 +65,31 @@ describe('Phase 0 specification guards', () => {
     expect(output).toContain('/.worktrees');
   });
 
+  it('reserves the root .artifacts directory for untracked canary scratch files', () => {
+    expect(readText('.gitignore')).toContain('.artifacts/');
+    expect(
+      execFileSync(
+        'git',
+        [
+          '-C',
+          projectRoot,
+          'check-ignore',
+          '-v',
+          '--no-index',
+          '.artifacts/reservation-probe/file.txt',
+        ],
+        {
+          encoding: 'utf8',
+        },
+      ),
+    ).toContain('.artifacts/');
+    expect(
+      execFileSync('git', ['-C', projectRoot, 'ls-files', '--', '.artifacts'], {
+        encoding: 'utf8',
+      }),
+    ).toBe('');
+  });
+
   it('keeps the default Tauri capability least-privileged for app_identity', () => {
     const capability = JSON.parse(
       readText('src-tauri/capabilities/default.json'),

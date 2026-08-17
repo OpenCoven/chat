@@ -1,15 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  prepareArtifactDirectory,
+  removeArtifactPath,
+  resolveArtifactDirectory,
+} from './artifact-directory.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultSdkRoot = resolve(root, '.cross-repo', 'sdk');
 const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
-const artifactBaseRoot = resolve(root, '.artifacts', 'contract-canary');
 const defaultArtifactName = 'default';
-const safeArtifactNamePattern = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 function printUsage() {
   process.stdout.write(
@@ -25,39 +28,47 @@ function printUsage() {
   );
 }
 
-function assertConfinedArtifactRoot(targetPath) {
-  const normalizedArtifactBaseRoot = resolve(artifactBaseRoot);
-  const normalizedRepositoryRoot = resolve(root);
-  const normalizedTargetPath = resolve(targetPath);
-  const normalizedHomeDirectory = resolve(homedir());
-  const relativeToArtifactBase = relative(normalizedArtifactBaseRoot, normalizedTargetPath);
-
-  if (
-    normalizedTargetPath === resolve('/') ||
-    normalizedTargetPath === normalizedHomeDirectory ||
-    normalizedTargetPath === normalizedRepositoryRoot ||
-    normalizedTargetPath === resolve(normalizedRepositoryRoot, '..') ||
-    relativeToArtifactBase.length === 0 ||
-    relativeToArtifactBase === '..' ||
-    relativeToArtifactBase.startsWith(`..${sep}`) ||
-    relativeToArtifactBase.split(sep).includes('..')
-  ) {
-    throw new Error(
-      `Artifact cleanup path must stay inside a child of ${normalizedArtifactBaseRoot}.`,
-    );
-  }
+function resolveContractCanaryArtifactContext(
+  repositoryRoot = root,
+  artifactName = defaultArtifactName,
+) {
+  return resolveArtifactDirectory({
+    repositoryRoot,
+    parentSegments: ['contract-canary'],
+    parentLabel: 'Artifact directory',
+    artifactName,
+  });
 }
 
-export function resolveContractCanaryArtifactRoot(artifactName = defaultArtifactName) {
-  if (!safeArtifactNamePattern.test(artifactName)) {
-    throw new Error(
-      `Artifact name "${artifactName}" must be a safe child name using only letters, digits, ".", "_" or "-".`,
-    );
-  }
+export function resolveContractCanaryArtifactRoot(
+  artifactName = defaultArtifactName,
+  options = {},
+) {
+  return resolveContractCanaryArtifactContext(options.repositoryRoot, artifactName).artifactPath;
+}
 
-  const artifactRoot = resolve(artifactBaseRoot, artifactName);
-  assertConfinedArtifactRoot(artifactRoot);
-  return artifactRoot;
+export function prepareContractCanaryArtifactRoot(
+  artifactName = defaultArtifactName,
+  options = {},
+) {
+  return prepareArtifactDirectory({
+    repositoryRoot: options.repositoryRoot ?? root,
+    parentSegments: ['contract-canary'],
+    parentLabel: 'Artifact directory',
+    artifactName,
+  }).artifactPath;
+}
+
+export function removeContractCanaryArtifactRoot(artifactRoot, options = {}) {
+  const context = resolveContractCanaryArtifactContext(
+    options.repositoryRoot ?? root,
+    defaultArtifactName,
+  );
+
+  removeArtifactPath(artifactRoot, {
+    artifactBasePath: context.parentPath,
+    artifactBaseRealPath: context.parentRealPath,
+  });
 }
 
 export function parseArgs(argv) {
@@ -293,8 +304,7 @@ export function main(argv = process.argv.slice(2)) {
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
 
   try {
-    rmSync(options.artifactRoot, { force: true, recursive: true });
-    mkdirSync(options.artifactRoot, { recursive: true });
+    prepareContractCanaryArtifactRoot(options.artifactName);
 
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
@@ -310,7 +320,7 @@ export function main(argv = process.argv.slice(2)) {
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
   } finally {
-    rmSync(options.artifactRoot, { force: true, recursive: true });
+    removeContractCanaryArtifactRoot(options.artifactRoot);
   }
 }
 
