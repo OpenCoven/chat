@@ -14,6 +14,18 @@ type PackageManifest = {
   scripts?: Record<string, string>;
 };
 
+type ContractCanaryLock = {
+  version: number;
+  sdk: {
+    repository: string;
+    revision: string;
+  };
+  cave: {
+    repository: string;
+    revision: string;
+  };
+};
+
 const projectRoot = process.cwd();
 
 function readText(relativePath: string) {
@@ -65,29 +77,14 @@ describe('Phase 0 specification guards', () => {
     expect(output).toContain('/.worktrees');
   });
 
-  it('reserves the root .artifacts directory for untracked canary scratch files', () => {
-    expect(readText('.gitignore')).toContain('.artifacts/');
-    expect(
-      execFileSync(
-        'git',
-        [
-          '-C',
-          projectRoot,
-          'check-ignore',
-          '-v',
-          '--no-index',
-          '.artifacts/reservation-probe/file.txt',
-        ],
-        {
-          encoding: 'utf8',
-        },
-      ),
-    ).toContain('.artifacts/');
-    expect(
-      execFileSync('git', ['-C', projectRoot, 'ls-files', '--', '.artifacts'], {
-        encoding: 'utf8',
-      }),
-    ).toBe('');
+  it('tracks reviewed counterpart revisions in repository content', () => {
+    const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
+
+    expect(lock.version).toBe(1);
+    expect(lock.sdk.repository).toBe('OpenCoven/sdk');
+    expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
+    expect(lock.sdk.revision).toMatch(/^[0-9a-f]{40}$/);
+    expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
   });
 
   it('keeps the default Tauri capability least-privileged for app_identity', () => {
@@ -225,23 +222,38 @@ describe('Phase 0 specification guards', () => {
       'node ./scripts/contract-canary.mjs',
     );
     expect(workflow).toMatch(/name:\s*Contract canary/);
-    expect(workflow).toContain('repository: OpenCoven/sdk');
+    expect(workflow).toContain(
+      "import { readContractCanaryLock } from './scripts/contract-canary.mjs';",
+    );
+    expect(workflow).toContain('sdk_repository=$' + '{lock.sdk.repository}');
+    expect(workflow).toContain(
+      'repository: $' + '{{ steps.reviewed-revisions.outputs.sdk_repository }}',
+    );
+    expect(workflow).toContain('ref: $' + '{{ steps.reviewed-revisions.outputs.sdk_revision }}');
     expect(workflow).toContain('path: .cross-repo/sdk');
-    expect(workflow).toContain('repository: OpenCoven/coven-cave');
+    expect(workflow).toContain('cave_repository=$' + '{lock.cave.repository}');
+    expect(workflow).toContain(
+      'repository: $' + '{{ steps.reviewed-revisions.outputs.cave_repository }}',
+    );
+    expect(workflow).toContain('ref: $' + '{{ steps.reviewed-revisions.outputs.cave_revision }}');
     expect(workflow).toContain('path: .cross-repo/coven-cave');
-    expect(workflow).toContain('OPENCOVEN_SDK_REVIEWED_REVISION');
-    expect(workflow).toContain('OPENCOVEN_CAVE_REVIEWED_REVISION');
+    expect(workflow).not.toContain('OPENCOVEN_SDK_REVIEWED_REVISION');
+    expect(workflow).not.toContain('OPENCOVEN_CAVE_REVIEWED_REVISION');
     expect(workflow).not.toContain('ref: main');
-    expect(workflow).toContain('reviewed immutable 40-character commit SHA');
+    expect(workflow).toContain('Read reviewed counterpart lock');
+    expect(workflow).toContain('Assert checked-out reviewed revisions');
+    expect(workflow).toContain('assertContractCanaryCheckoutHeads');
     expect(workflow).toContain('working-directory: .cross-repo/sdk');
     expect(workflow).toContain(
       'pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave',
     );
-    expect(canaryScript).toContain('pack-public-packages.mjs');
+    expect(canaryScript).toContain('contract-canary.lock.json');
+    expect(canaryScript).toContain('package-artifacts.mjs');
     expect(canaryScript).toContain('verify-contracts.mjs');
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
     expect(canaryScript).toContain('minimumClientVersion');
     expect(canaryScript).toContain('digest mismatch');
+    expect(canaryScript).toContain('does not match locked reviewed revision');
   });
 
   it('pins third-party workflow actions to immutable SHAs', () => {

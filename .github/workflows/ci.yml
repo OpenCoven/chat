@@ -45,35 +45,52 @@ jobs:
     name: Contract canary
     runs-on: ubuntu-latest
     needs: web
-    env:
-      OPENCOVEN_SDK_REVIEWED_REVISION: ${{ vars.OPENCOVEN_SDK_REVIEWED_REVISION }}
-      OPENCOVEN_CAVE_REVIEWED_REVISION: ${{ vars.OPENCOVEN_CAVE_REVIEWED_REVISION }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Validate reviewed counterpart revisions
+      - id: reviewed-revisions
+        name: Read reviewed counterpart lock
         run: |
           node --input-type=module <<'EOF'
-          const revisions = [
-            ['OPENCOVEN_SDK_REVIEWED_REVISION', process.env.OPENCOVEN_SDK_REVIEWED_REVISION],
-            ['OPENCOVEN_CAVE_REVIEWED_REVISION', process.env.OPENCOVEN_CAVE_REVIEWED_REVISION],
-          ];
+          import { appendFileSync } from 'node:fs';
+          import { readContractCanaryLock } from './scripts/contract-canary.mjs';
 
-          for (const [name, value] of revisions) {
-            if (!/^[0-9a-f]{40}$/i.test(value ?? '')) {
-              throw new Error(`${name} must be set to a reviewed immutable 40-character commit SHA.`);
-            }
+          const lock = readContractCanaryLock();
+          const outputPath = process.env.GITHUB_OUTPUT;
+
+          if (!outputPath) {
+            throw new Error('GITHUB_OUTPUT must be set.');
           }
+
+          appendFileSync(outputPath, `sdk_repository=${lock.sdk.repository}\n`);
+          appendFileSync(outputPath, `sdk_revision=${lock.sdk.revision}\n`);
+          appendFileSync(outputPath, `cave_repository=${lock.cave.repository}\n`);
+          appendFileSync(outputPath, `cave_revision=${lock.cave.revision}\n`);
           EOF
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          repository: OpenCoven/sdk
-          ref: ${{ env.OPENCOVEN_SDK_REVIEWED_REVISION }}
+          repository: ${{ steps.reviewed-revisions.outputs.sdk_repository }}
+          ref: ${{ steps.reviewed-revisions.outputs.sdk_revision }}
           path: .cross-repo/sdk
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          repository: OpenCoven/coven-cave
-          ref: ${{ env.OPENCOVEN_CAVE_REVIEWED_REVISION }}
+          repository: ${{ steps.reviewed-revisions.outputs.cave_repository }}
+          ref: ${{ steps.reviewed-revisions.outputs.cave_revision }}
           path: .cross-repo/coven-cave
+      - name: Assert checked-out reviewed revisions
+        run: |
+          node --input-type=module <<'EOF'
+          import {
+            assertContractCanaryCheckoutHeads,
+            readContractCanaryLock,
+          } from './scripts/contract-canary.mjs';
+
+          const lock = readContractCanaryLock();
+
+          assertContractCanaryCheckoutHeads(lock, {
+            sdkRoot: '.cross-repo/sdk',
+            caveRoot: '.cross-repo/coven-cave',
+          });
+          EOF
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.0

@@ -1,19 +1,17 @@
-export function resolveContractCanaryArtifactRoot(
-  artifactName?: string,
-  options?: { repositoryRoot?: string },
-): string;
-export function prepareContractCanaryArtifactRoot(
-  artifactName?: string,
-  options?: { repositoryRoot?: string },
-): string;
-export function removeContractCanaryArtifactRoot(
-  artifactRoot: string,
-  options?: { repositoryRoot?: string },
-): void;
+export function readContractCanaryLock(lockPath?: string): {
+  path: string;
+  sdk: { repository: string; revision: string };
+  cave: { repository: string; revision: string };
+};
+export function assertContractCanaryCheckoutHeads(
+  lock: {
+    sdk: { repository: string; revision: string };
+    cave: { repository: string; revision: string };
+  },
+  options: { sdkRoot: string; caveRoot: string },
+): { sdkHead: string; caveHead: string };
 export function parseArgs(argv: string[]): {
   sdkRoot: string;
   caveRoot: string;
-  artifactName: string;
-  artifactRoot: string;
 };
 export function main(argv?: string[]): void;

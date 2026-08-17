@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "sdk": {
+    "repository": "OpenCoven/sdk",
+    "revision": "bc94c7ed5f1e6058eee4583d4a2fc173e05b26f5"
+  },
+  "cave": {
+    "repository": "OpenCoven/coven-cave",
+    "revision": "2fe0abd05c88329c6b93660b986f40605c939ae1"
+  }
+}
