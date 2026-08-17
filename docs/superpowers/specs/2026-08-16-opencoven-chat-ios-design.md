@@ -231,10 +231,11 @@ presentation:
 It owns no UI and no storage. Secret storage, blob storage, persistence, and the
 clock are traits the host injects.
 
-**Platform-neutrality is a hard requirement, not a preference.** The UniFFI
-interface exposes scalars, records, enums, and callback interfaces only, with no
-Foundation or UIKit types anywhere, and the crate must compile clean for macOS,
-Linux, and Windows from the first commit. A core that only works under SwiftUI
+**Platform-neutrality is a hard requirement, not a preference.** `cave-core`
+carries no UniFFI derives and no platform types; the app's own FFI crate owns
+the UniFFI surface and exposes scalars, records, enums, and callback interfaces
+only, with no Foundation or UIKit types anywhere. `cave-core` must compile
+clean for macOS, Linux, and Windows from the first commit. A core that only works under SwiftUI
 would silently decide the desktop migration question in advance. Holding this
 line at phase 0 is cheap; retrofitting it is not.
 
@@ -413,15 +414,30 @@ copyable diagnostic identifier that exposes no secrets.
 - fuzzing the marker parser against the hostile-content corpus
 - conformance against the exported v1 fixtures
 
-### Differential Testing
+### Conformance, Then Differential Testing
 
-While the TypeScript client and `cave-core` coexist, the same exported fixture
-corpus runs through **both**, asserting identical reduced state and identical
-AST.
+These are two controls that arrive at different times, and conflating them
+produces a plan that cannot be executed.
 
-This is the control that makes deferring the desktop migration safe rather than
-merely postponed. Without it, two implementations of the security-critical path
-drift silently between audits.
+**Conformance comes first.** `cave-core` validates against the exported v1
+contract fixture from `cave-g6x6k` as soon as it exists. This needs no second
+implementation and is the gate for `cave-core` itself.
+
+**Differential testing begins when a second implementation exists.** The
+TypeScript reducer, cursor logic, and marker parser live in the desktop Chat
+client, built in desktop phases 2 through 4, which have not started. The
+published TypeScript SDK deliberately ships no reducer, so it is not a
+differential counterpart either.
+
+Until desktop's reducer lands there is exactly one implementation and nothing
+to drift from. Once it lands, the same exported corpus runs through both,
+asserting identical reduced state and identical AST — and that harness is the
+control that keeps deferring the desktop migration safe rather than merely
+postponed.
+
+Ordering consequence: the differential harness is **not** Phase B work. It is
+built when desktop Chat's reducer first exists, and its absence before then is
+a fact about sequencing rather than a gap.
 
 ### Swift
 
@@ -489,9 +505,16 @@ what distinguishes an extraction from a fork.
 
 Extend `coven-transport` with TLS, certificate pinning, the endpoint candidate
 model, and per-network selection memory. Create `cave-core` over it: contract
-types validated against the exported v1 fixture, the error envelope, and the
-UniFFI scaffold. Prove both compile for macOS, Linux, and Windows. Stand up the
-differential test harness against the TypeScript client.
+types validated against the exported v1 fixture, compatibility negotiation, the
+error envelope, and typed stream events. Prove both compile for macOS, Linux,
+and Windows. Conformance against the fixture is the gate; the differential
+harness waits for desktop's reducer to exist.
+
+`cave-core` carries no UniFFI derives, for the same reason `coven-transport`
+does not: the UniFFI surface belongs to each application's own FFI crate, which
+converts at the boundary. Chat iOS builds its FFI layer in Phase D. This is the
+structure Coven Pocket already uses, and it is what keeps a future desktop
+Tauri host able to consume `cave-core` without dragging in FFI scaffolding.
 
 ### Phase C: Enrollment Authority
 
@@ -548,8 +571,12 @@ The work is complete when:
   Cave.
 - Push notifications arrive carrying no content.
 - `overlay unavailable` and `Cave unreachable` are distinguishable to the user.
-- Differential tests show identical behavior between `cave-core` and the
-  TypeScript client.
+- `cave-core` passes conformance against the exported v1 contract fixture.
+- Once desktop Chat's TypeScript reducer exists, differential tests show
+  identical reduced state and identical AST between it and `cave-core`. If
+  desktop phases 2 through 4 have not landed by iOS release, this criterion
+  carries forward rather than blocking, because a single implementation cannot
+  drift.
 - Coven Pocket's test suite passes unchanged against `coven-transport`, and the
   reachability/HTTP primitive exists in exactly one place.
 - CI fails the `chat-ios` build if any GPL-licensed crate enters its dependency

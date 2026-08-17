@@ -18,6 +18,38 @@
 
 ---
 
+## Working Directories
+
+**Both repositories are live.** As of 2026-08-16 the SDK main checkout sits on `feat/cave-o2bqs-sdk-foundation` with uncommitted changes and a locked review worktree — Phase 0's SDK lane is in flight. Committing into that tree would entangle this phase with someone else's work.
+
+Per the program tracking document's operating rule 4, do all work in dedicated worktrees:
+
+```bash
+cd /Users/buns/Documents/GitHub/OpenCoven/sdk
+git worktree add -b feat/ios-phase-a-transport .worktrees/ios-phase-a-transport origin/main
+
+cd /Users/buns/Documents/GitHub/OpenCoven/coven-pocket
+git worktree add -b feat/ios-phase-a-transport .worktrees/ios-phase-a-transport origin/main
+```
+
+Every path in this plan that begins `/Users/buns/Documents/GitHub/OpenCoven/sdk/` or `/Users/buns/Documents/GitHub/OpenCoven/coven-pocket/` means the corresponding `.worktrees/ios-phase-a-transport/` path. The Coven Pocket path dependency in Task 9 must point at the SDK **worktree**:
+
+```toml
+coven-transport = { path = "../../../sdk/.worktrees/ios-phase-a-transport/crates/coven-transport" }
+```
+
+Before starting, confirm no other session is working these checkouts:
+
+```bash
+ps -ef | grep ' claude' | grep -v grep | awk '{print $2}' | while read pid; do
+  lsof -p $pid 2>/dev/null | awk '$4=="cwd"{print $9}'
+done
+```
+
+If any path under `sdk` or `coven-pocket` appears, stop and coordinate before proceeding.
+
+---
+
 ## Critical Rules
 
 **Every commit must be signed.** Pass `-S` to every `git commit` in this plan. Before the first commit, verify:
