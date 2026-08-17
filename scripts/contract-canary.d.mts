@@ -10,6 +10,17 @@ export function assertContractCanaryCheckoutHeads(
   },
   options: { sdkRoot: string; caveRoot: string },
 ): { sdkHead: string; caveHead: string };
+export function assertCleanGitCheckout(
+  repositoryRoot: string,
+  label: string,
+): { staged: number; unstaged: number; untracked: number };
+export function assertCleanContractCanaryCheckouts(options: {
+  sdkRoot: string;
+  caveRoot: string;
+}): {
+  sdk: { staged: number; unstaged: number; untracked: number };
+  cave: { staged: number; unstaged: number; untracked: number };
+};
 export function parseArgs(argv: string[]): {
   sdkRoot: string;
   caveRoot: string;

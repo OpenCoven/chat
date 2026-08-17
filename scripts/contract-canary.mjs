@@ -73,6 +73,89 @@ function readGitHead(repositoryRoot, label) {
   }).trim();
 }
 
+function readGitStatusPorcelain(repositoryRoot, label) {
+  requirePath(repositoryRoot, label);
+
+  return run(
+    'git',
+    ['-C', repositoryRoot, 'status', '--porcelain=v1', '--untracked-files=all'],
+    root,
+    {
+      stdio: 'pipe',
+      encoding: 'utf8',
+    },
+  );
+}
+
+function summarizeGitStatus(statusOutput) {
+  const summary = {
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+  };
+
+  for (const line of statusOutput.split('\n')) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const [indexStatus = ' ', worktreeStatus = ' '] = line;
+
+    if (indexStatus === '?' && worktreeStatus === '?') {
+      summary.untracked += 1;
+      continue;
+    }
+
+    if (indexStatus !== ' ') {
+      summary.staged += 1;
+    }
+
+    if (worktreeStatus !== ' ') {
+      summary.unstaged += 1;
+    }
+  }
+
+  return summary;
+}
+
+function formatDirtySummary(summary) {
+  const parts = [];
+
+  if (summary.staged > 0) {
+    parts.push(`${summary.staged} staged change${summary.staged === 1 ? '' : 's'}`);
+  }
+
+  if (summary.unstaged > 0) {
+    parts.push(`${summary.unstaged} unstaged change${summary.unstaged === 1 ? '' : 's'}`);
+  }
+
+  if (summary.untracked > 0) {
+    parts.push(`${summary.untracked} untracked item${summary.untracked === 1 ? '' : 's'}`);
+  }
+
+  return parts.join(', ');
+}
+
+export function assertCleanGitCheckout(repositoryRoot, label) {
+  const summary = summarizeGitStatus(readGitStatusPorcelain(repositoryRoot, label));
+
+  if (summary.staged === 0 && summary.unstaged === 0 && summary.untracked === 0) {
+    return summary;
+  }
+
+  throw new Error(
+    `${label} at ${repositoryRoot} is dirty (${formatDirtySummary(summary)}). ` +
+      'Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
+  );
+}
+
+export function assertCleanContractCanaryCheckouts({ sdkRoot, caveRoot }) {
+  return {
+    sdk: assertCleanGitCheckout(sdkRoot, 'SDK checkout'),
+    cave: assertCleanGitCheckout(caveRoot, 'Cave checkout'),
+  };
+}
+
 export function assertContractCanaryCheckoutHeads(lock, { sdkRoot, caveRoot }) {
   const sdkHead = readGitHead(sdkRoot, 'SDK root');
   const caveHead = readGitHead(caveRoot, 'Cave root');
@@ -325,10 +408,11 @@ export function main(argv = process.argv.slice(2)) {
 
   requirePath(options.sdkRoot, 'SDK root');
   requirePath(options.caveRoot, 'Cave root');
+  assertCleanContractCanaryCheckouts(options);
+  assertContractCanaryCheckoutHeads(lock, options);
   requirePath(caveFixturePath, 'Cave authority fixture');
   requirePath(caveDigestPath, 'Cave authority fixture digest');
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
-  assertContractCanaryCheckoutHeads(lock, options);
 
   let artifactContext;
 

@@ -242,6 +242,7 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).not.toContain('ref: main');
     expect(workflow).toContain('Read reviewed counterpart lock');
     expect(workflow).toContain('Assert checked-out reviewed revisions');
+    expect(workflow).toContain('assertCleanContractCanaryCheckouts');
     expect(workflow).toContain('assertContractCanaryCheckoutHeads');
     expect(workflow).toContain('working-directory: .cross-repo/sdk');
     expect(workflow).toContain(
@@ -253,6 +254,7 @@ describe('Phase 0 specification guards', () => {
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
     expect(canaryScript).toContain('minimumClientVersion');
     expect(canaryScript).toContain('digest mismatch');
+    expect(canaryScript).toContain('requires a clean checkout');
     expect(canaryScript).toContain('does not match locked reviewed revision');
   });
 

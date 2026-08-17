@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +15,11 @@ import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { parseArgs, readContractCanaryLock } from '../scripts/contract-canary.mjs';
+import {
+  assertCleanGitCheckout,
+  parseArgs,
+  readContractCanaryLock,
+} from '../scripts/contract-canary.mjs';
 import {
   cleanupOwnedTempRoot,
   createOwnedTempDirectory,
@@ -45,6 +51,44 @@ afterEach(() => {
     }
   }
 });
+
+function runGit(args: string[], cwd: string) {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  }).trim();
+}
+
+function createRepoLocalScratchRoot(prefix: string) {
+  const scratchParent = resolve(process.cwd(), 'test-results', 'vitest', 'contract-canary');
+
+  mkdirSync(scratchParent, { recursive: true });
+
+  const scratchRoot = mkdtempSync(resolve(scratchParent, `${prefix}-`));
+  scratchRoots.push(scratchRoot);
+  return scratchRoot;
+}
+
+function createGitWorktreeFixture(prefix: string) {
+  const scratchRoot = createRepoLocalScratchRoot(prefix);
+  const repoRoot = resolve(scratchRoot, 'repo');
+  const worktreeRoot = resolve(scratchRoot, 'worktree');
+
+  mkdirSync(repoRoot, { recursive: true });
+  runGit(['init', '--initial-branch=main'], repoRoot);
+  runGit(['config', 'user.name', 'OpenCoven Test'], repoRoot);
+  runGit(['config', 'user.email', 'opencoven-test@example.com'], repoRoot);
+  writeFileSync(resolve(repoRoot, 'tracked.txt'), 'baseline\n');
+  runGit(['add', 'tracked.txt'], repoRoot);
+  runGit(['commit', '-m', 'baseline'], repoRoot);
+  runGit(['worktree', 'add', '--detach', worktreeRoot, 'HEAD'], repoRoot);
+
+  return {
+    repoRoot,
+    worktreeRoot,
+  };
+}
 
 describe('contract canary temp directory safety', () => {
   test.each(['.', '..', '../escape', '/Users/buns', '/'])(
@@ -116,5 +160,56 @@ describe('contract canary temp directory safety', () => {
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
+  });
+});
+
+describe('contract canary checkout cleanliness', () => {
+  test('accepts a clean git worktree checkout', () => {
+    const { worktreeRoot } = createGitWorktreeFixture('clean');
+
+    expect(assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toEqual({
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+    });
+  });
+
+  test.each([
+    {
+      name: 'rejects unstaged changes',
+      prefix: 'unstaged',
+      mutate(worktreeRoot: string) {
+        appendFileSync(resolve(worktreeRoot, 'tracked.txt'), 'dirty\n');
+      },
+      expectedMessage:
+        'SDK checkout at PLACEHOLDER is dirty (1 unstaged change). Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
+    },
+    {
+      name: 'rejects staged changes',
+      prefix: 'staged',
+      mutate(worktreeRoot: string) {
+        appendFileSync(resolve(worktreeRoot, 'tracked.txt'), 'dirty\n');
+        runGit(['add', 'tracked.txt'], worktreeRoot);
+      },
+      expectedMessage:
+        'SDK checkout at PLACEHOLDER is dirty (1 staged change). Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
+    },
+    {
+      name: 'rejects untracked changes',
+      prefix: 'untracked',
+      mutate(worktreeRoot: string) {
+        writeFileSync(resolve(worktreeRoot, 'secret.txt'), 'dirty\n');
+      },
+      expectedMessage:
+        'SDK checkout at PLACEHOLDER is dirty (1 untracked item). Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
+    },
+  ])('$name', ({ prefix, mutate, expectedMessage }) => {
+    const { worktreeRoot } = createGitWorktreeFixture(prefix);
+
+    mutate(worktreeRoot);
+
+    expect(() => assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toThrow(
+      expectedMessage.replace('PLACEHOLDER', worktreeRoot),
+    );
   });
 });

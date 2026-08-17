@@ -72,12 +72,13 @@ Anything beyond that is intentionally deferred to later beads.
 
 `contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
 immutable 40-character commit SHAs. CI reads that tracked lock, checks out those
-exact revisions, and verifies the checked-out HEADs before running the canary.
+exact revisions, rejects dirty SDK or Cave checkouts, and verifies the
+checked-out HEADs before running the canary.
 
 Local explicit-root canary runs still use
 `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,
-and the script still rejects roots whose checked-out HEADs do not match the
-tracked lock.
+and the script rejects staged, unstaged, or untracked changes before it
+verifies that the checked-out HEADs match the tracked lock.
 
 ## CI coverage
 

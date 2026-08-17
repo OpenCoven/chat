@@ -80,11 +80,17 @@ jobs:
         run: |
           node --input-type=module <<'EOF'
           import {
+            assertCleanContractCanaryCheckouts,
             assertContractCanaryCheckoutHeads,
             readContractCanaryLock,
           } from './scripts/contract-canary.mjs';
 
           const lock = readContractCanaryLock();
+
+          assertCleanContractCanaryCheckouts({
+            sdkRoot: '.cross-repo/sdk',
+            caveRoot: '.cross-repo/coven-cave',
+          });
 
           assertContractCanaryCheckoutHeads(lock, {
             sdkRoot: '.cross-repo/sdk',
