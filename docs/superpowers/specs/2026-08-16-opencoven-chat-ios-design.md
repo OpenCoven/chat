@@ -122,15 +122,38 @@ GPLv3 §7 additional permission from every copyright holder.
 
 This design targets App Store distribution. Therefore:
 
-**`chat-ios` must link no GPL-licensed code.** It must never depend on
+**`chat-ios` must acquire no GPL-family obligation.** It must never depend on
 `claurst-*`, on `coven-pocket-ffi`, or on any crate that does. This is a
 release-blocking constraint, not a preference, and CI must enforce it rather
 than rely on review.
 
+The rule is stated as an obligation rather than as "links no GPL-licensed
+code", because the distinction is what makes the design work. The SDK is
+**dual-licensed `AGPL-3.0-or-later OR MIT`**, and a dual offer is the
+recipient's choice. So:
+
+- **`chat-ios` exercises the MIT arm**, for the SDK itself and for every crate
+  extracted into it, including `coven-transport` and `cave-core`. Under MIT
+  there is no copyleft obligation and App Store distribution is unaffected.
+- A dependency offered as `... OR MIT` satisfies the constraint. A
+  **GPL-only** dependency does not, and no election can rescue one.
+- Coven Pocket is GPL-3.0-only precisely because `claurst-*` offers no
+  permissive arm. That is the case this constraint exists to keep out.
+
+The election is not implicit. `cargo deny` resolves `AGPL-3.0-or-later OR MIT`
+through MIT because MIT is in the allow list and no GPL variant is — the gate
+already encodes the choice, and Phase D1's `deny.toml` says so. Phase A records
+it in the extracted crate's `NOTICE`, and the shipped app's acknowledgements
+must name MIT as the terms under which the SDK components are distributed.
+
 The extraction is clean because the modules being moved import no `claurst`
-code and are solely authored by OpenCoven, so OpenCoven may license them under
-the SDK's terms. The implementation plan verifies both properties before moving
-any file, and records the origin and relicensing grant in a `NOTICE`.
+code and are solely authored by OpenCoven, so OpenCoven may offer them under
+the SDK's dual terms. The implementation plan verifies both properties before
+moving any file, and records the origin and relicensing grant in a `NOTICE`.
+
+This is a licensing determination, not an engineering one. It should be
+confirmed by someone with authority to make it before submission, alongside the
+export-compliance determination in Phase H.
 
 ## Product Decisions
 
@@ -146,7 +169,7 @@ any file, and records the origin and relicensing grant in a `NOTICE`.
 | Action scope | Full parity with desktop v1 |
 | Core ownership | `cave-core` serves iOS now; desktop migrates only after proof |
 | Shared code | HTTP transport primitive extracted from Coven Pocket; pairing built fresh |
-| Licensing | `chat-ios` links no GPL code; extracted crates match SDK terms |
+| Licensing | SDK is dual `AGPL-3.0-or-later OR MIT`; `chat-ios` elects MIT and takes no GPL-family obligation |
 
 ## Transport
 

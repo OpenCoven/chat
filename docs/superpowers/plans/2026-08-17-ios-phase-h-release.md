@@ -73,7 +73,8 @@ git checkout -b feat/ios-phase-h-release
 ### chat-ios
 - Create `scripts/version.sh`, `scripts/archive.sh`, `scripts/upload.sh`, `scripts/audit-artifact.sh`.
 - Create `ExportOptions.plist`.
-- Create `docs/releasing.md`, `docs/app-review-notes.md`, `docs/privacy-disclosure.md`, `docs/rollout.md`.
+- Create `docs/releasing.md`, `docs/app-review-notes.md`, `docs/privacy-disclosure.md`, `docs/rollout.md`, `docs/export-compliance.md`.
+- Create `app/Resources/Acknowledgements.html` — generated third-party licence notices.
 - Modify `project.yml`, `.github/workflows/ci.yml`.
 - Create `.github/workflows/release.yml`.
 
@@ -589,7 +590,37 @@ codesign -d --entitlements :- build/ChatIOS.xcarchive/Products/Applications/Chat
 
 Confirm exactly what is expected and nothing more: `aps-environment` set to `production`, the Keychain access group, and background modes. An entitlement nobody can explain is one to remove before submitting, not after.
 
-- [ ] **Step 3: Confirm the G2 documents are complete**
+- [ ] **Step 3: Ship the license acknowledgements**
+
+The MIT election is not free. MIT requires its copyright notice and permission
+notice to travel with every distribution, so an app that links `cave-core`,
+`coven-transport`, and their permissive transitive crates must carry those
+notices — and the App Store binary is a distribution.
+
+Generate the set from the dependency graph rather than curating it by hand,
+because a hand-kept list silently goes stale the first time a crate is added:
+
+```bash
+cd /Users/buns/Documents/GitHub/OpenCoven/chat-ios/rust
+cargo install cargo-about --locked
+cargo about generate about.hbs > ../app/Resources/Acknowledgements.html
+```
+
+Then confirm three things:
+
+1. Every crate in the graph appears, with its license text, not merely its
+   SPDX identifier.
+2. The SDK components are listed **under MIT**, which is the arm this app
+   elects. If any entry shows AGPL for an OpenCoven crate, the election is not
+   being recorded and the spec's licensing constraint is unmet.
+3. The acknowledgements are reachable in the shipped app — a Settings row is
+   the conventional place — rather than existing only in the repository.
+
+A dual-licensed dependency creates the obligation of whichever arm you take.
+Taking MIT and then shipping no notice is the one way this design's licensing
+posture can fail at the last step, after every earlier gate has passed.
+
+- [ ] **Step 4: Confirm the G2 documents are complete**
 
 ```bash
 grep -c "Observed" docs/device-matrix.md
@@ -598,11 +629,11 @@ grep -ci "untested" docs/security-review.md
 
 A device matrix with empty cells and a security review full of untested claims mean this phase started early. Stop and finish G2.
 
-- [ ] **Step 4: Verify the build on real hardware one more time**
+- [ ] **Step 5: Verify the build on real hardware one more time**
 
 Install the exact archived build — not a debug build — on a physical device and run the G2 overnight test's short form: enroll, read, send, stream, background, foreground, receive a doorbell. A Release configuration differs from Debug in optimization, assertions, and strict-concurrency enforcement, and the differences surface exactly here.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add scripts/audit-artifact.sh
@@ -811,6 +842,7 @@ Phase H is done when:
 
 - A tagged commit produces a signed, reproducible archive from a clean tree, with a version and build number derived from git.
 - The artifact audit passes on the exact build submitted: no private API, no WebKit, no telemetry framework, no staging relay URL, extension present, dSYMs present.
+- Third-party licence acknowledgements ship inside the app, generated from the dependency graph, listing the OpenCoven SDK components under MIT — the arm this app elects.
 - App Privacy answers are derived from the security review and the relay's `PRIVACY.md`, and declare the device token honestly as collected-not-linked.
 - The export compliance determination is written down and confirmed by someone with authority to make it.
 - A reviewer can get into the app, verified by a rehearsal with someone who did not build it.
