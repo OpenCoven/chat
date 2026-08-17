@@ -492,6 +492,23 @@ independently testable, mirroring how the desktop program is structured. Each
 phase gets its own plan document. Cave's existing behavior, the desktop client,
 and Coven Pocket all continue working throughout.
 
+### Plan Index
+
+All ten plans exist. Each is the plan of record for its phase.
+
+| Phase | Plan |
+|---|---|
+| A | `2026-08-16-ios-phase-a-transport-extraction.md` |
+| B | `2026-08-16-ios-phase-b-cave-core-foundation.md` |
+| C | `2026-08-16-ios-phase-c-enrollment-authority.md` |
+| D1 | `2026-08-16-ios-phase-d1-ios-foundation.md` |
+| D2 | `2026-08-16-ios-phase-d2-enrollment-and-reads.md` |
+| E | `2026-08-16-ios-phase-e-send-stream-recovery.md` |
+| F | `2026-08-17-ios-phase-f-rich-content-and-actions.md` |
+| G1 | `2026-08-17-ios-phase-g1-doorbell-relay-and-delivery.md` |
+| G2 | `2026-08-17-ios-phase-g2-lifecycle-and-hardening.md` |
+| H | `2026-08-17-ios-phase-h-release.md` |
+
 ### Phase A: Extraction
 
 Verify provenance and engine-independence of the Pocket code being moved.
