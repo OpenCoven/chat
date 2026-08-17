@@ -190,4 +190,48 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toContain('patchelf');
     expect(workflow).toMatch(/- run: pnpm app:build/);
   });
+
+  it('defines a reproducible cross-repository packed-package canary', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const canaryScript = readText('scripts/contract-canary.mjs');
+
+    expect(packageManifest.scripts?.['test:contract-canary']).toBe(
+      'node ./scripts/contract-canary.mjs',
+    );
+    expect(workflow).toMatch(/name:\s*Contract canary/);
+    expect(workflow).toContain('repository: OpenCoven/sdk');
+    expect(workflow).toContain('path: .cross-repo/sdk');
+    expect(workflow).toContain('repository: OpenCoven/coven-cave');
+    expect(workflow).toContain('path: .cross-repo/coven-cave');
+    expect(workflow).toContain('OPENCOVEN_SDK_REVIEWED_REVISION');
+    expect(workflow).toContain('OPENCOVEN_CAVE_REVIEWED_REVISION');
+    expect(workflow).not.toContain('ref: main');
+    expect(workflow).toContain('reviewed immutable 40-character commit SHA');
+    expect(workflow).toContain('working-directory: .cross-repo/sdk');
+    expect(workflow).toContain(
+      'pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave',
+    );
+    expect(canaryScript).toContain('pack-public-packages.mjs');
+    expect(canaryScript).toContain('verify-contracts.mjs');
+    expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
+    expect(canaryScript).toContain('minimumClientVersion');
+    expect(canaryScript).toContain('digest mismatch');
+  });
+
+  it('pins third-party workflow actions to immutable SHAs', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const uses = [...workflow.matchAll(/uses:\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@([^\s#]+)/g)];
+
+    expect(uses.length).toBeGreaterThan(0);
+
+    for (const [, action, ref] of uses) {
+      expect(ref, `${action} must be pinned to a full commit SHA.`).toMatch(/^[0-9a-f]{40}$/);
+    }
+
+    expect(workflow).toMatch(/actions\/checkout@[0-9a-f]{40}\s+# v4\.4\.0/);
+    expect(workflow).toMatch(/pnpm\/action-setup@[0-9a-f]{40}\s+# v4\.4\.0/);
+    expect(workflow).toMatch(/actions\/setup-node@[0-9a-f]{40}\s+# v4\.4\.0/);
+    expect(workflow).toMatch(/dtolnay\/rust-toolchain@[0-9a-f]{40}\s+# stable/);
+  });
 });

@@ -129,4 +129,32 @@ describe('App', () => {
     expect(within(identityPanel as HTMLElement).getAllByText('Unavailable')).toHaveLength(3);
     expect(screen.getByText('OpenCoven Chat')).toBeVisible();
   });
+
+  it('shows a raw string rejection in the native app failure UI', async () => {
+    const desktopIdentityHost = makeDesktopHost({
+      canUseTauriCommands: () => true,
+      readAppIdentity: vi.fn().mockRejectedValue('invoke failed: raw string'),
+    });
+
+    render(<App desktopIdentityHost={desktopIdentityHost} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Desktop identity unavailable. invoke failed: raw string',
+    );
+  });
+
+  it('falls back to the generic native app failure copy for unknown rejection payloads', async () => {
+    const desktopIdentityHost = makeDesktopHost({
+      canUseTauriCommands: () => true,
+      readAppIdentity: vi.fn().mockRejectedValue({ code: 'E_NATIVE', secret: 'hidden' }),
+    });
+
+    render(<App desktopIdentityHost={desktopIdentityHost} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Desktop identity unavailable. The native app_identity command failed.',
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('E_NATIVE');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('hidden');
+  });
 });
