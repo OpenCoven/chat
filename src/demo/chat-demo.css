@@ -789,3 +789,42 @@
   font-family: inherit;
   font-size: 10.5px;
 }
+
+/* Streaming -------------------------------------------------------------- */
+
+/* A caret on the bubble still being written, so a paused stream is
+   distinguishable from a reply that simply ended. */
+.chat-demo .caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: currentColor;
+  vertical-align: text-bottom;
+  animation: demo-caret 1s step-end infinite;
+}
+
+@keyframes demo-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.chat-demo .round-button.stop {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--demo-text);
+}
+
+.chat-demo .round-button.stop:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-demo .caret {
+    animation: none;
+  }
+}

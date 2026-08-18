@@ -245,9 +245,11 @@ function ArtifactCard({
 function MessageRow({
   message,
   onOpenArtifact,
+  isStreaming = false,
 }: {
   message: MockMessage;
   onOpenArtifact: (artifact: MockArtifact) => void;
+  isStreaming?: boolean;
 }) {
   const mine = message.role === 'user';
   // Hidden by opacity rather than removed, so it stays in the accessibility
@@ -290,6 +292,7 @@ function MessageRow({
       {mine ? stamp : null}
       <div className={`bubble ${mine ? 'bubble-mine' : 'bubble-theirs'}`}>
         <MessageText text={message.text ?? ''} />
+        {isStreaming ? <span className="caret" aria-hidden="true" /> : null}
       </div>
       {mine ? null : stamp}
     </div>
@@ -304,6 +307,9 @@ export function ChatDemo() {
   const [pendingReply, setPendingReply] = useState(false);
   const [reader, setReader] = useState<ReaderDocument | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
+  /** Id of the message currently streaming, so the composer can offer stop. */
+  const [streamingId, setStreamingId] = useState<string | null>(null);
+  const timers = useRef<number[]>([]);
   const replyCount = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
@@ -338,10 +344,65 @@ export function ChatDemo() {
     setCommandIndex((current) => (current < matchCount ? current : 0));
   }, [matchCount]);
 
+  // Unmount clears anything still pending. Reads only the ref, so it needs no
+  // dependencies and cannot go stale.
+  useEffect(() => {
+    const pending = timers.current;
+
+    return () => {
+      for (const id of pending) {
+        window.clearTimeout(id);
+      }
+    };
+  }, []);
+
   /** Complete the draft to a command, leaving a trailing space to type into. */
   function completeCommand(name: string) {
     setDraft(`${name} `);
     setCommandIndex(0);
+  }
+
+  /** Track a timer so every pending callback can be cancelled together. */
+  function track(id: number): number {
+    timers.current.push(id);
+
+    return id;
+  }
+
+  /**
+   * Cancel everything in flight.
+   *
+   * Called on stop, on conversation switch, and on unmount. Without this a
+   * stream keeps writing into a conversation the user has already left, which
+   * looks like the demo hallucinating text into the wrong thread.
+   */
+  function cancelPending() {
+    for (const id of timers.current) {
+      window.clearTimeout(id);
+    }
+
+    timers.current = [];
+    setPendingReply(false);
+    setStreamingId(null);
+  }
+
+  function updateMessage(
+    conversationId: string,
+    messageId: string,
+    change: (message: MockMessage) => MockMessage,
+  ) {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.map((message) =>
+                message.id === messageId ? change(message) : message,
+              ),
+            }
+          : conversation,
+      ),
+    );
   }
 
   function appendTo(conversationId: string, message: MockMessage) {
@@ -361,17 +422,71 @@ export function ChatDemo() {
       return;
     }
 
-    appendTo(active.id, { id: `sent-${Date.now()}`, role: 'user', sentAt: nowLabel(), text });
+    const conversationId = active.id;
+
+    appendTo(conversationId, { id: `sent-${Date.now()}`, role: 'user', sentAt: nowLabel(), text });
     setDraft('');
     setPendingReply(true);
 
-    // A visible delay, because a reply that lands instantly reads as a canned
-    // string rather than as a response. This is the demo's only pretence.
-    window.setTimeout(() => {
-      replyCount.current += 1;
-      appendTo(active.id, mockReply(text, replyCount.current));
-      setPendingReply(false);
-    }, 700);
+    // A pause before the first token, because a reply that begins instantly
+    // reads as a lookup rather than as a response.
+    track(
+      window.setTimeout(() => {
+        replyCount.current += 1;
+        const reply = mockReply(text, replyCount.current);
+        setPendingReply(false);
+
+        // Only prose streams. An image, an unfurl, or a document arrives whole
+        // because that is how it would actually arrive -- pretending to type
+        // out a picture would be a lie about the medium.
+        if (!reply.text) {
+          appendTo(conversationId, reply);
+          return;
+        }
+
+        streamInto(conversationId, reply, reply.text);
+      }, 650),
+    );
+  }
+
+  /**
+   * Reveal a reply a few words at a time.
+   *
+   * Word-sized chunks rather than characters: a character-by-character reveal
+   * looks like a typewriter effect, and a real token stream arrives in pieces
+   * closer to words. Reduced motion delivers the whole thing at once, since
+   * the animation carries no information the final text does not.
+   */
+  function streamInto(conversationId: string, reply: MockMessage, full: string) {
+    const instant = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (instant) {
+      appendTo(conversationId, reply);
+      return;
+    }
+
+    appendTo(conversationId, { ...reply, text: '' });
+    setStreamingId(reply.id);
+
+    const chunks = full.split(/(\s+)/).filter(Boolean);
+    let shown = '';
+
+    chunks.forEach((chunk, index) => {
+      track(
+        window.setTimeout(
+          () => {
+            shown += chunk;
+            updateMessage(conversationId, reply.id, (message) => ({ ...message, text: shown }));
+
+            if (index === chunks.length - 1) {
+              setStreamingId(null);
+            }
+          },
+          // Slightly uneven pacing; a fixed interval reads as mechanical.
+          index * 45 + Math.min(index, 6) * 12,
+        ),
+      );
+    });
   }
 
   return (
@@ -398,7 +513,12 @@ export function ChatDemo() {
               <button
                 type="button"
                 className={`conversation ${conversation.id === activeId ? 'is-active' : ''}`}
-                onClick={() => setActiveId(conversation.id)}
+                onClick={() => {
+                  // Switching away cancels the stream rather than letting it
+                  // keep writing into a thread the user has left.
+                  cancelPending();
+                  setActiveId(conversation.id);
+                }}
               >
                 <Avatar seed={conversation.id} size={44} />
                 <span className="conversation-body">
@@ -455,6 +575,7 @@ export function ChatDemo() {
                 <MessageRow
                   key={message.id}
                   message={message}
+                  isStreaming={message.id === streamingId}
                   onOpenArtifact={(artifact) =>
                     setReader({
                       kind: artifact.kind,
@@ -566,17 +687,30 @@ export function ChatDemo() {
               }}
             />
 
-            <button
-              type="button"
-              className="round-button send"
-              aria-label="Send"
-              onClick={send}
-              disabled={draft.trim().length === 0}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M3 17l14-7L3 3v5.4l9 1.6-9 1.6z" fill="currentColor" />
-              </svg>
-            </button>
+            {streamingId || pendingReply ? (
+              <button
+                type="button"
+                className="round-button stop"
+                aria-label="Stop generating"
+                onClick={cancelPending}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="round-button send"
+                aria-label="Send"
+                onClick={send}
+                disabled={draft.trim().length === 0}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M3 17l14-7L3 3v5.4l9 1.6-9 1.6z" fill="currentColor" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       </main>
