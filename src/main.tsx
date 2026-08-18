@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app';
-import { ChatDemo } from './demo/chat-demo';
+import { DemoShell } from './demo/chat-demo';
 import './demo/chat-demo.css';
 import './styles.css';
 
@@ -23,4 +23,4 @@ if (!rootElement) {
  */
 const isChatDemo = new URLSearchParams(window.location.search).get('demo') === 'chat';
 
-createRoot(rootElement).render(<StrictMode>{isChatDemo ? <ChatDemo /> : <App />}</StrictMode>);
+createRoot(rootElement).render(<StrictMode>{isChatDemo ? <DemoShell /> : <App />}</StrictMode>);
