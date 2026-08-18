@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DocumentReader, type ReaderDocument } from './document-reader';
+import { FamiliarsPage } from './familiars-page';
 import {
   MOCK_COMMANDS,
   MOCK_CONVERSATIONS,
@@ -9,6 +10,7 @@ import {
   nowLabel,
 } from './mock-data';
 import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
+import { SettingsPage } from './settings-page';
 
 /**
  * Proof-of-concept chat surface.
@@ -295,6 +297,70 @@ function MessageRow({
         {isStreaming ? <span className="caret" aria-hidden="true" /> : null}
       </div>
       {mine ? null : stamp}
+    </div>
+  );
+}
+
+/** The demo's three surfaces. */
+type Surface = 'chat' | 'familiars' | 'settings';
+
+/**
+ * Icon rail, mirroring the reference layout's far-left column.
+ *
+ * Three surfaces rather than a general navigation: chat is the product,
+ * familiars is what the product talks to, and settings is what the contract
+ * and the API say is configurable.
+ */
+function Rail({ surface, onChange }: { surface: Surface; onChange: (next: Surface) => void }) {
+  const items: { id: Surface; label: string; path: string }[] = [
+    {
+      id: 'chat',
+      label: 'Chat',
+      path: 'M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v6a2.5 2.5 0 0 1-2.5 2.5H8l-4 3v-3H5.5A2.5 2.5 0 0 1 3 11.5z',
+    },
+    {
+      id: 'familiars',
+      label: 'Familiars',
+      path: 'M10 3a3.2 3.2 0 1 1 0 6.4A3.2 3.2 0 0 1 10 3zm0 8c3.6 0 6.4 1.9 6.4 4.2V17H3.6v-1.8C3.6 12.9 6.4 11 10 11z',
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      path: 'M10 6.6A3.4 3.4 0 1 0 10 13.4 3.4 3.4 0 0 0 10 6.6zm7 3.4c0-.5 0-1-.1-1.4l1.6-1.2-1.6-2.8-1.9.7c-.7-.6-1.5-1-2.3-1.3L12.4 2H9.6l-.3 2c-.9.3-1.6.7-2.3 1.3l-1.9-.7-1.6 2.8L5.1 8.6c-.1.4-.1.9-.1 1.4s0 1 .1 1.4l-1.6 1.2 1.6 2.8 1.9-.7c.7.6 1.4 1 2.3 1.3l.3 2h2.8l.3-2c.9-.3 1.6-.7 2.3-1.3l1.9.7 1.6-2.8-1.6-1.2c.1-.4.1-.9.1-1.4z',
+    },
+  ];
+
+  return (
+    <nav className="rail" aria-label="Surfaces">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={`rail-button ${surface === item.id ? 'is-active' : ''}`}
+          aria-label={item.label}
+          aria-current={surface === item.id ? 'page' : undefined}
+          onClick={() => onChange(item.id)}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d={item.path} fill="currentColor" />
+          </svg>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+export function DemoShell() {
+  const [surface, setSurface] = useState<Surface>('chat');
+
+  return (
+    <div className="demo-shell">
+      <Rail surface={surface} onChange={setSurface} />
+      <div className="demo-surface">
+        {surface === 'chat' ? <ChatDemo /> : null}
+        {surface === 'familiars' ? <FamiliarsPage /> : null}
+        {surface === 'settings' ? <SettingsPage /> : null}
+      </div>
     </div>
   );
 }
