@@ -11,6 +11,15 @@
  * of source rather than a rewrite of the view.
  */
 
+import {
+  findLinkHost,
+  type MockArtifact,
+  type MockLinkPreview,
+  mockHandoffArtifact,
+  mockLinkPreview,
+  mockSpecArtifact,
+} from './mock-rich-content';
+
 export type MockRole = 'user' | 'assistant';
 
 export type MockMessage = {
@@ -21,11 +30,16 @@ export type MockMessage = {
   /**
    * Set when the turn is a generated image rather than prose.
    *
-   * Carries only a description: the placeholder is drawn by the renderer as
-   * inline SVG. No `src`, so no URL literal enters runtime source, which the
-   * Phase 0 guard against ad hoc networking primitives forbids outright.
+   * Carries a description and the prompt it came from: the placeholder is
+   * drawn by the renderer as inline SVG, seeded off the prompt so different
+   * prompts look different. No `src`, so no URL literal enters runtime source,
+   * which the Phase 0 guard against ad hoc networking primitives forbids.
    */
-  image?: { alt: string };
+  image?: { alt: string; prompt: string };
+  /** Set when the turn unfurls a link the message contained. */
+  link?: MockLinkPreview;
+  /** Set when the turn is a generated `/spec` or `/handoff` document. */
+  artifact?: MockArtifact;
 };
 
 export type MockConversation = {
@@ -60,7 +74,7 @@ export const MOCK_CONVERSATIONS: MockConversation[] = [
       {
         id: 'm4',
         role: 'assistant',
-        image: { alt: 'A purple cat in a glowing garden' },
+        image: { alt: 'A purple cat in a glowing garden', prompt: 'cat purple' },
       },
     ],
   },
@@ -85,15 +99,31 @@ const CANNED_REPLIES = [
 /** The reply the demo produces for a given input. */
 export function mockReply(input: string, replyIndex: number): MockMessage {
   const trimmed = input.trim();
+  const id = `mock-${replyIndex}`;
+  const command = /^\/([a-z-]+)\s*(.*)$/is.exec(trimmed);
+  const name = command?.[1]?.toLowerCase();
+  const argument = command?.[2] ?? '';
 
-  if (trimmed.toLowerCase().startsWith('/image')) {
-    const prompt = trimmed.slice('/image'.length).trim() || 'an image';
+  if (name === 'image') {
+    const prompt = argument.trim() || 'an image';
 
-    return {
-      id: `mock-${replyIndex}`,
-      role: 'assistant',
-      image: { alt: `Generated image: ${prompt}` },
-    };
+    return { id, role: 'assistant', image: { alt: `Generated image: ${prompt}`, prompt } };
+  }
+
+  if (name === 'spec') {
+    return { id, role: 'assistant', artifact: mockSpecArtifact(argument) };
+  }
+
+  if (name === 'handoff') {
+    return { id, role: 'assistant', artifact: mockHandoffArtifact(argument) };
+  }
+
+  // A message carrying a link unfurls it. The unfurl is invented locally; the
+  // page is never requested.
+  const host = findLinkHost(trimmed);
+
+  if (host) {
+    return { id, role: 'assistant', link: mockLinkPreview(host) };
   }
 
   // Indexed access is `string | undefined` under noUncheckedIndexedAccess, and
@@ -101,11 +131,7 @@ export function mockReply(input: string, replyIndex: number): MockMessage {
   const reply =
     CANNED_REPLIES[replyIndex % CANNED_REPLIES.length] ?? CANNED_REPLIES[0] ?? 'Got it.';
 
-  return {
-    id: `mock-${replyIndex}`,
-    role: 'assistant',
-    text: reply,
-  };
+  return { id, role: 'assistant', text: reply };
 }
 
 /** Commands the composer offers when the input starts with `/`. */

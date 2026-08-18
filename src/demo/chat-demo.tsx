@@ -7,6 +7,7 @@ import {
   type MockMessage,
   mockReply,
 } from './mock-data';
+import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
 
 /**
  * Proof-of-concept chat surface.
@@ -71,23 +72,33 @@ function MessageText({ text }: { text: string }) {
  * that would have to be licensed and reviewed. It reads as "an image was
  * generated here" without pretending to be a real model output.
  */
-function GeneratedImage({ alt }: { alt: string }) {
+function GeneratedImage({ alt, prompt }: { alt: string; prompt: string }) {
+  // Hue derived from the prompt, so `/image cat purple` and `/image dog blue`
+  // are visibly different generations rather than the same tile twice.
+  let seed = 0;
+  for (const character of prompt) {
+    seed += character.charCodeAt(0);
+  }
+  const hue = seed % 360;
+  const gradientId = `demo-bg-${hue}`;
+  const glowId = `demo-glow-${hue}`;
+
   return (
     <svg className="generated" viewBox="0 0 600 400" role="img" aria-label={alt}>
       <defs>
-        <linearGradient id="demo-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#2a1b3d" />
-          <stop offset="45%" stopColor="#44318d" />
-          <stop offset="100%" stopColor="#1b1033" />
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor={`hsl(${hue} 45% 17%)`} />
+          <stop offset="45%" stopColor={`hsl(${hue} 48% 37%)`} />
+          <stop offset="100%" stopColor={`hsl(${hue} 50% 12%)`} />
         </linearGradient>
-        <radialGradient id="demo-glow" cx="50%" cy="42%" r="55%">
-          <stop offset="0%" stopColor="#d8b4fe" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#d8b4fe" stopOpacity="0" />
+        <radialGradient id={glowId} cx="50%" cy="42%" r="55%">
+          <stop offset="0%" stopColor={`hsl(${hue} 90% 82%)`} stopOpacity="0.55" />
+          <stop offset="100%" stopColor={`hsl(${hue} 90% 82%)`} stopOpacity="0" />
         </radialGradient>
       </defs>
-      <rect width="600" height="400" fill="url(#demo-bg)" />
-      <rect width="600" height="400" fill="url(#demo-glow)" />
-      <g fill="#c4b5fd" opacity="0.92">
+      <rect width="600" height="400" fill={`url(#${gradientId})`} />
+      <rect width="600" height="400" fill={`url(#${glowId})`} />
+      <g fill={`hsl(${hue} 80% 80%)`} opacity="0.92">
         <ellipse cx="300" cy="252" rx="54" ry="64" />
         <circle cx="300" cy="176" r="43" />
         <path d="M265 146 l-7 -36 l32 21 z" />
@@ -98,7 +109,7 @@ function GeneratedImage({ alt }: { alt: string }) {
         <circle cx="286" cy="174" r="5" />
         <circle cx="314" cy="174" r="5" />
       </g>
-      <g fill="#f5d0fe" opacity="0.85">
+      <g fill={`hsl(${hue} 95% 90%)`} opacity="0.85">
         <circle cx="120" cy="96" r="3" />
         <circle cx="470" cy="120" r="4" />
         <circle cx="196" cy="60" r="2.5" />
@@ -110,13 +121,143 @@ function GeneratedImage({ alt }: { alt: string }) {
   );
 }
 
+/** Abstract hero illustration for a link unfurl. */
+function LinkHero({ kind }: { kind: MockLinkPreview['hero'] }) {
+  if (kind === 'repository') {
+    return (
+      <svg className="link-hero" viewBox="0 0 600 300" role="presentation">
+        <rect width="600" height="300" fill="#1b2431" />
+        <g fill="none" stroke="#3d5170" strokeWidth="2">
+          <rect x="60" y="60" width="220" height="26" rx="6" />
+          <rect x="60" y="104" width="300" height="14" rx="5" />
+          <rect x="60" y="132" width="250" height="14" rx="5" />
+          <rect x="60" y="160" width="280" height="14" rx="5" />
+        </g>
+        <g fill="#64d2a3" opacity="0.85">
+          <circle cx="420" cy="120" r="26" />
+          <rect x="470" y="106" width="70" height="28" rx="14" />
+        </g>
+      </svg>
+    );
+  }
+
+  if (kind === 'plain') {
+    return (
+      <svg className="link-hero" viewBox="0 0 600 300" role="presentation">
+        <rect width="600" height="300" fill="#20242c" />
+        <g fill="#3a414d">
+          <rect x="70" y="90" width="300" height="18" rx="6" />
+          <rect x="70" y="126" width="220" height="14" rx="5" />
+          <rect x="70" y="156" width="260" height="14" rx="5" />
+        </g>
+      </svg>
+    );
+  }
+
+  // A sketched diagram, evoking a shared infographic.
+  return (
+    <svg className="link-hero" viewBox="0 0 600 300" role="presentation">
+      <rect width="600" height="300" fill="#eceae4" />
+      <g fill="#3b3f8f">
+        <rect x="196" y="26" width="208" height="26" rx="5" />
+        <rect x="228" y="62" width="144" height="11" rx="4" />
+      </g>
+      <g fill="none" stroke="#6b7280" strokeWidth="2">
+        <rect x="24" y="96" width="150" height="52" rx="8" />
+        <rect x="24" y="164" width="150" height="52" rx="8" />
+        <rect x="426" y="96" width="150" height="52" rx="8" />
+        <rect x="426" y="164" width="150" height="52" rx="8" />
+      </g>
+      <g fill="none" stroke="#3b3f8f" strokeWidth="2">
+        <rect x="200" y="118" width="72" height="46" rx="8" />
+        <rect x="292" y="118" width="72" height="46" rx="8" />
+        <path d="M272 141h20M364 141h20" />
+      </g>
+      <g fill="#9ca3af">
+        <rect x="40" y="112" width="86" height="7" rx="3" />
+        <rect x="40" y="128" width="110" height="6" rx="3" />
+        <rect x="442" y="112" width="96" height="7" rx="3" />
+        <rect x="442" y="180" width="80" height="7" rx="3" />
+        <rect x="40" y="180" width="96" height="7" rx="3" />
+      </g>
+      <g fill="none" stroke="#c2410c" strokeWidth="2">
+        <path d="M212 240h176" />
+        <path d="M380 234l10 6-10 6" />
+      </g>
+    </svg>
+  );
+}
+
+/** An Open Graph style link unfurl. */
+function LinkPreviewCard({ preview }: { preview: MockLinkPreview }) {
+  return (
+    <article className="link-card">
+      <LinkHero kind={preview.hero} />
+      <div className="link-body">
+        <h3 className="link-title">{preview.title}</h3>
+        <div className="link-author">
+          <span className="link-avatar" aria-hidden="true" />
+          <span className="link-author-text">
+            <span className="link-author-name">
+              {preview.authorName} <span className="link-handle">({preview.authorHandle})</span>
+            </span>
+            {preview.stats ? <span className="link-stats">{preview.stats}</span> : null}
+            {/* Domain only. The card never shows or opens a full URL, and it
+                never fetched the page it describes. */}
+            <span className="link-domain">{preview.domain}</span>
+          </span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** A generated `/spec` or `/handoff` document, as a compact card. */
+function ArtifactCard({ artifact }: { artifact: MockArtifact }) {
+  return (
+    <article className={`artifact artifact-${artifact.kind}`}>
+      <header className="artifact-head">
+        <span className="artifact-kind">{artifact.kind}</span>
+        <span className="artifact-meta">{artifact.meta}</span>
+      </header>
+      <h3 className="artifact-title">{artifact.title}</h3>
+      <ul className="artifact-lines">
+        {artifact.lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <footer className="artifact-foot">
+        <button type="button" className="artifact-open">
+          Open in reader
+        </button>
+      </footer>
+    </article>
+  );
+}
+
 function MessageRow({ message }: { message: MockMessage }) {
   const mine = message.role === 'user';
 
   if (message.image) {
     return (
       <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
-        <GeneratedImage alt={message.image.alt} />
+        <GeneratedImage alt={message.image.alt} prompt={message.image.prompt} />
+      </div>
+    );
+  }
+
+  if (message.link) {
+    return (
+      <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
+        <LinkPreviewCard preview={message.link} />
+      </div>
+    );
+  }
+
+  if (message.artifact) {
+    return (
+      <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
+        <ArtifactCard artifact={message.artifact} />
       </div>
     );
   }
