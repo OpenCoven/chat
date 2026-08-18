@@ -66,16 +66,28 @@ jobs:
           appendFileSync(outputPath, `cave_repository=${lock.cave.repository}\n`);
           appendFileSync(outputPath, `cave_revision=${lock.cave.revision}\n`);
           EOF
+      # CANARY_TOKEN, when set, is a fine-grained token with read access to the
+      # counterpart repositories. The fallback to github.token is what makes
+      # this safe to land before the secret exists: without it the job behaves
+      # exactly as it does today.
+      #
+      # The default token is scoped to this repository alone, so it can only
+      # read a counterpart that is public. That coupling has taken this job
+      # down repeatedly whenever a sibling was switched to private, for reasons
+      # having nothing to do with this repository's code. The token removes the
+      # dependency on someone else's visibility setting.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ steps.reviewed-revisions.outputs.sdk_repository }}
           ref: ${{ steps.reviewed-revisions.outputs.sdk_revision }}
           path: .cross-repo/sdk
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ steps.reviewed-revisions.outputs.cave_repository }}
           ref: ${{ steps.reviewed-revisions.outputs.cave_revision }}
           path: .cross-repo/coven-cave
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
       - name: Assert checked-out reviewed revisions
         run: |
           node --input-type=module <<'EOF'

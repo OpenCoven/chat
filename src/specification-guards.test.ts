@@ -213,6 +213,22 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toMatch(/- run: pnpm app:build/);
   });
 
+  it('reads counterpart repositories with a token that does not depend on their visibility', () => {
+    // The default GITHUB_TOKEN is scoped to this repository, so it can only
+    // read a counterpart that happens to be public. Relying on that has taken
+    // this job down repeatedly when a sibling was switched to private.
+    //
+    // The fallback matters as much as the token: `secrets.X || github.token`
+    // keeps the job working exactly as before when the secret is absent, so
+    // this can land ahead of the credential rather than in lockstep with it.
+    const workflow = readText('.github/workflows/ci.yml');
+    const tokenLines = workflow.match(
+      /token: \$\{\{ secrets\.CANARY_TOKEN \|\| github\.token \}\}/g,
+    );
+
+    expect(tokenLines, 'both cross-repository checkouts need the token').toHaveLength(2);
+  });
+
   it('proves the packed harness installs with no network access', () => {
     // The offline install is the assertion, and the warm pass exists only so
     // that assertion is about the tarballs rather than about whether a fresh
