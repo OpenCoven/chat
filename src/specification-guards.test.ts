@@ -213,6 +213,24 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toMatch(/- run: pnpm app:build/);
   });
 
+  it('runs one workflow per branch rather than racing the push and pull request events', () => {
+    // Both triggers fire for a branch with an open pull request. Without a
+    // shared concurrency group the two runs raced for the preview server's
+    // fixed port and the loser hung indefinitely.
+    //
+    // The group must key off head_ref with a ref_name fallback: github.ref
+    // differs between the two events, so grouping on it would leave the race
+    // in place while looking like it had been fixed.
+    const workflow = readText('.github/workflows/ci.yml');
+
+    expect(workflow).toContain('concurrency:');
+    expect(workflow).toContain(
+      '${' + '{ github.workflow }}-${' + '{ github.head_ref || github.ref_name }}',
+    );
+    // main still verifies every merge to completion.
+    expect(workflow).toContain('cancel-in-progress: ${' + "{ github.ref_name != 'main' }}");
+  });
+
   it('reads counterpart repositories with a token that does not depend on their visibility', () => {
     // The default GITHUB_TOKEN is scoped to this repository, so it can only
     // read a counterpart that happens to be public. Relying on that has taken
