@@ -5,10 +5,15 @@ on:
   push:
 
 # Both triggers fire for a branch with an open pull request, so every commit
-# started two full runs of this workflow. They raced for the preview server's
-# fixed port, and the loser waited for a port that would never free: five runs
-# hung this way, one of them on main, each holding a runner until GitHub's
-# six-hour limit.
+# started two full runs of this workflow: the same suites executed twice, for
+# the same commit, at double the cost. One run per branch is enough.
+#
+# This does not explain the five runs that hung and held a runner until
+# GitHub's six-hour limit. That was first attributed to the two runs racing for
+# the preview server's fixed port, and the attribution was wrong: with
+# concurrency in place and only one run, the job still stalled, in the browser
+# install step, which never touches that port. The e2e job's timeout and cache
+# below address that separately.
 #
 # The group name has to match across both events, which `github.ref` does not:
 # a push gives `refs/heads/name` and a pull_request gives `refs/pull/N/merge`.
@@ -45,6 +50,12 @@ jobs:
     name: E2E
     runs-on: ubuntu-latest
     needs: web
+    # The suite itself takes seconds; installing the browser has taken
+    # anywhere from two minutes to ten, and on five occasions never finished
+    # at all, holding a runner until GitHub's six-hour limit. A ceiling turns
+    # that into a fast, visible failure. It is set well above the slowest
+    # successful run observed rather than tuned to it.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -56,7 +67,24 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # Cache the browser itself, keyed on the Playwright version so a bump
+      # invalidates it. A warm cache skips the download entirely, which is
+      # where nearly all of this job's time went.
+      - id: playwright-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-1.62.1
+      - name: Install Chromium and its system dependencies
+        # apt must never wait for input on a runner with no one to answer.
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            pnpm exec playwright install-deps chromium
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
       - run: pnpm test:e2e
 
   contract-canary:
