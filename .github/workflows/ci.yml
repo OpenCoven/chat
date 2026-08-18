@@ -4,6 +4,24 @@ on:
   pull_request:
   push:
 
+# Both triggers fire for a branch with an open pull request, so every commit
+# started two full runs of this workflow. They raced for the preview server's
+# fixed port, and the loser waited for a port that would never free: five runs
+# hung this way, one of them on main, each holding a runner until GitHub's
+# six-hour limit.
+#
+# The group name has to match across both events, which `github.ref` does not:
+# a push gives `refs/heads/name` and a pull_request gives `refs/pull/N/merge`.
+# `head_ref` is the source branch on a pull_request and empty on a push, so
+# falling back to `ref_name` yields the same bare branch name for both.
+#
+# main is exempt from cancellation. Cancelling there would abandon the
+# verification of a merge that has already landed, which is the one place the
+# result still matters after the fact.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
 jobs:
   web:
     name: Web checks
