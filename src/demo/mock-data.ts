@@ -25,6 +25,8 @@ export type MockRole = 'user' | 'assistant';
 export type MockMessage = {
   id: string;
   role: MockRole;
+  /** Send time, revealed on hover and focus rather than shown always. */
+  sentAt: string;
   /** Plain body text. A `/command` prefix is styled by the renderer. */
   text?: string;
   /**
@@ -64,16 +66,18 @@ export const MOCK_CONVERSATIONS: MockConversation[] = [
     timestamp: 'Yesterday',
     openedAt: 'Yesterday 10:39 PM',
     messages: [
-      { id: 'm1', role: 'user', text: 'hey' },
+      { id: 'm1', role: 'user', sentAt: '10:39 PM', text: 'hey' },
       {
         id: 'm2',
         role: 'assistant',
+        sentAt: '10:39 PM',
         text: "Hey! How's it going? What can I help you with?",
       },
-      { id: 'm3', role: 'user', text: '/image cat purple' },
+      { id: 'm3', role: 'user', sentAt: '10:41 PM', text: '/image cat purple' },
       {
         id: 'm4',
         role: 'assistant',
+        sentAt: '10:41 PM',
         image: { alt: 'A purple cat in a glowing garden', prompt: 'cat purple' },
       },
     ],
@@ -96,10 +100,16 @@ const CANNED_REPLIES = [
   'Done thinking about it — say the word and I will begin.',
 ];
 
+/** A wall-clock label for a message just sent. */
+export function nowLabel(): string {
+  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 /** The reply the demo produces for a given input. */
 export function mockReply(input: string, replyIndex: number): MockMessage {
   const trimmed = input.trim();
   const id = `mock-${replyIndex}`;
+  const sentAt = nowLabel();
   const command = /^\/([a-z-]+)\s*(.*)$/is.exec(trimmed);
   const name = command?.[1]?.toLowerCase();
   const argument = command?.[2] ?? '';
@@ -107,15 +117,15 @@ export function mockReply(input: string, replyIndex: number): MockMessage {
   if (name === 'image') {
     const prompt = argument.trim() || 'an image';
 
-    return { id, role: 'assistant', image: { alt: `Generated image: ${prompt}`, prompt } };
+    return { id, role: 'assistant', sentAt, image: { alt: `Generated image: ${prompt}`, prompt } };
   }
 
   if (name === 'spec') {
-    return { id, role: 'assistant', artifact: mockSpecArtifact(argument) };
+    return { id, role: 'assistant', sentAt, artifact: mockSpecArtifact(argument) };
   }
 
   if (name === 'handoff') {
-    return { id, role: 'assistant', artifact: mockHandoffArtifact(argument) };
+    return { id, role: 'assistant', sentAt, artifact: mockHandoffArtifact(argument) };
   }
 
   // A message carrying a link unfurls it. The unfurl is invented locally; the
@@ -123,7 +133,7 @@ export function mockReply(input: string, replyIndex: number): MockMessage {
   const host = findLinkHost(trimmed);
 
   if (host) {
-    return { id, role: 'assistant', link: mockLinkPreview(host) };
+    return { id, role: 'assistant', sentAt, link: mockLinkPreview(host) };
   }
 
   // Indexed access is `string | undefined` under noUncheckedIndexedAccess, and
@@ -131,7 +141,7 @@ export function mockReply(input: string, replyIndex: number): MockMessage {
   const reply =
     CANNED_REPLIES[replyIndex % CANNED_REPLIES.length] ?? CANNED_REPLIES[0] ?? 'Got it.';
 
-  return { id, role: 'assistant', text: reply };
+  return { id, role: 'assistant', sentAt, text: reply };
 }
 
 /** Commands the composer offers when the input starts with `/`. */

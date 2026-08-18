@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-
+import { DocumentReader, type ReaderDocument } from './document-reader';
 import {
   MOCK_COMMANDS,
   MOCK_CONVERSATIONS,
   type MockConversation,
   type MockMessage,
   mockReply,
+  nowLabel,
 } from './mock-data';
 import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
 
@@ -213,7 +214,13 @@ function LinkPreviewCard({ preview }: { preview: MockLinkPreview }) {
 }
 
 /** A generated `/spec` or `/handoff` document, as a compact card. */
-function ArtifactCard({ artifact }: { artifact: MockArtifact }) {
+function ArtifactCard({
+  artifact,
+  onOpen,
+}: {
+  artifact: MockArtifact;
+  onOpen: (artifact: MockArtifact) => void;
+}) {
   return (
     <article className={`artifact artifact-${artifact.kind}`}>
       <header className="artifact-head">
@@ -227,7 +234,7 @@ function ArtifactCard({ artifact }: { artifact: MockArtifact }) {
         ))}
       </ul>
       <footer className="artifact-foot">
-        <button type="button" className="artifact-open">
+        <button type="button" className="artifact-open" onClick={() => onOpen(artifact)}>
           Open in reader
         </button>
       </footer>
@@ -235,13 +242,25 @@ function ArtifactCard({ artifact }: { artifact: MockArtifact }) {
   );
 }
 
-function MessageRow({ message }: { message: MockMessage }) {
+function MessageRow({
+  message,
+  onOpenArtifact,
+}: {
+  message: MockMessage;
+  onOpenArtifact: (artifact: MockArtifact) => void;
+}) {
   const mine = message.role === 'user';
+  // Hidden by opacity rather than removed, so it stays in the accessibility
+  // tree and is announced with the message. Hover is a visual reveal only, not
+  // the sole route to the information.
+  const stamp = <span className="stamp">{message.sentAt}</span>;
 
   if (message.image) {
     return (
       <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
+        {mine ? stamp : null}
         <GeneratedImage alt={message.image.alt} prompt={message.image.prompt} />
+        {mine ? null : stamp}
       </div>
     );
   }
@@ -249,7 +268,9 @@ function MessageRow({ message }: { message: MockMessage }) {
   if (message.link) {
     return (
       <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
+        {mine ? stamp : null}
         <LinkPreviewCard preview={message.link} />
+        {mine ? null : stamp}
       </div>
     );
   }
@@ -257,16 +278,20 @@ function MessageRow({ message }: { message: MockMessage }) {
   if (message.artifact) {
     return (
       <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
-        <ArtifactCard artifact={message.artifact} />
+        {mine ? stamp : null}
+        <ArtifactCard artifact={message.artifact} onOpen={onOpenArtifact} />
+        {mine ? null : stamp}
       </div>
     );
   }
 
   return (
     <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
+      {mine ? stamp : null}
       <div className={`bubble ${mine ? 'bubble-mine' : 'bubble-theirs'}`}>
         <MessageText text={message.text ?? ''} />
       </div>
+      {mine ? null : stamp}
     </div>
   );
 }
@@ -277,6 +302,8 @@ export function ChatDemo() {
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [pendingReply, setPendingReply] = useState(false);
+  const [reader, setReader] = useState<ReaderDocument | null>(null);
+  const [commandIndex, setCommandIndex] = useState(0);
   const replyCount = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
@@ -288,6 +315,9 @@ export function ChatDemo() {
   );
 
   const showingCommands = draft.trim().startsWith('/') && !draft.trim().includes(' ');
+  const commandMatches = showingCommands
+    ? MOCK_COMMANDS.filter((command) => command.name.startsWith(draft.trim()))
+    : [];
 
   useEffect(() => {
     // Nothing to scroll to in an empty conversation, and reading both values
@@ -299,6 +329,20 @@ export function ChatDemo() {
 
     transcriptEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messageCount, pendingReply]);
+
+  // Keep the highlight in range as the list narrows; an index left pointing
+  // past the end would complete to nothing.
+  const matchCount = commandMatches.length;
+
+  useEffect(() => {
+    setCommandIndex((current) => (current < matchCount ? current : 0));
+  }, [matchCount]);
+
+  /** Complete the draft to a command, leaving a trailing space to type into. */
+  function completeCommand(name: string) {
+    setDraft(`${name} `);
+    setCommandIndex(0);
+  }
 
   function appendTo(conversationId: string, message: MockMessage) {
     setConversations((current) =>
@@ -317,7 +361,7 @@ export function ChatDemo() {
       return;
     }
 
-    appendTo(active.id, { id: `sent-${Date.now()}`, role: 'user', text });
+    appendTo(active.id, { id: `sent-${Date.now()}`, role: 'user', sentAt: nowLabel(), text });
     setDraft('');
     setPendingReply(true);
 
@@ -408,7 +452,17 @@ export function ChatDemo() {
             <>
               <p className="timestamp">{active.openedAt}</p>
               {active.messages.map((message) => (
-                <MessageRow key={message.id} message={message} />
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  onOpenArtifact={(artifact) =>
+                    setReader({
+                      kind: artifact.kind,
+                      title: artifact.title,
+                      markdown: artifact.markdown,
+                    })
+                  }
+                />
               ))}
               {pendingReply ? (
                 <div className="row row-theirs">
@@ -427,20 +481,23 @@ export function ChatDemo() {
         <div className="composer-wrap">
           {showingCommands ? (
             <ul className="command-menu">
-              {MOCK_COMMANDS.filter((command) => command.name.startsWith(draft.trim())).map(
-                (command) => (
-                  <li key={command.name}>
-                    <button
-                      type="button"
-                      className="command-option"
-                      onClick={() => setDraft(`${command.name} `)}
-                    >
-                      <span className="command">{command.name}</span>
-                      <span className="command-hint">{command.hint}</span>
-                    </button>
-                  </li>
-                ),
-              )}
+              {commandMatches.map((command, index) => (
+                <li key={command.name}>
+                  <button
+                    type="button"
+                    className={`command-option ${index === commandIndex ? 'is-highlighted' : ''}`}
+                    onMouseEnter={() => setCommandIndex(index)}
+                    onClick={() => completeCommand(command.name)}
+                  >
+                    <span className="command">{command.name}</span>
+                    <span className="command-hint">{command.hint}</span>
+                  </button>
+                </li>
+              ))}
+              <li className="command-help">
+                <kbd>up</kbd> <kbd>down</kbd> to move · <kbd>tab</kbd> or <kbd>right</kbd> to
+                complete
+              </li>
             </ul>
           ) : null}
 
@@ -458,6 +515,50 @@ export function ChatDemo() {
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
+                const open = commandMatches.length > 0;
+                const selected = commandMatches[commandIndex];
+
+                if (open) {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setCommandIndex((current) => (current + 1) % commandMatches.length);
+                    return;
+                  }
+
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setCommandIndex(
+                      (current) => (current - 1 + commandMatches.length) % commandMatches.length,
+                    );
+                    return;
+                  }
+
+                  // Tab and Right both complete. Right only when the caret is
+                  // at the end, so it still moves the caret mid-word.
+                  const atEnd =
+                    event.currentTarget.selectionStart === event.currentTarget.value.length;
+
+                  if (selected && (event.key === 'Tab' || (event.key === 'ArrowRight' && atEnd))) {
+                    event.preventDefault();
+                    completeCommand(selected.name);
+                    return;
+                  }
+
+                  // Enter accepts the highlighted command rather than sending a
+                  // half-typed one.
+                  if (selected && event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    completeCommand(selected.name);
+                    return;
+                  }
+
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setDraft('');
+                    return;
+                  }
+                }
+
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   send();
@@ -479,6 +580,8 @@ export function ChatDemo() {
           </div>
         </div>
       </main>
+
+      {reader ? <DocumentReader document={reader} onClose={() => setReader(null)} /> : null}
     </div>
   );
 }
