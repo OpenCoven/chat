@@ -68,6 +68,32 @@ The current application renders:
 
 Anything beyond that is intentionally deferred to later beads.
 
+## Proof-of-concept chat demo
+
+`pnpm app:dev` opens the desktop window straight into a mock chat surface, and
+`pnpm dev` serves it at <127.0.0.1:4173/?demo=chat>. It previews what Phases 1
+through 3 will present: conversations, a transcript, generated images, link
+unfurls, `/spec` and `/handoff` artifacts, and a composer.
+
+**It connects to nothing.** No Cave, no network, no persistence. Replies come
+from canned strings and a timer, link unfurls invent their metadata from the
+hostname rather than fetching the page, and the generated image is a drawn
+placeholder whose palette varies by prompt. A refresh resets everything.
+
+Two consequences worth knowing:
+
+- **Dev and production differ deliberately.** `devUrl` carries `?demo=chat`, so
+  only `tauri dev` opens the demo. A production build loads `dist/index.html`
+  with no query string and still shows the Phase 0 scaffold, which is what the
+  app actually is.
+- **The scaffold is still the default view.** Without the query flag the app
+  renders the scaffold, which is what every unit test and both end-to-end specs
+  assert. The demo has no test coverage; it is a demo.
+
+`src/demo/` is meant to be deleted when the real read and send paths land. Its
+mock types are shaped close to the canonical ones so that lands as a change of
+data source rather than a rewrite of the view.
+
 ## Reviewed counterpart lock
 
 `contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
