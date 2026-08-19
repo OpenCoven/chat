@@ -201,16 +201,110 @@ describe('Phase 0 specification guards', () => {
   });
 
   it('runs the desktop entrypoint in CI with Linux Tauri dependencies', () => {
+    // These dependencies moved out of an apt-get in this job and into the
+    // image the job runs in. What has to stay true is that they are present
+    // before `pnpm app:build` -- not where they came from -- so the guard
+    // follows them rather than pinning the mechanism that used to supply them.
     const workflow = readText('.github/workflows/ci.yml');
+    const dockerfile = readText('.github/ci-image/Dockerfile');
 
     expect(workflow).toMatch(/name:\s*Desktop build/);
-    expect(workflow).toMatch(/sudo apt-get update/);
-    expect(workflow).toMatch(/sudo apt-get install -y[\s\S]*libwebkit2gtk-4\.1-dev/);
-    expect(workflow).toContain('libayatana-appindicator3-dev');
-    expect(workflow).toContain('librsvg2-dev');
-    expect(workflow).toContain('libxdo-dev');
-    expect(workflow).toContain('patchelf');
     expect(workflow).toMatch(/- run: pnpm app:build/);
+
+    for (const dependency of [
+      'build-essential',
+      'libayatana-appindicator3-dev',
+      'libgtk-3-dev',
+      'librsvg2-dev',
+      'libwebkit2gtk-4.1-dev',
+      'libxdo-dev',
+      'patchelf',
+      'pkg-config',
+    ]) {
+      expect(dockerfile, `${dependency} must be baked into the CI image`).toContain(dependency);
+    }
+  });
+
+  it('installs no system packages while a pull request is waiting on it', () => {
+    // Six runs hung on an apt-get that never returned, in two jobs whose only
+    // shared property was calling it. Installing the packages ahead of time
+    // does not make apt reliable; it moves the unreliability to a workflow
+    // where hanging costs nobody a merge.
+    //
+    // Comments are stripped first: describing the history is the point of
+    // those comments, and only what CI executes is under test here.
+    const executable = readText('.github/workflows/ci.yml')
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+    expect(executable, 'CI must not install system packages at job time').not.toContain('apt-get');
+  });
+
+  it('pins the CI image by digest so a rebuild cannot change what CI runs', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const images = [...workflow.matchAll(/image: (\S+)/g)].map((match) => match[1]);
+
+    expect(images.length, 'the containerised jobs are missing').toBeGreaterThan(0);
+
+    for (const image of images) {
+      // A moving tag would let a weekly rebuild change the compiler, the
+      // browser and the system libraries under a green branch, with no commit
+      // recording that anything changed.
+      expect(image, 'the CI image must be pinned by digest').toMatch(
+        /^ghcr\.io\/opencoven\/chat-ci@sha256:[0-9a-f]{64}$/,
+      );
+    }
+  });
+
+  it('builds the CI image from the Playwright version the suite pins', () => {
+    // The image carries the browsers, so a bump to @playwright/test that does
+    // not rebuild the image leaves the two disagreeing. The suite still runs
+    // when they disagree -- it downloads the browser it wants -- which is
+    // precisely why the drift needs a guard to be visible at all.
+    const dockerfile = readText('.github/ci-image/Dockerfile');
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const pinned = packageManifest.devDependencies?.['@playwright/test'];
+
+    expect(pinned, '@playwright/test must be pinned').toBeDefined();
+
+    const version = String(pinned).replace(/^\D*/, '');
+
+    expect(dockerfile).toContain(`FROM mcr.microsoft.com/playwright:v${version}-noble`);
+  });
+
+  it('bounds every CI job so one stuck step cannot hold a runner all day', () => {
+    // GitHub's default is six hours, which is not a timeout but a limit on the
+    // damage. Desktop build had no ceiling and sat on a single step for
+    // forty-seven minutes before it was killed by hand.
+    const workflow = readText('.github/workflows/ci.yml');
+    const jobsBlock = workflow.slice(workflow.indexOf('\njobs:'));
+    const jobNames = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((match) => match[1]);
+    const timeouts = jobsBlock.match(/^ {4}timeout-minutes: \d+$/gm) ?? [];
+
+    expect(jobNames.length, 'no jobs were found').toBeGreaterThan(0);
+    expect(timeouts, `every job needs a ceiling: ${jobNames.join(', ')}`).toHaveLength(
+      jobNames.length,
+    );
+  });
+
+  it('skips the expensive jobs for a branch that changed only prose', () => {
+    // A documentation branch spent two twenty-minute E2E timeouts proving
+    // nothing about documentation.
+    const workflow = readText('.github/workflows/ci.yml');
+
+    expect(workflow).toMatch(/^ {2}changes:$/m);
+    expect(workflow).toContain('docs_only: $' + '{{ steps.classify.outputs.docs_only }}');
+
+    const gated = workflow.match(/if: needs\.changes\.outputs\.docs_only != 'true'/g) ?? [];
+
+    expect(gated, 'E2E, Desktop build and Rust are the jobs worth skipping').toHaveLength(3);
+
+    // The classification has to fail towards running everything. A wrong guess
+    // that way wastes a few minutes; the other way merges untested code.
+    expect(workflow).toContain('No usable base commit; treating this as a code change.');
+    expect(workflow).toContain('No files changed; treating this as a code change.');
+    expect(workflow).toMatch(/\*\) docs_only=false ;;/);
   });
 
   it('runs one workflow per branch rather than racing the push and pull request events', () => {
