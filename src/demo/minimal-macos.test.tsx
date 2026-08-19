@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import { MinimalMacOS } from './minimal-macos';
+import { chatInScope, MINIMAL_CHATS, projectsOf } from './minimal-mock';
 
 /**
  * Guards for the Minimal (macOS) surface.
@@ -27,6 +28,20 @@ function openChat(name: RegExp) {
 
 function openApproval() {
   fireEvent.click(screen.getByRole('button', { name: /Needs your approval/ }));
+}
+
+function openScope() {
+  fireEvent.click(
+    screen.getByRole('button', { name: /All projects|selected|No projects|Quick chats/ }),
+  );
+}
+
+function chatTitles(): string[] {
+  const list = screen.getByRole('heading', { name: 'Chats' }).parentElement;
+
+  return within(list as HTMLElement)
+    .queryAllByRole('button')
+    .map((button) => button.textContent ?? '');
 }
 
 function openSettings() {
@@ -180,18 +195,42 @@ describe('Minimal (macOS) surface', () => {
     }
   });
 
-  it('cycles the composer between answering, planning, and going ahead', () => {
+  it('offers all three composer modes at once and marks the chosen one', () => {
+    // This used to cycle through a single button, which meant two of the three
+    // choices were invisible and "what will this do next" was something you
+    // found out by clicking. All three are now present and directly
+    // selectable, so the test asserts the choice rather than the rotation.
     render(<MinimalMacOS />);
 
-    const mode = screen.getByTitle('How it should respond');
+    const plan = screen.getByRole('button', { name: 'Plan first' });
+    const answer = screen.getByRole('button', { name: 'Just answer' });
+    const ahead = screen.getByRole('button', { name: 'Go ahead' });
 
-    expect(mode).toHaveTextContent('Plan first');
+    // Exactly one is pressed, and it is the one naming itself.
+    expect(plan).toHaveAttribute('aria-pressed', 'true');
+    expect(answer).toHaveAttribute('aria-pressed', 'false');
+    expect(ahead).toHaveAttribute('aria-pressed', 'false');
+    expect(plan).toHaveTextContent('Plan');
 
-    fireEvent.click(mode);
-    expect(mode).toHaveTextContent('Go ahead');
+    fireEvent.click(ahead);
 
-    fireEvent.click(mode);
-    expect(mode).toHaveTextContent('Just answer');
+    expect(ahead).toHaveAttribute('aria-pressed', 'true');
+    expect(plan).toHaveAttribute('aria-pressed', 'false');
+    expect(ahead).toHaveTextContent('Build');
+
+    // The full phrase stays the accessible name. "Build" does not say that the
+    // familiar is about to act without checking first; "Go ahead" does.
+    expect(ahead).toHaveAccessibleName('Go ahead');
+  });
+
+  it('closes a sheet when the backdrop is clicked', () => {
+    render(<MinimalMacOS />);
+
+    openSettings();
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Settings' }));
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
   it('filters both chats and familiars from one search field', () => {
@@ -298,5 +337,77 @@ describe('Minimal (macOS) surface', () => {
 
     expect(within(panel).getByText('Waiting to push the branch')).toBeVisible();
     expect(within(panel).getByText('src/lib/attention.ts')).toBeVisible();
+  });
+
+  it('derives the project list from the chats, and copes with there being none', () => {
+    // The empty case is the one worth pinning: a surface with no projects yet
+    // is the state every new install is in, and it must not be a special
+    // branch nobody exercised.
+    expect(projectsOf([])).toEqual([]);
+    expect(projectsOf(MINIMAL_CHATS)).toEqual(['coven-cave', 'grimoire']);
+  });
+
+  it('treats an empty scope as everything rather than as nothing', () => {
+    // Deselecting the last project has to return you to all of them. The
+    // alternative is a blank list with no visible way back out of it.
+    const nothingSelected = new Set<string | null>();
+
+    for (const chat of MINIMAL_CHATS) {
+      expect(chatInScope(chat, nothingSelected)).toBe(true);
+    }
+  });
+
+  it('scopes chats to a selected project, and to several at once', () => {
+    render(<MinimalMacOS />);
+
+    expect(chatTitles().join(' ')).toContain('Release note draft');
+
+    openScope();
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'coven-cave' }));
+
+    // grimoire's chat is gone; coven-cave's remain.
+    expect(chatTitles().join(' ')).not.toContain('Release note draft');
+    expect(chatTitles().join(' ')).toContain('Attention centre wiring');
+
+    // Multiselect: adding grimoire brings its chat back alongside.
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'grimoire' }));
+    expect(chatTitles().join(' ')).toContain('Release note draft');
+    expect(chatTitles().join(' ')).toContain('Attention centre wiring');
+  });
+
+  it('keeps quick chats selectable on their own terms', () => {
+    // A quick chat belongs to no project, so filtering by project would drop
+    // it entirely. It is offered as its own entry instead of being silently
+    // swept in or out.
+    render(<MinimalMacOS />);
+
+    openScope();
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Quick chats' }));
+
+    expect(chatTitles().join(' ')).toContain('Quick chat');
+    expect(chatTitles().join(' ')).not.toContain('Release note draft');
+  });
+
+  it('never hides the chat you are reading, whatever the scope', () => {
+    // Filtering the sidebar must not contradict the transcript beside it.
+    render(<MinimalMacOS />);
+
+    openChat(/Release note draft/);
+
+    openScope();
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'coven-cave' }));
+
+    expect(chatTitles().join(' ')).toContain('Release note draft');
+  });
+
+  it('returns to everything when the scope is cleared', () => {
+    render(<MinimalMacOS />);
+
+    openScope();
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'coven-cave' }));
+    expect(chatTitles().join(' ')).not.toContain('Release note draft');
+
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'All projects' }));
+    expect(chatTitles().join(' ')).toContain('Release note draft');
   });
 });

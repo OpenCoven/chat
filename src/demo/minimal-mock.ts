@@ -368,6 +368,43 @@ export const MINIMAL_STARTERS: ReadonlyArray<{ text: string; mode: ComposerMode 
   { text: 'Review the diff on feat/attention-center', mode: 'ask' },
 ];
 
+/**
+ * A scope selection: which projects the surface is currently showing.
+ *
+ * `null` is a member rather than a sentinel, because `null` is already what
+ * the data means by "belongs to no project". A quick chat is not a special
+ * case bolted onto the filter -- it is one of the things being filtered.
+ *
+ * An empty set means no filter at all, not "show nothing". Deselecting the
+ * last project should return you to everything rather than to a blank list
+ * you have to work out how to escape.
+ */
+export type ProjectScope = ReadonlySet<string | null>;
+
+/**
+ * The projects that exist, derived from the chats that reference them.
+ *
+ * Derived rather than declared so the two can never disagree: a project with
+ * no chats left in it stops being offered, and a chat cannot name a project
+ * the selector has never heard of.
+ */
+export function projectsOf(chats: readonly MinimalChat[]): readonly string[] {
+  const seen = new Set<string>();
+
+  for (const chat of chats) {
+    if (chat.project !== null) {
+      seen.add(chat.project);
+    }
+  }
+
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/** Whether a chat survives the current scope. */
+export function chatInScope(chat: MinimalChat, scope: ProjectScope): boolean {
+  return scope.size === 0 || scope.has(chat.project);
+}
+
 /** How much rope the familiar gets on the next message. */
 export type ComposerMode = 'ask' | 'do' | 'plan';
 

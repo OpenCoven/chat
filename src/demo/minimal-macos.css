@@ -27,10 +27,10 @@
    * Darker as well as more chromatic, because translucent panels only look
    * like glass when there is something dark behind them to be lit against.
    */
-  --mm-bg-void: oklch(0.125 0.015 296);
-  --mm-bg-base: oklch(0.185 0.028 296);
-  --mm-bg-panel: oklch(0.165 0.024 297);
-  --mm-bg-elevated: oklch(0.238 0.036 295);
+  --mm-bg-void: oklch(0.105 0.014 296);
+  --mm-bg-base: oklch(0.162 0.022 296);
+  --mm-bg-panel: oklch(0.145 0.019 296);
+  --mm-bg-elevated: oklch(0.208 0.03 296);
 
   /* Text. */
   --mm-text-primary: oklch(0.985 0 0);
@@ -98,11 +98,11 @@
    * identical background is not glass, it is a flat fill paying the cost of a
    * blur. These let the violet bloom behind them actually come through.
    */
-  --mm-panel-78: oklch(0.165 0.024 297 / 0.62);
-  --mm-panel-70: oklch(0.165 0.024 297 / 0.52);
-  --mm-panel-55: oklch(0.165 0.024 297 / 0.4);
-  --mm-elevated-92: oklch(0.238 0.036 295 / 0.82);
-  --mm-elevated-88: oklch(0.238 0.036 295 / 0.74);
+  --mm-panel-78: oklch(0.145 0.019 296 / 0.66);
+  --mm-panel-70: oklch(0.145 0.019 296 / 0.56);
+  --mm-panel-55: oklch(0.145 0.019 296 / 0.42);
+  --mm-elevated-92: oklch(0.208 0.03 296 / 0.84);
+  --mm-elevated-88: oklch(0.208 0.03 296 / 0.76);
 
   /* The specular top edge that makes a translucent panel read as a solid. */
   --mm-specular: oklch(0.95 0.03 296 / 0.1);
@@ -116,6 +116,14 @@
   --mm-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", sans-serif;
   --mm-font-mono: SFMono-Regular, ui-monospace, Menlo, "JetBrains Mono", monospace;
   --mm-font-serif: "EB Garamond", Georgia, "Times New Roman", serif;
+
+  /*
+   * The reading measure, shared by the transcript and the composer so the two
+   * stay in the same column. Widened from 680px: the window is 1180 wide and
+   * the sidebar takes 236 of it, so 680 left the conversation floating in the
+   * middle of a much larger main area.
+   */
+  --mm-measure: 860px;
 
   --mm-fast: 120ms;
   --mm-base: 180ms;
@@ -570,7 +578,7 @@
 }
 
 .mm-transcript {
-  max-width: 680px;
+  max-width: var(--mm-measure);
   margin: 0 auto;
   padding: 22px 24px 18px;
 }
@@ -896,7 +904,7 @@
 }
 
 .mm-composer {
-  max-width: 680px;
+  max-width: var(--mm-measure);
   margin: 0 auto;
 }
 
@@ -1861,3 +1869,336 @@
  * Focus is not redefined here. It is set once, next to the reasoning for it,
  * where this file already scoped a ring.
  */
+
+/*
+ * The backdrop, as a control.
+ *
+ * Full-bleed and behind the sheet, so a click anywhere outside closes it. It
+ * carries no appearance of its own -- the scrim above already paints the
+ * dimming -- and exists only so that "click away to close" is a real button
+ * with a name, rather than a handler bolted to a div that a keyboard never
+ * reaches.
+ */
+.mm-scrim-close {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.mm-sheet {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==========================================================================
+ * Composer.
+ *
+ * A framed block with its top edge notched by two legends, a mode group that
+ * names the mode it is in, and an action cluster on the right. The frame takes
+ * the colour of the mode, so the thing that decides how much rope the familiar
+ * gets is legible from across the room rather than from reading a chip.
+ * ========================================================================== */
+
+.mm-composer-box {
+  position: relative;
+
+  /* Room for the legends to sit on the top edge without touching the text. */
+  padding: 18px 12px 10px 16px;
+  transition:
+    border-color var(--mm-base) var(--mm-ease),
+    box-shadow var(--mm-base) var(--mm-ease);
+}
+
+.mm-notch {
+  position: absolute;
+  top: -9px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  background: var(--mm-bg-panel);
+  color: var(--mm-text-secondary);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.mm-notch--start {
+  left: 14px;
+}
+
+.mm-notch--end {
+  right: 14px;
+}
+
+/* The mode group ------------------------------------------------------- */
+
+.mm-modes {
+  /* A fieldset, so the group has a real name. Its default chrome is not. */
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 999px;
+  background: var(--mm-tint-3);
+}
+
+.mm-mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition:
+    background var(--mm-fast) var(--mm-ease),
+    color var(--mm-fast) var(--mm-ease);
+}
+
+.mm-mode:hover {
+  color: var(--mm-text-primary);
+}
+
+.mm-mode-name {
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/*
+ * The active chip and the frame around the whole composer are the same
+ * colour, which is what ties the small control to the large consequence.
+ */
+.mm-composer-box.is-plan .mm-mode.is-active {
+  border-color: oklch(0.709 0.159 293.5 / 0.55);
+  background: oklch(0.709 0.159 293.5 / 0.18);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-ask .mm-mode.is-active {
+  border-color: oklch(0.865 0.115 207 / 0.5);
+  background: oklch(0.865 0.115 207 / 0.15);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-do .mm-mode.is-active {
+  border-color: oklch(0.83 0.13 78 / 0.55);
+  background: oklch(0.83 0.13 78 / 0.16);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-plan {
+  border-color: oklch(0.709 0.159 293.5 / 0.42);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.709 0.159 293.5 / 0.16),
+    0 14px 44px -20px oklch(0.709 0.159 293.5 / 0.5);
+}
+
+.mm-composer-box.is-ask {
+  border-color: oklch(0.865 0.115 207 / 0.38);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.865 0.115 207 / 0.14),
+    0 14px 44px -20px oklch(0.865 0.115 207 / 0.4);
+}
+
+.mm-composer-box.is-do {
+  border-color: oklch(0.83 0.13 78 / 0.42);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.83 0.13 78 / 0.16),
+    0 14px 44px -20px oklch(0.83 0.13 78 / 0.45);
+}
+
+/* The legend sits on the frame, so it takes the frame's colour with it. */
+.mm-composer-box.is-plan .mm-notch {
+  border-color: oklch(0.709 0.159 293.5 / 0.42);
+}
+
+.mm-composer-box.is-ask .mm-notch {
+  border-color: oklch(0.865 0.115 207 / 0.38);
+}
+
+.mm-composer-box.is-do .mm-notch {
+  border-color: oklch(0.83 0.13 78 / 0.42);
+}
+
+/* Stop ----------------------------------------------------------------- */
+
+/*
+ * Salmon rather than the danger red: stopping a run is not destructive and
+ * nothing is lost by it, so it should not wear the colour reserved for things
+ * that cannot be taken back.
+ */
+.mm-stop {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid oklch(0.74 0.13 24 / 0.4);
+  border-radius: 999px;
+  background: oklch(0.74 0.13 24 / 0.2);
+  color: oklch(0.9 0.07 24);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.mm-stop:hover {
+  background: oklch(0.74 0.13 24 / 0.3);
+}
+
+.mm-stop kbd {
+  font-family: var(--mm-font-mono);
+  font-size: 11px;
+}
+
+/* Project scope --------------------------------------------------------- */
+
+/*
+ * The strip beside the traffic lights. It was left empty when the simulated
+ * chrome came off in the app, and this is what it was holding space for: the
+ * scope everything else is read through.
+ */
+.mm-sidebar-top {
+  gap: 10px;
+}
+
+.mm-picker {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.mm-picker-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.mm-picker-button:hover {
+  background: var(--mm-tint-5);
+  color: var(--mm-text-primary);
+}
+
+/* Filtered is a state worth seeing without opening the menu. */
+.mm-picker-button.is-filtered {
+  border-color: oklch(0.709 0.159 293.5 / 0.32);
+  background: oklch(0.709 0.159 293.5 / 0.14);
+  color: var(--mm-text-primary);
+}
+
+.mm-picker-name {
+  flex: 1;
+  overflow: hidden;
+  font-weight: 500;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-picker-away {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.mm-picker-menu {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid var(--mm-line);
+  border-radius: 10px;
+  background: var(--mm-elevated-92);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 18px 44px -18px oklch(0.08 0.04 296 / 0.9);
+  backdrop-filter: var(--mm-glass-blur);
+  -webkit-backdrop-filter: var(--mm-glass-blur);
+}
+
+.mm-picker-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.mm-picker-item:hover {
+  background: var(--mm-tint-6);
+  color: var(--mm-text-primary);
+}
+
+.mm-picker-item.is-on {
+  color: var(--mm-text-primary);
+}
+
+/* Reserved whether or not it is filled, so the labels do not shift. */
+.mm-picker-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--mm-accent);
+}
+
+.mm-picker-rule {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--mm-line-faint);
+}
+
+.mm-picker-empty {
+  margin: 0;
+  padding: 8px 9px;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mm-rows-empty {
+  margin: 0;
+  padding: 6px 9px 8px;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}

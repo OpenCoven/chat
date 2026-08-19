@@ -30,6 +30,7 @@ export type IconName =
   | 'copy'
   | 'envelope'
   | 'file-text'
+  | 'flask'
   | 'folder-open'
   | 'gear-six'
   | 'git-branch'
@@ -38,12 +39,15 @@ export type IconName =
   | 'heartbeat'
   | 'info'
   | 'magnifying-glass'
+  | 'microphone'
   | 'paint-brush'
   | 'paper-plane-tilt'
   | 'pencil-simple'
   | 'plus'
   | 'sidebar-simple'
   | 'sliders-horizontal'
+  | 'sparkle'
+  | 'squares-four'
   | 'terminal-window'
   | 'warning-circle-fill'
   | 'waveform'
@@ -132,6 +136,13 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M8.8 16.8h6.4" />
     </>
   ),
+  flask: (
+    <>
+      <path d="M9.4 3.2v6.1L4.6 17.6A2 2 0 0 0 6.3 20.8h11.4a2 2 0 0 0 1.7-3.2l-4.8-8.3V3.2" />
+      <path d="M8.2 3.2h7.6" />
+      <path d="M7.1 14.2h9.8" />
+    </>
+  ),
   'folder-open': (
     <>
       <path d="M3.2 18.6V6.2a1.2 1.2 0 0 1 1.2-1.2h4.6l2.2 2.6h7.2a1.2 1.2 0 0 1 1.2 1.2v2.3" />
@@ -187,6 +198,13 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="m15.6 15.6 4.7 4.7" />
     </>
   ),
+  microphone: (
+    <>
+      <rect x="9" y="2.8" width="6" height="11.4" rx="3" />
+      <path d="M5.4 11.6a6.6 6.6 0 0 0 13.2 0" />
+      <path d="M12 18.2v3" />
+    </>
+  ),
   'paint-brush': (
     <>
       <path d="M20.2 3.8a2.5 2.5 0 0 0-3.5 0L9.4 11l3.6 3.6 7.2-7.3a2.5 2.5 0 0 0 0-3.5z" />
@@ -225,6 +243,20 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M11.2 15.6h9.2" />
       <circle cx="15" cy="8.4" r="2.2" />
       <circle cx="9" cy="15.6" r="2.2" />
+    </>
+  ),
+  sparkle: (
+    <>
+      <path d="M12 3.4c.9 4.1 1.6 4.8 5.7 5.7-4.1.9-4.8 1.6-5.7 5.7-.9-4.1-1.6-4.8-5.7-5.7 4.1-.9 4.8-1.6 5.7-5.7z" />
+      <path d="M18.4 15.2c.5 2.1.8 2.4 2.9 2.9-2.1.5-2.4.8-2.9 2.9-.5-2.1-.8-2.4-2.9-2.9 2.1-.5 2.4-.8 2.9-2.9z" />
+    </>
+  ),
+  'squares-four': (
+    <>
+      <rect x="3.4" y="3.4" width="7.2" height="7.2" rx="1.6" />
+      <rect x="13.4" y="3.4" width="7.2" height="7.2" rx="1.6" />
+      <rect x="3.4" y="13.4" width="7.2" height="7.2" rx="1.6" />
+      <rect x="13.4" y="13.4" width="7.2" height="7.2" rx="1.6" />
     </>
   ),
   'terminal-window': (
