@@ -359,6 +359,9 @@ function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
     `import {
   parseVerifiedCaveContractFixture,
   type CaveContractFixture,
+  type CaveContractReport,
+  type CaveFamiliar,
+  type CaveFamiliarAnalytics,
 } from '@opencoven/cave-client';
 
 export function loadAuthorityFixture(
@@ -366,6 +369,46 @@ export function loadAuthorityFixture(
   digestContents: string,
 ): CaveContractFixture {
   return parseVerifiedCaveContractFixture(fixtureContents, digestContents);
+}
+
+/**
+ * The familiar surface this repository reads.
+ *
+ * Chat holds no dependency on @opencoven/cave-client, so nothing else would
+ * notice if these types were renamed, narrowed, or dropped -- the app would
+ * simply carry its own copy of a shape the SDK no longer serves, and the
+ * mismatch would surface at integration rather than here.
+ *
+ * Compiling against the packed package is what makes "mirrors the SDK" a
+ * checkable claim. Every field read below is one the familiar surface renders.
+ */
+export function readFamiliarSurface(
+  familiar: CaveFamiliar,
+  report: CaveContractReport,
+  analytics: CaveFamiliarAnalytics,
+): string {
+  const properties = report.properties.filter((property) => property.pass).length;
+  const window = analytics.windows['7d'];
+  // Null is meaningful and must stay distinguishable from zero.
+  const rate = window === undefined || window.successRate === null ? 'unknown' : String(window.successRate);
+
+  return [
+    familiar.displayName,
+    familiar.role,
+    familiar.status ?? 'unknown',
+    familiar.memoryFreshness ?? 'unknown',
+    String(familiar.activeSessions ?? 0),
+    report.specVersion,
+    String(report.pass),
+    String(properties),
+    String(report.warnings.length),
+    analytics.generatedAt,
+    rate,
+    String(window?.attempts ?? 0),
+    String(window?.toolFailures ?? 0),
+    analytics.backfill.state,
+    String(analytics.recentAttempts.length),
+  ].join(' ');
 }
 `,
   );
