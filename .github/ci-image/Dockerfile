@@ -17,6 +17,13 @@
 # tag below in the same commit -- they are one version, expressed twice.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
+# Links the published package to this repository, which is what lets a CI job's
+# GITHUB_TOKEN pull it and what makes the package page point back at the
+# Dockerfile that produced it. A CI image with no stated provenance is a
+# binary blob that everything depends on and nothing explains.
+LABEL org.opencontainers.image.source=https://github.com/OpenCoven/chat
+LABEL org.opencontainers.image.description="Build and test environment for OpenCoven Chat CI."
+
 # apt must never wait for input on a machine with no one to answer.
 ENV DEBIAN_FRONTEND=noninteractive
 
