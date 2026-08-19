@@ -1,0 +1,69 @@
+name: CI image
+
+# Builds the container CI runs in. See .github/ci-image/Dockerfile for why it
+# exists.
+#
+# This is the one place apt-get is still allowed to hang. It is deliberately
+# not on the path of a pull request: nothing here gates a merge, so a bad day
+# on a Debian mirror shows up as a failure on this workflow instead of as five
+# wedged runners and a branch nobody can land.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/ci-image/**
+      - .github/workflows/ci-image.yml
+  # Rebuilt weekly so security updates land without anyone remembering to ask.
+  # A rebuild does not reach CI on its own: ci.yml pins a digest, so adopting a
+  # new image is an explicit, reviewable commit.
+  schedule:
+    - cron: 0 5 * * 1
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build and push
+    runs-on: ubuntu-latest
+    # Generous, because this job is allowed to be slow -- it is the buffer that
+    # keeps slowness away from pull requests. Still bounded, because the
+    # failure mode being addressed is precisely a step that never returns.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The docker CLI is already on the runner. Using it directly keeps this
+      # workflow free of third-party actions to pin and review, which matters
+      # more here than the build-cache features they would add: this image is
+      # built weekly, not per-commit.
+      - name: Log in to GHCR
+        run: echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Build
+        run: docker build --pull -t ghcr.io/opencoven/chat-ci:v1 .github/ci-image
+
+      - name: Push
+        id: push
+        run: |
+          set -euo pipefail
+          docker push ghcr.io/opencoven/chat-ci:v1
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/opencoven/chat-ci:v1)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # The digest is the deliverable. ci.yml pins by digest rather than by the
+      # v1 tag, so this line is what someone copies into a commit to adopt the
+      # rebuild -- a mutable tag would let an image change what CI runs without
+      # any commit saying so.
+      - name: Report digest
+        run: |
+          {
+            echo '## CI image published'
+            echo
+            echo 'Pin this in `.github/workflows/ci.yml` to adopt it:'
+            echo
+            echo '```'
+            echo '${{ steps.push.outputs.digest }}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
