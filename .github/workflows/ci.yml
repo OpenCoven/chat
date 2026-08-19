@@ -8,12 +8,12 @@ on:
 # started two full runs of this workflow: the same suites executed twice, for
 # the same commit, at double the cost. One run per branch is enough.
 #
-# This does not explain the five runs that hung and held a runner until
-# GitHub's six-hour limit. That was first attributed to the two runs racing for
-# the preview server's fixed port, and the attribution was wrong: with
-# concurrency in place and only one run, the job still stalled, in the browser
-# install step, which never touches that port. The e2e job's timeout and cache
-# below address that separately.
+# This does not explain the runs that hung and held a runner until GitHub's
+# six-hour limit. That was first attributed to the two runs racing for the
+# preview server's fixed port, and the attribution was wrong: with concurrency
+# in place and only one run, the job still stalled. The cause was apt-get, in
+# two different jobs that had nothing in common except calling it, and it is
+# addressed by the prebuilt image rather than here.
 #
 # The group name has to match across both events, which `github.ref` does not:
 # a push gives `refs/heads/name` and a pull_request gives `refs/pull/N/merge`.
@@ -27,10 +27,76 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
+# Every job below sets timeout-minutes. GitHub's default is six hours, which is
+# not a timeout so much as an upper bound on the damage: a job that stops
+# making progress holds a runner for the rest of the working day and reports
+# nothing until it does. The numbers are set above the slowest successful run
+# observed for each job, not tuned to it -- they exist to catch a hang, not to
+# police a slow day.
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The comparison needs both endpoints in history, and a shallow clone
+          # has neither for anything but the newest commit.
+          fetch-depth: 0
+      - id: classify
+        name: Classify the diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Every unknown answers "code". A new branch has no `before`, a force
+          # push has one that no longer exists, and a wrong guess in this
+          # direction costs a few minutes of CI, while a wrong guess in the
+          # other direction merges untested code.
+          if [ -z "${BASE}" ] \
+            || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit; treating this as a code change."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          files=$(git diff --name-only "${BASE}" "${HEAD}")
+
+          if [ -z "${files}" ]; then
+            echo "No files changed; treating this as a code change."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "${files}" | sed 's/^/  /'
+
+          docs_only=true
+          while IFS= read -r file; do
+            case "${file}" in
+              # Prose, and nothing else. Note what is absent: a change under
+              # .github is code by this rule, so editing CI cannot be the thing
+              # that decides CI does not need to run.
+              docs/*|*.md) ;;
+              *) docs_only=false ;;
+            esac
+          done <<EOF
+          ${files}
+          EOF
+
+          echo "docs_only=${docs_only}"
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+
   web:
     name: Web checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -49,12 +115,25 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
-    needs: web
-    # The suite itself takes seconds; installing the browser has taken
-    # anywhere from two minutes to ten, and on five occasions never finished
-    # at all, holding a runner until GitHub's six-hour limit. A ceiling turns
-    # that into a fast, visible failure. It is set well above the slowest
-    # successful run observed rather than tuned to it.
+    needs: [web, changes]
+    # A documentation change cannot fail a browser test. This job took twenty
+    # minutes to time out on a two-commit docs branch, twice, which is the
+    # entire argument for the condition.
+    if: needs.changes.outputs.docs_only != 'true'
+    # The image carries Chromium and its system libraries already, so this job
+    # no longer downloads a browser or calls apt. That removed the step that
+    # hung five times. See .github/ci-image/Dockerfile.
+    container:
+      image: ghcr.io/opencoven/chat-ci@sha256:da7790204dc362185b6fcc74356255c97f03436afd876c3e2921714e3586f7ca
+      # A package published by a workflow starts out private regardless of the
+      # repository's visibility, so the pull is authenticated rather than
+      # relying on it being public.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -67,30 +146,19 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Cache the browser itself, keyed on the Playwright version so a bump
-      # invalidates it. A warm cache skips the download entirely, which is
-      # where nearly all of this job's time went.
-      - id: playwright-cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-1.62.1
-      - name: Install Chromium and its system dependencies
-        # apt must never wait for input on a runner with no one to answer.
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            pnpm exec playwright install-deps chromium
-          else
-            pnpm exec playwright install --with-deps chromium
-          fi
+      # A no-op while the image's Playwright version matches the one in
+      # package.json, which is the point of pinning the same version in both.
+      # If someone bumps @playwright/test without rebuilding the image, this
+      # downloads the new browser and the suite still runs -- slower, but not
+      # broken, and never touching apt.
+      - run: pnpm exec playwright install chromium
       - run: pnpm test:e2e
 
   contract-canary:
     name: Contract canary
     runs-on: ubuntu-latest
     needs: web
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: reviewed-revisions
@@ -172,26 +240,23 @@ jobs:
   desktop:
     name: Desktop build
     runs-on: ubuntu-latest
-    needs: web
+    needs: [web, changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    # The apt-get that used to open this job is now baked into the image. It
+    # hung for forty-seven minutes on 19 August with no timeout to stop it,
+    # which is how the cause was finally identified: a second job, sharing no
+    # code with the first, stuck on the same kind of step.
+    container:
+      image: ghcr.io/opencoven/chat-ci@sha256:da7790204dc362185b6fcc74356255c97f03436afd876c3e2921714e3586f7ca
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Install Linux Tauri dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            file \
-            libayatana-appindicator3-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            librsvg2-dev \
-            patchelf \
-            pkg-config \
-            wget \
-            xdg-utils
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.0
@@ -209,6 +274,11 @@ jobs:
   rust:
     name: Rust
     runs-on: macos-latest
+    needs: changes
+    # macOS runners bill at ten times the Linux rate. Spending that on a branch
+    # that changed only prose is the least defensible minute in this file.
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
