@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
+import { canUseTauriCommands } from '../lib/desktop-host';
 import { Icon, type IconName } from './minimal-icons';
 import {
   type AgentId,
@@ -689,6 +690,12 @@ export function MinimalMacOS() {
   return (
     <div
       className="mm-desktop"
+      // The simulated desktop, window frame and traffic lights below are how
+      // this design presents itself on its own. Inside the app the real window
+      // already supplies all three, and drawing them again puts a window
+      // inside a window at the same size. The frame is dropped there; what is
+      // being evaluated is the content, not a picture of a window.
+      data-host={canUseTauriCommands() ? 'desktop' : undefined}
       data-reduce-motion={prefs.reduceMotion ? 'true' : undefined}
       data-appearance={prefs.appearance}
     >
