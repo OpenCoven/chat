@@ -1,0 +1,1638 @@
+/*
+ * The Minimal (macOS) surface.
+ *
+ * An implementation of the approved design of that name. Everything is scoped
+ * under .mm-desktop so it cannot leak into the Phase 0 scaffold, which remains
+ * the app's real entry point and keeps the Coven visual direction.
+ *
+ * The design carries its own palette rather than the scaffold's: it is a
+ * separate direction, not a reskin of the same one, and mixing the two would
+ * produce a third that nobody approved. The token values below are the ones
+ * the OpenCoven design system publishes, transcribed rather than re-picked.
+ *
+ * Translucent colours are written as an alpha channel on the palette colour
+ * itself -- oklch(L C H / A) -- rather than as a hand-mixed rgba. That is what
+ * makes a tint provably the palette colour: change the token and every tint of
+ * it follows, and there is no second, nearly-right violet to drift.
+ */
+
+.mm-desktop {
+  /* Surfaces. */
+  --mm-bg-base: oklch(0.24 0.006 291);
+  --mm-bg-panel: oklch(0.22 0.006 291);
+  --mm-bg-elevated: oklch(0.29 0.008 291);
+
+  /* Text. */
+  --mm-text-primary: oklch(0.985 0 0);
+  --mm-text-secondary: oklch(0.66 0.01 291);
+  --mm-text-muted: oklch(0.985 0 0 / 0.72);
+
+  /* Presence: the one accent, reserved for the app's own voice. */
+  --mm-accent: oklch(0.66 0.09 293);
+
+  /*
+   * Status. Each one is paired with a word everywhere it appears -- "Asks
+   * you", "Working", "Allowed" -- so none of these colours is ever the only
+   * thing carrying the state.
+   */
+  --mm-success: oklch(0.78 0.14 158);
+  --mm-warning: oklch(0.83 0.13 78);
+  --mm-danger: oklch(0.74 0.18 24);
+  --mm-info: var(--mm-accent);
+
+  /* Hairlines and tints, all struck from white so they read as light on glass. */
+  --mm-line: oklch(1 0 0 / 0.1);
+  --mm-line-soft: oklch(1 0 0 / 0.08);
+  --mm-line-faint: oklch(1 0 0 / 0.07);
+  --mm-line-strong: oklch(1 0 0 / 0.14);
+  --mm-tint-3: oklch(1 0 0 / 0.03);
+  --mm-tint-4: oklch(1 0 0 / 0.04);
+  --mm-tint-5: oklch(1 0 0 / 0.05);
+  --mm-tint-6: oklch(1 0 0 / 0.06);
+  --mm-tint-7: oklch(1 0 0 / 0.07);
+  --mm-tint-8: oklch(1 0 0 / 0.08);
+  --mm-tint-9: oklch(1 0 0 / 0.09);
+  --mm-tint-11: oklch(1 0 0 / 0.11);
+  --mm-tint-12: oklch(1 0 0 / 0.12);
+  --mm-tint-16: oklch(1 0 0 / 0.16);
+  --mm-tint-26: oklch(1 0 0 / 0.26);
+
+  /* Glass. The panels sit over the window, not over the desktop. */
+  --mm-panel-78: oklch(0.22 0.006 291 / 0.78);
+  --mm-panel-70: oklch(0.22 0.006 291 / 0.7);
+  --mm-panel-55: oklch(0.22 0.006 291 / 0.55);
+  --mm-elevated-92: oklch(0.29 0.008 291 / 0.92);
+  --mm-elevated-88: oklch(0.29 0.008 291 / 0.88);
+
+  /*
+   * None of these faces is bundled, so the system face is what actually
+   * renders. It is listed first to say so rather than implying a webfont that
+   * never loads.
+   */
+  --mm-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", sans-serif;
+  --mm-font-mono: SFMono-Regular, ui-monospace, Menlo, "JetBrains Mono", monospace;
+  --mm-font-serif: "EB Garamond", Georgia, "Times New Roman", serif;
+
+  --mm-fast: 120ms;
+  --mm-base: 180ms;
+  --mm-ease: cubic-bezier(0.2, 0, 0, 1);
+  --mm-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  padding: 26px;
+  overflow: hidden;
+
+  /* Two soft lights, above and below, so the window has somewhere to sit. */
+  background:
+    radial-gradient(90% 70% at 50% -12%, oklch(0.28 0.03 291), transparent 64%),
+    radial-gradient(120% 90% at 50% 115%, oklch(0.24 0.025 260), transparent 60%), var(--mm-bg-base);
+  color: var(--mm-text-primary);
+  font-family: var(--mm-font-ui);
+  font-size: 13px;
+}
+
+.mm-desktop *,
+.mm-desktop *::before,
+.mm-desktop *::after {
+  box-sizing: border-box;
+}
+
+/*
+ * The scaffold's focus ring is cyan, which belongs to the other direction.
+ * Scoping one here keeps keyboard focus visible in this surface's own accent
+ * rather than removing it, which is the usual and much worse fix.
+ */
+.mm-desktop :focus-visible {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.mm-icon {
+  display: block;
+  flex: none;
+}
+
+/* Window --------------------------------------------------------------- */
+
+.mm-window {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  max-width: 1180px;
+  height: 100%;
+  max-height: 780px;
+  border: 1px solid var(--mm-line);
+  border-radius: 12px;
+  background: var(--mm-bg-base);
+  box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.85);
+}
+
+/*
+ * Decorative, and marked so. This is a picture of a window rather than a
+ * window, and three unlabelled buttons that close nothing are worse than
+ * nothing for anyone listening to the page.
+ */
+.mm-lights {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex: none;
+  padding: 1px;
+}
+
+.mm-light {
+  width: 14px;
+  height: 14px;
+  border: 0.5px solid oklch(0 0 0 / 0.1);
+  border-radius: 50%;
+}
+
+.mm-light--close {
+  background: oklch(0.68 0.19 22);
+}
+
+.mm-light--min {
+  background: oklch(0.82 0.16 78);
+}
+
+.mm-light--zoom {
+  background: oklch(0.72 0.21 143);
+}
+
+/* Sidebar -------------------------------------------------------------- */
+
+.mm-sidebar {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  flex: none;
+  min-height: 0;
+  width: 236px;
+  border-right: 1px solid var(--mm-line-soft);
+  background: var(--mm-panel-78);
+  backdrop-filter: blur(30px) saturate(160%);
+}
+
+.mm-sidebar-top {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 14px;
+}
+
+.mm-search-wrap {
+  padding: 2px 12px 10px;
+}
+
+.mm-search {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: var(--mm-tint-7);
+}
+
+.mm-search-icon {
+  display: flex;
+  color: var(--mm-text-muted);
+}
+
+.mm-search input {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--mm-text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.mm-sidebar-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+}
+
+.mm-section {
+  margin-bottom: 14px;
+}
+
+.mm-section-label {
+  margin: 0 0 7px;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mm-sidebar .mm-section-label {
+  margin: 0 0 3px;
+  padding: 0 8px;
+}
+
+.mm-rows {
+  display: grid;
+  gap: 1px;
+}
+
+.mm-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.mm-row:hover {
+  background: var(--mm-tint-6);
+}
+
+.mm-row.is-active {
+  background: var(--mm-tint-9);
+  color: var(--mm-text-primary);
+  font-weight: 500;
+}
+
+.mm-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-row-trailing {
+  flex: none;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+.mm-row-trailing.mm-status--available {
+  color: var(--mm-success);
+}
+
+.mm-row-trailing.mm-status--working {
+  color: var(--mm-info);
+}
+
+.mm-row-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.mm-row-dot--approval {
+  background: var(--mm-warning);
+}
+
+.mm-row-dot--question {
+  background: var(--mm-info);
+}
+
+.mm-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--mm-mark-size);
+  height: var(--mm-mark-size);
+  border: 1px solid oklch(0.62 0.11 var(--mm-hue) / 0.45);
+  border-radius: 50%;
+  background: oklch(0.62 0.11 var(--mm-hue) / 0.32);
+  color: oklch(0.88 0.06 var(--mm-hue));
+  font-size: calc(var(--mm-mark-size) * 0.42);
+  font-weight: 600;
+}
+
+.mm-sidebar-foot {
+  padding: 8px;
+  border-top: 1px solid var(--mm-line-soft);
+}
+
+.mm-foot-button {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.mm-foot-button:hover {
+  background: var(--mm-tint-6);
+}
+
+/* Header --------------------------------------------------------------- */
+
+.mm-main {
+  display: grid;
+  grid-template-rows: 52px 1fr auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--mm-bg-base);
+}
+
+.mm-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--mm-line-faint);
+  background: var(--mm-panel-55);
+  backdrop-filter: blur(24px);
+}
+
+.mm-icon-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+}
+
+.mm-icon-button:hover {
+  background: var(--mm-tint-8);
+}
+
+.mm-icon-button.is-active {
+  background: var(--mm-tint-12);
+  color: var(--mm-text-primary);
+}
+
+.mm-icon-button--small {
+  width: 24px;
+}
+
+.mm-title {
+  min-width: 0;
+}
+
+.mm-title-main {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-title-sub {
+  margin: 0;
+  overflow: hidden;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-spacer {
+  flex: 1;
+}
+
+.mm-busy {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--mm-tint-7);
+  color: var(--mm-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mm-approval-pill {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid oklch(0.83 0.13 78 / 0.42);
+  border-radius: 999px;
+  background: oklch(0.83 0.13 78 / 0.14);
+  color: var(--mm-warning);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* Status dots ---------------------------------------------------------- */
+
+.mm-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.mm-dot--pulse {
+  width: 6px;
+  height: 6px;
+  background: var(--mm-accent);
+  animation: mm-dots 1.4s ease-in-out infinite;
+}
+
+.mm-dot--running,
+.mm-dot--working {
+  background: var(--mm-info);
+}
+
+.mm-dot--done {
+  background: var(--mm-success);
+}
+
+.mm-dot--waiting {
+  background: var(--mm-warning);
+}
+
+.mm-dot--read {
+  background: var(--mm-tint-26);
+}
+
+/* Transcript ----------------------------------------------------------- */
+
+.mm-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mm-transcript {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 22px 24px 18px;
+}
+
+.mm-message {
+  display: flex;
+  margin-bottom: 24px;
+}
+
+.mm-message--user {
+  justify-content: flex-end;
+}
+
+.mm-message--notice {
+  margin-bottom: 16px;
+}
+
+.mm-bubble {
+  max-width: 76%;
+  padding: 9px 15px;
+  border-radius: 19px;
+  background: var(--mm-tint-9);
+  color: var(--mm-text-primary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.mm-notice {
+  width: 100%;
+  margin: 0;
+  color: var(--mm-text-muted);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.mm-reply,
+.mm-image {
+  max-width: 92%;
+  min-width: 0;
+}
+
+.mm-reply-who {
+  margin: 0 0 4px;
+  color: var(--mm-text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.mm-reply-text {
+  margin: 0;
+  color: var(--mm-text-primary);
+  font-size: 14px;
+  line-height: 1.68;
+}
+
+.mm-code {
+  margin: 9px 0 0;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--mm-tint-9);
+  border-radius: 9px;
+  background: oklch(0 0 0 / 0.34);
+  font-family: var(--mm-font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.mm-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.mm-action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--mm-text-muted);
+  cursor: pointer;
+}
+
+.mm-action:hover {
+  background: var(--mm-tint-8);
+  color: var(--mm-text-primary);
+}
+
+/* Generated image ------------------------------------------------------ */
+
+.mm-image .mm-reply-who {
+  margin: 0 0 5px;
+  font-size: 11px;
+}
+
+.mm-image-button {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--mm-tint-9);
+  border-radius: 12px;
+  background: none;
+  cursor: zoom-in;
+}
+
+.mm-generated {
+  display: block;
+  width: 100%;
+}
+
+.mm-generated-base {
+  fill: oklch(0.34 0.09 var(--mm-hue));
+}
+
+.mm-generated-glow {
+  fill: oklch(0.86 0.12 var(--mm-hue));
+  opacity: 0.12;
+}
+
+.mm-generated-body {
+  fill: oklch(0.84 0.11 var(--mm-hue));
+  opacity: 0.92;
+}
+
+.mm-generated-eyes {
+  fill: oklch(0.18 0.02 291);
+}
+
+.mm-image-caption {
+  margin: 6px 0 0;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+/* Run card ------------------------------------------------------------- */
+
+.mm-run {
+  overflow: hidden;
+  width: 100%;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 14px;
+  background: var(--mm-tint-4);
+}
+
+.mm-run-head {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.mm-run-head .mm-dot--running {
+  animation: mm-dots 1.5s ease-in-out infinite;
+}
+
+.mm-run-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-run-meta {
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+.mm-run-body {
+  border-top: 1px solid var(--mm-line-soft);
+}
+
+.mm-run-step {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 7px 12px;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}
+
+.mm-run-step .mm-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.mm-run-step-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-run-step-took {
+  color: var(--mm-text-muted);
+  font-family: var(--mm-font-mono);
+  font-size: 10.5px;
+}
+
+.mm-run-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--mm-line-soft);
+}
+
+.mm-run-footnote {
+  flex: 1;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+.mm-button {
+  flex: none;
+  padding: 4px 11px;
+  border: 1px solid var(--mm-line-strong);
+  border-radius: 7px;
+  background: var(--mm-tint-6);
+  color: var(--mm-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.mm-button--wide {
+  min-width: 96px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.mm-button--primary {
+  border: 0;
+  background: var(--mm-accent);
+  color: var(--mm-bg-panel);
+  font-weight: 600;
+}
+
+/* Typing, empty state -------------------------------------------------- */
+
+.mm-typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.mm-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mm-text-muted);
+  animation: mm-dots 1.3s ease-in-out infinite;
+}
+
+.mm-typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.mm-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.mm-empty {
+  padding: 88px 0 40px;
+  text-align: center;
+}
+
+.mm-empty-title {
+  margin: 0 0 6px;
+  font-family: var(--mm-font-serif);
+  font-size: 27px;
+  letter-spacing: -0.01em;
+}
+
+.mm-empty-body {
+  margin: 0 0 22px;
+  color: var(--mm-text-muted);
+  font-size: 12.5px;
+}
+
+.mm-starters {
+  display: flex;
+  gap: 7px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mm-starter {
+  padding: 6px 13px;
+  border: 1px solid var(--mm-tint-11);
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mm-starter:hover {
+  background: var(--mm-tint-7);
+  color: var(--mm-text-primary);
+}
+
+/* Composer ------------------------------------------------------------- */
+
+.mm-composer-wrap {
+  padding: 0 24px 18px;
+}
+
+.mm-composer {
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.mm-composer-box {
+  display: grid;
+  gap: 2px;
+  padding: 11px 10px 8px 16px;
+  border: 1px solid var(--mm-tint-11);
+  border-radius: 22px;
+  background: var(--mm-tint-5);
+  box-shadow:
+    inset 0 1px 0 var(--mm-tint-6),
+    0 14px 40px -22px oklch(0 0 0 / 0.85);
+}
+
+.mm-composer-box textarea {
+  width: 100%;
+  padding: 2px 0 6px;
+  border: 0;
+  background: none;
+  color: var(--mm-text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  outline: none;
+  resize: none;
+}
+
+.mm-composer-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.mm-round-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+}
+
+.mm-round-button:hover,
+.mm-mode-button:hover {
+  background: var(--mm-tint-8);
+}
+
+.mm-mode-button {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mm-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mm-tint-9);
+  color: var(--mm-text-muted);
+  cursor: pointer;
+  transition: background var(--mm-fast) var(--mm-ease);
+}
+
+/*
+ * The send button lights up only once there is something to send. It is the
+ * one place in the surface where colour alone changes, and it is safe there:
+ * pressing it with an empty composer does nothing either way.
+ */
+.mm-send.is-ready {
+  background: var(--mm-text-primary);
+  color: var(--mm-bg-base);
+}
+
+.mm-composer-scope {
+  margin: 8px 0 0;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* Activity ------------------------------------------------------------- */
+
+.mm-activity {
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  flex: none;
+  min-height: 0;
+  width: 264px;
+  border-left: 1px solid var(--mm-line-soft);
+  background: var(--mm-panel-70);
+  backdrop-filter: blur(30px);
+}
+
+.mm-activity-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--mm-line-faint);
+}
+
+.mm-activity-title {
+  flex: 1;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mm-activity-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.mm-activity-group {
+  margin-bottom: 16px;
+}
+
+.mm-activity-rows {
+  display: grid;
+  gap: 7px;
+}
+
+.mm-activity-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.mm-activity-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}
+
+.mm-activity-meta {
+  color: var(--mm-text-muted);
+  font-family: var(--mm-font-mono);
+  font-size: 10.5px;
+}
+
+/* Sheets --------------------------------------------------------------- */
+
+.mm-scrim {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: 52px 16px 16px;
+  background: oklch(0 0 0 / 0.45);
+  animation: mm-fade var(--mm-base) var(--mm-ease);
+}
+
+.mm-sheet {
+  overflow: hidden auto;
+  max-height: 100%;
+  border: 1px solid var(--mm-tint-12);
+  border-radius: 14px;
+  background: var(--mm-elevated-92);
+  backdrop-filter: blur(30px);
+  box-shadow: 0 24px 60px -20px oklch(0 0 0 / 0.8);
+  animation: mm-sheet var(--mm-base) var(--mm-ease-out);
+}
+
+.mm-sheet--approval {
+  width: min(420px, 92%);
+}
+
+.mm-sheet--familiar {
+  width: min(440px, 92%);
+}
+
+.mm-sheet--settings {
+  width: min(560px, 92%);
+}
+
+/* Approval sheet ------------------------------------------------------- */
+
+.mm-approval {
+  padding: 20px 22px 16px;
+  text-align: center;
+}
+
+.mm-approval-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: oklch(0.83 0.13 78 / 0.16);
+  color: var(--mm-warning);
+}
+
+.mm-approval-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mm-approval-body {
+  margin: 0 0 14px;
+  color: var(--mm-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.mm-facts {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid var(--mm-tint-9);
+  border-radius: 9px;
+  text-align: left;
+}
+
+.mm-fact {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 11px;
+  background: var(--mm-tint-4);
+}
+
+.mm-fact-label {
+  min-width: 104px;
+  color: var(--mm-text-muted);
+  font-size: 11.5px;
+}
+
+.mm-fact-value {
+  flex: 1;
+  font-size: 12px;
+}
+
+.mm-fact-value.is-good {
+  color: var(--mm-success);
+}
+
+.mm-link-button {
+  margin-bottom: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mm-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.mm-diff {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: oklch(0 0 0 / 0.3);
+  text-align: left;
+}
+
+.mm-diff-row {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 4px;
+  font-family: var(--mm-font-mono);
+  font-size: 11px;
+}
+
+.mm-diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mm-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-diff-add {
+  color: var(--mm-success);
+}
+
+.mm-diff-del {
+  color: var(--mm-danger);
+}
+
+.mm-approval-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.mm-quiet-button {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mm-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+}
+
+/* Familiar sheet ------------------------------------------------------- */
+
+.mm-familiar-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 18px 20px 14px;
+}
+
+.mm-familiar-who {
+  flex: 1;
+  min-width: 0;
+}
+
+.mm-familiar-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mm-pronouns {
+  color: var(--mm-text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.mm-familiar-sub {
+  margin: 2px 0 0;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}
+
+.mm-status-pill {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.mm-status-pill.mm-status--available {
+  background: oklch(0.78 0.14 158 / 0.16);
+  color: var(--mm-success);
+}
+
+.mm-status-pill.mm-status--working {
+  background: oklch(0.66 0.09 293 / 0.16);
+  color: var(--mm-info);
+}
+
+.mm-status-pill.mm-status--offline {
+  background: var(--mm-tint-12);
+  color: var(--mm-text-secondary);
+}
+
+.mm-familiar-purpose {
+  margin: 0;
+  padding: 0 20px 14px;
+  color: var(--mm-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.mm-familiar-block {
+  padding: 0 20px 14px;
+}
+
+.mm-permissions {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--mm-tint-9);
+  border-radius: 9px;
+}
+
+.mm-permission {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 11px;
+  background: var(--mm-tint-4);
+}
+
+.mm-permission-icon {
+  display: flex;
+  color: var(--mm-text-secondary);
+}
+
+.mm-permission-name {
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.mm-permission-state {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mm-permission-state--allowed {
+  background: oklch(0.78 0.14 158 / 0.14);
+  color: var(--mm-success);
+}
+
+.mm-permission-state--asks {
+  background: oklch(0.83 0.13 78 / 0.14);
+  color: var(--mm-warning);
+}
+
+.mm-permission-state--off {
+  background: var(--mm-tint-9);
+  color: var(--mm-text-muted);
+}
+
+.mm-promises {
+  display: grid;
+  gap: 6px;
+}
+
+.mm-promise {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+}
+
+.mm-promise-icon {
+  display: flex;
+  flex: none;
+}
+
+.mm-promise-icon.is-good {
+  color: var(--mm-success);
+}
+
+.mm-promise-icon.is-warning {
+  color: var(--mm-warning);
+}
+
+.mm-promise-text {
+  flex: 1;
+  color: var(--mm-text-secondary);
+  font-size: 12.5px;
+}
+
+.mm-promise-title {
+  color: var(--mm-text-primary);
+}
+
+.mm-familiar-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid var(--mm-line-soft);
+  background: var(--mm-tint-3);
+}
+
+.mm-familiar-owner {
+  flex: 1;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+.mm-familiar-foot .mm-button {
+  padding: 5px 13px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+/* Settings sheet ------------------------------------------------------- */
+
+.mm-settings-tabs {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--mm-line-soft);
+}
+
+.mm-settings-tab {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.mm-settings-tab span {
+  font-size: 11px;
+}
+
+.mm-settings-tab.is-active {
+  background: var(--mm-tint-12);
+  color: var(--mm-text-primary);
+}
+
+.mm-settings-body {
+  padding: 16px 20px 18px;
+}
+
+.mm-settings-group {
+  margin-bottom: 16px;
+}
+
+.mm-settings-rows {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--mm-tint-9);
+  border-radius: 10px;
+}
+
+.mm-settings-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--mm-tint-4);
+}
+
+.mm-settings-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.mm-settings-label {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.mm-settings-hint {
+  margin: 2px 0 0;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/*
+ * Flex rather than the button's default centring: a knob left to centre
+ * itself sits half-way along an off switch, which reads as neither state.
+ */
+.mm-switch {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: none;
+  width: 36px;
+  height: 21px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mm-tint-16);
+  cursor: pointer;
+}
+
+.mm-switch.is-on {
+  background: var(--mm-accent);
+}
+
+.mm-knob {
+  display: block;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--mm-text-secondary);
+  transform: translateX(0);
+  transition: transform var(--mm-fast) var(--mm-ease);
+}
+
+.mm-switch.is-on .mm-knob {
+  background: var(--mm-bg-panel);
+  transform: translateX(15px);
+}
+
+.mm-segment {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: oklch(0 0 0 / 0.26);
+}
+
+/*
+ * The group's name is already the setting's label in the row beside it, so
+ * the legend would read it out twice on screen. Clipped rather than
+ * display:none, which would take it out of the accessibility tree too.
+ */
+.mm-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mm-segment-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  border-radius: 6px;
+  color: var(--mm-text-muted);
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+/*
+ * The radio itself is the control; the pill is what you see. Sized to nothing
+ * rather than hidden, so it stays focusable, and the focus ring is put back on
+ * the pill around it.
+ */
+.mm-segment-option input {
+  width: 0;
+  height: 0;
+  margin: 0;
+  appearance: none;
+}
+
+.mm-segment-option:has(input:focus-visible) {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+}
+
+.mm-segment-option.is-active {
+  background: var(--mm-tint-16);
+  color: var(--mm-text-primary);
+}
+
+.mm-settings-value {
+  flex: none;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}
+
+.mm-settings-value.is-mono {
+  font-family: var(--mm-font-mono);
+  font-size: 11.5px;
+}
+
+.mm-menu-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+  padding: 4px 9px;
+  border: 1px solid var(--mm-line-strong);
+  border-radius: 7px;
+  background: var(--mm-tint-6);
+  color: var(--mm-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mm-settings-footnote {
+  margin: 0;
+  color: var(--mm-text-muted);
+  font-size: 11px;
+}
+
+/* Zoom and toast ------------------------------------------------------- */
+
+.mm-zoom {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 34px;
+  border: 0;
+  background: oklch(0 0 0 / 0.8);
+  cursor: zoom-out;
+  animation: mm-fade var(--mm-base) var(--mm-ease);
+}
+
+.mm-zoom-inner {
+  display: grid;
+  gap: 9px;
+  justify-items: center;
+}
+
+.mm-zoom-inner .mm-generated {
+  width: min(70vw, 760px);
+  border-radius: 14px;
+}
+
+.mm-zoom-caption {
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+}
+
+.mm-toast {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--mm-tint-12);
+  border-radius: 999px;
+  background: var(--mm-elevated-88);
+  backdrop-filter: blur(20px);
+  color: var(--mm-text-primary);
+  font-size: 12.5px;
+  transform: translateX(-50%);
+  animation: mm-fade var(--mm-fast) var(--mm-ease);
+}
+
+/* Motion --------------------------------------------------------------- */
+
+@keyframes mm-dots {
+  0%,
+  60%,
+  100% {
+    opacity: 0.28;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+@keyframes mm-sheet {
+  from {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes mm-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+ * Reduce motion twice over: once for the system preference, and once for the
+ * app's own switch. The switch's label promises it stops the typing dots and
+ * the sheet slide, and a preference that only prints a toast is a lie the
+ * settings pane tells about itself.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .mm-desktop *,
+  .mm-desktop *::before,
+  .mm-desktop *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.mm-desktop[data-reduce-motion="true"] *,
+.mm-desktop[data-reduce-motion="true"] *::before,
+.mm-desktop[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/*
+ * Narrow windows drop the fixed columns rather than crushing the transcript.
+ * The window frame itself goes too: below this width there is no desk left to
+ * sit the window on, and a 26px inset is just lost space.
+ */
+@media (max-width: 900px) {
+  .mm-desktop {
+    padding: 0;
+  }
+
+  .mm-window {
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .mm-sidebar {
+    width: 200px;
+  }
+
+  .mm-activity {
+    width: 220px;
+  }
+}
