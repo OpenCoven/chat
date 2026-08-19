@@ -1,6 +1,21 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
 import { canUseTauriCommands } from '../lib/desktop-host';
+import {
+  backfillNote,
+  CAVE_ANALYTICS_WINDOWS,
+  CAVE_FAMILIAR_ANALYTICS,
+  CAVE_FAMILIAR_CONTRACTS,
+  CAVE_FAMILIAR_RECORDS,
+  type CaveAnalyticsWindowKey,
+  type CaveContractReport,
+  type CaveExecutionSlice,
+  type CaveFamiliarAnalytics,
+  formatCost,
+  formatDuration,
+  formatSuccessRate,
+  formatTokens,
+} from './minimal-familiar-sdk';
 import { Icon, type IconName } from './minimal-icons';
 import {
   type AgentId,
@@ -280,6 +295,211 @@ function ProjectPicker({ onClear, onToggle, projects, scope }: ProjectPickerProp
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+// ── Familiar detail ─────────────────────────────────────────────────────────
+
+type FamiliarTab = 'overview' | 'contract' | 'activity';
+
+/**
+ * The Familiar Contract report, as Cave evaluates it.
+ *
+ * Violations and warnings are separate lists because they mean different
+ * things: a violation fails the contract, a warning does not. Collapsing them
+ * into one "issues" count would make a familiar that keeps no memory look
+ * identical to one that is malformed.
+ */
+function ContractPanel({ report }: { report: CaveContractReport }) {
+  const passed = report.properties.filter((property) => property.pass).length;
+
+  return (
+    <div className="mm-fam-panel">
+      <div className="mm-fam-verdict">
+        <span className={`mm-fam-verdict-mark ${report.pass ? 'is-pass' : 'is-fail'}`}>
+          <Icon name={report.pass ? 'check-circle-fill' : 'warning-circle-fill'} size={16} />
+        </span>
+        <span className="mm-fam-verdict-text">
+          <strong>{report.pass ? 'Contract met' : 'Contract not met'}</strong>
+          <span className="mm-fam-verdict-note">
+            {passed} of {report.properties.length} properties · spec {report.specVersion}
+          </span>
+        </span>
+      </div>
+
+      <div className="mm-fam-properties">
+        {report.properties.map((property) => (
+          <div key={property.property} className="mm-fam-property">
+            <span className={`mm-fam-dot ${property.pass ? 'is-pass' : 'is-fail'}`} />
+            <span className="mm-fam-property-name">{property.property}</span>
+            <span className="mm-fam-property-state">{property.pass ? 'Met' : 'Not met'}</span>
+          </div>
+        ))}
+      </div>
+
+      {report.violations.length > 0 ? (
+        <div className="mm-fam-notes">
+          <p className="mm-section-label">What is missing</p>
+          {report.violations.map((violation) => (
+            <p key={`${violation.file}:${violation.field}`} className="mm-fam-note is-violation">
+              <code>{violation.file}</code> {violation.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {report.warnings.length > 0 ? (
+        <div className="mm-fam-notes">
+          {/* Named as advice, because a warning does not fail the contract. */}
+          <p className="mm-section-label">Worth knowing</p>
+          {report.warnings.map((warning) => (
+            <p key={`${warning.file}:${warning.field}`} className="mm-fam-note">
+              <code>{warning.file}</code> {warning.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SliceRows({ label, slices }: { label: string; slices: CaveExecutionSlice[] }) {
+  if (slices.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mm-fam-slices">
+      <p className="mm-section-label">{label}</p>
+      {slices.map((slice) => (
+        <div key={slice.key} className="mm-fam-slice">
+          <span className="mm-fam-slice-name">{slice.label ?? slice.key}</span>
+          <span className="mm-fam-slice-bar" aria-hidden="true">
+            <span
+              className="mm-fam-slice-fill"
+              style={{ width: `${Math.round((slice.successRate ?? 0) * 100)}%` }}
+            />
+          </span>
+          <span className="mm-fam-slice-value">
+            {slice.successRate === null ? '—' : `${Math.round(slice.successRate * 100)}%`}
+            <span className="mm-fam-slice-count">{slice.attempts}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Execution analytics.
+ *
+ * The backfill state is rendered rather than hidden. A success rate drawn from
+ * a partial import is a different claim from one drawn from the whole history,
+ * and a reader who cannot tell them apart will believe the wrong one.
+ */
+function ActivityPanel({
+  analytics,
+  onWindow,
+  windowKey,
+}: {
+  analytics: CaveFamiliarAnalytics;
+  onWindow: (key: CaveAnalyticsWindowKey) => void;
+  windowKey: CaveAnalyticsWindowKey;
+}) {
+  const window = analytics.windows[windowKey];
+  const note = backfillNote(analytics.backfill);
+  const ran = (window?.attempts ?? 0) > 0;
+
+  return (
+    <div className="mm-fam-panel">
+      {/*
+       * Toggles, not tabs. These filter the figures below rather than swap
+       * between panels, and there is no tabpanel for them to control -- tab
+       * semantics would promise a relationship that does not exist and leave
+       * a screen reader looking for the panel each one owns.
+       */}
+      <fieldset className="mm-fam-windows" aria-label="Time window">
+        {CAVE_ANALYTICS_WINDOWS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={key === windowKey}
+            className={`mm-fam-window ${key === windowKey ? 'is-active' : ''}`}
+            onClick={() => onWindow(key)}
+          >
+            {key}
+          </button>
+        ))}
+      </fieldset>
+
+      {note === null ? null : <p className="mm-fam-backfill">{note}</p>}
+
+      {ran ? (
+        <>
+          <div className="mm-fam-metrics">
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">{formatSuccessRate(window)}</span>
+              <span className="mm-fam-metric-label">Completed</span>
+            </div>
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">{window?.attempts ?? 0}</span>
+              <span className="mm-fam-metric-label">Runs</span>
+            </div>
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">
+                {formatDuration(window?.medianDurationMs)}
+              </span>
+              <span className="mm-fam-metric-label">Median</span>
+            </div>
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">{formatDuration(window?.p95DurationMs)}</span>
+              <span className="mm-fam-metric-label">Slowest 5%</span>
+            </div>
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">{formatTokens(window?.totalTokens)}</span>
+              <span className="mm-fam-metric-label">Tokens</span>
+            </div>
+            <div className="mm-fam-metric">
+              <span className="mm-fam-metric-value">{formatCost(window?.costUsd)}</span>
+              <span className="mm-fam-metric-label">Cost</span>
+            </div>
+          </div>
+
+          <p className="mm-fam-tools">
+            {window?.toolCalls ?? 0} tool calls, {window?.toolFailures ?? 0} of them failed
+          </p>
+
+          <SliceRows label="By model" slices={window?.models ?? []} />
+          <SliceRows label="By harness" slices={window?.harnesses ?? []} />
+        </>
+      ) : (
+        /* Not "0% success": nothing ran, which is a different statement. */
+        <p className="mm-fam-empty">No runs in this window.</p>
+      )}
+
+      <div className="mm-fam-attempts">
+        <p className="mm-section-label">Recent runs</p>
+        {analytics.recentAttempts.length === 0 ? (
+          <p className="mm-fam-empty">Nothing has run yet.</p>
+        ) : (
+          analytics.recentAttempts.map((attempt) => (
+            <div key={attempt.id} className="mm-fam-attempt">
+              <span className={`mm-fam-dot is-${attempt.status}`} />
+              <span className="mm-fam-attempt-main">
+                <span className="mm-fam-attempt-model">
+                  {attempt.confirmedModel ?? attempt.requestedModel ?? attempt.harnessId}
+                </span>
+                <span className="mm-fam-attempt-meta">
+                  {attempt.harnessId} · {formatDuration(attempt.durationMs)} ·{' '}
+                  {formatTokens(attempt.totalTokens)} tokens · {formatCost(attempt.costUsd)}
+                </span>
+              </span>
+              <span className={`mm-fam-attempt-status is-${attempt.status}`}>{attempt.status}</span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -567,6 +787,8 @@ export function MinimalMacOS() {
    * everything rather than to a blank list.
    */
   const [scope, setScope] = useState<ReadonlySet<string | null>>(() => new Set());
+  const [familiarTab, setFamiliarTab] = useState<FamiliarTab>('overview');
+  const [analyticsWindow, setAnalyticsWindow] = useState<CaveAnalyticsWindowKey>('7d');
 
   const timers = useRef<number[]>([]);
   const toastTimer = useRef<number | null>(null);
@@ -577,6 +799,15 @@ export function MinimalMacOS() {
   const chat = MINIMAL_CHATS.find((entry) => entry.id === chatId) ?? MINIMAL_CHATS[0];
   const agent = chat === undefined ? undefined : MINIMAL_AGENTS[chat.agent];
   const familiar = MINIMAL_AGENTS[familiarId];
+  // Shaped exactly as @opencoven/cave-client returns them. See
+  // minimal-familiar-sdk.ts for why these are declared rather than imported.
+  const record = CAVE_FAMILIAR_RECORDS[familiarId] ?? {
+    id: familiarId,
+    displayName: familiarId,
+    role: '',
+  };
+  const contractReport = CAVE_FAMILIAR_CONTRACTS[familiarId];
+  const analytics = CAVE_FAMILIAR_ANALYTICS[familiarId];
 
   const messages: readonly MinimalMessage[] = [
     ...minimalTranscript(chatId, approval),
@@ -1362,48 +1593,118 @@ export function MinimalMacOS() {
                     </span>
                   </div>
 
-                  <p className="mm-familiar-purpose">{familiar.purpose}</p>
-
-                  <div className="mm-familiar-block">
-                    <p className="mm-section-label">What it can do here</p>
-                    <div className="mm-permissions">
-                      {familiar.permissions.map((permission) => (
-                        <div key={permission.name} className="mm-permission">
-                          <span className="mm-permission-icon">
-                            <Icon name={permission.icon} size={13} />
-                          </span>
-                          <span className="mm-permission-name">{permission.name}</span>
-                          <span
-                            className={`mm-permission-state mm-permission-state--${permissionTone(permission.state)}`}
-                          >
-                            {permission.state}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  {/*
+                   * Roster facts, straight off the record Cave serves. Absent
+                   * fields are omitted rather than rendered as "unknown": Echo
+                   * has never run, and a row saying so twice is noise.
+                   */}
+                  <div className="mm-familiar-meta">
+                    {record.activeSessions === undefined ? null : (
+                      <span>
+                        {record.activeSessions} active{' '}
+                        {record.activeSessions === 1 ? 'session' : 'sessions'}
+                      </span>
+                    )}
+                    {record.memoryFreshness === undefined ? null : (
+                      <span>Memory written {record.memoryFreshness}</span>
+                    )}
                   </div>
 
-                  <div className="mm-familiar-block">
-                    <p className="mm-section-label">Its promises</p>
-                    <div className="mm-promises">
-                      {familiar.contract.map((promise) => (
-                        <div key={promise.title} className="mm-promise">
-                          <span
-                            className={`mm-promise-icon ${promise.ok ? 'is-good' : 'is-warning'}`}
-                          >
-                            <Icon
-                              name={promise.ok ? 'check-circle-fill' : 'warning-circle-fill'}
-                              size={13}
-                            />
-                          </span>
-                          <span className="mm-promise-text">
-                            <span className="mm-promise-title">{promise.title}</span> —{' '}
-                            {promise.note}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="mm-fam-tabs" role="tablist" aria-label="Familiar detail">
+                    {(['overview', 'contract', 'activity'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        role="tab"
+                        aria-selected={familiarTab === tab}
+                        className={`mm-fam-tab ${familiarTab === tab ? 'is-active' : ''}`}
+                        onClick={() => setFamiliarTab(tab)}
+                      >
+                        {tab === 'overview'
+                          ? 'Overview'
+                          : tab === 'contract'
+                            ? 'Contract'
+                            : 'Activity'}
+                      </button>
+                    ))}
                   </div>
+
+                  {/*
+                   * Cave can serve a roster entry with no contract evaluated
+                   * and no history imported. Saying so is the answer; falling
+                   * back to an empty report would claim a contract had been
+                   * checked and found wanting.
+                   */}
+                  {familiarTab === 'contract' ? (
+                    contractReport === undefined ? (
+                      <p className="mm-fam-empty">
+                        No contract report has been read for this familiar.
+                      </p>
+                    ) : (
+                      <ContractPanel report={contractReport} />
+                    )
+                  ) : null}
+
+                  {familiarTab === 'activity' ? (
+                    analytics === undefined ? (
+                      <p className="mm-fam-empty">
+                        No run history has been read for this familiar.
+                      </p>
+                    ) : (
+                      <ActivityPanel
+                        analytics={analytics}
+                        windowKey={analyticsWindow}
+                        onWindow={setAnalyticsWindow}
+                      />
+                    )
+                  ) : null}
+
+                  {familiarTab === 'overview' ? (
+                    <>
+                      <p className="mm-familiar-purpose">{familiar.purpose}</p>
+
+                      <div className="mm-familiar-block">
+                        <p className="mm-section-label">What it can do here</p>
+                        <div className="mm-permissions">
+                          {familiar.permissions.map((permission) => (
+                            <div key={permission.name} className="mm-permission">
+                              <span className="mm-permission-icon">
+                                <Icon name={permission.icon} size={13} />
+                              </span>
+                              <span className="mm-permission-name">{permission.name}</span>
+                              <span
+                                className={`mm-permission-state mm-permission-state--${permissionTone(permission.state)}`}
+                              >
+                                {permission.state}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mm-familiar-block">
+                        <p className="mm-section-label">Its promises</p>
+                        <div className="mm-promises">
+                          {familiar.contract.map((promise) => (
+                            <div key={promise.title} className="mm-promise">
+                              <span
+                                className={`mm-promise-icon ${promise.ok ? 'is-good' : 'is-warning'}`}
+                              >
+                                <Icon
+                                  name={promise.ok ? 'check-circle-fill' : 'warning-circle-fill'}
+                                  size={13}
+                                />
+                              </span>
+                              <span className="mm-promise-text">
+                                <span className="mm-promise-title">{promise.title}</span> —{' '}
+                                {promise.note}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
 
                   <div className="mm-familiar-foot">
                     <span className="mm-familiar-owner">

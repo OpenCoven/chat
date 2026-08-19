@@ -18,19 +18,21 @@
 
 .mm-desktop {
   /*
-   * Surfaces: the near-blacks from the approved palette, which are violet
-   * rather than neutral. src/styles.css ships them as #07060b, #0d0a13 and
-   * #141020 -- hue 295 to 299 at chroma 0.013 to 0.032. These previously sat
-   * at chroma 0.006, which is grey with a rumour of violet in it, and read as
-   * grey against anything actually purple.
+   * Surfaces: neutral dark greys, straight from the brand's own tokens.
    *
-   * Darker as well as more chromatic, because translucent panels only look
-   * like glass when there is something dark behind them to be lit against.
+   * DESIGN.md is explicit -- "90% black / white, compose UI on neutral
+   * foundation" and "violet for identity ... not backgrounds". These had been
+   * pushed to a violet cast on the reasoning that the palette's near-blacks
+   * are violet; they are, in src/styles.css, which the brand file marks as
+   * legacy. The canonical surfaces have no chroma at all.
+   *
+   *   #080808 page   #0f0f0f panels   #141414 elevated   #1a1a1a hover
    */
-  --mm-bg-void: oklch(0.105 0.014 296);
-  --mm-bg-base: oklch(0.162 0.022 296);
-  --mm-bg-panel: oklch(0.145 0.019 296);
-  --mm-bg-elevated: oklch(0.208 0.03 296);
+  --mm-bg-void: oklch(0.134 0 0);
+  --mm-bg-panel: oklch(0.168 0 0);
+  --mm-bg-base: oklch(0.168 0 0);
+  --mm-bg-elevated: oklch(0.191 0 0);
+  --mm-bg-hover: oklch(0.218 0 0);
 
   /* Text. */
   --mm-text-primary: oklch(0.985 0 0);
@@ -38,75 +40,71 @@
   --mm-text-muted: oklch(0.985 0 0 / 0.72);
 
   /*
-   * Presence. The approved palette names two accents and gives each a job:
-   * violet for depth and selection, cyan for circuitry and focus. This is
-   * #a78bfa and #67e8f9 converted exactly, not approximated -- the previous
-   * violet sat at chroma 0.09 against the palette's 0.159, so it was the
-   * right hue at a little over half the saturation.
+   * Presence: #9A8ECD, the brand's canonical violet -- a muted lavender-grey,
+   * not the vivid #a78bfa this file briefly used. That value is the legacy
+   * one; the brand tokens list it as "was #A78BFF" and have moved on.
    *
-   * Reserving cyan for focus is what keeps the violet from having to mean
-   * both "selected" and "focused", which is how an accent stops reading as
-   * anything at all.
+   * Violet is for identity: labels, active states, accent borders. Not
+   * backgrounds, and not 90% of the surface.
    */
-  --mm-accent: oklch(0.709 0.159 293.5);
-  --mm-accent-bright: oklch(0.78 0.15 293.5);
-  --mm-accent-deep: oklch(0.265 0.066 303);
-  --mm-focus: oklch(0.865 0.115 207);
+  --mm-accent: oklch(0.681 0.092 292.5);
+  --mm-accent-bright: oklch(0.821 0.067 292.5);
+  --mm-accent-deep: oklch(0.572 0.093 293);
+  /* The brand's accent border, struck from the violet at low alpha. */
+  --mm-border-violet: oklch(0.681 0.092 292.5 / 0.18);
+  /* Focus is violet too. The brand ring is rgba(154,142,205,0.52). */
+  --mm-focus: oklch(0.681 0.092 292.5);
 
   /*
    * Status. Each one is paired with a word everywhere it appears -- "Asks
    * you", "Working", "Allowed" -- so none of these colours is ever the only
    * thing carrying the state.
    */
-  --mm-success: oklch(0.78 0.14 158);
+  --mm-success: oklch(0.756 0.208 147);
   --mm-warning: oklch(0.83 0.13 78);
-  --mm-danger: oklch(0.74 0.18 24);
+  --mm-danger: oklch(0.654 0.232 28.7);
   --mm-info: var(--mm-accent);
 
   /*
-   * Hairlines and tints. Previously struck from pure white, which is why the
-   * interface read grey no matter how violet the surfaces underneath it were:
-   * every border, every fill and every hover state was a neutral laid over
-   * the colour, and there are far more of those than there are accents.
+   * Hairlines and tints, struck from white.
    *
-   * Striking them from a violet-leaning light instead tints the whole
-   * interface at once, without a single rule having to name the accent. The
-   * alphas are unchanged, so nothing shifts in weight -- only in hue.
+   * These were briefly struck from a violet-leaning light, to tint the whole
+   * interface at once. That was the wrong instinct: the brand's own border
+   * tokens are rgba(255,255,255,...), and violet is reserved for identity
+   * rather than spread across every border and hover state. A separate
+   * --mm-border-violet exists for the places that are meant to be violet.
    */
-  --mm-veil: oklch(0.93 0.055 296);
+  --mm-veil: oklch(1 0 0);
 
-  --mm-line: oklch(0.93 0.055 296 / 0.1);
-  --mm-line-soft: oklch(0.93 0.055 296 / 0.08);
-  --mm-line-faint: oklch(0.93 0.055 296 / 0.07);
-  --mm-line-strong: oklch(0.93 0.055 296 / 0.14);
-  --mm-tint-3: oklch(0.93 0.055 296 / 0.03);
-  --mm-tint-4: oklch(0.93 0.055 296 / 0.04);
-  --mm-tint-5: oklch(0.93 0.055 296 / 0.05);
-  --mm-tint-6: oklch(0.93 0.055 296 / 0.06);
-  --mm-tint-7: oklch(0.93 0.055 296 / 0.07);
-  --mm-tint-8: oklch(0.93 0.055 296 / 0.08);
-  --mm-tint-9: oklch(0.93 0.055 296 / 0.09);
-  --mm-tint-11: oklch(0.93 0.055 296 / 0.11);
-  --mm-tint-12: oklch(0.93 0.055 296 / 0.12);
-  --mm-tint-16: oklch(0.93 0.055 296 / 0.16);
-  --mm-tint-26: oklch(0.93 0.055 296 / 0.26);
+  --mm-line: oklch(1 0 0 / 0.1);
+  --mm-line-soft: oklch(1 0 0 / 0.08);
+  --mm-line-faint: oklch(1 0 0 / 0.06);
+  --mm-line-strong: oklch(1 0 0 / 0.14);
+  --mm-tint-3: oklch(1 0 0 / 0.03);
+  --mm-tint-4: oklch(1 0 0 / 0.04);
+  --mm-tint-5: oklch(1 0 0 / 0.05);
+  --mm-tint-6: oklch(1 0 0 / 0.06);
+  --mm-tint-7: oklch(1 0 0 / 0.07);
+  --mm-tint-8: oklch(1 0 0 / 0.08);
+  --mm-tint-9: oklch(1 0 0 / 0.09);
+  --mm-tint-11: oklch(1 0 0 / 0.11);
+  --mm-tint-12: oklch(1 0 0 / 0.12);
+  --mm-tint-16: oklch(1 0 0 / 0.16);
+  --mm-tint-26: oklch(1 0 0 / 0.26);
 
   /*
-   * Glass. The panels sit over the window, not over the desktop.
+   * Panels, solid.
    *
-   * Lower alphas than before, because a panel at 0.78 opacity over a nearly
-   * identical background is not glass, it is a flat fill paying the cost of a
-   * blur. These let the violet bloom behind them actually come through.
+   * These were translucent, blurred and lit with a specular edge -- glass. The
+   * brand does not allow it: "No blur/glass -- no backdrop-filter; panels are
+   * solid surface colors." The names are kept so the call sites do not all
+   * churn, but the values no longer carry an alpha channel.
    */
-  --mm-panel-78: oklch(0.145 0.019 296 / 0.66);
-  --mm-panel-70: oklch(0.145 0.019 296 / 0.56);
-  --mm-panel-55: oklch(0.145 0.019 296 / 0.42);
-  --mm-elevated-92: oklch(0.208 0.03 296 / 0.84);
-  --mm-elevated-88: oklch(0.208 0.03 296 / 0.76);
-
-  /* The specular top edge that makes a translucent panel read as a solid. */
-  --mm-specular: oklch(0.95 0.03 296 / 0.1);
-  --mm-glass-blur: blur(34px) saturate(180%);
+  --mm-panel-78: oklch(0.168 0 0);
+  --mm-panel-70: oklch(0.168 0 0);
+  --mm-panel-55: oklch(0.168 0 0);
+  --mm-elevated-92: oklch(0.191 0 0);
+  --mm-elevated-88: oklch(0.191 0 0);
 
   /*
    * None of these faces is bundled, so the system face is what actually
@@ -119,11 +117,14 @@
 
   /*
    * The reading measure, shared by the transcript and the composer so the two
-   * stay in the same column. Widened from 680px: the window is 1180 wide and
-   * the sidebar takes 236 of it, so 680 left the conversation floating in the
-   * middle of a much larger main area.
+   * stay in the same column.
+   *
+   * 680 -> 860 -> 1720. The last step only does anything because the window
+   * cap moved with it: at 1180 wide the main area is about 896px, so 860 was
+   * already filling it and raising the measure alone would have changed
+   * nothing visible.
    */
-  --mm-measure: 860px;
+  --mm-measure: 1720px;
 
   --mm-fast: 120ms;
   --mm-base: 180ms;
@@ -136,14 +137,8 @@
   padding: 26px;
   overflow: hidden;
 
-  /*
-   * Two soft lights, above and below, so the window has somewhere to sit.
-   * Violet above and a cooler violet below, at the chroma the rest of the
-   * surface now uses -- at the old 0.03 they read as grey haze against it.
-   */
-  background:
-    radial-gradient(90% 70% at 50% -12%, oklch(0.3 0.075 295), transparent 64%),
-    radial-gradient(120% 90% at 50% 115%, oklch(0.24 0.06 275), transparent 60%), var(--mm-bg-void);
+  /* Flat, for the same reason as the window: no gradients. */
+  background: var(--mm-bg-void);
   color: var(--mm-text-primary);
   font-family: var(--mm-font-ui);
   font-size: 13px;
@@ -156,21 +151,18 @@
 }
 
 /*
- * Focus is cyan, and selection is violet, because the approved direction
- * gives each accent a job: "cyan circuitry and focus accents, violet depth
- * and selection states".
+ * Focus is violet, which is where this file started.
  *
- * This ring was violet, on the reasoning that cyan belonged to the scaffold
- * and this surface should use its own accent. That holds right up until
- * violet is also the selection colour, which it now is -- at which point the
- * focused row and the selected row are the same colour and the keyboard user
- * is the one who pays for it. Two accents, two meanings.
+ * It was moved to cyan on the reasoning that violet had become the selection
+ * colour and one accent cannot mean two things. The brand settles it the other
+ * way: there is one accent, #9A8ECD, and its focus ring is that violet. Focus
+ * and selection are told apart by the ring's offset and weight rather than by
+ * hue, which is how the platform does it too.
  */
 .mm-desktop :focus-visible {
   outline: 2px solid var(--mm-focus);
   outline-offset: 2px;
   border-radius: 4px;
-  box-shadow: 0 0 0 4px oklch(0.865 0.115 207 / 0.16);
 }
 
 .mm-icon {
@@ -185,27 +177,22 @@
   display: flex;
   overflow: hidden;
   width: 100%;
-  max-width: 1180px;
+  max-width: 2360px;
   height: 100%;
   max-height: 780px;
   border: 1px solid var(--mm-line);
   border-radius: 12px;
 
   /*
-   * The bloom the glass panels are lit against: two violets and a trace of
-   * cyan, placed off the corners so they fall off before they reach any text.
+   * Flat, because the brand's rule on gradients has no exceptions.
    *
-   * Painted as this element's own background rather than as a ::before. A
-   * pseudo-element here is a generated child of a flex container, and giving
-   * it a negative inset dragged the real children up with it -- the sidebar
-   * and the transcript both ended up 312px above the window. A background
-   * needs no box, no z-index, and cannot move anything.
+   * This carried a violet bloom that the glass panels were lit against. It
+   * looked good and it is gone: DESIGN.md says "No gradients. Ever." and
+   * "violet for identity ... not backgrounds", and a lit violet backdrop is
+   * both. The panels now read as glass against a flat surface, which is less
+   * dramatic and is what the brand asks for.
    */
-  background:
-    radial-gradient(72% 56% at 10% -10%, oklch(0.5 0.16 295 / 0.34), transparent 70%),
-    radial-gradient(66% 56% at 94% 106%, oklch(0.42 0.13 288 / 0.3), transparent 68%),
-    radial-gradient(42% 36% at 80% -6%, oklch(0.62 0.1 210 / 0.1), transparent 72%),
-    var(--mm-bg-base);
+  background: var(--mm-bg-base);
   box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.85);
 }
 
@@ -251,7 +238,6 @@
   width: 236px;
   border-right: 1px solid var(--mm-line-soft);
   background: var(--mm-panel-78);
-  backdrop-filter: blur(30px) saturate(160%);
 }
 
 .mm-sidebar-top {
@@ -430,20 +416,13 @@
   min-height: 0;
 
   /*
-   * The third light, and it has to live here rather than on .mm-window: this
-   * panel is opaque, so the window's bloom never reached the transcript at
-   * all. That is why the middle of the surface read flat while the sidebar
-   * and the corners looked like glass -- the sidebar is translucent and the
-   * corners are where the window's own lights already were.
-   *
-   * Centred on the composer and rising from below it, so the translucent
-   * composer box has something behind it to be lit by. It is placed off the
-   * bottom edge and falls off well before the transcript, because a light
-   * bright enough to reach the messages would be competing with them.
+   * Flat. This carried a violet light behind the composer, added so the
+   * translucent composer box had something to be lit by. It goes for the same
+   * reason as the window's bloom: the brand's rule on gradients has no
+   * exceptions, and a violet wash behind the transcript is violet used as a
+   * background.
    */
-  background:
-    radial-gradient(54% 38% at 50% 103%, oklch(0.52 0.16 295 / 0.32), transparent 72%),
-    var(--mm-bg-base);
+  background: var(--mm-bg-base);
 }
 
 .mm-header {
@@ -453,7 +432,6 @@
   padding: 0 14px;
   border-bottom: 1px solid var(--mm-line-faint);
   background: var(--mm-panel-55);
-  backdrop-filter: blur(24px);
 }
 
 .mm-icon-button {
@@ -1015,7 +993,6 @@
   width: 264px;
   border-left: 1px solid var(--mm-line-soft);
   background: var(--mm-panel-70);
-  backdrop-filter: blur(30px);
 }
 
 .mm-activity-head {
@@ -1086,7 +1063,6 @@
   border: 1px solid var(--mm-tint-12);
   border-radius: 14px;
   background: var(--mm-elevated-92);
-  backdrop-filter: blur(30px);
   box-shadow: 0 24px 60px -20px oklch(0 0 0 / 0.8);
   animation: mm-sheet var(--mm-base) var(--mm-ease-out);
 }
@@ -1641,7 +1617,6 @@
   border: 1px solid var(--mm-tint-12);
   border-radius: 999px;
   background: var(--mm-elevated-88);
-  backdrop-filter: blur(20px);
   color: var(--mm-text-primary);
   font-size: 12.5px;
   transform: translateX(-50%);
@@ -1766,53 +1741,20 @@
 }
 
 /* ==========================================================================
- * Liquid glass.
+ * Surfaces.
  *
- * Three things make a translucent panel read as a physical material rather
- * than as a lowered opacity:
+ * This section built glass: translucent panels over a violet bloom, lit by an
+ * inset specular edge and blurred with backdrop-filter. All of it is gone.
+ * DESIGN.md rules it out three separate ways -- no blur or glass, no
+ * gradients, no glow shadows -- and panels are solid surface colours.
  *
- *   something behind it worth seeing   -- the violet bloom below,
- *   a specular edge where light lands  -- the inset top hairline,
- *   and saturation through the blur    -- backdrop-filter's saturate().
- *
- * Without the first, the blur has nothing to do and the panel looks flat.
- * Without the second, the panel has no top and floats. The order matters more
- * than the numbers do.
+ * What is left is the part that survives those rules: flat fills separated by
+ * hairlines, and state carried by border-colour.
  * ========================================================================== */
-
-/*
- * The bloom lives on .mm-window's own background, next to the reasoning for
- * it. It is not a pseudo-element here: inside a flex container that is a
- * generated child, and a negative inset on it moves the real children.
- *
- * In the standalone comp the bloom sits behind the simulated window; in the
- * app it is the only atmosphere there is, since the desktop the design used
- * to sit on is gone.
- */
-
-/*
- * Panels. The specular edge is an inset hairline at the top only: light comes
- * from above, so an even border would read as a stroke rather than as a lit
- * surface.
- */
-.mm-sidebar,
-.mm-header,
-.mm-composer-box,
-.mm-activity {
-  backdrop-filter: var(--mm-glass-blur);
-  -webkit-backdrop-filter: var(--mm-glass-blur);
-}
-
-.mm-sidebar,
-.mm-header {
-  box-shadow: inset 0 1px 0 var(--mm-specular);
-}
 
 .mm-composer-box {
   border-color: var(--mm-line);
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 18px 48px -26px oklch(0.1 0.05 296 / 0.9);
+  box-shadow: 0 18px 48px -26px oklch(0 0 0 / 0.55);
 }
 
 /*
@@ -1822,15 +1764,10 @@
  */
 .mm-row.is-active {
   position: relative;
-  border: 1px solid oklch(0.709 0.159 293.5 / 0.28);
-  background: linear-gradient(
-    180deg,
-    oklch(0.709 0.159 293.5 / 0.22),
-    oklch(0.709 0.159 293.5 / 0.12)
-  );
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 6px 18px -10px oklch(0.709 0.159 293.5 / 0.55);
+  /* Flat fill and an accent border. The brand forbids gradients outright and
+     asks for border-colour to carry state rather than a glow. */
+  border: 1px solid oklch(0.681 0.092 292.5 / 0.42);
+  background: oklch(0.681 0.092 292.5 / 0.14);
 }
 
 .mm-row.is-active::before {
@@ -1846,20 +1783,13 @@
 }
 
 .mm-row:not(.is-active):hover {
-  background: oklch(0.709 0.159 293.5 / 0.09);
+  background: oklch(0.681 0.092 292.5 / 0.09);
 }
 
 /* The user's own words, in the app's own colour. */
 .mm-bubble {
-  border: 1px solid oklch(0.709 0.159 293.5 / 0.22);
-  background: linear-gradient(
-    180deg,
-    oklch(0.709 0.159 293.5 / 0.26),
-    oklch(0.709 0.159 293.5 / 0.14)
-  );
-  box-shadow: inset 0 1px 0 var(--mm-specular);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--mm-border-violet);
+  background: oklch(0.681 0.092 292.5 / 0.16);
 }
 
 /*
@@ -1983,14 +1913,14 @@
  * colour, which is what ties the small control to the large consequence.
  */
 .mm-composer-box.is-plan .mm-mode.is-active {
-  border-color: oklch(0.709 0.159 293.5 / 0.55);
-  background: oklch(0.709 0.159 293.5 / 0.18);
+  border-color: oklch(0.681 0.092 292.5 / 0.55);
+  background: oklch(0.681 0.092 292.5 / 0.18);
   color: var(--mm-text-primary);
 }
 
 .mm-composer-box.is-ask .mm-mode.is-active {
-  border-color: oklch(0.865 0.115 207 / 0.5);
-  background: oklch(0.865 0.115 207 / 0.15);
+  border-color: var(--mm-line-strong);
+  background: var(--mm-tint-8);
   color: var(--mm-text-primary);
 }
 
@@ -2001,36 +1931,24 @@
 }
 
 .mm-composer-box.is-plan {
-  border-color: oklch(0.709 0.159 293.5 / 0.42);
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 0 0 1px oklch(0.709 0.159 293.5 / 0.16),
-    0 14px 44px -20px oklch(0.709 0.159 293.5 / 0.5);
+  border-color: oklch(0.681 0.092 292.5 / 0.42);
 }
 
 .mm-composer-box.is-ask {
-  border-color: oklch(0.865 0.115 207 / 0.38);
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 0 0 1px oklch(0.865 0.115 207 / 0.14),
-    0 14px 44px -20px oklch(0.865 0.115 207 / 0.4);
+  border-color: var(--mm-line-strong);
 }
 
 .mm-composer-box.is-do {
   border-color: oklch(0.83 0.13 78 / 0.42);
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 0 0 1px oklch(0.83 0.13 78 / 0.16),
-    0 14px 44px -20px oklch(0.83 0.13 78 / 0.45);
 }
 
 /* The legend sits on the frame, so it takes the frame's colour with it. */
 .mm-composer-box.is-plan .mm-notch {
-  border-color: oklch(0.709 0.159 293.5 / 0.42);
+  border-color: oklch(0.681 0.092 292.5 / 0.42);
 }
 
 .mm-composer-box.is-ask .mm-notch {
-  border-color: oklch(0.865 0.115 207 / 0.38);
+  border-color: var(--mm-line-strong);
 }
 
 .mm-composer-box.is-do .mm-notch {
@@ -2107,8 +2025,8 @@
 
 /* Filtered is a state worth seeing without opening the menu. */
 .mm-picker-button.is-filtered {
-  border-color: oklch(0.709 0.159 293.5 / 0.32);
-  background: oklch(0.709 0.159 293.5 / 0.14);
+  border-color: oklch(0.681 0.092 292.5 / 0.32);
+  background: oklch(0.681 0.092 292.5 / 0.14);
   color: var(--mm-text-primary);
 }
 
@@ -2140,11 +2058,7 @@
   border: 1px solid var(--mm-line);
   border-radius: 10px;
   background: var(--mm-elevated-92);
-  box-shadow:
-    inset 0 1px 0 var(--mm-specular),
-    0 18px 44px -18px oklch(0.08 0.04 296 / 0.9);
-  backdrop-filter: var(--mm-glass-blur);
-  -webkit-backdrop-filter: var(--mm-glass-blur);
+  box-shadow: 0 18px 44px -18px oklch(0 0 0 / 0.6);
 }
 
 .mm-picker-item {
@@ -2201,4 +2115,372 @@
   padding: 6px 9px 8px;
   color: var(--mm-text-secondary);
   font-size: 12px;
+}
+
+/* ==========================================================================
+ * Familiar detail.
+ *
+ * Three tabs, because the sheet answers three different questions: who this is
+ * and what it may do, whether it keeps its contract, and what it has actually
+ * been doing. Stacking all of it would bury the contract under the numbers,
+ * and the contract is the part that says whether the numbers can be trusted.
+ * ========================================================================== */
+
+.mm-familiar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: -4px 0 12px;
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+}
+
+.mm-fam-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  padding: 2px;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 999px;
+  background: var(--mm-tint-3);
+}
+
+.mm-fam-tab {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.mm-fam-tab:hover {
+  color: var(--mm-text-primary);
+}
+
+.mm-fam-tab.is-active {
+  border-color: oklch(0.681 0.092 292.5 / 0.4);
+  background: oklch(0.681 0.092 292.5 / 0.18);
+  color: var(--mm-text-primary);
+  font-weight: 500;
+}
+
+.mm-fam-panel {
+  display: grid;
+  gap: 16px;
+}
+
+/* Verdict ------------------------------------------------------------- */
+
+.mm-fam-verdict {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 13px;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 10px;
+  background: var(--mm-tint-4);
+}
+
+.mm-fam-verdict-mark.is-pass {
+  color: var(--mm-success);
+}
+
+.mm-fam-verdict-mark.is-fail {
+  color: var(--mm-warning);
+}
+
+.mm-fam-verdict-text {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.mm-fam-verdict-note {
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+}
+
+.mm-fam-properties {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--mm-line-faint);
+  border-radius: 10px;
+  background: var(--mm-line-faint);
+}
+
+.mm-fam-property {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--mm-bg-panel);
+  font-size: 12.5px;
+}
+
+.mm-fam-property-name {
+  flex: 1;
+}
+
+.mm-fam-property-state {
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+}
+
+/*
+ * One dot, four meanings, and never the only thing saying which: every row
+ * that uses it also carries the word.
+ */
+.mm-fam-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mm-text-secondary);
+}
+
+.mm-fam-dot.is-pass,
+.mm-fam-dot.is-completed {
+  background: var(--mm-success);
+}
+
+.mm-fam-dot.is-fail,
+.mm-fam-dot.is-failed {
+  background: var(--mm-danger);
+}
+
+.mm-fam-dot.is-cancelled {
+  background: var(--mm-text-muted);
+}
+
+.mm-fam-notes {
+  display: grid;
+  gap: 6px;
+}
+
+.mm-fam-note {
+  margin: 0;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mm-fam-note.is-violation {
+  color: var(--mm-text-primary);
+}
+
+.mm-fam-note code {
+  margin-right: 4px;
+  color: var(--mm-accent);
+  font-family: var(--mm-font-mono);
+  font-size: 11px;
+}
+
+/* Activity ------------------------------------------------------------ */
+
+.mm-fam-windows {
+  /* A fieldset, so the group is named. Its default chrome is not wanted. */
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mm-fam-window {
+  padding: 3px 11px;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.mm-fam-window.is-active {
+  border-color: oklch(0.681 0.092 292.5 / 0.42);
+  background: oklch(0.681 0.092 292.5 / 0.18);
+  color: var(--mm-text-primary);
+}
+
+/*
+ * The caveat on every number beside it. Amber rather than red: an incomplete
+ * import is not a fault, it is a reason to read the figures as provisional.
+ */
+.mm-fam-backfill {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid oklch(0.83 0.13 78 / 0.32);
+  border-radius: 9px;
+  background: oklch(0.83 0.13 78 / 0.1);
+  color: var(--mm-text-primary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.mm-fam-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--mm-line-faint);
+  border-radius: 10px;
+  background: var(--mm-line-faint);
+}
+
+.mm-fam-metric {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  background: var(--mm-bg-panel);
+}
+
+.mm-fam-metric-value {
+  font-size: 17px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.mm-fam-metric-label {
+  color: var(--mm-text-secondary);
+  font-size: 11px;
+}
+
+.mm-fam-tools {
+  margin: 0;
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+}
+
+.mm-fam-slices {
+  display: grid;
+  gap: 7px;
+}
+
+.mm-fam-slice {
+  display: grid;
+  grid-template-columns: 1fr 80px auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.mm-fam-slice-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-fam-slice-bar {
+  overflow: hidden;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--mm-tint-8);
+}
+
+.mm-fam-slice-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--mm-accent);
+}
+
+.mm-fam-slice-value {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  color: var(--mm-text-secondary);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-fam-slice-count {
+  color: var(--mm-text-muted);
+  font-size: 10.5px;
+}
+
+.mm-fam-attempts {
+  display: grid;
+  gap: 7px;
+}
+
+.mm-fam-attempt {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 11px;
+  border: 1px solid var(--mm-line-faint);
+  border-radius: 9px;
+  background: var(--mm-tint-3);
+}
+
+.mm-fam-attempt-main {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mm-fam-attempt-model {
+  font-family: var(--mm-font-mono);
+  font-size: 11.5px;
+}
+
+.mm-fam-attempt-meta {
+  overflow: hidden;
+  color: var(--mm-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-fam-attempt-status {
+  flex: none;
+  color: var(--mm-text-secondary);
+  font-size: 11px;
+}
+
+.mm-fam-attempt-status.is-failed {
+  color: var(--mm-danger);
+}
+
+.mm-fam-empty {
+  margin: 0;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+}
+
+/*
+ * The composer's own edge is its focus indicator.
+ *
+ * The textarea already set `outline: none`, but `.mm-desktop :focus-visible`
+ * out-specifies it -- (0,2,0) against (0,1,1) -- so the ring won and the field
+ * drew a second border inside a box that already had one. This rule is
+ * (0,2,1), which is the smallest thing that beats it.
+ *
+ * The focus is not removed, only moved: the frame brightens instead, which is
+ * also what the brand asks for -- state carried by border-colour rather than
+ * by a ring or a glow.
+ */
+.mm-composer-box textarea:focus-visible {
+  outline: none;
+}
+
+.mm-composer-box.is-plan:focus-within {
+  border-color: oklch(0.681 0.092 292.5 / 0.75);
+}
+
+.mm-composer-box.is-ask:focus-within {
+  border-color: var(--mm-tint-26);
+}
+
+.mm-composer-box.is-do:focus-within {
+  border-color: oklch(0.83 0.13 78 / 0.75);
 }

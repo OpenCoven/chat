@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-
+import { formatDuration, formatSuccessRate } from './minimal-familiar-sdk';
 import { MinimalMacOS } from './minimal-macos';
 import { chatInScope, MINIMAL_CHATS, projectsOf } from './minimal-mock';
 
@@ -429,5 +429,109 @@ describe('Minimal (macOS) surface', () => {
 
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'All projects' }));
     expect(chatTitles().join(' ')).toContain('Release note draft');
+  });
+
+  it('carries seconds into minutes rather than rendering sixty of them', () => {
+    // Rounding the minutes and the seconds independently lost the carry, so
+    // 119,900ms rendered as "2m 60s".
+    expect(formatDuration(119_900)).toBe('2m 0s');
+    expect(formatDuration(119_499)).toBe('1m 59s');
+    expect(formatDuration(90_000)).toBe('1m 30s');
+    expect(formatDuration(undefined)).toBe('—');
+  });
+
+  it('reports an unknown success rate as unknown, not as zero', () => {
+    // A rate over no attempts is not nought per cent. Zero would read as an
+    // accusation about a familiar that has simply never run.
+    expect(
+      formatSuccessRate({
+        attempts: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        successRate: null,
+        toolCalls: 0,
+        toolFailures: 0,
+        models: [],
+        harnesses: [],
+      }),
+    ).toBe('—');
+    expect(formatSuccessRate(undefined)).toBe('—');
+  });
+
+  it('shows the contract report, keeping violations and warnings apart', () => {
+    render(<MinimalMacOS />);
+    openChat(/^Echo/);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Contract' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'Echo' });
+
+    expect(within(sheet).getByText('Contract not met')).toBeVisible();
+    expect(within(sheet).getByText(/4 of 5 properties/)).toBeVisible();
+    expect(within(sheet).getByText('Persistent Memory')).toBeVisible();
+    // A violation is what failed it; a warning would not have.
+    expect(within(sheet).getByText('What is missing')).toBeVisible();
+    expect(within(sheet).getByText(/MEMORY.md is absent/)).toBeVisible();
+  });
+
+  it('names a warning as advice rather than as a failure', () => {
+    render(<MinimalMacOS />);
+    openChat(/^Astra/);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Contract' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'Astra' });
+
+    expect(within(sheet).getByText('Contract met')).toBeVisible();
+    expect(within(sheet).getByText('Worth knowing')).toBeVisible();
+    expect(within(sheet).queryByText('What is missing')).not.toBeInTheDocument();
+  });
+
+  it('shows execution analytics, and says when the history is partial', () => {
+    render(<MinimalMacOS />);
+    openChat(/^Cody/);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'Cody' });
+
+    expect(within(sheet).getByText('85%')).toBeVisible();
+    expect(within(sheet).getByText('48')).toBeVisible();
+    // The caveat on every number beside it.
+    expect(within(sheet).getByText(/402 runs, 168 still to read/)).toBeVisible();
+    expect(within(sheet).getByText('By model')).toBeVisible();
+  });
+
+  it('switches the analytics window without pretending to be tabs', () => {
+    render(<MinimalMacOS />);
+    openChat(/^Cody/);
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'Cody' });
+    const week = within(sheet).getByRole('button', { name: '7d' });
+    const all = within(sheet).getByRole('button', { name: 'all' });
+
+    // Toggles, not tabs: they filter the figures rather than swap panels.
+    expect(week).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(all);
+
+    expect(all).toHaveAttribute('aria-pressed', 'true');
+    expect(week).toHaveAttribute('aria-pressed', 'false');
+    expect(within(sheet).getByText('917')).toBeVisible();
+  });
+
+  it('says nothing ran rather than showing a zero success rate', () => {
+    render(<MinimalMacOS />);
+    openChat(/^Echo/);
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'Echo' });
+
+    expect(within(sheet).getByText('No runs in this window.')).toBeVisible();
+    expect(within(sheet).getByText('Nothing has run yet.')).toBeVisible();
+    expect(within(sheet).getByText(/No run history has been imported yet/)).toBeVisible();
+    expect(within(sheet).queryByText('0%')).not.toBeInTheDocument();
   });
 });
