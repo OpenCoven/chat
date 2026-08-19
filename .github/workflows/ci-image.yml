@@ -99,6 +99,13 @@ jobs:
           if docker pull --quiet "ghcr.io/opencoven/chat-ci@${pinned}" >/dev/null 2>&1; then
             old_packages=$(packages "ghcr.io/opencoven/chat-ci@${pinned}")
             old_base=$(docker image inspect --format '{{index .Config.Labels "io.opencoven.base-digest"}}' "ghcr.io/opencoven/chat-ci@${pinned}")
+
+            # An image built before the label existed reports nothing here.
+            # Saying so beats reporting that the base moved from "" to a
+            # digest, which describes a change that did not happen.
+            if [ -z "${old_base}" ] || [ "${old_base}" = "<no value>" ]; then
+              old_base=unrecorded
+            fi
           else
             # The pinned image is gone. That is itself worth a pull request,
             # because CI is pinned to something that may stop resolving.
@@ -117,7 +124,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             {
               echo "reason<<REASON"
-              [ "${old_base}" != "${BASE_DIGEST}" ] && echo "- base image moved from \`${old_base}\` to \`${BASE_DIGEST}\`"
+              if [ "${old_base}" = unrecorded ]; then
+                echo "- the pinned image predates the base-digest label, so there is nothing to compare it against"
+              elif [ "${old_base}" != "${BASE_DIGEST}" ]; then
+                echo "- base image moved from \`${old_base}\` to \`${BASE_DIGEST}\`"
+              fi
               [ "${old_packages}" != "${new_packages}" ] && echo "- installed Debian package versions changed"
               echo "REASON"
             } >> "$GITHUB_OUTPUT"
@@ -173,8 +184,12 @@ jobs:
       # it, so the check is that nothing needed fetching rather than that the
       # command succeeded.
       - name: Assert the browser came from the image
+        # POSIX sh, not bash. A container job's default shell is `sh -e`, and
+        # `set -o pipefail` is not a POSIX option, so the bash spelling used
+        # elsewhere in this file fails here with "Illegal option -o pipefail".
+        # There is no pipeline in this step whose status needs preserving.
         run: |
-          set -euo pipefail
+          set -eu
           output=$(pnpm exec playwright install chromium 2>&1)
           echo "${output}"
 
