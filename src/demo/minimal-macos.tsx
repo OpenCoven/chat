@@ -413,20 +413,25 @@ function ActivityPanel({
 
   return (
     <div className="mm-fam-panel">
-      <div className="mm-fam-windows" role="tablist" aria-label="Time window">
+      {/*
+       * Toggles, not tabs. These filter the figures below rather than swap
+       * between panels, and there is no tabpanel for them to control -- tab
+       * semantics would promise a relationship that does not exist and leave
+       * a screen reader looking for the panel each one owns.
+       */}
+      <fieldset className="mm-fam-windows" aria-label="Time window">
         {CAVE_ANALYTICS_WINDOWS.map((key) => (
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={key === windowKey}
+            aria-pressed={key === windowKey}
             className={`mm-fam-window ${key === windowKey ? 'is-active' : ''}`}
             onClick={() => onWindow(key)}
           >
             {key}
           </button>
         ))}
-      </div>
+      </fieldset>
 
       {note === null ? null : <p className="mm-fam-backfill">{note}</p>}
 

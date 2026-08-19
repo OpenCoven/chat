@@ -501,7 +501,11 @@ export function formatDuration(ms: number | undefined): string {
     return `${(ms / 1000).toFixed(1)}s`;
   }
 
-  return `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  // Round once, to whole seconds, then split. Rounding the minutes and the
+  // seconds independently loses the carry: 119,900ms became "2m 60s".
+  const totalSeconds = Math.round(ms / 1000);
+
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
 }
 
 export function formatTokens(total: number | undefined): string {

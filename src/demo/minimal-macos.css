@@ -2283,8 +2283,13 @@
 /* Activity ------------------------------------------------------------ */
 
 .mm-fam-windows {
+  /* A fieldset, so the group is named. Its default chrome is not wanted. */
   display: flex;
   gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .mm-fam-window {
