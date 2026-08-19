@@ -17,18 +17,41 @@
  */
 
 .mm-desktop {
-  /* Surfaces. */
-  --mm-bg-base: oklch(0.24 0.006 291);
-  --mm-bg-panel: oklch(0.22 0.006 291);
-  --mm-bg-elevated: oklch(0.29 0.008 291);
+  /*
+   * Surfaces: the near-blacks from the approved palette, which are violet
+   * rather than neutral. src/styles.css ships them as #07060b, #0d0a13 and
+   * #141020 -- hue 295 to 299 at chroma 0.013 to 0.032. These previously sat
+   * at chroma 0.006, which is grey with a rumour of violet in it, and read as
+   * grey against anything actually purple.
+   *
+   * Darker as well as more chromatic, because translucent panels only look
+   * like glass when there is something dark behind them to be lit against.
+   */
+  --mm-bg-void: oklch(0.105 0.014 296);
+  --mm-bg-base: oklch(0.162 0.022 296);
+  --mm-bg-panel: oklch(0.145 0.019 296);
+  --mm-bg-elevated: oklch(0.208 0.03 296);
 
   /* Text. */
   --mm-text-primary: oklch(0.985 0 0);
   --mm-text-secondary: oklch(0.66 0.01 291);
   --mm-text-muted: oklch(0.985 0 0 / 0.72);
 
-  /* Presence: the one accent, reserved for the app's own voice. */
-  --mm-accent: oklch(0.66 0.09 293);
+  /*
+   * Presence. The approved palette names two accents and gives each a job:
+   * violet for depth and selection, cyan for circuitry and focus. This is
+   * #a78bfa and #67e8f9 converted exactly, not approximated -- the previous
+   * violet sat at chroma 0.09 against the palette's 0.159, so it was the
+   * right hue at a little over half the saturation.
+   *
+   * Reserving cyan for focus is what keeps the violet from having to mean
+   * both "selected" and "focused", which is how an accent stops reading as
+   * anything at all.
+   */
+  --mm-accent: oklch(0.709 0.159 293.5);
+  --mm-accent-bright: oklch(0.78 0.15 293.5);
+  --mm-accent-deep: oklch(0.265 0.066 303);
+  --mm-focus: oklch(0.865 0.115 207);
 
   /*
    * Status. Each one is paired with a word everywhere it appears -- "Asks
@@ -40,29 +63,50 @@
   --mm-danger: oklch(0.74 0.18 24);
   --mm-info: var(--mm-accent);
 
-  /* Hairlines and tints, all struck from white so they read as light on glass. */
-  --mm-line: oklch(1 0 0 / 0.1);
-  --mm-line-soft: oklch(1 0 0 / 0.08);
-  --mm-line-faint: oklch(1 0 0 / 0.07);
-  --mm-line-strong: oklch(1 0 0 / 0.14);
-  --mm-tint-3: oklch(1 0 0 / 0.03);
-  --mm-tint-4: oklch(1 0 0 / 0.04);
-  --mm-tint-5: oklch(1 0 0 / 0.05);
-  --mm-tint-6: oklch(1 0 0 / 0.06);
-  --mm-tint-7: oklch(1 0 0 / 0.07);
-  --mm-tint-8: oklch(1 0 0 / 0.08);
-  --mm-tint-9: oklch(1 0 0 / 0.09);
-  --mm-tint-11: oklch(1 0 0 / 0.11);
-  --mm-tint-12: oklch(1 0 0 / 0.12);
-  --mm-tint-16: oklch(1 0 0 / 0.16);
-  --mm-tint-26: oklch(1 0 0 / 0.26);
+  /*
+   * Hairlines and tints. Previously struck from pure white, which is why the
+   * interface read grey no matter how violet the surfaces underneath it were:
+   * every border, every fill and every hover state was a neutral laid over
+   * the colour, and there are far more of those than there are accents.
+   *
+   * Striking them from a violet-leaning light instead tints the whole
+   * interface at once, without a single rule having to name the accent. The
+   * alphas are unchanged, so nothing shifts in weight -- only in hue.
+   */
+  --mm-veil: oklch(0.93 0.055 296);
 
-  /* Glass. The panels sit over the window, not over the desktop. */
-  --mm-panel-78: oklch(0.22 0.006 291 / 0.78);
-  --mm-panel-70: oklch(0.22 0.006 291 / 0.7);
-  --mm-panel-55: oklch(0.22 0.006 291 / 0.55);
-  --mm-elevated-92: oklch(0.29 0.008 291 / 0.92);
-  --mm-elevated-88: oklch(0.29 0.008 291 / 0.88);
+  --mm-line: oklch(0.93 0.055 296 / 0.1);
+  --mm-line-soft: oklch(0.93 0.055 296 / 0.08);
+  --mm-line-faint: oklch(0.93 0.055 296 / 0.07);
+  --mm-line-strong: oklch(0.93 0.055 296 / 0.14);
+  --mm-tint-3: oklch(0.93 0.055 296 / 0.03);
+  --mm-tint-4: oklch(0.93 0.055 296 / 0.04);
+  --mm-tint-5: oklch(0.93 0.055 296 / 0.05);
+  --mm-tint-6: oklch(0.93 0.055 296 / 0.06);
+  --mm-tint-7: oklch(0.93 0.055 296 / 0.07);
+  --mm-tint-8: oklch(0.93 0.055 296 / 0.08);
+  --mm-tint-9: oklch(0.93 0.055 296 / 0.09);
+  --mm-tint-11: oklch(0.93 0.055 296 / 0.11);
+  --mm-tint-12: oklch(0.93 0.055 296 / 0.12);
+  --mm-tint-16: oklch(0.93 0.055 296 / 0.16);
+  --mm-tint-26: oklch(0.93 0.055 296 / 0.26);
+
+  /*
+   * Glass. The panels sit over the window, not over the desktop.
+   *
+   * Lower alphas than before, because a panel at 0.78 opacity over a nearly
+   * identical background is not glass, it is a flat fill paying the cost of a
+   * blur. These let the violet bloom behind them actually come through.
+   */
+  --mm-panel-78: oklch(0.145 0.019 296 / 0.66);
+  --mm-panel-70: oklch(0.145 0.019 296 / 0.56);
+  --mm-panel-55: oklch(0.145 0.019 296 / 0.42);
+  --mm-elevated-92: oklch(0.208 0.03 296 / 0.84);
+  --mm-elevated-88: oklch(0.208 0.03 296 / 0.76);
+
+  /* The specular top edge that makes a translucent panel read as a solid. */
+  --mm-specular: oklch(0.95 0.03 296 / 0.1);
+  --mm-glass-blur: blur(34px) saturate(180%);
 
   /*
    * None of these faces is bundled, so the system face is what actually
@@ -72,6 +116,14 @@
   --mm-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", sans-serif;
   --mm-font-mono: SFMono-Regular, ui-monospace, Menlo, "JetBrains Mono", monospace;
   --mm-font-serif: "EB Garamond", Georgia, "Times New Roman", serif;
+
+  /*
+   * The reading measure, shared by the transcript and the composer so the two
+   * stay in the same column. Widened from 680px: the window is 1180 wide and
+   * the sidebar takes 236 of it, so 680 left the conversation floating in the
+   * middle of a much larger main area.
+   */
+  --mm-measure: 860px;
 
   --mm-fast: 120ms;
   --mm-base: 180ms;
@@ -84,10 +136,14 @@
   padding: 26px;
   overflow: hidden;
 
-  /* Two soft lights, above and below, so the window has somewhere to sit. */
+  /*
+   * Two soft lights, above and below, so the window has somewhere to sit.
+   * Violet above and a cooler violet below, at the chroma the rest of the
+   * surface now uses -- at the old 0.03 they read as grey haze against it.
+   */
   background:
-    radial-gradient(90% 70% at 50% -12%, oklch(0.28 0.03 291), transparent 64%),
-    radial-gradient(120% 90% at 50% 115%, oklch(0.24 0.025 260), transparent 60%), var(--mm-bg-base);
+    radial-gradient(90% 70% at 50% -12%, oklch(0.3 0.075 295), transparent 64%),
+    radial-gradient(120% 90% at 50% 115%, oklch(0.24 0.06 275), transparent 60%), var(--mm-bg-void);
   color: var(--mm-text-primary);
   font-family: var(--mm-font-ui);
   font-size: 13px;
@@ -100,14 +156,21 @@
 }
 
 /*
- * The scaffold's focus ring is cyan, which belongs to the other direction.
- * Scoping one here keeps keyboard focus visible in this surface's own accent
- * rather than removing it, which is the usual and much worse fix.
+ * Focus is cyan, and selection is violet, because the approved direction
+ * gives each accent a job: "cyan circuitry and focus accents, violet depth
+ * and selection states".
+ *
+ * This ring was violet, on the reasoning that cyan belonged to the scaffold
+ * and this surface should use its own accent. That holds right up until
+ * violet is also the selection colour, which it now is -- at which point the
+ * focused row and the selected row are the same colour and the keyboard user
+ * is the one who pays for it. Two accents, two meanings.
  */
 .mm-desktop :focus-visible {
-  outline: 2px solid var(--mm-accent);
+  outline: 2px solid var(--mm-focus);
   outline-offset: 2px;
   border-radius: 4px;
+  box-shadow: 0 0 0 4px oklch(0.865 0.115 207 / 0.16);
 }
 
 .mm-icon {
@@ -127,7 +190,22 @@
   max-height: 780px;
   border: 1px solid var(--mm-line);
   border-radius: 12px;
-  background: var(--mm-bg-base);
+
+  /*
+   * The bloom the glass panels are lit against: two violets and a trace of
+   * cyan, placed off the corners so they fall off before they reach any text.
+   *
+   * Painted as this element's own background rather than as a ::before. A
+   * pseudo-element here is a generated child of a flex container, and giving
+   * it a negative inset dragged the real children up with it -- the sidebar
+   * and the transcript both ended up 312px above the window. A background
+   * needs no box, no z-index, and cannot move anything.
+   */
+  background:
+    radial-gradient(72% 56% at 10% -10%, oklch(0.5 0.16 295 / 0.34), transparent 70%),
+    radial-gradient(66% 56% at 94% 106%, oklch(0.42 0.13 288 / 0.3), transparent 68%),
+    radial-gradient(42% 36% at 80% -6%, oklch(0.62 0.1 210 / 0.1), transparent 72%),
+    var(--mm-bg-base);
   box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.85);
 }
 
@@ -350,7 +428,22 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
-  background: var(--mm-bg-base);
+
+  /*
+   * The third light, and it has to live here rather than on .mm-window: this
+   * panel is opaque, so the window's bloom never reached the transcript at
+   * all. That is why the middle of the surface read flat while the sidebar
+   * and the corners looked like glass -- the sidebar is translucent and the
+   * corners are where the window's own lights already were.
+   *
+   * Centred on the composer and rising from below it, so the translucent
+   * composer box has something behind it to be lit by. It is placed off the
+   * bottom edge and falls off well before the transcript, because a light
+   * bright enough to reach the messages would be competing with them.
+   */
+  background:
+    radial-gradient(54% 38% at 50% 103%, oklch(0.52 0.16 295 / 0.32), transparent 72%),
+    var(--mm-bg-base);
 }
 
 .mm-header {
@@ -485,7 +578,7 @@
 }
 
 .mm-transcript {
-  max-width: 680px;
+  max-width: var(--mm-measure);
   margin: 0 auto;
   padding: 22px 24px 18px;
 }
@@ -811,7 +904,7 @@
 }
 
 .mm-composer {
-  max-width: 680px;
+  max-width: var(--mm-measure);
   margin: 0 auto;
 }
 
@@ -1635,4 +1728,477 @@
   .mm-activity {
     width: 220px;
   }
+}
+
+/*
+ * Inside the desktop app.
+ *
+ * Everything above draws a macOS window: a lit desktop for it to sit on, a
+ * bordered and shadowed frame at exactly the size the app's window is
+ * configured for, and three traffic lights. That is what makes this design
+ * legible on its own, in a browser or a screenshot.
+ *
+ * In the app the real window supplies all of it, so drawing it again produces
+ * a window inside a window -- same size, two sets of controls, one of which
+ * does nothing. The frame comes off and the content fills the real window.
+ *
+ * The sidebar's 52px top strip stays even though it is now empty. It is what
+ * holds the sidebar level with the header beside it, and collapsing it would
+ * trade one visible defect for a subtler one.
+ */
+.mm-desktop[data-host="desktop"] {
+  place-items: stretch;
+  padding: 0;
+  background: var(--mm-bg-base);
+}
+
+.mm-desktop[data-host="desktop"] .mm-window {
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Decorative, and the working ones are now directly above them. */
+.mm-desktop[data-host="desktop"] .mm-lights {
+  display: none;
+}
+
+/* ==========================================================================
+ * Liquid glass.
+ *
+ * Three things make a translucent panel read as a physical material rather
+ * than as a lowered opacity:
+ *
+ *   something behind it worth seeing   -- the violet bloom below,
+ *   a specular edge where light lands  -- the inset top hairline,
+ *   and saturation through the blur    -- backdrop-filter's saturate().
+ *
+ * Without the first, the blur has nothing to do and the panel looks flat.
+ * Without the second, the panel has no top and floats. The order matters more
+ * than the numbers do.
+ * ========================================================================== */
+
+/*
+ * The bloom lives on .mm-window's own background, next to the reasoning for
+ * it. It is not a pseudo-element here: inside a flex container that is a
+ * generated child, and a negative inset on it moves the real children.
+ *
+ * In the standalone comp the bloom sits behind the simulated window; in the
+ * app it is the only atmosphere there is, since the desktop the design used
+ * to sit on is gone.
+ */
+
+/*
+ * Panels. The specular edge is an inset hairline at the top only: light comes
+ * from above, so an even border would read as a stroke rather than as a lit
+ * surface.
+ */
+.mm-sidebar,
+.mm-header,
+.mm-composer-box,
+.mm-activity {
+  backdrop-filter: var(--mm-glass-blur);
+  -webkit-backdrop-filter: var(--mm-glass-blur);
+}
+
+.mm-sidebar,
+.mm-header {
+  box-shadow: inset 0 1px 0 var(--mm-specular);
+}
+
+.mm-composer-box {
+  border-color: var(--mm-line);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 18px 48px -26px oklch(0.1 0.05 296 / 0.9);
+}
+
+/*
+ * Selection, which the palette assigns to violet. A tint alone said "this row
+ * is slightly lighter"; the fill, the hairline and the bloom together say the
+ * row is chosen. The left marker is what survives if colour is not available.
+ */
+.mm-row.is-active {
+  position: relative;
+  border: 1px solid oklch(0.709 0.159 293.5 / 0.28);
+  background: linear-gradient(
+    180deg,
+    oklch(0.709 0.159 293.5 / 0.22),
+    oklch(0.709 0.159 293.5 / 0.12)
+  );
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 6px 18px -10px oklch(0.709 0.159 293.5 / 0.55);
+}
+
+.mm-row.is-active::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -1px;
+  width: 2px;
+  height: 14px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--mm-accent-bright);
+}
+
+.mm-row:not(.is-active):hover {
+  background: oklch(0.709 0.159 293.5 / 0.09);
+}
+
+/* The user's own words, in the app's own colour. */
+.mm-bubble {
+  border: 1px solid oklch(0.709 0.159 293.5 / 0.22);
+  background: linear-gradient(
+    180deg,
+    oklch(0.709 0.159 293.5 / 0.26),
+    oklch(0.709 0.159 293.5 / 0.14)
+  );
+  box-shadow: inset 0 1px 0 var(--mm-specular);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/*
+ * The bloom is static -- no animation, nothing to remove under reduced
+ * motion. It is listed here so the next person does not have to check.
+ *
+ * Focus is not redefined here. It is set once, next to the reasoning for it,
+ * where this file already scoped a ring.
+ */
+
+/*
+ * The backdrop, as a control.
+ *
+ * Full-bleed and behind the sheet, so a click anywhere outside closes it. It
+ * carries no appearance of its own -- the scrim above already paints the
+ * dimming -- and exists only so that "click away to close" is a real button
+ * with a name, rather than a handler bolted to a div that a keyboard never
+ * reaches.
+ */
+.mm-scrim-close {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.mm-sheet {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==========================================================================
+ * Composer.
+ *
+ * A framed block with its top edge notched by two legends, a mode group that
+ * names the mode it is in, and an action cluster on the right. The frame takes
+ * the colour of the mode, so the thing that decides how much rope the familiar
+ * gets is legible from across the room rather than from reading a chip.
+ * ========================================================================== */
+
+.mm-composer-box {
+  position: relative;
+
+  /* Room for the legends to sit on the top edge without touching the text. */
+  padding: 18px 12px 10px 16px;
+  transition:
+    border-color var(--mm-base) var(--mm-ease),
+    box-shadow var(--mm-base) var(--mm-ease);
+}
+
+.mm-notch {
+  position: absolute;
+  top: -9px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  background: var(--mm-bg-panel);
+  color: var(--mm-text-secondary);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.mm-notch--start {
+  left: 14px;
+}
+
+.mm-notch--end {
+  right: 14px;
+}
+
+/* The mode group ------------------------------------------------------- */
+
+.mm-modes {
+  /* A fieldset, so the group has a real name. Its default chrome is not. */
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--mm-line-soft);
+  border-radius: 999px;
+  background: var(--mm-tint-3);
+}
+
+.mm-mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition:
+    background var(--mm-fast) var(--mm-ease),
+    color var(--mm-fast) var(--mm-ease);
+}
+
+.mm-mode:hover {
+  color: var(--mm-text-primary);
+}
+
+.mm-mode-name {
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/*
+ * The active chip and the frame around the whole composer are the same
+ * colour, which is what ties the small control to the large consequence.
+ */
+.mm-composer-box.is-plan .mm-mode.is-active {
+  border-color: oklch(0.709 0.159 293.5 / 0.55);
+  background: oklch(0.709 0.159 293.5 / 0.18);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-ask .mm-mode.is-active {
+  border-color: oklch(0.865 0.115 207 / 0.5);
+  background: oklch(0.865 0.115 207 / 0.15);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-do .mm-mode.is-active {
+  border-color: oklch(0.83 0.13 78 / 0.55);
+  background: oklch(0.83 0.13 78 / 0.16);
+  color: var(--mm-text-primary);
+}
+
+.mm-composer-box.is-plan {
+  border-color: oklch(0.709 0.159 293.5 / 0.42);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.709 0.159 293.5 / 0.16),
+    0 14px 44px -20px oklch(0.709 0.159 293.5 / 0.5);
+}
+
+.mm-composer-box.is-ask {
+  border-color: oklch(0.865 0.115 207 / 0.38);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.865 0.115 207 / 0.14),
+    0 14px 44px -20px oklch(0.865 0.115 207 / 0.4);
+}
+
+.mm-composer-box.is-do {
+  border-color: oklch(0.83 0.13 78 / 0.42);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 0 0 1px oklch(0.83 0.13 78 / 0.16),
+    0 14px 44px -20px oklch(0.83 0.13 78 / 0.45);
+}
+
+/* The legend sits on the frame, so it takes the frame's colour with it. */
+.mm-composer-box.is-plan .mm-notch {
+  border-color: oklch(0.709 0.159 293.5 / 0.42);
+}
+
+.mm-composer-box.is-ask .mm-notch {
+  border-color: oklch(0.865 0.115 207 / 0.38);
+}
+
+.mm-composer-box.is-do .mm-notch {
+  border-color: oklch(0.83 0.13 78 / 0.42);
+}
+
+/* Stop ----------------------------------------------------------------- */
+
+/*
+ * Salmon rather than the danger red: stopping a run is not destructive and
+ * nothing is lost by it, so it should not wear the colour reserved for things
+ * that cannot be taken back.
+ */
+.mm-stop {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid oklch(0.74 0.13 24 / 0.4);
+  border-radius: 999px;
+  background: oklch(0.74 0.13 24 / 0.2);
+  color: oklch(0.9 0.07 24);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.mm-stop:hover {
+  background: oklch(0.74 0.13 24 / 0.3);
+}
+
+.mm-stop kbd {
+  font-family: var(--mm-font-mono);
+  font-size: 11px;
+}
+
+/* Project scope --------------------------------------------------------- */
+
+/*
+ * The strip beside the traffic lights. It was left empty when the simulated
+ * chrome came off in the app, and this is what it was holding space for: the
+ * scope everything else is read through.
+ */
+.mm-sidebar-top {
+  gap: 10px;
+}
+
+.mm-picker {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.mm-picker-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.mm-picker-button:hover {
+  background: var(--mm-tint-5);
+  color: var(--mm-text-primary);
+}
+
+/* Filtered is a state worth seeing without opening the menu. */
+.mm-picker-button.is-filtered {
+  border-color: oklch(0.709 0.159 293.5 / 0.32);
+  background: oklch(0.709 0.159 293.5 / 0.14);
+  color: var(--mm-text-primary);
+}
+
+.mm-picker-name {
+  flex: 1;
+  overflow: hidden;
+  font-weight: 500;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-picker-away {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.mm-picker-menu {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid var(--mm-line);
+  border-radius: 10px;
+  background: var(--mm-elevated-92);
+  box-shadow:
+    inset 0 1px 0 var(--mm-specular),
+    0 18px 44px -18px oklch(0.08 0.04 296 / 0.9);
+  backdrop-filter: var(--mm-glass-blur);
+  -webkit-backdrop-filter: var(--mm-glass-blur);
+}
+
+.mm-picker-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--mm-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.mm-picker-item:hover {
+  background: var(--mm-tint-6);
+  color: var(--mm-text-primary);
+}
+
+.mm-picker-item.is-on {
+  color: var(--mm-text-primary);
+}
+
+/* Reserved whether or not it is filled, so the labels do not shift. */
+.mm-picker-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--mm-accent);
+}
+
+.mm-picker-rule {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--mm-line-faint);
+}
+
+.mm-picker-empty {
+  margin: 0;
+  padding: 8px 9px;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mm-rows-empty {
+  margin: 0;
+  padding: 6px 9px 8px;
+  color: var(--mm-text-secondary);
+  font-size: 12px;
 }

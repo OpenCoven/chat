@@ -1,11 +1,13 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
+import { canUseTauriCommands } from '../lib/desktop-host';
 import { Icon, type IconName } from './minimal-icons';
 import {
   type AgentId,
   type ApprovalOutcome,
   COMPOSER_MODE_LABELS,
   type ComposerMode,
+  chatInScope,
   type MessageAction,
   MINIMAL_ACTIVITY,
   MINIMAL_AGENTS,
@@ -16,8 +18,9 @@ import {
   type MinimalChat,
   type MinimalMessage,
   minimalTranscript,
-  NEXT_COMPOSER_MODE,
   type PermissionState,
+  type ProjectScope,
+  projectsOf,
   SHORT_REPLY_ACTIONS,
 } from './minimal-mock';
 
@@ -85,6 +88,26 @@ function permissionTone(state: PermissionState): string {
   return state === 'Off' ? 'off' : 'allowed';
 }
 
+/**
+ * How each mode presents itself in the composer.
+ *
+ * The order is the amount of rope the familiar gets, left to right: plan
+ * before acting, answer without acting, go ahead and act. The colours follow
+ * from that rather than from decoration -- amber is already this file's
+ * warning colour, and "Go ahead" is the mode that needs one.
+ *
+ * `short` is the word on the chip; COMPOSER_MODE_LABELS stays the full phrase
+ * and is what gets announced, because "Build" does not tell you that the
+ * familiar is about to act without checking first.
+ */
+const MODE_PRESENTATION: Readonly<Record<ComposerMode, { icon: IconName; short: string }>> = {
+  plan: { icon: 'squares-four', short: 'Plan' },
+  ask: { icon: 'globe', short: 'Explore' },
+  do: { icon: 'flask', short: 'Build' },
+};
+
+const MODE_ORDER: ReadonlyArray<ComposerMode> = ['plan', 'ask', 'do'];
+
 function statusLabel(agent: MinimalAgent): string {
   if (agent.status === 'working') {
     return 'Working';
@@ -124,10 +147,151 @@ function Mark({ agent, size }: { agent: MinimalAgent; size: number }) {
   );
 }
 
-// ── Sidebar ─────────────────────────────────────────────────────────────────
+/** How a scope selection names itself on the button. */
+function scopeLabel(scope: ProjectScope, hasProjects: boolean): string {
+  if (!hasProjects) {
+    return 'No projects';
+  }
+
+  if (scope.size === 0) {
+    return 'All projects';
+  }
+
+  if (scope.size === 1) {
+    const [only] = [...scope];
+
+    return only ?? 'Quick chats';
+  }
+
+  // Not "N projects": one of them may be the quick chats, which is not one.
+  return `${scope.size} selected`;
+}
+
+type ProjectPickerProps = Readonly<{
+  onClear: () => void;
+  onToggle: (project: string | null) => void;
+  projects: readonly string[];
+  scope: ProjectScope;
+}>;
+
+/**
+ * The project scope, in the strip the traffic lights used to have to
+ * themselves.
+ *
+ * Everything the surface shows is filtered through this, so it sits above the
+ * search field rather than beside it: the search looks inside the scope, and
+ * putting them on the same line would suggest they were the same kind of
+ * narrowing.
+ */
+function ProjectPicker({ onClear, onToggle, projects, scope }: ProjectPickerProps) {
+  const [open, setOpen] = useState(false);
+
+  // Escape closes it, like everything else layered over this surface. Bound
+  // only while open, so it cannot swallow an Escape meant for a sheet.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener('keydown', onKey, true);
+
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
+  const hasProjects = projects.length > 0;
+  const entries: ReadonlyArray<string | null> = [...projects, null];
+
+  return (
+    <div className="mm-picker">
+      <button
+        type="button"
+        className={`mm-picker-button ${scope.size > 0 ? 'is-filtered' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Icon name="folder-open" size={13} />
+        <span className="mm-picker-name">{scopeLabel(scope, hasProjects)}</span>
+        <Icon name="caret-up-down" size={12} />
+      </button>
+
+      {open ? (
+        <>
+          {/* Same reasoning as the sheet backdrop: a real button, so closing
+              by clicking away is not a mouse-only secret. */}
+          <button
+            type="button"
+            className="mm-picker-away"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={() => setOpen(false)}
+          />
+          <div className="mm-picker-menu" role="menu">
+            {hasProjects ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={scope.size === 0}
+                  className={`mm-picker-item ${scope.size === 0 ? 'is-on' : ''}`}
+                  onClick={onClear}
+                >
+                  <span className="mm-picker-check" aria-hidden="true">
+                    {scope.size === 0 ? <Icon name="check-circle-fill" size={13} /> : null}
+                  </span>
+                  All projects
+                </button>
+
+                <div className="mm-picker-rule" />
+
+                {entries.map((project) => (
+                  <button
+                    key={project ?? 'quick'}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={scope.has(project)}
+                    className={`mm-picker-item ${scope.has(project) ? 'is-on' : ''}`}
+                    onClick={() => onToggle(project)}
+                  >
+                    <span className="mm-picker-check" aria-hidden="true">
+                      {scope.has(project) ? <Icon name="check-circle-fill" size={13} /> : null}
+                    </span>
+                    {project ?? 'Quick chats'}
+                  </button>
+                ))}
+              </>
+            ) : (
+              /*
+               * Nothing to filter by yet. The selector still appears, so the
+               * control does not materialise later in a place the user has
+               * never looked -- it says what it is waiting for.
+               */
+              <p className="mm-picker-empty">
+                No projects yet. Chats you start without one stay as quick chats, and are kept for
+                seven days.
+              </p>
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Sidebar ─────────────────────────────────────────────────────
 
 type SidebarProps = Readonly<{
   activeChatId: string;
+  onClearScope: () => void;
+  onToggleScope: (project: string | null) => void;
+  projects: readonly string[];
+  scope: ProjectScope;
   chats: readonly MinimalChat[];
   familiars: readonly MinimalAgent[];
   onOpenChat: (id: string) => void;
@@ -141,6 +305,10 @@ function Sidebar({
   activeChatId,
   chats,
   familiars,
+  onClearScope,
+  onToggleScope,
+  projects,
+  scope,
   onOpenChat,
   onOpenFamiliar,
   onOpenSettings,
@@ -151,6 +319,12 @@ function Sidebar({
     <aside className="mm-sidebar">
       <div className="mm-sidebar-top">
         <TrafficLights />
+        <ProjectPicker
+          projects={projects}
+          scope={scope}
+          onToggle={onToggleScope}
+          onClear={onClearScope}
+        />
       </div>
 
       <div className="mm-search-wrap">
@@ -171,6 +345,7 @@ function Sidebar({
       <div className="mm-sidebar-list">
         <section className="mm-section">
           <h2 className="mm-section-label">Chats</h2>
+          {chats.length === 0 ? <p className="mm-rows-empty">Nothing here in this scope.</p> : null}
           <div className="mm-rows">
             {chats.map((chat) => (
               <button
@@ -386,6 +561,12 @@ export function MinimalMacOS() {
   });
   /** Anything sent during the visit, per chat, appended to the fixture. */
   const [sent, setSent] = useState<Record<string, readonly MinimalMessage[]>>({});
+  /**
+   * Which projects the surface is scoped to. Empty means all of them, so the
+   * selector has no dead end: deselecting the last one returns you to
+   * everything rather than to a blank list.
+   */
+  const [scope, setScope] = useState<ReadonlySet<string | null>>(() => new Set());
 
   const timers = useRef<number[]>([]);
   const toastTimer = useRef<number | null>(null);
@@ -403,7 +584,15 @@ export function MinimalMacOS() {
   ];
 
   const needle = query.trim().toLowerCase();
-  const chats = MINIMAL_CHATS.filter((entry) => entry.title.toLowerCase().includes(needle));
+  const projects = projectsOf(MINIMAL_CHATS);
+  const chats = MINIMAL_CHATS.filter(
+    (entry) =>
+      entry.title.toLowerCase().includes(needle) &&
+      // The chat you are reading stays listed even when the scope would drop
+      // it. Filtering the sidebar should not silently contradict the
+      // transcript beside it, and it should never take away your place.
+      (chatInScope(entry, scope) || entry.id === chatId),
+  );
   const familiars = Object.values(MINIMAL_AGENTS).filter((entry) =>
     entry.name.toLowerCase().includes(needle),
   );
@@ -452,6 +641,18 @@ export function MinimalMacOS() {
 
     transcriptEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messageCount, typing]);
+
+  function toggleScope(project: string | null) {
+    setScope((current) => {
+      const next = new Set(current);
+
+      if (!next.delete(project)) {
+        next.add(project);
+      }
+
+      return next;
+    });
+  }
 
   function flash(text: string) {
     if (toastTimer.current !== null) {
@@ -689,6 +890,12 @@ export function MinimalMacOS() {
   return (
     <div
       className="mm-desktop"
+      // The simulated desktop, window frame and traffic lights below are how
+      // this design presents itself on its own. Inside the app the real window
+      // already supplies all three, and drawing them again puts a window
+      // inside a window at the same size. The frame is dropped there; what is
+      // being evaluated is the content, not a picture of a window.
+      data-host={canUseTauriCommands() ? 'desktop' : undefined}
       data-reduce-motion={prefs.reduceMotion ? 'true' : undefined}
       data-appearance={prefs.appearance}
     >
@@ -709,6 +916,10 @@ export function MinimalMacOS() {
               setSheet('familiar');
             }}
             onOpenSettings={() => setSheet('settings')}
+            projects={projects}
+            scope={scope}
+            onToggleScope={toggleScope}
+            onClearScope={() => setScope(new Set())}
           />
         ) : null}
 
@@ -878,7 +1089,22 @@ export function MinimalMacOS() {
 
           <div className="mm-composer-wrap">
             <div className="mm-composer">
-              <div className="mm-composer-box">
+              <div className={`mm-composer-box is-${mode}`}>
+                {/*
+                 * Two legends notched into the top edge, naming what the two
+                 * halves of the row below are for. Decorative labels, not
+                 * controls: the buttons underneath are already named, and a
+                 * screen reader reading "Tools" before a group that announces
+                 * itself as "How it should respond" would only be in the way.
+                 */}
+                <span className="mm-notch mm-notch--start" aria-hidden="true">
+                  <Icon name="sparkle" size={10} />
+                  Tools
+                </span>
+                <span className="mm-notch mm-notch--end" aria-hidden="true">
+                  <Icon name="squares-four" size={10} />
+                  Task
+                </span>
                 <textarea
                   rows={1}
                   placeholder={
@@ -906,16 +1132,65 @@ export function MinimalMacOS() {
                   >
                     <Icon name="plus" size={15} />
                   </button>
+
+                  {/*
+                   * All three modes are visible at once, with the chosen one
+                   * naming itself. Cycling through a single button hid two
+                   * thirds of the choice and made "what will this do" a thing
+                   * you discovered by clicking.
+                   */}
+                  <fieldset className="mm-modes" aria-label="How it should respond">
+                    {MODE_ORDER.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className={`mm-mode ${mode === name ? 'is-active' : ''}`}
+                        aria-pressed={mode === name}
+                        aria-label={COMPOSER_MODE_LABELS[name]}
+                        title={COMPOSER_MODE_LABELS[name]}
+                        onClick={() => setMode(name)}
+                      >
+                        <Icon name={MODE_PRESENTATION[name].icon} size={14} />
+                        {mode === name ? (
+                          <span className="mm-mode-name">{MODE_PRESENTATION[name].short}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </fieldset>
+
+                  <span className="mm-spacer" />
+
+                  {/* Only when there is something to stop. */}
+                  {agent.status === 'working' ? (
+                    <button
+                      type="button"
+                      className="mm-stop"
+                      onClick={() => flash('Stopping arrives with the real send path.')}
+                    >
+                      <kbd>esc</kbd>
+                      <span aria-hidden="true">·</span>
+                      stop
+                    </button>
+                  ) : null}
+
                   <button
                     type="button"
-                    className="mm-mode-button"
-                    title="How it should respond"
-                    onClick={() => setMode((current) => NEXT_COMPOSER_MODE[current])}
+                    className="mm-round-button"
+                    aria-label="Rewrite this message"
+                    title="Rewrite"
+                    onClick={() => flash('Rewriting arrives with the real send path.')}
                   >
-                    <Icon name="sliders-horizontal" size={13} />
-                    {COMPOSER_MODE_LABELS[mode]}
+                    <Icon name="sparkle" size={14} />
                   </button>
-                  <span className="mm-spacer" />
+                  <button
+                    type="button"
+                    className="mm-round-button"
+                    aria-label="Dictate this message"
+                    title="Dictate"
+                    onClick={() => flash('Dictation arrives with the real send path.')}
+                  >
+                    <Icon name="microphone" size={14} />
+                  </button>
                   <button
                     type="button"
                     className={`mm-send ${draft.trim() === '' ? '' : 'is-ready'}`}
@@ -969,6 +1244,22 @@ export function MinimalMacOS() {
 
         {sheet === null ? null : (
           <div className="mm-scrim">
+            {/*
+             * Clicking the backdrop closes the sheet.
+             *
+             * A <button> so the handler sits on something that was always
+             * clickable, but hidden from assistive technology and out of the
+             * tab order: it is full-bleed, so as a tab stop it would be a
+             * screen-sized control announcing itself between the dialog and
+             * its contents. Escape is the keyboard path, and it is tested.
+             */}
+            <button
+              type="button"
+              className="mm-scrim-close"
+              tabIndex={-1}
+              aria-hidden="true"
+              onClick={() => setSheet(null)}
+            />
             <div
               className={`mm-sheet mm-sheet--${sheet}`}
               role="dialog"
