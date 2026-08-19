@@ -88,11 +88,28 @@ Two consequences worth knowing:
   app actually is.
 - **The scaffold is still the default view.** Without the query flag the app
   renders the scaffold, which is what every unit test and both end-to-end specs
-  assert. The demo has no test coverage; it is a demo.
+  assert.
 
 `src/demo/` is meant to be deleted when the real read and send paths land. Its
 mock types are shaped close to the canonical ones so that lands as a change of
 data source rather than a rewrite of the view.
+
+### Minimal (macOS) surface
+
+<127.0.0.1:4173/?demo=minimal> implements the approved **Coven Cave Minimal
+(macOS)** design: one window, a sidebar of chats and familiars, an activity
+panel, and the approval, familiar and settings sheets over the top.
+
+A second surface rather than a revision of the first, because they are two
+directions rather than two drafts of one. Keeping both means the choice between
+them can be made by looking at them side by side.
+
+It connects to nothing either, and it carries its own palette — the design
+system's tokens, not the scaffold's — scoped under `.mm-desktop` so the two
+cannot bleed into each other. Unlike the chat demo it does have test coverage,
+in `src/demo/minimal-macos.test.tsx`: what is covered there is the design's
+checkable claims, chiefly that an irreversible action stops and asks, and that
+the transcript then records which answer it got.
 
 ## Reviewed counterpart lock
 
