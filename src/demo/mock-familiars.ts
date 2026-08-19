@@ -88,7 +88,7 @@ export const MOCK_FAMILIARS: MockFamiliar[] = [
     creature: 'Cartographer',
     role: 'Research and synthesis',
     description: 'Reads widely, keeps a source ledger, and refuses to assert what it has not read.',
-    pronouns: 'they/them',
+    pronouns: 'she/her',
     emoji: '\u{1F5FA}',
     status: 'available',
     soul: {
@@ -161,7 +161,7 @@ export const MOCK_FAMILIARS: MockFamiliar[] = [
     creature: 'Herald',
     role: 'Correspondence',
     description: 'Drafts and triages written communication, and never sends without a gesture.',
-    pronouns: 'she/her',
+    pronouns: 'they/them',
     emoji: '\u{1F4EC}',
     status: 'offline',
     soul: {
