@@ -229,8 +229,28 @@ describe('Minimal (macOS) surface', () => {
     openSettings();
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close Settings' }));
+    // Queried by class rather than by role: the backdrop is deliberately
+    // hidden from assistive technology and out of the tab order, because a
+    // full-bleed tab stop between a dialog and its contents is not a
+    // courtesy. Escape is the keyboard path, and it has its own test above.
+    const backdrop = document.querySelector('.mm-scrim-close');
+
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop as Element);
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  it('closes the project picker on Escape', () => {
+    // The surface teaches Escape as "close the thing on top". A menu that
+    // ignored it would be the one exception a user has to learn.
+    render(<MinimalMacOS />);
+
+    openScope();
+    expect(screen.getByRole('menuitemradio', { name: 'All projects' })).toBeVisible();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByRole('menuitemradio', { name: 'All projects' })).not.toBeInTheDocument();
   });
 
   it('filters both chats and familiars from one search field', () => {

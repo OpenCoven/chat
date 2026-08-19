@@ -185,6 +185,25 @@ type ProjectPickerProps = Readonly<{
  */
 function ProjectPicker({ onClear, onToggle, projects, scope }: ProjectPickerProps) {
   const [open, setOpen] = useState(false);
+
+  // Escape closes it, like everything else layered over this surface. Bound
+  // only while open, so it cannot swallow an Escape meant for a sheet.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener('keydown', onKey, true);
+
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
   const hasProjects = projects.length > 0;
   const entries: ReadonlyArray<string | null> = [...projects, null];
 
@@ -209,7 +228,8 @@ function ProjectPicker({ onClear, onToggle, projects, scope }: ProjectPickerProp
           <button
             type="button"
             className="mm-picker-away"
-            aria-label="Close the project list"
+            tabIndex={-1}
+            aria-hidden="true"
             onClick={() => setOpen(false)}
           />
           <div className="mm-picker-menu" role="menu">
@@ -1225,16 +1245,19 @@ export function MinimalMacOS() {
         {sheet === null ? null : (
           <div className="mm-scrim">
             {/*
-             * Clicking the backdrop closes the sheet. A real button rather
-             * than a click handler on the scrim div: this way the affordance
-             * is reachable and announced, instead of being a mouse-only
-             * gesture that a keyboard user has to already know about. Escape
-             * still works, and now they agree.
+             * Clicking the backdrop closes the sheet.
+             *
+             * A <button> so the handler sits on something that was always
+             * clickable, but hidden from assistive technology and out of the
+             * tab order: it is full-bleed, so as a tab stop it would be a
+             * screen-sized control announcing itself between the dialog and
+             * its contents. Escape is the keyboard path, and it is tested.
              */}
             <button
               type="button"
               className="mm-scrim-close"
-              aria-label={`Close ${sheetTitle}`}
+              tabIndex={-1}
+              aria-hidden="true"
               onClick={() => setSheet(null)}
             />
             <div
