@@ -1,21 +1,24 @@
 name: CI image
 
-# Builds the container CI runs in. See .github/ci-image/Dockerfile for why it
-# exists.
+# Builds the container CI runs in, proves it works, and proposes it.
+# See .github/ci-image/Dockerfile for why the image exists.
 #
 # This is the one place apt-get is still allowed to hang. It is deliberately
 # not on the path of a pull request: nothing here gates a merge, so a bad day
 # on a Debian mirror shows up as a failure on this workflow instead of as five
 # wedged runners and a branch nobody can land.
+#
+# The three jobs are build, verify, propose, and the order is the point.
+# ci.yml pins the image by digest, so adopting a rebuild means editing a file
+# -- and an automated edit that nobody has tested is a rubber stamp. The new
+# image runs the actual suites before a pull request is opened for it.
 on:
   workflow_dispatch:
   push:
     paths:
       - .github/ci-image/**
       - .github/workflows/ci-image.yml
-  # Rebuilt weekly so security updates land without anyone remembering to ask.
-  # A rebuild does not reach CI on its own: ci.yml pins a digest, so adopting a
-  # new image is an explicit, reviewable commit.
+  # Weekly, so security updates reach CI without anyone remembering to ask.
   schedule:
     - cron: 0 5 * * 1
 
@@ -31,6 +34,11 @@ jobs:
     # keeps slowness away from pull requests. Still bounded, because the
     # failure mode being addressed is precisely a step that never returns.
     timeout-minutes: 45
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      reference: ${{ steps.push.outputs.reference }}
+      changed: ${{ steps.compare.outputs.changed }}
+      reason: ${{ steps.compare.outputs.reason }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -42,28 +50,252 @@ jobs:
         run: echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
 
       - name: Build
-        run: docker build --pull -t ghcr.io/opencoven/chat-ci:v1 .github/ci-image
+        id: build
+        run: |
+          set -euo pipefail
 
+          docker pull mcr.microsoft.com/playwright:v1.62.1-noble
+          base=$(docker image inspect --format '{{index .RepoDigests 0}}' mcr.microsoft.com/playwright:v1.62.1-noble)
+          echo "base: ${base}"
+
+          # Recorded on the image because it cannot be recovered from one
+          # afterwards, and the next rebuild needs to know what the last one
+          # was built on to tell a real change from a reproducible one.
+          docker build \
+            --label io.opencoven.base-digest="${base#*@}" \
+            -t ghcr.io/opencoven/chat-ci:v1 .github/ci-image
+
+          echo "base_digest=${base#*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare what is inside the image, not its digest
+        id: compare
+        env:
+          BASE_DIGEST: ${{ steps.build.outputs.base_digest }}
+        run: |
+          set -euo pipefail
+
+          pinned=$(grep -oE 'chat-ci@sha256:[0-9a-f]{64}' .github/workflows/ci.yml | head -1 | cut -d@ -f2)
+
+          if [ -z "${pinned}" ]; then
+            echo "::error::No pinned digest found in ci.yml; refusing to guess."
+            exit 1
+          fi
+
+          # A layer digest is not a statement about content. It is a hash of a
+          # tar stream carrying mtimes, so an identical rebuild produces a
+          # different digest, and comparing digests would open a pull request
+          # every week that changed nothing until people stopped reading them.
+          #
+          # What matters is the base image and the installed package versions.
+          # The previously pinned image is still pullable, so both can be read
+          # from the thing CI is actually running rather than from a lockfile
+          # that could disagree with it.
+          packages() {
+            docker run --rm --entrypoint dpkg-query "$1" -W -f '${Package}=${Version}\n' | sort | sha256sum | cut -d' ' -f1
+          }
+
+          new_packages=$(packages ghcr.io/opencoven/chat-ci:v1)
+
+          if docker pull --quiet "ghcr.io/opencoven/chat-ci@${pinned}" >/dev/null 2>&1; then
+            old_packages=$(packages "ghcr.io/opencoven/chat-ci@${pinned}")
+            old_base=$(docker image inspect --format '{{index .Config.Labels "io.opencoven.base-digest"}}' "ghcr.io/opencoven/chat-ci@${pinned}")
+
+            # An image built before the label existed reports nothing here.
+            # Saying so beats reporting that the base moved from "" to a
+            # digest, which describes a change that did not happen.
+            if [ -z "${old_base}" ] || [ "${old_base}" = "<no value>" ]; then
+              old_base=unrecorded
+            fi
+          else
+            # The pinned image is gone. That is itself worth a pull request,
+            # because CI is pinned to something that may stop resolving.
+            echo "The pinned image could not be pulled; proposing a replacement."
+            old_packages=unavailable
+            old_base=unavailable
+          fi
+
+          echo "base     old=${old_base} new=${BASE_DIGEST}"
+          echo "packages old=${old_packages} new=${new_packages}"
+
+          if [ "${old_base}" = "${BASE_DIGEST}" ] && [ "${old_packages}" = "${new_packages}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Same base and same packages; nothing worth proposing."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "reason<<REASON"
+              if [ "${old_base}" = unrecorded ]; then
+                echo "- the pinned image predates the base-digest label, so there is nothing to compare it against"
+              elif [ "${old_base}" != "${BASE_DIGEST}" ]; then
+                echo "- base image moved from \`${old_base}\` to \`${BASE_DIGEST}\`"
+              fi
+              [ "${old_packages}" != "${new_packages}" ] && echo "- installed Debian package versions changed"
+              echo "REASON"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Pushed only once there is a reason to. An unchanged rebuild would
+      # otherwise move the v1 tag weekly for no benefit.
       - name: Push
         id: push
+        if: steps.compare.outputs.changed == 'true'
         run: |
           set -euo pipefail
           docker push ghcr.io/opencoven/chat-ci:v1
-          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/opencoven/chat-ci:v1)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          reference=$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/opencoven/chat-ci:v1)
+          echo "reference=${reference}" >> "$GITHUB_OUTPUT"
+          echo "digest=${reference#*@}" >> "$GITHUB_OUTPUT"
 
-      # The digest is the deliverable. ci.yml pins by digest rather than by the
-      # v1 tag, so this line is what someone copies into a commit to adopt the
-      # rebuild -- a mutable tag would let an image change what CI runs without
-      # any commit saying so.
-      - name: Report digest
+  verify:
+    name: Verify the new image
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    # The suites that the image exists to serve, run inside the image being
+    # proposed. Without this the bump is an untested dependency upgrade, and
+    # the pull request it opens cannot run CI on itself: a GITHUB_TOKEN cannot
+    # trigger a workflow, by design, to stop workflows recursing.
+    container:
+      image: ghcr.io/opencoven/chat-ci@${{ needs.build.outputs.digest }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - run: pnpm install --frozen-lockfile
+
+      # The browser must already be in the image. If this downloads one, the
+      # image and package.json have drifted apart and the bump would paper over
+      # it, so the check is that nothing needed fetching rather than that the
+      # command succeeded.
+      - name: Assert the browser came from the image
+        # POSIX sh, not bash. A container job's default shell is `sh -e`, and
+        # `set -o pipefail` is not a POSIX option, so the bash spelling used
+        # elsewhere in this file fails here with "Illegal option -o pipefail".
+        # There is no pipeline in this step whose status needs preserving.
         run: |
-          {
-            echo '## CI image published'
-            echo
-            echo 'Pin this in `.github/workflows/ci.yml` to adopt it:'
-            echo
-            echo '```'
-            echo '${{ steps.push.outputs.digest }}'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -eu
+          output=$(pnpm exec playwright install chromium 2>&1)
+          echo "${output}"
+
+          if echo "${output}" | grep -qiE 'downloading|extracting'; then
+            echo "::error::The image does not carry the pinned Playwright browser."
+            exit 1
+          fi
+
+      - run: pnpm test:e2e
+      - run: pnpm app:build
+
+  propose:
+    name: Propose the bump
+    runs-on: ubuntu-latest
+    needs: [build, verify]
+    # Only from the default branch. A push to .github/ci-image on a feature
+    # branch still builds and verifies an image; opening a pull request against
+    # main from that state would propose a digest for a Dockerfile main has
+    # never seen.
+    if: needs.build.outputs.changed == 'true' && github.ref_name == 'main'
+    permissions:
+      contents: write
+      pull-requests: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Open or update the bump pull request
+        env:
+          # Same fallback the contract canary uses. With a token that can
+          # trigger workflows the pull request runs CI on itself; without one
+          # it still opens, carrying the verify job as its evidence. The
+          # fallback is what lets this land before the secret exists.
+          GH_TOKEN: ${{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          REASON: ${{ needs.build.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          short=${DIGEST#sha256:}
+          branch="ci/image-digest-${short:0:12}"
+
+          # Named for the digest, so a re-run of the same build finds its own
+          # branch already there instead of opening a second pull request for
+          # a bump that is already waiting.
+          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
+            echo "${branch} already exists; nothing to open."
+            exit 0
+          fi
+
+          base=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -X POST \
+            -f ref="refs/heads/${branch}" -f sha="${base}" >/dev/null
+
+          pinned=$(grep -oE 'chat-ci@sha256:[0-9a-f]{64}' .github/workflows/ci.yml | head -1 | cut -d@ -f2)
+          sed -i "s|chat-ci@${pinned}|chat-ci@${DIGEST}|g" .github/workflows/ci.yml
+
+          # Committed through the API rather than with `git commit`, because
+          # GitHub signs what it writes and a runner has no key to sign with.
+          # An unsigned commit here would be the one unverified commit in the
+          # history, arriving weekly.
+          file_sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/ci.yml?ref=${branch}" --jq .sha)
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/ci.yml" -X PUT \
+            -f message="ci: adopt rebuilt CI image ${short:0:12}" \
+            -f content="$(base64 -w0 .github/workflows/ci.yml)" \
+            -f sha="${file_sha}" \
+            -f branch="${branch}" >/dev/null
+
+          # Written to a file rather than passed through "$(cat <<BODY ...)".
+          # A heredoc nested inside a command substitution is parsed for quote
+          # balance by some bash versions, so an apostrophe in the prose is
+          # enough to break the script -- and to break it in a way that only
+          # shows up on the machine that runs it.
+          cat > "${RUNNER_TEMP}/pr-body.md" <<BODY
+          The weekly rebuild found the image's contents had moved. Nothing in
+          \`.github/ci-image/Dockerfile\` changed; what it installs did.
+
+          ${REASON}
+
+              was  ${pinned}
+              now  ${DIGEST}
+
+          A rebuild almost always yields a different digest, because a layer digest
+          hashes a tar stream that carries file timestamps. That is not a reason to
+          adopt anything, so this pull request is opened on a comparison of the base
+          image and the installed package versions instead, read from the running
+          image rather than from a lockfile that could disagree with it.
+
+          The new image was verified before this was opened: the E2E suite and the Tauri
+          desktop build both ran inside it, and the Playwright browser was asserted to
+          come from the image rather than be downloaded. See ${RUN_URL}.
+
+          That verification is the evidence for this pull request. If the checks below
+          are absent, it is because a \`GITHUB_TOKEN\` cannot trigger workflows -- set a
+          \`CI_IMAGE_BUMP_TOKEN\` secret to have this run CI on itself, or close and
+          reopen this pull request to start it by hand.
+
+          Merging adopts the rebuilt image. Declining leaves CI on the previous digest,
+          which stays pullable; there is no deadline attached to this.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          BODY
+
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "ci: adopt rebuilt CI image ${short:0:12}" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

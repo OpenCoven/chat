@@ -307,6 +307,76 @@ describe('Phase 0 specification guards', () => {
     expect(workflow).toMatch(/\*\) docs_only=false ;;/);
   });
 
+  it('proposes an image bump only after running the suites inside the new image', () => {
+    // The pull request this opens cannot run CI on itself: a GITHUB_TOKEN
+    // cannot trigger a workflow, by design. Without the verify job in front of
+    // it the bump would be an untested dependency upgrade wearing a green
+    // tick, which is worse than no automation at all.
+    const workflow = readText('.github/workflows/ci-image.yml');
+
+    expect(workflow).toMatch(/^ {2}verify:$/m);
+    expect(workflow).toMatch(/^ {2}propose:$/m);
+    expect(workflow).toContain('needs: [build, verify]');
+    expect(workflow).toContain(
+      'image: ghcr.io/opencoven/chat-ci@$' + '{{ needs.build.outputs.digest }}',
+    );
+    expect(workflow, 'the new image must run the suites it exists to serve').toContain(
+      '- run: pnpm test:e2e',
+    );
+    expect(workflow).toContain('- run: pnpm app:build');
+
+    // Only from the default branch. A feature branch proposing a digest for a
+    // Dockerfile main has never seen would be proposing a build of itself.
+    expect(workflow).toContain("github.ref_name == 'main'");
+  });
+
+  it('decides the image bump on contents rather than on a layer digest', () => {
+    // A layer digest hashes a tar stream carrying file timestamps, so an
+    // otherwise identical rebuild produces a new one. Comparing digests would
+    // open a pull request every week that changed nothing, until nobody read
+    // them and the weekly rebuild stopped meaning anything.
+    const workflow = readText('.github/workflows/ci-image.yml');
+
+    expect(workflow).toContain('io.opencoven.base-digest');
+    expect(workflow).toMatch(/dpkg-query/);
+    expect(workflow).toContain('changed=false');
+    expect(workflow).toContain('changed=true');
+  });
+
+  it('commits the bump through the API, which is the only way it gets signed', () => {
+    // A runner has no signing key, so `git commit` there produces the one
+    // unverified commit in the history -- arriving weekly, forever. Commits
+    // written through the contents API are signed by GitHub.
+    const workflow = readText('.github/workflows/ci-image.yml');
+    const proposeBlock = workflow.slice(workflow.indexOf('\n  propose:'));
+
+    expect(proposeBlock).toContain('/contents/.github/workflows/ci.yml');
+    expect(proposeBlock).toMatch(/-X PUT/);
+
+    // Comments stripped, because the comment explaining why `git commit` is
+    // not used here necessarily contains the words `git commit`.
+    const executable = proposeBlock
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+    expect(executable, 'a runner cannot sign a commit').not.toMatch(/\bgit commit\b/);
+  });
+
+  it('bounds every job in the image workflow too', () => {
+    // The image build is where apt-get is still allowed to hang. That is only
+    // survivable because the hang ends.
+    const workflow = readText('.github/workflows/ci-image.yml');
+    const jobsBlock = workflow.slice(workflow.indexOf('\njobs:'));
+    const jobNames = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((match) => match[1]);
+    const timeouts = jobsBlock.match(/^ {4}timeout-minutes: \d+$/gm) ?? [];
+
+    expect(jobNames.length, 'no jobs were found').toBeGreaterThan(0);
+    expect(timeouts, `every job needs a ceiling: ${jobNames.join(', ')}`).toHaveLength(
+      jobNames.length,
+    );
+  });
+
   it('runs one workflow per branch rather than racing the push and pull request events', () => {
     // Both triggers fire for a branch with an open pull request. Without a
     // shared concurrency group the two runs raced for the preview server's
