@@ -123,9 +123,13 @@
 }
 
 .chat-demo .avatar {
-  display: inline-block;
+  display: grid;
+  place-items: center;
   flex: none;
+  border: 1px solid transparent;
   border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .chat-demo .conversation-body {
