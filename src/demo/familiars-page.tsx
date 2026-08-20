@@ -1,11 +1,42 @@
 import { useMemo, useState } from 'react';
 
 import {
-  contractReport,
-  FAMILIAR_TEMPLATES,
-  MOCK_FAMILIARS,
-  type MockFamiliar,
-} from './mock-familiars';
+  backfillNote,
+  CAVE_ANALYTICS_WINDOWS,
+  CAVE_FAMILIAR_ANALYTICS,
+  CAVE_FAMILIAR_CONTRACTS,
+  type CaveAnalyticsWindowKey,
+  type CaveContractReport,
+  type CaveFamiliarAnalytics,
+  formatCost,
+  formatDuration,
+  formatSuccessRate,
+  formatTokens,
+} from './minimal-familiar-sdk';
+import { FAMILIAR_TEMPLATES, MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
+
+/**
+ * The contract and analytics come from the shapes @opencoven/cave-client
+ * exposes, shared with the Minimal surface rather than duplicated: one set of
+ * fixtures, one set of types, one thing to change when the SDK moves.
+ *
+ * The property notes this page used to show have no SDK equivalent. That is
+ * not a loss of detail but a relocation of it: the real report explains itself
+ * through `violations` and `warnings`, each naming the file it came from, and
+ * keeps the two apart because a violation fails a contract and a warning does
+ * not.
+ */
+const EMPTY_REPORT: CaveContractReport = {
+  specVersion: '0.1.0',
+  pass: false,
+  properties: [],
+  violations: [],
+  warnings: [],
+};
+
+function reportFor(id: string): CaveContractReport {
+  return CAVE_FAMILIAR_CONTRACTS[id] ?? EMPTY_REPORT;
+}
 
 /**
  * Familiars surface: browse on the left, detail on the right.
@@ -15,7 +46,7 @@ import {
  * that showed a name and an avatar and nothing else would be a contacts list.
  */
 
-type Tab = 'contract' | 'identity' | 'authority';
+type Tab = 'contract' | 'activity' | 'identity' | 'authority';
 
 function StatusDot({ status }: { status: MockFamiliar['status'] }) {
   return <span className={`fam-status fam-status-${status}`} aria-hidden="true" />;
@@ -39,8 +70,10 @@ function Glyph({ familiar, size }: { familiar: { id: string; emoji: string }; si
         width: size,
         height: size,
         fontSize: size * 0.5,
-        background: `linear-gradient(140deg, hsl(${hue} 70% 30%), hsl(${(hue + 60) % 360} 65% 22%))`,
-        borderColor: `hsl(${hue} 70% 45%)`,
+        // Flat. A gradient here would be the same rule broken inline that
+        // the stylesheet beside it just stopped breaking.
+        background: `hsl(${hue} 42% 26%)`,
+        borderColor: `hsl(${hue} 46% 42%)`,
       }}
     >
       {familiar.emoji}
@@ -56,8 +89,9 @@ export function FamiliarsPage() {
   const [search, setSearch] = useState('');
 
   const selected = familiars.find((familiar) => familiar.id === selectedId);
-  const checks = selected ? contractReport(selected) : [];
-  const passing = checks.filter((check) => check.pass).length;
+  const report = selected ? reportFor(selected.id) : EMPTY_REPORT;
+  const passing = report.properties.filter((property) => property.pass).length;
+  const analytics = selected ? CAVE_FAMILIAR_ANALYTICS[selected.id] : undefined;
 
   const visible = familiars.filter((familiar) =>
     `${familiar.name} ${familiar.role}`.toLowerCase().includes(search.trim().toLowerCase()),
@@ -97,8 +131,8 @@ export function FamiliarsPage() {
 
         <ul className="fam-list">
           {visible.map((familiar) => {
-            const report = contractReport(familiar);
-            const passes = report.filter((check) => check.pass).length;
+            const card = reportFor(familiar.id);
+            const passes = card.properties.filter((property) => property.pass).length;
 
             return (
               <li key={familiar.id}>
@@ -117,8 +151,8 @@ export function FamiliarsPage() {
                   </span>
                   <span className="fam-card-role">{familiar.role}</span>
                   <span className="fam-card-foot">
-                    <span className={`fam-pill ${passes === 5 ? 'is-pass' : 'is-warn'}`}>
-                      {passes}/5 contract
+                    <span className={`fam-pill ${card.pass ? 'is-pass' : 'is-warn'}`}>
+                      {passes}/{card.properties.length} contract
                     </span>
                     <span className="fam-pill">
                       {familiar.ward.approvalTiers.humanReview.length} held
@@ -159,8 +193,8 @@ export function FamiliarsPage() {
               </div>
 
               <div className="fam-detail-actions">
-                <span className={`fam-pill ${passing === 5 ? 'is-pass' : 'is-warn'}`}>
-                  {passing}/5 properties
+                <span className={`fam-pill ${report.pass ? 'is-pass' : 'is-warn'}`}>
+                  {passing}/{report.properties.length} properties
                 </span>
                 <button
                   type="button"
@@ -173,7 +207,7 @@ export function FamiliarsPage() {
             </header>
 
             <nav className="fam-tabs" aria-label="Familiar detail">
-              {(['contract', 'identity', 'authority'] as const).map((name) => (
+              {(['contract', 'activity', 'identity', 'authority'] as const).map((name) => (
                 <button
                   key={name}
                   type="button"
@@ -182,15 +216,18 @@ export function FamiliarsPage() {
                 >
                   {name === 'contract'
                     ? 'Contract'
-                    : name === 'identity'
-                      ? 'Identity'
-                      : 'Authority'}
+                    : name === 'activity'
+                      ? 'Activity'
+                      : name === 'identity'
+                        ? 'Identity'
+                        : 'Authority'}
                 </button>
               ))}
             </nav>
 
             <div className="fam-body">
-              {tab === 'contract' ? <ContractTab familiar={selected} /> : null}
+              {tab === 'contract' ? <ContractTab report={report} /> : null}
+              {tab === 'activity' ? <ActivityTab analytics={analytics} /> : null}
               {tab === 'identity' ? (
                 <IdentityTab familiar={selected} editing={editing} onChange={applyEdit} />
               ) : null}
@@ -205,40 +242,136 @@ export function FamiliarsPage() {
   );
 }
 
-/** The five properties, each with the file that carries its evidence. */
-function ContractTab({ familiar }: { familiar: MockFamiliar }) {
-  const checks = contractReport(familiar);
+/**
+ * The Familiar Contract report, as the SDK returns it.
+ *
+ * Violations and warnings are separate lists because they mean different
+ * things. Echo keeping no memory is a violation -- it fails the contract --
+ * while Astra declaring no automatic tier is a warning that does not. Folding
+ * them into one count would make those two familiars look alike.
+ */
+function ContractTab({ report }: { report: CaveContractReport }) {
+  const passed = report.properties.filter((property) => property.pass).length;
 
   return (
     <div className="fam-section">
       <p className="fam-lede">
-        The Familiar Contract defines five normative properties. Each is derived from this
-        familiar's own files, not stored as a badge.
+        The Familiar Contract defines five normative properties. This report is what Cave evaluated
+        from the familiar's own files — spec {report.specVersion} — not a badge stored against it.
       </p>
 
       <ul className="fam-checks">
-        {checks.map((check) => (
-          <li key={check.property} className={check.pass ? 'is-pass' : 'is-fail'}>
+        {report.properties.map((property) => (
+          <li key={property.property} className={property.pass ? 'is-pass' : 'is-fail'}>
             <span className="fam-check-mark" aria-hidden="true">
-              {check.pass ? '✓' : '⚠'}
+              {property.pass ? '✓' : '⚠'}
             </span>
             <span className="fam-check-body">
-              <span className="fam-check-title">
-                {check.property}
-                <span className="fam-check-file">{check.file}</span>
-              </span>
-              <span className="fam-check-note">{check.note}</span>
+              <span className="fam-check-title">{property.property}</span>
+              <span className="fam-check-note">{property.pass ? 'Met' : 'Not met'}</span>
             </span>
           </li>
         ))}
       </ul>
 
-      {checks.some((check) => !check.pass) ? (
-        <p className="fam-warn">
-          A failing property does not disable the familiar. It means the contract cannot vouch for
-          that property, and the reason is stated above rather than hidden behind a score.
-        </p>
+      <p className="fam-count">
+        {passed} of {report.properties.length} met ·{' '}
+        {report.pass ? 'contract met' : 'contract not met'}
+      </p>
+
+      {report.violations.length > 0 ? (
+        <div className="fam-notes">
+          <p className="fam-notes-label">What is missing</p>
+          {report.violations.map((violation) => (
+            <p key={`${violation.file}:${violation.field}`} className="fam-note is-violation">
+              <code>{violation.file}</code> {violation.message}
+            </p>
+          ))}
+        </div>
       ) : null}
+
+      {report.warnings.length > 0 ? (
+        <div className="fam-notes">
+          {/* Named as advice, because a warning does not fail the contract. */}
+          <p className="fam-notes-label">Worth knowing</p>
+          {report.warnings.map((warning) => (
+            <p key={`${warning.file}:${warning.field}`} className="fam-note">
+              <code>{warning.file}</code> {warning.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Execution analytics, from `GET /api/familiars/:id/execution-analytics`.
+ *
+ * Two things it will not round off: a window with no attempts says so rather
+ * than reporting 0%, because a rate over nothing is unknown; and the backfill
+ * state is shown, because figures from a partial import are a different claim
+ * from figures drawn from the whole history.
+ */
+function ActivityTab({ analytics }: { analytics: CaveFamiliarAnalytics | undefined }) {
+  const [windowKey, setWindowKey] = useState<CaveAnalyticsWindowKey>('7d');
+
+  if (analytics === undefined) {
+    return <p className="fam-empty">No run history has been read for this familiar.</p>;
+  }
+
+  const active = analytics.windows[windowKey];
+  const note = backfillNote(analytics.backfill);
+  const ran = (active?.attempts ?? 0) > 0;
+
+  return (
+    <div className="fam-section">
+      <fieldset className="fam-windows" aria-label="Time window">
+        {CAVE_ANALYTICS_WINDOWS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={key === windowKey}
+            className={`fam-window ${key === windowKey ? 'is-active' : ''}`}
+            onClick={() => setWindowKey(key)}
+          >
+            {key}
+          </button>
+        ))}
+      </fieldset>
+
+      {note === null ? null : <p className="fam-backfill">{note}</p>}
+
+      {ran ? (
+        <div className="fam-metrics">
+          <div className="fam-metric">
+            <span className="fam-metric-value">{formatSuccessRate(active)}</span>
+            <span className="fam-metric-label">Completed</span>
+          </div>
+          <div className="fam-metric">
+            <span className="fam-metric-value">{active?.attempts ?? 0}</span>
+            <span className="fam-metric-label">Runs</span>
+          </div>
+          <div className="fam-metric">
+            <span className="fam-metric-value">{formatDuration(active?.medianDurationMs)}</span>
+            <span className="fam-metric-label">Median</span>
+          </div>
+          <div className="fam-metric">
+            <span className="fam-metric-value">{formatTokens(active?.totalTokens)}</span>
+            <span className="fam-metric-label">Tokens</span>
+          </div>
+          <div className="fam-metric">
+            <span className="fam-metric-value">{formatCost(active?.costUsd)}</span>
+            <span className="fam-metric-label">Cost</span>
+          </div>
+          <div className="fam-metric">
+            <span className="fam-metric-value">{active?.toolFailures ?? 0}</span>
+            <span className="fam-metric-label">Tool failures</span>
+          </div>
+        </div>
+      ) : (
+        <p className="fam-empty">No runs in this window.</p>
+      )}
     </div>
   );
 }

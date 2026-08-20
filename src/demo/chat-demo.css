@@ -10,13 +10,26 @@
  */
 
 .chat-demo {
-  --demo-bg: #0b0b0d;
-  --demo-sidebar: #131315;
-  --demo-selected: #2b2b30;
-  --demo-bubble-theirs: #2c2c2e;
-  --demo-bubble-mine: #0a84ff;
-  --demo-text: #f2f2f7;
-  --demo-muted: #8e8e93;
+  /*
+   * The brand palette. OpenCoven/brand DESIGN.md asks for "90% black /
+   * white, compose UI on neutral foundation" and "10% violet accents -- hover states, active borders,
+   * labels, identity moments".
+   *
+   * This surface was built to emulate Messages, so its accent was iOS blue and
+   * its greys were Apple's. Both are replaced: the surfaces are the brand's
+   * neutrals and the accent is #9A8ECD, the canonical violet.
+   */
+  --demo-bg: #080808;
+  --demo-sidebar: #0f0f0f;
+  --demo-elevated: #141414;
+  --demo-selected: #1a1a1a;
+  --demo-bubble-theirs: #141414;
+  /* A tint, not a fill: violet is for identity, not for backgrounds. */
+  --demo-bubble-mine: rgba(154, 142, 205, 0.16);
+  --demo-violet: #9a8ecd;
+  --demo-violet-line: rgba(154, 142, 205, 0.42);
+  --demo-text: rgba(255, 255, 255, 0.94);
+  --demo-muted: rgba(255, 255, 255, 0.64);
   --demo-line: rgba(255, 255, 255, 0.08);
 
   display: grid;
@@ -413,7 +426,8 @@
   height: 40px;
   flex: none;
   border-radius: 9px;
-  background: linear-gradient(140deg, #f0a5c8, #8b5cf6 55%, #38bdf8);
+  /* Flat: the brand allows no gradients on this surface. */
+  background: var(--demo-violet);
 }
 
 .chat-demo .link-author-text {
@@ -460,8 +474,8 @@
 .chat-demo .artifact-kind {
   padding: 2px 9px;
   border-radius: 999px;
-  background: rgba(10, 132, 255, 0.16);
-  color: #6cb6ff;
+  background: rgba(154, 142, 205, 0.16);
+  color: #c5bded;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -607,8 +621,8 @@
 
 /* The rail says where the reader is, not only where they can go. */
 .chat-demo .reader-rail-link.is-active {
-  background: rgba(10, 132, 255, 0.14);
-  color: #6cb6ff;
+  background: rgba(154, 142, 205, 0.14);
+  color: #c5bded;
   font-weight: 600;
 }
 
@@ -692,7 +706,7 @@
 
 .chat-demo .reader-kicker {
   margin: 0 0 6px;
-  color: #6cb6ff;
+  color: #c5bded;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -727,14 +741,14 @@
 
 .chat-demo .reader-paragraph {
   margin: 0 0 15px;
-  color: #d6d6db;
+  color: rgba(255, 255, 255, 0.82);
   line-height: 1.62;
 }
 
 .chat-demo .reader-list {
   margin: 0 0 15px;
   padding-left: 20px;
-  color: #d6d6db;
+  color: rgba(255, 255, 255, 0.82);
   line-height: 1.62;
 }
 
@@ -770,7 +784,7 @@
 /* Command menu keyboard state -------------------------------------------- */
 
 .chat-demo .command-option.is-highlighted {
-  background: rgba(10, 132, 255, 0.18);
+  background: rgba(154, 142, 205, 0.18);
 }
 
 .chat-demo .command-help {
@@ -832,13 +846,23 @@
 /* Shell and rail ---------------------------------------------------------- */
 
 .demo-shell {
-  --demo-bg: #0b0b0d;
-  --demo-sidebar: #131315;
-  --demo-selected: #2b2b30;
-  --demo-text: #f2f2f7;
-  --demo-muted: #8e8e93;
+  /*
+   * The same brand tokens as .chat-demo, and they have to be repeated here:
+   * .chat-demo wraps only the chat surface, while the familiars and settings
+   * pages are its siblings under .demo-surface. Defining them in one place
+   * only is how the familiars page stayed on the old Apple greys while the
+   * chat surface moved to the brand.
+   */
+  --demo-bg: #080808;
+  --demo-sidebar: #0f0f0f;
+  --demo-elevated: #141414;
+  --demo-selected: #1a1a1a;
+  --demo-text: rgba(255, 255, 255, 0.94);
+  --demo-muted: rgba(255, 255, 255, 0.64);
   --demo-line: rgba(255, 255, 255, 0.08);
-  --demo-accent: #0a84ff;
+  --demo-accent: #9a8ecd;
+  --demo-violet: #9a8ecd;
+  --demo-violet-line: rgba(154, 142, 205, 0.42);
 
   display: grid;
   grid-template-columns: 56px 1fr;
@@ -887,8 +911,8 @@
 }
 
 .rail-button.is-active {
-  background: rgba(10, 132, 255, 0.16);
-  color: #6cb6ff;
+  background: rgba(154, 142, 205, 0.16);
+  color: #c5bded;
 }
 
 .rail-button svg {
@@ -995,8 +1019,8 @@
 }
 
 .fam-card.is-active {
-  border-color: rgba(10, 132, 255, 0.5);
-  background: rgba(10, 132, 255, 0.1);
+  border-color: rgba(154, 142, 205, 0.5);
+  background: rgba(154, 142, 205, 0.1);
 }
 
 .fam-card-head {
@@ -1058,8 +1082,8 @@
 }
 
 .fam-pill.is-pass {
-  border-color: rgba(52, 199, 89, 0.4);
-  color: #4ddb7a;
+  border-color: rgba(48, 209, 88, 0.4);
+  color: #30d158;
 }
 
 .fam-pill.is-warn {
@@ -1167,8 +1191,8 @@
 }
 
 .set-button.is-danger {
-  border-color: rgba(255, 69, 58, 0.4);
-  color: #ff6961;
+  border-color: rgba(255, 59, 48, 0.4);
+  color: #ff3b30;
 }
 
 .fam-tabs {
@@ -1226,7 +1250,7 @@
 }
 
 .fam-checks li.is-pass .fam-check-mark {
-  color: #4ddb7a;
+  color: #30d158;
 }
 
 .fam-checks li.is-fail {
@@ -1335,7 +1359,7 @@
 }
 
 .fam-value {
-  color: #d6d6db;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .fam-textarea {
@@ -1353,7 +1377,7 @@
   gap: 4px;
   margin: 0;
   padding-left: 18px;
-  color: #d6d6db;
+  color: rgba(255, 255, 255, 0.82);
   line-height: 1.5;
 }
 
@@ -1389,7 +1413,7 @@
   gap: 4px;
   margin: 0;
   padding-left: 17px;
-  color: #d6d6db;
+  color: rgba(255, 255, 255, 0.82);
   font-size: 13px;
 }
 
@@ -1555,4 +1579,122 @@
   .set-knob {
     transition: none;
   }
+}
+
+/* Familiars: contract report and analytics ------------------------------- */
+
+.fam-count {
+  margin: 0;
+  color: var(--demo-muted);
+  font-size: 12.5px;
+}
+
+.fam-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.fam-notes-label {
+  margin: 0;
+  color: var(--demo-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.fam-note {
+  margin: 0;
+  color: var(--demo-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.fam-note.is-violation {
+  color: var(--demo-text);
+}
+
+.fam-note code {
+  margin-right: 5px;
+  color: var(--demo-violet);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+/* A named group of toggles, not tabs: they filter the figures below rather
+   than swap between panels, and there is no panel for them to control. */
+.fam-windows {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+.fam-window {
+  padding: 4px 12px;
+  border: 1px solid var(--demo-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--demo-muted);
+  font-size: 12px;
+}
+
+.fam-window.is-active {
+  border-color: var(--demo-violet-line);
+  background: rgba(154, 142, 205, 0.16);
+  color: var(--demo-text);
+}
+
+/*
+ * The caveat that belongs beside every figure it qualifies. Amber, not red:
+ * an incomplete import is not a fault, it is a reason to read the numbers as
+ * provisional.
+ */
+.fam-backfill {
+  margin: 0 0 14px;
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 214, 10, 0.32);
+  border-radius: 10px;
+  background: rgba(255, 214, 10, 0.08);
+  color: var(--demo-text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.fam-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--demo-line);
+  border-radius: 12px;
+  background: var(--demo-line);
+}
+
+.fam-metric {
+  display: grid;
+  gap: 4px;
+  padding: 13px 14px;
+  background: var(--demo-elevated);
+}
+
+.fam-metric-value {
+  font-size: 19px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.fam-metric-label {
+  color: var(--demo-muted);
+  font-size: 11.5px;
+}
+
+.fam-empty {
+  margin: 0;
+  color: var(--demo-muted);
+  font-size: 12.5px;
 }
