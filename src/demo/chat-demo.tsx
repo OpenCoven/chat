@@ -37,10 +37,8 @@ function Avatar({ seed, size }: { seed: string; size: number }) {
       style={{
         width: size,
         height: size,
-        background: `linear-gradient(140deg,
-          hsl(${hue} 85% 62%),
-          hsl(${(hue + 55) % 360} 78% 58%),
-          hsl(${(hue + 110) % 360} 82% 66%))`,
+        // Flat, for the same reason as the stylesheet: no gradients.
+        background: `hsl(${hue} 58% 52%)`,
       }}
     />
   );

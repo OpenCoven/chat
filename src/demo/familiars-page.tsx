@@ -70,8 +70,10 @@ function Glyph({ familiar, size }: { familiar: { id: string; emoji: string }; si
         width: size,
         height: size,
         fontSize: size * 0.5,
-        background: `linear-gradient(140deg, hsl(${hue} 70% 30%), hsl(${(hue + 60) % 360} 65% 22%))`,
-        borderColor: `hsl(${hue} 70% 45%)`,
+        // Flat. A gradient here would be the same rule broken inline that
+        // the stylesheet beside it just stopped breaking.
+        background: `hsl(${hue} 42% 26%)`,
+        borderColor: `hsl(${hue} 46% 42%)`,
       }}
     >
       {familiar.emoji}

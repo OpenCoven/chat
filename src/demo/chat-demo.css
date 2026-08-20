@@ -11,8 +11,8 @@
 
 .chat-demo {
   /*
-   * The brand palette. DESIGN.md: "90% black / white, compose UI on neutral
-   * foundation" and "10% violet accents -- hover states, active borders,
+   * The brand palette. OpenCoven/brand DESIGN.md asks for "90% black /
+   * white, compose UI on neutral foundation" and "10% violet accents -- hover states, active borders,
    * labels, identity moments".
    *
    * This surface was built to emulate Messages, so its accent was iOS blue and
@@ -426,7 +426,7 @@
   height: 40px;
   flex: none;
   border-radius: 9px;
-  /* Flat: the brand forbids gradients without exception. */
+  /* Flat: the brand allows no gradients on this surface. */
   background: var(--demo-violet);
 }
 
@@ -1192,7 +1192,7 @@
 
 .set-button.is-danger {
   border-color: rgba(255, 59, 48, 0.4);
-  color: #ff6961;
+  color: #ff3b30;
 }
 
 .fam-tabs {

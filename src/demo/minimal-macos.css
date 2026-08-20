@@ -20,7 +20,8 @@
   /*
    * Surfaces: neutral dark greys, straight from the brand's own tokens.
    *
-   * DESIGN.md is explicit -- "90% black / white, compose UI on neutral
+   * The brand repository's DESIGN.md (OpenCoven/brand) is explicit --
+   * "90% black / white, compose UI on neutral
    * foundation" and "violet for identity ... not backgrounds". These had been
    * pushed to a violet cast on the reasoning that the palette's near-blacks
    * are violet; they are, in src/styles.css, which the brand file marks as
@@ -187,7 +188,8 @@
    * Flat, because the brand's rule on gradients has no exceptions.
    *
    * This carried a violet bloom that the glass panels were lit against. It
-   * looked good and it is gone: DESIGN.md says "No gradients. Ever." and
+   * looked good and it is gone: OpenCoven/brand DESIGN.md says "No
+   * gradients. Ever." and
    * "violet for identity ... not backgrounds", and a lit violet backdrop is
    * both. The panels now read as glass against a flat surface, which is less
    * dramatic and is what the brand asks for.
@@ -1745,7 +1747,8 @@
  *
  * This section built glass: translucent panels over a violet bloom, lit by an
  * inset specular edge and blurred with backdrop-filter. All of it is gone.
- * DESIGN.md rules it out three separate ways -- no blur or glass, no
+ * OpenCoven/brand DESIGN.md rules it out three separate ways -- no blur or
+ * glass, no
  * gradients, no glow shadows -- and panels are solid surface colours.
  *
  * What is left is the part that survives those rules: flat fills separated by
