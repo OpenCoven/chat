@@ -20,8 +20,22 @@ import { SettingsPage } from './settings-page';
  * app's real entry point; this renders only at `?demo=chat`.
  */
 
-/** A conversation's gradient avatar, seeded off its id so it stays stable. */
-function Avatar({ seed, size }: { seed: string; size: number }) {
+/**
+ * A conversation's mark: its initial on a tint of a hue seeded from its id.
+ *
+ * This was a saturated disc and, before that, a three-stop gradient. The
+ * gradient went because the brand does not allow them; the saturated disc went
+ * because it was the loudest thing on a neutral surface while saying nothing --
+ * an avatar that carries no letter, no image and no status is decoration
+ * occupying the position of an identity.
+ *
+ * The hue is seeded off the id rather than the title, so renaming a
+ * conversation does not change its colour.
+ *
+ * Still aria-hidden: the title sits directly beside it, and announcing "Q,
+ * Quick Chat" reads the same thing twice.
+ */
+function Avatar({ label, seed, size }: { label: string; seed: string; size: number }) {
   const hue = useMemo(() => {
     let total = 0;
     for (const character of seed) {
@@ -30,6 +44,8 @@ function Avatar({ seed, size }: { seed: string; size: number }) {
     return total % 360;
   }, [seed]);
 
+  const initial = label.trim().charAt(0).toUpperCase();
+
   return (
     <span
       className="avatar"
@@ -37,10 +53,15 @@ function Avatar({ seed, size }: { seed: string; size: number }) {
       style={{
         width: size,
         height: size,
-        // Flat, for the same reason as the stylesheet: no gradients.
-        background: `hsl(${hue} 58% 52%)`,
+        fontSize: Math.round(size * 0.42),
+        // Flat, per the brand: a tint and a border of one hue, no gradient.
+        borderColor: `hsl(${hue} 38% 52% / 0.5)`,
+        background: `hsl(${hue} 34% 46% / 0.28)`,
+        color: `hsl(${hue} 46% 82%)`,
       }}
-    />
+    >
+      {initial}
+    </span>
   );
 }
 
@@ -584,7 +605,7 @@ export function ChatDemo() {
                   setActiveId(conversation.id);
                 }}
               >
-                <Avatar seed={conversation.id} size={44} />
+                <Avatar label={conversation.title} seed={conversation.id} size={44} />
                 <span className="conversation-body">
                   <span className="conversation-top">
                     <span className="conversation-title">{conversation.title}</span>
@@ -617,7 +638,7 @@ export function ChatDemo() {
           </button>
 
           <div className="thread-title">
-            <Avatar seed={active?.id ?? 'none'} size={22} />
+            <Avatar label={active?.title ?? ''} seed={active?.id ?? 'none'} size={22} />
             <span>{active?.title ?? 'No conversation'}</span>
           </div>
 
