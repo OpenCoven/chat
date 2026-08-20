@@ -21,6 +21,33 @@ import { SettingsPage } from './settings-page';
  */
 
 /**
+ * The first user-perceived character of a label.
+ *
+ * Not charAt(0), which indexes UTF-16 code units: a title beginning with an
+ * emoji returns half a surrogate pair and renders as a replacement character.
+ * Not a spread either, which fixes that but still splits a ZWJ sequence -- a
+ * family emoji would show only its first person.
+ *
+ * Intl.Segmenter is the one that answers the question actually being asked,
+ * with a spread as a fallback for anywhere it is unavailable.
+ */
+export function firstGrapheme(label: string): string {
+  const trimmed = label.trim();
+
+  if (trimmed === '') {
+    return '';
+  }
+
+  if (typeof Intl.Segmenter === 'function') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+    return [...segmenter.segment(trimmed)][0]?.segment ?? '';
+  }
+
+  return [...trimmed][0] ?? '';
+}
+
+/**
  * A conversation's mark: its initial on a tint of a hue seeded from its id.
  *
  * This was a saturated disc and, before that, a three-stop gradient. The
@@ -44,7 +71,7 @@ function Avatar({ label, seed, size }: { label: string; seed: string; size: numb
     return total % 360;
   }, [seed]);
 
-  const initial = label.trim().charAt(0).toUpperCase();
+  const initial = firstGrapheme(label).toUpperCase();
 
   return (
     <span
