@@ -160,8 +160,10 @@ public.
 - `opencoven cave pair|status|forget [--json]`
 - `opencoven coven health [--json]`
 
-Supported OS keychains are explicit adapters. Missing secure storage fails
-closed. There is no plaintext file fallback.
+The CLI secure-store adapter uses `@napi-rs/keyring` directly so it reaches the
+native macOS Keychain, Windows Credential Manager, or Linux Secret Service
+without enabling a file or shell-command fallback. Missing native bindings or
+an unavailable OS keychain fails closed as `secure_store_unavailable`.
 
 ### Chat native host
 
@@ -202,7 +204,11 @@ sequence is:
 4. Check API major and minimum client version.
 5. Check native credential status.
 6. Probe authenticated health when a credential exists.
-7. On repeated `401`, delete the revoked credential and begin pairing.
+7. Treat revocation as confirmed only after two consecutive authenticated
+   health probes using the same discovery nonce and credential id return `401`,
+   with a 500 ms delay between probes. Any success, non-`401` response,
+   discovery identity change, or credential change resets the counter. On the
+   second `401`, delete the revoked credential and begin pairing.
 8. Create and poll a pairing request.
 9. Exchange approval; native code writes the bearer before returning metadata.
 10. Confirm authenticated health and enter `connected`.
@@ -220,7 +226,11 @@ The reducer uses explicit discriminated states:
 
 ```ts
 type ConnectionState =
-  | { kind: "locating"; attemptId: number }
+  | {
+      kind: "locating";
+      attemptId: number;
+      notice?: "revoked_credential";
+    }
   | { kind: "starting"; attemptId: number; candidate: string }
   | { kind: "waiting"; attemptId: number; attempt: number; elapsedMs: number }
   | {
@@ -250,9 +260,10 @@ type ConnectionState =
     };
 ```
 
-Revocation is represented as an authenticated transition back into pairing,
-not as a persistent terminal state. The gate announces the reason before the
-new pairing request begins.
+Revocation is represented as an authenticated transition to `locating` with a
+`revoked_credential` notice, then back into pairing. It is not a persistent
+terminal state. The gate announces the notice before the new pairing request
+begins.
 
 ## Data and Secret Flow
 
@@ -282,7 +293,8 @@ new pairing request begins.
 1. Cave revokes the persisted credential.
 2. Chat receives authenticated `401` responses.
 3. A single ambiguous `401` does not delete the credential.
-4. Repeated confirmed `401` deletes the keychain entry.
+4. A second consecutive authenticated `401` after 500 ms, for the same Cave
+   discovery nonce and credential id, deletes the keychain entry.
 5. Chat announces revocation and begins a new pairing request.
 
 ## Error Handling
@@ -445,4 +457,3 @@ Phase 1 is complete only when:
 - no raw private route, arbitrary HTTP client, or plaintext credential fallback
   exists
 - repository-local suites and required GitHub checks pass on merged revisions
-

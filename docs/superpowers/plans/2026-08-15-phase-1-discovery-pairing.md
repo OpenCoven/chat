@@ -1,5 +1,9 @@
 # Phase 1 Discovery and Pairing Implementation Plan
 
+
+> **2026-08-20 plan-of-record note:** The approved spec `docs/superpowers/specs/2026-08-20-phase-1-discovery-pairing-design.md` now supersedes this consolidated 2026-08-15 plan's stale file and command assumptions. Implement Phase 1 from the split plans `docs/superpowers/plans/2026-08-20-phase-1a-cave-pairing-authority.md`, `docs/superpowers/plans/2026-08-20-phase-1b-sdk-discovery-pairing.md`, `docs/superpowers/plans/2026-08-20-phase-1c-chat-native-connection.md`, and `docs/superpowers/plans/2026-08-20-phase-1d-real-authority-conformance.md`. The original goals, dependency waves, and bead mapping (`cave-9pifu`, `cave-p8qkk`, `cave-lf7bu`, `cave-tsvfj`, `cave-0prpu`, `cave-23nmv`, `cave-fz01p`) remain the program record; only the stale implementation details are superseded.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a fresh Chat installation discover or start Cave, negotiate health, request explicit pairing approval, exchange a one-time grant into native keychain storage, reconnect, and recover cleanly after revocation.
