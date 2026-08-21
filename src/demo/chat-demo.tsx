@@ -351,11 +351,17 @@ export function DemoShell() {
   return <ChatDemo />;
 }
 
+function isNarrowWindow(): boolean {
+  return (
+    typeof window !== 'undefined' && window.matchMedia?.('(max-width: 820px)').matches === true
+  );
+}
+
 export function ChatDemo() {
   const [conversations, setConversations] = useState<MockConversation[]>(MOCK_CONVERSATIONS);
   const [activeId, setActiveId] = useState(MOCK_CONVERSATIONS[0]?.id ?? '');
   const [conversationsOpen, setConversationsOpen] = useState(true);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(() => !isNarrowWindow());
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [pendingReply, setPendingReply] = useState(false);
@@ -410,6 +416,25 @@ export function ChatDemo() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isNarrowWindow() || (!conversationsOpen && !inspectorOpen)) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setConversationsOpen(false);
+      setInspectorOpen(false);
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [conversationsOpen, inspectorOpen]);
 
   /** Complete the draft to a command, leaving a trailing space to type into. */
   function completeCommand(name: string) {
@@ -552,6 +577,20 @@ export function ChatDemo() {
     );
   }
 
+  function showConversations() {
+    if (isNarrowWindow()) {
+      setInspectorOpen(false);
+    }
+    setConversationsOpen(true);
+  }
+
+  function showInspector() {
+    if (isNarrowWindow()) {
+      setConversationsOpen(false);
+    }
+    setInspectorOpen(true);
+  }
+
   return (
     <div
       className={`chat-demo ${conversationsOpen ? '' : 'is-conversations-closed'} ${
@@ -643,7 +682,7 @@ export function ChatDemo() {
               aria-label="Show conversations"
               aria-controls="conversation-panel"
               aria-expanded="false"
-              onClick={() => setConversationsOpen(true)}
+              onClick={showConversations}
             >
               ›
             </button>
@@ -667,7 +706,7 @@ export function ChatDemo() {
               aria-label="Show agent inspector"
               aria-controls="agent-inspector"
               aria-expanded="false"
-              onClick={() => setInspectorOpen(true)}
+              onClick={showInspector}
             >
               ‹
             </button>
