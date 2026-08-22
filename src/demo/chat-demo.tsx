@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChatInspector } from './chat-inspector';
 import { DocumentReader, type ReaderDocument } from './document-reader';
-import { FamiliarsPage } from './familiars-page';
 import {
   MOCK_COMMANDS,
   MOCK_CONVERSATIONS,
@@ -9,8 +9,8 @@ import {
   mockReply,
   nowLabel,
 } from './mock-data';
+import { MOCK_FAMILIARS } from './mock-familiars';
 import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
-import { SettingsPage } from './settings-page';
 
 /**
  * Proof-of-concept chat surface.
@@ -347,73 +347,52 @@ function MessageRow({
   );
 }
 
-/** The demo's three surfaces. */
-type Surface = 'chat' | 'familiars' | 'settings';
+export function DemoShell() {
+  return <ChatDemo />;
+}
 
-/**
- * Icon rail, mirroring the reference layout's far-left column.
- *
- * Three surfaces rather than a general navigation: chat is the product,
- * familiars is what the product talks to, and settings is what the contract
- * and the API say is configurable.
- */
-function Rail({ surface, onChange }: { surface: Surface; onChange: (next: Surface) => void }) {
-  const items: { id: Surface; label: string; path: string }[] = [
-    {
-      id: 'chat',
-      label: 'Chat',
-      path: 'M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v6a2.5 2.5 0 0 1-2.5 2.5H8l-4 3v-3H5.5A2.5 2.5 0 0 1 3 11.5z',
-    },
-    {
-      id: 'familiars',
-      label: 'Familiars',
-      path: 'M10 3a3.2 3.2 0 1 1 0 6.4A3.2 3.2 0 0 1 10 3zm0 8c3.6 0 6.4 1.9 6.4 4.2V17H3.6v-1.8C3.6 12.9 6.4 11 10 11z',
-    },
-    {
-      id: 'settings',
-      label: 'Settings',
-      path: 'M10 6.6A3.4 3.4 0 1 0 10 13.4 3.4 3.4 0 0 0 10 6.6zm7 3.4c0-.5 0-1-.1-1.4l1.6-1.2-1.6-2.8-1.9.7c-.7-.6-1.5-1-2.3-1.3L12.4 2H9.6l-.3 2c-.9.3-1.6.7-2.3 1.3l-1.9-.7-1.6 2.8L5.1 8.6c-.1.4-.1.9-.1 1.4s0 1 .1 1.4l-1.6 1.2 1.6 2.8 1.9-.7c.7.6 1.4 1 2.3 1.3l.3 2h2.8l.3-2c.9-.3 1.6-.7 2.3-1.3l1.9.7 1.6-2.8-1.6-1.2c.1-.4.1-.9.1-1.4z',
-    },
-  ];
-
+function isNarrowWindow(): boolean {
   return (
-    <nav className="rail" aria-label="Surfaces">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className={`rail-button ${surface === item.id ? 'is-active' : ''}`}
-          aria-label={item.label}
-          aria-current={surface === item.id ? 'page' : undefined}
-          onClick={() => onChange(item.id)}
-        >
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d={item.path} fill="currentColor" />
-          </svg>
-        </button>
-      ))}
-    </nav>
+    typeof window !== 'undefined' && window.matchMedia?.('(max-width: 820px)').matches === true
   );
 }
 
-export function DemoShell() {
-  const [surface, setSurface] = useState<Surface>('chat');
+function useNarrowWindow(): boolean {
+  const [isNarrow, setIsNarrow] = useState(isNarrowWindow);
 
-  return (
-    <div className="demo-shell">
-      <Rail surface={surface} onChange={setSurface} />
-      <div className="demo-surface">
-        {surface === 'chat' ? <ChatDemo /> : null}
-        {surface === 'familiars' ? <FamiliarsPage /> : null}
-        {surface === 'settings' ? <SettingsPage /> : null}
-      </div>
-    </div>
-  );
+  useEffect(() => {
+    if (!window.matchMedia) {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 820px)');
+    const onChange = () => setIsNarrow(mediaQuery.matches);
+
+    onChange();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', onChange);
+    } else {
+      mediaQuery.addListener?.(onChange);
+    }
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', onChange);
+      } else {
+        mediaQuery.removeListener?.(onChange);
+      }
+    };
+  }, []);
+
+  return isNarrow;
 }
 
 export function ChatDemo() {
   const [conversations, setConversations] = useState<MockConversation[]>(MOCK_CONVERSATIONS);
   const [activeId, setActiveId] = useState(MOCK_CONVERSATIONS[0]?.id ?? '');
+  const [conversationsOpen, setConversationsOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(() => !isNarrowWindow());
+  const isNarrow = useNarrowWindow();
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [pendingReply, setPendingReply] = useState(false);
@@ -426,6 +405,7 @@ export function ChatDemo() {
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
   const active = conversations.find((conversation) => conversation.id === activeId);
+  const activeFamiliar = MOCK_FAMILIARS.find((familiar) => familiar.id === active?.familiarId);
   const messageCount = active?.messages.length ?? 0;
 
   const visible = conversations.filter((conversation) =>
@@ -467,6 +447,31 @@ export function ChatDemo() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (isNarrow && conversationsOpen && inspectorOpen) {
+      setInspectorOpen(false);
+    }
+  }, [conversationsOpen, inspectorOpen, isNarrow]);
+
+  useEffect(() => {
+    if (!isNarrow || (!conversationsOpen && !inspectorOpen)) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setConversationsOpen(false);
+      setInspectorOpen(false);
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [conversationsOpen, inspectorOpen, isNarrow]);
 
   /** Complete the draft to a command, leaving a trailing space to type into. */
   function completeCommand(name: string) {
@@ -601,9 +606,53 @@ export function ChatDemo() {
     });
   }
 
+  function changeActiveFamiliar(familiarId: string) {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === activeId ? { ...conversation, familiarId } : conversation,
+      ),
+    );
+  }
+
+  function showConversations() {
+    if (isNarrow) {
+      setInspectorOpen(false);
+    }
+    setConversationsOpen(true);
+  }
+
+  function showInspector() {
+    if (isNarrow) {
+      setConversationsOpen(false);
+    }
+    setInspectorOpen(true);
+  }
+
   return (
-    <div className="chat-demo">
-      <aside className="sidebar">
+    <div
+      className={`chat-demo ${conversationsOpen ? '' : 'is-conversations-closed'} ${
+        inspectorOpen ? '' : 'is-inspector-closed'
+      }`}
+    >
+      <aside
+        id="conversation-panel"
+        className="sidebar glass-panel"
+        aria-label="Conversations"
+        hidden={!conversationsOpen}
+      >
+        <header className="sidebar-header">
+          <h1>Chats</h1>
+          <button
+            type="button"
+            className="glass-control"
+            aria-label="Hide conversations"
+            aria-controls="conversation-panel"
+            aria-expanded="true"
+            onClick={() => setConversationsOpen(false)}
+          >
+            ‹
+          </button>
+        </header>
         <div className="search-wrap">
           <svg className="search-icon" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -625,6 +674,7 @@ export function ChatDemo() {
               <button
                 type="button"
                 className={`conversation ${conversation.id === activeId ? 'is-active' : ''}`}
+                aria-label={conversation.title}
                 onClick={() => {
                   // Switching away cancels the stream rather than letting it
                   // keep writing into a thread the user has left.
@@ -651,32 +701,53 @@ export function ChatDemo() {
             </li>
           ))}
         </ul>
+
+        <button type="button" className="new-conversation">
+          <span aria-hidden="true">＋</span>
+          <span>New conversation</span>
+        </button>
       </aside>
 
       <main className="thread">
         <header className="thread-header">
-          <button type="button" className="icon-button" aria-label="New conversation">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path
-                d="M3 14.2V17h2.8l8.4-8.4-2.8-2.8L3 14.2zM16.8 6.2a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0l-1.3 1.3 2.8 2.8 1.5-1.1z"
-                fill="currentColor"
-              />
-            </svg>
-          </button>
+          {conversationsOpen ? (
+            <span />
+          ) : (
+            <button
+              type="button"
+              className="glass-control"
+              aria-label="Show conversations"
+              aria-controls="conversation-panel"
+              aria-expanded="false"
+              onClick={showConversations}
+            >
+              ›
+            </button>
+          )}
 
           <div className="thread-title">
-            <Avatar label={active?.title ?? ''} seed={active?.id ?? 'none'} size={22} />
-            <span>{active?.title ?? 'No conversation'}</span>
+            <Avatar
+              label={activeFamiliar?.name ?? active?.title ?? ''}
+              seed={activeFamiliar?.id ?? active?.id ?? 'none'}
+              size={24}
+            />
+            <span>{activeFamiliar?.name ?? 'No agent'}</span>
           </div>
 
-          <button type="button" className="icon-button" aria-label="Settings">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path
-                d="M10 6.6A3.4 3.4 0 1 0 10 13.4 3.4 3.4 0 0 0 10 6.6zm7 3.4c0-.5 0-1-.1-1.4l1.6-1.2-1.6-2.8-1.9.7c-.7-.6-1.5-1-2.3-1.3L12.4 2H9.6l-.3 2c-.9.3-1.6.7-2.3 1.3l-1.9-.7-1.6 2.8L5.1 8.6c-.1.4-.1.9-.1 1.4s0 1 .1 1.4l-1.6 1.2 1.6 2.8 1.9-.7c.7.6 1.4 1 2.3 1.3l.3 2h2.8l.3-2c.9-.3 1.6-.7 2.3-1.3l1.9.7 1.6-2.8-1.6-1.2c.1-.4.1-.9.1-1.4z"
-                fill="currentColor"
-              />
-            </svg>
-          </button>
+          {inspectorOpen ? (
+            <span />
+          ) : (
+            <button
+              type="button"
+              className="glass-control"
+              aria-label="Show agent inspector"
+              aria-controls="agent-inspector"
+              aria-expanded="false"
+              onClick={showInspector}
+            >
+              ‹
+            </button>
+          )}
         </header>
 
         <div className="transcript">
@@ -826,6 +897,14 @@ export function ChatDemo() {
           </div>
         </div>
       </main>
+
+      <aside id="agent-inspector" aria-label="Agent inspector" hidden={!inspectorOpen}>
+        <ChatInspector
+          familiar={activeFamiliar}
+          onClose={() => setInspectorOpen(false)}
+          onFamiliarChange={changeActiveFamiliar}
+        />
+      </aside>
 
       {reader ? <DocumentReader document={reader} onClose={() => setReader(null)} /> : null}
     </div>

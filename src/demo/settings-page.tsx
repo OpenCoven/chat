@@ -26,7 +26,7 @@ import { MOCK_FAMILIARS } from './mock-familiars';
  */
 
 /** What `GET /api/client/v1/health` reports, mocked. */
-const MOCK_HEALTH = {
+export const MOCK_HEALTH = {
   service: 'coven-cave',
   apiVersion: '1.4',
   minimumClientVersion: '1.0',
@@ -36,7 +36,7 @@ const MOCK_HEALTH = {
 };
 
 /** The paired credential, as the paired-clients surface would describe it. */
-const MOCK_CREDENTIAL = {
+export const MOCK_CREDENTIAL = {
   label: 'OpenCoven Chat (desktop)',
   scopes: ['chat:read', 'chat:send', 'conversations:write', 'attachments:write'],
   createdAt: '12 August 2026',

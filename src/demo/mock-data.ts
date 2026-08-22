@@ -46,6 +46,8 @@ export type MockMessage = {
 
 export type MockConversation = {
   id: string;
+  /** Familiar whose identity and authority apply to this conversation. */
+  familiarId: string;
   title: string;
   /** Secondary line in the sidebar. */
   preview: string;
@@ -60,6 +62,7 @@ export type MockConversation = {
 export const MOCK_CONVERSATIONS: MockConversation[] = [
   {
     id: 'quick-chat',
+    familiarId: 'astra',
     title: 'Quick Chat',
     preview: 'Photo',
     previewGlyph: '\u{1F4F7}',
@@ -84,6 +87,7 @@ export const MOCK_CONVERSATIONS: MockConversation[] = [
   },
   {
     id: 'new-chat',
+    familiarId: 'cody',
     title: 'New Chat',
     preview: 'New conversation',
     timestamp: 'Yesterday',
