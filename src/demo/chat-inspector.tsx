@@ -20,6 +20,7 @@ export type ChatInspectorProps = Readonly<{
 }>;
 
 const TABS: readonly InspectorTab[] = ['overview', 'access', 'activity'];
+const APP_TABS: readonly AppTab[] = ['general', 'connection'];
 
 function titleCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
@@ -173,38 +174,80 @@ function Activity({ analytics }: { analytics: CaveExecutionWindow | undefined })
 function AppSettings({
   familiar,
   onBack,
+  onClose,
 }: {
   familiar: MockFamiliar | undefined;
   onBack: () => void;
+  onClose: () => void;
 }) {
   const [tab, setTab] = useState<AppTab>('general');
   const [notifications, setNotifications] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  function selectTab(next: AppTab) {
+    setTab(next);
+    tabRefs.current[APP_TABS.indexOf(next)]?.focus();
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? APP_TABS.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + APP_TABS.length) % APP_TABS.length;
+    const next = APP_TABS[nextIndex];
+
+    if (next) {
+      selectTab(next);
+    }
+  }
 
   return (
     <section className="chat-inspector app-settings-view" aria-label="App settings">
-      <button
-        type="button"
-        className="inspector-back"
-        aria-label={`Back to ${familiar?.name ?? 'agent'}`}
-        onClick={onBack}
-      >
-        <span aria-hidden="true">‹</span>
-        <span>{familiar?.name ?? 'Agent'}</span>
-      </button>
+      <div className="inspector-app-toolbar">
+        <button
+          type="button"
+          className="inspector-back"
+          aria-label={`Back to ${familiar?.name ?? 'agent'}`}
+          onClick={onBack}
+        >
+          <span aria-hidden="true">‹</span>
+          <span>{familiar?.name ?? 'Agent'}</span>
+        </button>
+        <button
+          type="button"
+          className="glass-control"
+          aria-label="Hide agent inspector"
+          onClick={onClose}
+        >
+          ›
+        </button>
+      </div>
       <header className="inspector-app-header">
         <h2>App settings</h2>
         <p>Device and Cave preferences</p>
       </header>
       <div className="inspector-tabs" role="tablist" aria-label="App settings sections">
-        {(['general', 'connection'] as const).map((name) => (
+        {APP_TABS.map((name, index) => (
           <button
             key={name}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
             type="button"
             role="tab"
             aria-selected={tab === name}
+            tabIndex={tab === name ? 0 : -1}
             onClick={() => setTab(name)}
+            onKeyDown={(event) => onTabKeyDown(event, index)}
           >
             {titleCase(name)}
           </button>
@@ -281,7 +324,7 @@ export function ChatInspector({ familiar, onClose, onFamiliarChange }: ChatInspe
   }
 
   if (view === 'app') {
-    return <AppSettings familiar={familiar} onBack={() => setView('agent')} />;
+    return <AppSettings familiar={familiar} onBack={() => setView('agent')} onClose={onClose} />;
   }
 
   const analytics = familiar ? CAVE_FAMILIAR_ANALYTICS[familiar.id]?.windows['7d'] : undefined;

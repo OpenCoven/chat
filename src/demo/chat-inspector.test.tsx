@@ -29,7 +29,8 @@ describe('ChatInspector', () => {
   });
 
   it('opens app settings in place and returns to the agent', () => {
-    render(<ChatInspector familiar={astra} onFamiliarChange={vi.fn()} onClose={vi.fn()} />);
+    const onClose = vi.fn();
+    render(<ChatInspector familiar={astra} onFamiliarChange={vi.fn()} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'App settings' }));
     expect(screen.getByRole('heading', { name: 'App settings' })).toBeVisible();
@@ -38,6 +39,15 @@ describe('ChatInspector', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Connection' }));
     expect(screen.getByText('cave-7f3a91c2')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Copy diagnostic report' })).toBeVisible();
+
+    const connection = screen.getByRole('tab', { name: 'Connection' });
+    connection.focus();
+    fireEvent.keyDown(connection, { key: 'Home' });
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide agent inspector' }));
+    expect(onClose).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to Astra' }));
     expect(screen.getByRole('heading', { name: 'Astra' })).toBeVisible();

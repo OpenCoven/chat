@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import { DemoShell } from './chat-demo';
 import { MOCK_CONVERSATIONS } from './mock-data';
@@ -71,6 +71,47 @@ describe('chat demo shell', () => {
 
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(document.getElementById('agent-inspector')).not.toBeVisible();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it('reconciles open panels when a mounted desktop window becomes narrow', () => {
+    const originalMatchMedia = window.matchMedia;
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    let matches = false;
+    const mediaQuery = {
+      get matches() {
+        return matches;
+      },
+      media: '(max-width: 820px)',
+      onchange: null,
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+    } as MediaQueryList;
+    window.matchMedia = vi.fn().mockReturnValue(mediaQuery);
+
+    try {
+      render(<DemoShell />);
+      expect(document.getElementById('conversation-panel')).toBeVisible();
+      expect(document.getElementById('agent-inspector')).toBeVisible();
+
+      act(() => {
+        matches = true;
+        for (const listener of listeners) {
+          listener({ matches: true, media: mediaQuery.media } as MediaQueryListEvent);
+        }
+      });
+
+      expect(document.getElementById('conversation-panel')).toBeVisible();
+      expect(document.getElementById('agent-inspector')).not.toBeVisible();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(document.getElementById('conversation-panel')).not.toBeVisible();
     } finally {
       window.matchMedia = originalMatchMedia;
     }

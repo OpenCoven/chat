@@ -357,11 +357,42 @@ function isNarrowWindow(): boolean {
   );
 }
 
+function useNarrowWindow(): boolean {
+  const [isNarrow, setIsNarrow] = useState(isNarrowWindow);
+
+  useEffect(() => {
+    if (!window.matchMedia) {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 820px)');
+    const onChange = () => setIsNarrow(mediaQuery.matches);
+
+    onChange();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', onChange);
+    } else {
+      mediaQuery.addListener?.(onChange);
+    }
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', onChange);
+      } else {
+        mediaQuery.removeListener?.(onChange);
+      }
+    };
+  }, []);
+
+  return isNarrow;
+}
+
 export function ChatDemo() {
   const [conversations, setConversations] = useState<MockConversation[]>(MOCK_CONVERSATIONS);
   const [activeId, setActiveId] = useState(MOCK_CONVERSATIONS[0]?.id ?? '');
   const [conversationsOpen, setConversationsOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(() => !isNarrowWindow());
+  const isNarrow = useNarrowWindow();
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [pendingReply, setPendingReply] = useState(false);
@@ -418,7 +449,13 @@ export function ChatDemo() {
   }, []);
 
   useEffect(() => {
-    if (!isNarrowWindow() || (!conversationsOpen && !inspectorOpen)) {
+    if (isNarrow && conversationsOpen && inspectorOpen) {
+      setInspectorOpen(false);
+    }
+  }, [conversationsOpen, inspectorOpen, isNarrow]);
+
+  useEffect(() => {
+    if (!isNarrow || (!conversationsOpen && !inspectorOpen)) {
       return;
     }
 
@@ -434,7 +471,7 @@ export function ChatDemo() {
     window.addEventListener('keydown', onKeyDown);
 
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [conversationsOpen, inspectorOpen]);
+  }, [conversationsOpen, inspectorOpen, isNarrow]);
 
   /** Complete the draft to a command, leaving a trailing space to type into. */
   function completeCommand(name: string) {
@@ -578,14 +615,14 @@ export function ChatDemo() {
   }
 
   function showConversations() {
-    if (isNarrowWindow()) {
+    if (isNarrow) {
       setInspectorOpen(false);
     }
     setConversationsOpen(true);
   }
 
   function showInspector() {
-    if (isNarrowWindow()) {
+    if (isNarrow) {
       setConversationsOpen(false);
     }
     setInspectorOpen(true);
