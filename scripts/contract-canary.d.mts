@@ -1,13 +1,30 @@
-export function readContractCanaryLock(lockPath?: string): {
-  path: string;
-  sdk: { repository: string; revision: string };
-  cave: { repository: string; revision: string };
+export type ContractCanaryArtifact = {
+  packageName: string;
+  sha256: string;
 };
+export type ContractCanarySdkArtifacts = {
+  core: ContractCanaryArtifact;
+  cave: ContractCanaryArtifact;
+  coven: ContractCanaryArtifact;
+  sdk: ContractCanaryArtifact;
+};
+export type ContractCanarySdkLockEntry = {
+  repository: string;
+  revision: string;
+  artifacts: ContractCanarySdkArtifacts;
+};
+export type ContractCanaryCaveLockEntry = {
+  repository: string;
+  revision: string;
+};
+export type ContractCanaryLock = {
+  path: string;
+  sdk: ContractCanarySdkLockEntry;
+  cave: ContractCanaryCaveLockEntry;
+};
+export function readContractCanaryLock(lockPath?: string): ContractCanaryLock;
 export function assertContractCanaryCheckoutHeads(
-  lock: {
-    sdk: { repository: string; revision: string };
-    cave: { repository: string; revision: string };
-  },
+  lock: ContractCanaryLock,
   options: { sdkRoot: string; caveRoot: string },
 ): { sdkHead: string; caveHead: string };
 export function assertCleanGitCheckout(
@@ -23,7 +40,7 @@ export function assertCleanContractCanaryCheckouts(options: {
 };
 export function createContractCanaryVerifier(): string;
 export function assertPackedFixtureMatchesCaveCheckout(
-  lock: { cave: { revision: string } },
+  lock: Pick<ContractCanaryLock, 'cave'>,
   harnessRoot: string,
   caveRoot: string,
 ): void;

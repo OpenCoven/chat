@@ -208,9 +208,11 @@ describe('contract canary temp directory safety', () => {
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.sdk.revision).toBe('a86773cb6ba45084495c00ca364f8646865f1606');
-    expect(
-      Object.keys((lock.sdk as unknown as { artifacts: Record<string, unknown> }).artifacts),
-    ).toEqual(['core', 'cave', 'coven', 'sdk']);
+    expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
+    expect(lock.sdk.artifacts.core).toEqual({
+      packageName: '@opencoven/sdk-core',
+      sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
+    });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
