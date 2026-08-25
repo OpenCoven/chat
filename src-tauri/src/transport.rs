@@ -167,7 +167,7 @@ impl NativeCaveTransport for ConstrainedTransport {
         request_id: &str,
         secret: &str,
     ) -> NativeResult<Value> {
-        validate_route_id(request_id)?;
+        validate_pairing_request_id(request_id)?;
         Self::request(
             authority,
             Method::GET,
@@ -186,7 +186,7 @@ impl NativeCaveTransport for ConstrainedTransport {
         request_id: &str,
         secret: &str,
     ) -> NativeResult<NativePairingExchange> {
-        validate_route_id(request_id)?;
+        validate_pairing_request_id(request_id)?;
         let response = Self::request(
             authority,
             Method::POST,
@@ -216,20 +216,22 @@ impl NativeCaveTransport for ConstrainedTransport {
             CaveReadPath::Conversations { page } => {
                 ("api/client/v1/conversations".to_owned(), Some(page))
             }
-            CaveReadPath::Conversation { conversation_id } => {
-                validate_route_id(&conversation_id)?;
-                (
-                    format!("api/client/v1/conversations/{conversation_id}"),
-                    None,
-                )
-            }
+            CaveReadPath::Conversation { conversation_id } => (
+                format!(
+                    "api/client/v1/conversations/{}",
+                    encoded_cave_path_segment(&conversation_id)
+                ),
+                None,
+            ),
             CaveReadPath::ConversationMessages {
                 conversation_id,
                 page,
             } => (
                 {
-                    validate_route_id(&conversation_id)?;
-                    format!("api/client/v1/conversations/{conversation_id}/messages")
+                    format!(
+                        "api/client/v1/conversations/{}/messages",
+                        encoded_cave_path_segment(&conversation_id)
+                    )
                 },
                 Some(page),
             ),
@@ -239,7 +241,7 @@ impl NativeCaveTransport for ConstrainedTransport {
     }
 }
 
-fn validate_route_id(value: &str) -> NativeResult<()> {
+fn validate_pairing_request_id(value: &str) -> NativeResult<()> {
     if value.is_empty()
         || value.len() > 128
         || !value
@@ -249,6 +251,19 @@ fn validate_route_id(value: &str) -> NativeResult<()> {
         return Err(NativeDiagnostic::new("invalid_native_input", false));
     }
     Ok(())
+}
+
+pub(crate) fn encoded_cave_path_segment(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'~') {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 fn with_page(mut path: String, page: Option<NativePage>) -> NativeResult<String> {
@@ -354,8 +369,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        managed_pairing_created, CaveReadPath, ConstrainedTransport, NativeCaveTransport,
-        NativePage,
+        encoded_cave_path_segment, managed_pairing_created, CaveReadPath, ConstrainedTransport,
+        NativeCaveTransport, NativePage,
     };
     use crate::cave::{
         pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
@@ -379,6 +394,14 @@ mod tests {
             }),
         );
         assert!(!created.to_string().contains("pairing-secret-canary"));
+    }
+
+    #[test]
+    fn canonical_conversation_ids_are_encoded_as_one_path_segment() {
+        assert_eq!(
+            encoded_cave_path_segment("a/b space/雪%.."),
+            "a%2Fb%20space%2F%E9%9B%AA%25%2E%2E"
+        );
     }
 
     #[test]

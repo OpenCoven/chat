@@ -108,6 +108,16 @@ impl ConnectionRuntime {
         self.generation
     }
 
+    fn clear_authority_state(&mut self) {
+        self.authority = None;
+        self.authority_handle = None;
+        self.instance_id = None;
+        self.pairing = None;
+        self.pairing_in_flight = false;
+        self.revocation_in_flight = false;
+        self.unauthorized.reset();
+    }
+
     fn require_authority(&self, handle: &str) -> NativeResult<(u64, PinnedCaveAuthority)> {
         if self.authority_handle.as_deref() != Some(handle) {
             return Err(NativeDiagnostic::new("invalid_discovery_handle", false));
@@ -192,11 +202,7 @@ impl NativeConnectionState {
         let mut runtime = self.runtime()?;
         let (generation, authority) = runtime.require_authority(handle)?;
         if !authority.matches_owner_record(&record) {
-            runtime.authority = None;
-            runtime.authority_handle = None;
-            runtime.instance_id = None;
-            runtime.pairing = None;
-            runtime.pairing_in_flight = false;
+            runtime.clear_authority_state();
             runtime.new_generation();
             return Err(NativeDiagnostic::new("stale_discovery_handle", true));
         }
@@ -319,26 +325,54 @@ impl NativeConnectionState {
                 pairing.secret.clone(),
             )
         };
+        let expected_credential_id =
+            match self.keyring.read(&instance_id, authority.origin().as_str()) {
+                Ok(credential) => Some(credential.credential_id),
+                Err(KeyringError::NotFound) => None,
+                Err(error) => {
+                    let mut runtime = self.runtime()?;
+                    if runtime.generation == generation
+                        && runtime.authority_handle.as_deref() == Some(&handle)
+                        && runtime
+                            .pairing
+                            .as_mut()
+                            .is_some_and(|pairing| pairing.request_id == request_id)
+                    {
+                        runtime.pairing.as_mut().unwrap().exchange_committed = false;
+                    }
+                    return Err(error.diagnostic());
+                }
+            };
         let exchanged = self
             .transport
             .pairing_exchange(&authority, &request_id, &secret)
             .await?;
-        if let Err(error) = self.keyring.store(
+        self.capture_handle(&handle)?;
+        self.runtime()?
+            .require_current(generation, &handle, &authority)?;
+        let persisted = match self.keyring.store_if_current(
             &instance_id,
             authority.origin().as_str(),
+            expected_credential_id.as_deref(),
             &exchanged.bearer,
             &exchanged.credential_id,
         ) {
-            let mut runtime = self.runtime()?;
-            if runtime.generation == generation
-                && runtime
-                    .pairing
-                    .as_ref()
-                    .is_some_and(|pairing| pairing.request_id == request_id)
-            {
-                runtime.pairing = None;
+            Ok(persisted) => persisted,
+            Err(error) => {
+                let mut runtime = self.runtime()?;
+                if runtime.generation == generation
+                    && runtime
+                        .pairing
+                        .as_ref()
+                        .is_some_and(|pairing| pairing.request_id == request_id)
+                {
+                    runtime.pairing = None;
+                }
+                return Err(error.diagnostic());
             }
-            return Err(error.diagnostic());
+        };
+        if !persisted {
+            return Err(NativeDiagnostic::new("credential_update_in_progress", true));
         }
 
         let mut runtime = self.runtime()?;
@@ -401,7 +435,7 @@ impl NativeConnectionState {
                 return Err(error);
             }
         };
-        {
+        let revoked = {
             let mut runtime = self.runtime()?;
             runtime.require_current(generation, &handle, &authority)?;
             runtime.revocation_in_flight = false;
@@ -417,24 +451,39 @@ impl NativeConnectionState {
                         )
                         .map_err(|error| error.diagnostic())?;
                     runtime.unauthorized.reset();
+                    Some(deleted)
+                } else {
                     return Ok(json!({
-                        "status": if deleted { "revoked" } else { "missing" },
-                        "health": {},
+                        "status": "disconnected",
+                        "reason": "reconcile_required",
                     }));
                 }
-                return Ok(json!({
-                    "status": "disconnected",
-                    "reason": "reconcile_required",
-                }));
+            } else {
+                runtime.unauthorized.reset();
+                None
             }
-            require_success(&response)?;
-            runtime.unauthorized.reset();
+        };
+        if let Some(deleted) = revoked {
+            let health = self.transport.health(&authority).await?;
+            self.runtime()?
+                .require_current(generation, &handle, &authority)?;
+            return Ok(json!({
+                "status": if deleted { "revoked" } else { "missing" },
+                "health": health.payload,
+            }));
         }
         let health = self.transport.health(&authority).await?;
-        require_success(&health)?;
+        self.runtime()?
+            .require_current(generation, &handle, &authority)?;
+        let access = match response.status_code {
+            200..=299 => "chat:read",
+            403 => "scope_denied",
+            429 => "rate_limited",
+            _ => "service_unavailable",
+        };
         Ok(json!({
             "status": "valid",
-            "access": "chat:read",
+            "access": access,
             "health": health.payload,
         }))
     }
@@ -482,12 +531,14 @@ impl NativeConnectionState {
     }
 
     pub(crate) async fn cave_launch(&self) -> NativeResult<()> {
+        let deadline = Instant::now() + LAUNCH_READINESS_DEADLINE;
         let generation = {
             let mut runtime = self.runtime()?;
             runtime.reap_launch()?;
             if runtime.launch_in_flight || runtime.launch.is_some() {
                 return Err(NativeDiagnostic::new("cave_launch_in_progress", true));
             }
+            runtime.clear_authority_state();
             runtime.launch_in_flight = true;
             runtime.new_generation()
         };
@@ -500,7 +551,6 @@ impl NativeConnectionState {
         };
         self.runtime()?.launch = Some(ManagedLaunch { child, generation });
 
-        let deadline = Instant::now() + LAUNCH_READINESS_DEADLINE;
         let mut backoff = Duration::from_millis(100);
         while Instant::now() < deadline {
             {
@@ -686,14 +736,31 @@ mod tests {
                 .ok_or(KeyringError::NotFound)
         }
 
-        fn store(
+        fn store_if_current(
             &self,
             _instance_id: &str,
-            _origin: &str,
-            _bearer: &str,
-            _credential_id: &str,
-        ) -> Result<(), KeyringError> {
-            Err(KeyringError::Failure)
+            origin: &str,
+            expected_credential_id: Option<&str>,
+            bearer: &str,
+            credential_id: &str,
+        ) -> Result<bool, KeyringError> {
+            let mut stored = self.credential.lock().unwrap();
+            let matches_expected = match (stored.as_ref(), expected_credential_id) {
+                (None, None) => true,
+                (Some(current), Some(expected)) => {
+                    current.origin == origin && current.credential_id == expected
+                }
+                _ => false,
+            };
+            if !matches_expected {
+                return Ok(false);
+            }
+            *stored = Some(Credential {
+                bearer: bearer.to_owned(),
+                credential_id: credential_id.to_owned(),
+                origin: origin.to_owned(),
+            });
+            Ok(true)
         }
 
         fn delete_if_matches(
@@ -868,6 +935,44 @@ mod tests {
     }
 
     #[test]
+    fn launch_invalidates_the_prelaunch_authority_handle() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery { record }),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+        );
+        let old_handle = state.cave_read_discovery().unwrap().handle;
+
+        tauri::async_runtime::block_on(state.cave_launch()).unwrap();
+
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_health(old_handle))
+                .unwrap_err()
+                .code,
+            "invalid_discovery_handle"
+        );
+    }
+
+    #[test]
     fn stale_health_completion_cannot_replace_a_new_discovery_generation() {
         let record_a = OwnerDiscoveryRecord {
             handle: String::new(),
@@ -998,5 +1103,39 @@ mod tests {
 
         assert!(!serialized.contains("http://127.0.0.1:4310"));
         assert!(serialized.contains("opaque-native-handle"));
+    }
+
+    #[test]
+    fn late_exchange_cas_cannot_replace_a_newer_credential() {
+        let keyring = FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "newer-bearer".to_owned(),
+                credential_id: "credential-new".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        };
+
+        let persisted = keyring
+            .store_if_current(
+                "owner-record",
+                "http://127.0.0.1:4310/",
+                Some("credential-old"),
+                "late-bearer",
+                "credential-old",
+            )
+            .unwrap();
+
+        assert!(!persisted);
+        assert_eq!(
+            keyring
+                .credential
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .credential_id,
+            "credential-new"
+        );
     }
 }

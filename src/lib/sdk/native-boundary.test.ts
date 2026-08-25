@@ -100,7 +100,7 @@ describe('Cave managed native boundary', () => {
     await binding.source.read();
 
     expect(binding.takeHandle()).toBe('native-discovery-handle');
-    expect(() => binding.takeHandle()).toThrow('Native Cave operation was unavailable.');
+    expect(() => binding.takeHandle()).toThrow('Cave service was unavailable.');
   });
 
   it('never places secret canaries in managed command arguments or results', async () => {
@@ -142,9 +142,9 @@ describe('Cave managed native boundary', () => {
     ];
 
     expect(error).toEqual({
-      code: 'native_unavailable',
+      code: 'service_unavailable',
       retryable: true,
-      message: 'Native Cave operation was unavailable.',
+      message: 'Cave service was unavailable.',
     });
     for (const snapshot of snapshots) {
       expect(snapshot).not.toContain(secret);

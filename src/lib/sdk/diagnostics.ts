@@ -1,5 +1,5 @@
 export type NativeSdkDiagnostic = Readonly<{
-  code: 'native_unavailable' | 'invalid_native_result';
+  code: 'service_unavailable' | 'invalid_response';
   retryable: boolean;
   message: string;
 }>;
@@ -10,9 +10,9 @@ const MAX_STRING_LENGTH = 64 * 1024;
 
 function invalidNativeResult(): never {
   const diagnostic: NativeSdkDiagnostic = {
-    code: 'invalid_native_result',
+    code: 'invalid_response',
     retryable: false,
-    message: 'Native Cave result was invalid.',
+    message: 'Cave response was invalid.',
   };
   throw Object.freeze(diagnostic);
 }
@@ -88,8 +88,8 @@ export function snapshotNativeResult(value: unknown): unknown {
 
 export function nativeUnavailable(): NativeSdkDiagnostic {
   return Object.freeze({
-    code: 'native_unavailable',
+    code: 'service_unavailable',
     retryable: true,
-    message: 'Native Cave operation was unavailable.',
+    message: 'Cave service was unavailable.',
   });
 }

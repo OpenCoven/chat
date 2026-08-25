@@ -47,13 +47,14 @@ struct StoredCredential {
 
 pub(crate) trait CredentialCustody: Send + Sync {
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError>;
-    fn store(
+    fn store_if_current(
         &self,
         instance_id: &str,
         origin: &str,
+        expected_credential_id: Option<&str>,
         bearer: &str,
         credential_id: &str,
-    ) -> Result<(), KeyringError>;
+    ) -> Result<bool, KeyringError>;
     fn delete_if_matches(
         &self,
         instance_id: &str,
@@ -170,26 +171,47 @@ impl CredentialCustody for NativeKeyring {
         })
     }
 
-    fn store(
+    fn store_if_current(
         &self,
         instance_id: &str,
         origin: &str,
+        expected_credential_id: Option<&str>,
         bearer: &str,
         credential_id: &str,
-    ) -> Result<(), KeyringError> {
+    ) -> Result<bool, KeyringError> {
         if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
             return Err(KeyringError::Failure);
         }
         let _guard = acquire_mutation_lock()?;
+        let entry = Self::entry(instance_id)?;
+        let current = match entry.get_password() {
+            Ok(value) => Some(
+                serde_json::from_str::<StoredCredential>(&value)
+                    .map_err(|_| KeyringError::Failure)?,
+            ),
+            Err(keyring::Error::NoEntry) => None,
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let matches_expected = match (current.as_ref(), expected_credential_id) {
+            (None, None) => true,
+            (Some(stored), Some(expected)) => {
+                stored.origin == origin && stored.credential_id == expected
+            }
+            _ => false,
+        };
+        if !matches_expected {
+            return Ok(false);
+        }
         let value = serde_json::to_string(&StoredCredential {
             bearer: bearer.to_owned(),
             credential_id: credential_id.to_owned(),
             origin: origin.to_owned(),
         })
         .map_err(|_| KeyringError::Failure)?;
-        Self::entry(instance_id)?
+        entry
             .set_password(&value)
             .map_err(map_keyring_error)
+            .map(|()| true)
     }
 
     fn delete_if_matches(
