@@ -529,7 +529,11 @@ mod tests {
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
     };
 
-    struct FakeTransport;
+    #[derive(Default)]
+    struct FakeTransport {
+        health_started: Option<Arc<std::sync::Barrier>>,
+        health_release: Option<Arc<std::sync::Barrier>>,
+    }
 
     struct StaticDiscovery {
         record: OwnerDiscoveryRecord,
@@ -547,6 +551,10 @@ mod tests {
             &self,
             _authority: &PinnedCaveAuthority,
         ) -> NativeResult<NativeHttpResponse> {
+            if let Some(started) = self.health_started.as_ref() {
+                started.wait();
+                self.health_release.as_ref().unwrap().wait();
+            }
             Ok(NativeHttpResponse {
                 status_code: 200,
                 payload: json!({ "data": { "instanceId": "instance-a" } }),
@@ -682,7 +690,7 @@ mod tests {
             },
         };
         let state = NativeConnectionState::with_test_collaborators(
-            Arc::new(FakeTransport),
+            Arc::new(FakeTransport::default()),
             keyring.clone(),
             Arc::new(StaticDiscovery { record }),
             Arc::new(FakeLauncher),
@@ -722,7 +730,7 @@ mod tests {
             },
         };
         let state = NativeConnectionState::with_test_collaborators(
-            Arc::new(FakeTransport),
+            Arc::new(FakeTransport::default()),
             keyring.clone(),
             Arc::new(StaticDiscovery { record }),
             Arc::new(FakeLauncher),
@@ -766,7 +774,7 @@ mod tests {
             launches: AtomicUsize::new(0),
         });
         let state = NativeConnectionState::with_test_collaborators(
-            Arc::new(FakeTransport),
+            Arc::new(FakeTransport::default()),
             Arc::new(FakeKeyring {
                 credential: Mutex::new(None),
                 deletes: AtomicUsize::new(0),
@@ -780,5 +788,64 @@ mod tests {
 
         assert_eq!(duplicate.code, "cave_launch_in_progress");
         assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stale_health_completion_cannot_replace_a_new_discovery_generation() {
+        let record_a = OwnerDiscoveryRecord {
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let record_b = OwnerDiscoveryRecord {
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4311",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 3,
+                process_alive: true,
+            },
+        };
+        let started = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport {
+                health_started: Some(started.clone()),
+                health_release: Some(release.clone()),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery { record: record_a }),
+            Arc::new(FakeLauncher),
+        );
+        state.cave_read_discovery().unwrap();
+
+        let stale_state = state.clone();
+        let completion =
+            std::thread::spawn(move || tauri::async_runtime::block_on(stale_state.cave_health()));
+        started.wait();
+        state
+            .runtime()
+            .unwrap()
+            .accept_discovery(&record_b)
+            .unwrap();
+        release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
     }
 }
