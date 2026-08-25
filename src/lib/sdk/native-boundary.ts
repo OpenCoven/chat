@@ -31,7 +31,15 @@ export async function invokeNative(
   } catch {
     throw nativeUnavailable();
   }
-  return snapshotNativeResult(result);
+  try {
+    return snapshotNativeResult(result);
+  } catch {
+    throw Object.freeze({
+      code: 'invalid_response',
+      retryable: false,
+      message: 'Cave response was invalid.',
+    });
+  }
 }
 
 function pageArgs(page: PageOptions): Record<string, unknown> {

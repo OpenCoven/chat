@@ -4,7 +4,7 @@ export type NativeSdkDiagnostic = Readonly<{
   message: string;
 }>;
 
-const SECRET_FIELD = /(?:bearer|secret|authorization|cookie|token|header)/iu;
+const FORBIDDEN_NATIVE_FIELD = /(?:bearer|secret|authorization|cookie|token|header|cause|path)/iu;
 const MAX_NODES = 4_096;
 const MAX_STRING_LENGTH = 64 * 1024;
 
@@ -75,7 +75,7 @@ export function snapshotNativeResult(value: unknown): unknown {
 
     const output: Record<string, unknown> = {};
     for (const [key, descriptor] of Object.entries(descriptors)) {
-      if (SECRET_FIELD.test(key) || !Object.hasOwn(descriptor, 'value')) {
+      if (FORBIDDEN_NATIVE_FIELD.test(key) || !Object.hasOwn(descriptor, 'value')) {
         return invalidNativeResult();
       }
       output[key] = snapshot(descriptor.value);

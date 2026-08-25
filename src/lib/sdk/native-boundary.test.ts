@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
 import { inspect } from 'node:util';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createCaveManagedDiscoveryBinding,
   createCaveManagedCredentialTransport,
+  createCaveManagedDiscoveryBinding,
   createCaveManagedDiscoverySource,
   type NativeSdkInvoke,
 } from './native-boundary';
@@ -113,6 +113,32 @@ describe('Cave managed native boundary', () => {
 
     expect(JSON.stringify(invoke.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(await transport.managedCredentialStatus())).not.toContain(secret);
+  });
+
+  it('returns a fresh frozen native snapshot and rejects forbidden native fields', async () => {
+    const native = Object.freeze({ status: 'missing' });
+    const transport = createCaveManagedCredentialTransport(
+      vi.fn<NativeSdkInvoke>().mockResolvedValue(native),
+      'native-discovery-handle',
+    );
+
+    const snapshot = await transport.managedCredentialStatus();
+    expect(snapshot).toEqual(native);
+    expect(snapshot).not.toBe(native);
+    expect(Object.isFrozen(snapshot as object)).toBe(true);
+
+    const forbidden = createCaveManagedCredentialTransport(
+      vi.fn<NativeSdkInvoke>().mockResolvedValue({
+        status: 'missing',
+        cause: { path: 'native-path-secret-canary' },
+      }),
+      'native-discovery-handle',
+    );
+    await expect(forbidden.managedCredentialStatus()).rejects.toEqual({
+      code: 'invalid_response',
+      retryable: false,
+      message: 'Cave response was invalid.',
+    });
   });
 
   it('replaces hostile native rejection objects with a fresh redacted diagnostic', async () => {

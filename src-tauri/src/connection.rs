@@ -85,6 +85,12 @@ enum UnauthorizedAction {
     ConfirmRevocation,
 }
 
+enum CredentialCurrentState {
+    Missing,
+    Current,
+    Changed,
+}
+
 impl UnauthorizedTracker {
     fn reset(&mut self) {
         self.identity = None;
@@ -210,6 +216,20 @@ impl ConnectionRuntime {
                 .as_ref()
                 .is_none_or(|current| !current.is_same_pin(authority))
         {
+            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+        }
+        Ok(())
+    }
+
+    fn require_current_authorized(
+        &self,
+        generation: u64,
+        handle: &str,
+        authority: &PinnedCaveAuthority,
+        instance_id: &str,
+    ) -> NativeResult<()> {
+        self.require_current(generation, handle, authority)?;
+        if self.instance_id.as_deref() != Some(instance_id) {
             return Err(NativeDiagnostic::new("stale_connection_attempt", true));
         }
         Ok(())
@@ -511,6 +531,45 @@ impl NativeConnectionState {
         Ok((generation, authority))
     }
 
+    fn revalidate_authorized(
+        &self,
+        generation: u64,
+        handle: &str,
+        authority: &PinnedCaveAuthority,
+        instance_id: &str,
+    ) -> NativeResult<()> {
+        let (current_generation, current_authority) = self.capture_handle(handle)?;
+        if current_generation != generation || !current_authority.is_same_pin(authority) {
+            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+        }
+        self.runtime()?
+            .require_current_authorized(generation, handle, authority, instance_id)
+    }
+
+    fn credential_current_state(
+        &self,
+        generation: u64,
+        handle: &str,
+        authority: &PinnedCaveAuthority,
+        instance_id: &str,
+        expected: &Credential,
+    ) -> NativeResult<CredentialCurrentState> {
+        self.revalidate_authorized(generation, handle, authority, instance_id)?;
+        let state = match self.keyring.read(instance_id, authority.origin().as_str()) {
+            Ok(current)
+                if current.credential_id == expected.credential_id
+                    && current.origin == expected.origin =>
+            {
+                CredentialCurrentState::Current
+            }
+            Ok(_) => CredentialCurrentState::Changed,
+            Err(KeyringError::NotFound) => CredentialCurrentState::Missing,
+            Err(error) => return Err(error.diagnostic()),
+        };
+        self.revalidate_authorized(generation, handle, authority, instance_id)?;
+        Ok(state)
+    }
+
     pub(crate) async fn cave_health(&self, handle: String) -> NativeResult<Value> {
         let (generation, authority) = self.capture_handle(&handle)?;
         let response = self.transport.health(&authority).await?;
@@ -697,12 +756,16 @@ impl NativeConnectionState {
         let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
             Ok(credential) => credential,
-            Err(KeyringError::NotFound) => return Ok(json!({ "status": "missing" })),
+            Err(KeyringError::NotFound) => {
+                self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
+                return Ok(json!({ "status": "missing" }));
+            }
             Err(error) => return Err(error.diagnostic()),
         };
+        self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
         {
             let mut runtime = self.runtime()?;
-            runtime.require_current(generation, &handle, &authority)?;
+            runtime.require_current_authorized(generation, &handle, &authority, &instance_id)?;
             if runtime.revocation_in_flight {
                 return Ok(json!({
                     "status": "disconnected",
@@ -727,56 +790,132 @@ impl NativeConnectionState {
         {
             Ok(response) => response,
             Err(error) => {
+                self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
                 let mut runtime = self.runtime()?;
-                if runtime
-                    .require_current(generation, &handle, &authority)
-                    .is_ok()
-                {
-                    runtime.revocation_in_flight = false;
-                }
+                runtime.require_current_authorized(
+                    generation,
+                    &handle,
+                    &authority,
+                    &instance_id,
+                )?;
+                runtime.revocation_in_flight = false;
                 return Err(error);
             }
         };
-        let revoked = {
+        self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
+        let action = {
             let mut runtime = self.runtime()?;
-            runtime.require_current(generation, &handle, &authority)?;
+            runtime.require_current_authorized(generation, &handle, &authority, &instance_id)?;
             runtime.revocation_in_flight = false;
             if response.status_code == 401 {
-                let action = runtime.unauthorized.record(&instance_id, &credential);
-                if matches!(action, UnauthorizedAction::ConfirmRevocation) {
-                    let deleted = self
-                        .keyring
-                        .delete_if_matches(
-                            &instance_id,
-                            authority.origin().as_str(),
-                            &credential.credential_id,
-                        )
-                        .map_err(|error| error.diagnostic())?;
-                    runtime.unauthorized.reset();
-                    Some(deleted)
-                } else {
-                    return Ok(json!({
-                        "status": "disconnected",
-                        "reason": "reconcile_required",
-                    }));
-                }
+                Some(runtime.unauthorized.record(&instance_id, &credential))
             } else {
                 runtime.unauthorized.reset();
                 None
             }
         };
-        if let Some(deleted) = revoked {
+        if let Some(action) = action {
+            if !matches!(action, UnauthorizedAction::ConfirmRevocation) {
+                return Ok(json!({
+                    "status": "disconnected",
+                    "reason": "reconcile_required",
+                }));
+            }
+            match self.credential_current_state(
+                generation,
+                &handle,
+                &authority,
+                &instance_id,
+                &credential,
+            )? {
+                CredentialCurrentState::Missing => return Ok(json!({ "status": "missing" })),
+                CredentialCurrentState::Changed => {
+                    return Ok(json!({
+                        "status": "disconnected",
+                        "reason": "credential_update_in_progress",
+                    }));
+                }
+                CredentialCurrentState::Current => {}
+            }
+
+            let deleted = self
+                .keyring
+                .delete_if_matches(
+                    &instance_id,
+                    authority.origin().as_str(),
+                    &credential.credential_id,
+                )
+                .map_err(|error| error.diagnostic())?;
+            match self.credential_current_state(
+                generation,
+                &handle,
+                &authority,
+                &instance_id,
+                &credential,
+            )? {
+                CredentialCurrentState::Missing if deleted => {}
+                CredentialCurrentState::Missing => return Ok(json!({ "status": "missing" })),
+                CredentialCurrentState::Current | CredentialCurrentState::Changed => {
+                    return Ok(json!({
+                        "status": "disconnected",
+                        "reason": "credential_update_in_progress",
+                    }));
+                }
+            }
+            {
+                let mut runtime = self.runtime()?;
+                runtime.require_current_authorized(
+                    generation,
+                    &handle,
+                    &authority,
+                    &instance_id,
+                )?;
+                runtime.unauthorized.reset();
+            }
+
             let health = self.transport.health(&authority).await?;
-            self.runtime()?
-                .require_current(generation, &handle, &authority)?;
+            require_success(&health)?;
+            self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
+            match self.credential_current_state(
+                generation,
+                &handle,
+                &authority,
+                &instance_id,
+                &credential,
+            )? {
+                CredentialCurrentState::Missing => {}
+                CredentialCurrentState::Current | CredentialCurrentState::Changed => {
+                    return Ok(json!({
+                        "status": "disconnected",
+                        "reason": "credential_update_in_progress",
+                    }));
+                }
+            }
             return Ok(json!({
-                "status": if deleted { "revoked" } else { "missing" },
+                "status": "revoked",
                 "health": health.payload,
             }));
         }
+
         let health = self.transport.health(&authority).await?;
-        self.runtime()?
-            .require_current(generation, &handle, &authority)?;
+        require_success(&health)?;
+        self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
+        match self.credential_current_state(
+            generation,
+            &handle,
+            &authority,
+            &instance_id,
+            &credential,
+        )? {
+            CredentialCurrentState::Missing => return Ok(json!({ "status": "missing" })),
+            CredentialCurrentState::Changed => {
+                return Ok(json!({
+                    "status": "disconnected",
+                    "reason": "credential_update_in_progress",
+                }));
+            }
+            CredentialCurrentState::Current => {}
+        }
         let access = match response.status_code {
             200..=299 => "chat:read",
             403 => "scope_denied",
@@ -791,13 +930,31 @@ impl NativeConnectionState {
     }
 
     pub(crate) fn cave_forget_credential(&self, handle: String) -> NativeResult<Value> {
-        self.capture_handle(&handle)?;
-        let (_, authority, instance_id) = self.runtime()?.require_authorized(&handle)?;
+        let (generation, authority) = self.capture_handle(&handle)?;
+        let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
             Ok(credential) => credential,
-            Err(KeyringError::NotFound) => return Ok(json!({ "status": "missing" })),
+            Err(KeyringError::NotFound) => {
+                self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
+                return Ok(json!({ "status": "missing" }));
+            }
             Err(error) => return Err(error.diagnostic()),
         };
+        match self.credential_current_state(
+            generation,
+            &handle,
+            &authority,
+            &instance_id,
+            &credential,
+        )? {
+            CredentialCurrentState::Missing => return Ok(json!({ "status": "missing" })),
+            CredentialCurrentState::Changed => {
+                return Ok(json!({
+                    "status": "credential_update_in_progress",
+                }));
+            }
+            CredentialCurrentState::Current => {}
+        }
         let deleted = self
             .keyring
             .delete_if_matches(
@@ -806,7 +963,19 @@ impl NativeConnectionState {
                 &credential.credential_id,
             )
             .map_err(|error| error.diagnostic())?;
-        Ok(json!({ "status": if deleted { "deleted" } else { "credential_update_in_progress" } }))
+        match self.credential_current_state(
+            generation,
+            &handle,
+            &authority,
+            &instance_id,
+            &credential,
+        )? {
+            CredentialCurrentState::Missing if deleted => Ok(json!({ "status": "deleted" })),
+            CredentialCurrentState::Missing => Ok(json!({ "status": "missing" })),
+            CredentialCurrentState::Current | CredentialCurrentState::Changed => {
+                Ok(json!({ "status": "credential_update_in_progress" }))
+            }
+        }
     }
 
     pub(crate) async fn cave_read(
@@ -1023,10 +1192,20 @@ mod tests {
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
     };
 
-    #[derive(Default)]
     struct FakeTransport {
         health_started: Option<Arc<std::sync::Barrier>>,
         health_release: Option<Arc<std::sync::Barrier>>,
+        read_status: u16,
+    }
+
+    impl Default for FakeTransport {
+        fn default() -> Self {
+            Self {
+                health_started: None,
+                health_release: None,
+                read_status: 401,
+            }
+        }
     }
 
     struct StaticDiscovery {
@@ -1061,7 +1240,7 @@ mod tests {
             }
             Ok(NativeHttpResponse {
                 status_code: 200,
-                payload: json!({ "data": { "instanceId": "instance-a" } }),
+                payload: client_v1_health_envelope(),
             })
         }
 
@@ -1098,8 +1277,121 @@ mod tests {
             _path: CaveReadPath,
         ) -> NativeResult<NativeHttpResponse> {
             Ok(NativeHttpResponse {
-                status_code: 401,
-                payload: json!({ "error": { "code": "unauthorized" } }),
+                status_code: self.read_status,
+                payload: json!({}),
+            })
+        }
+    }
+
+    struct StatusRaceTransport {
+        health_calls: AtomicUsize,
+        final_health_started: Option<Arc<Barrier>>,
+        final_health_release: Option<Arc<Barrier>>,
+        read_started: Option<Arc<Barrier>>,
+        read_release: Option<Arc<Barrier>>,
+        read_status: u16,
+    }
+
+    fn client_v1_health_envelope() -> Value {
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": [
+                "health",
+                "pairing",
+                "credentials",
+                "familiars",
+                "projects",
+                "conversations",
+                "conversation-messages",
+                "cursors",
+            ],
+            "operations": [
+                "health.read",
+                "pairing.create",
+                "pairing.poll",
+                "pairing.exchange",
+                "pairing.admin.list",
+                "pairing.admin.decide",
+                "credentials.admin.list",
+                "credentials.admin.revoke",
+                "familiars.list",
+                "projects.list",
+                "conversations.list",
+                "conversations.read",
+                "messages.list",
+            ],
+            "data": {
+                "instanceId": "00000000-0000-4000-8000-000000000000",
+                "pairingRequired": true,
+                "releaseVersion": "0.0.0",
+            },
+        })
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for StatusRaceTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            if self.health_calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                if let Some(started) = self.final_health_started.as_ref() {
+                    started.wait();
+                    self.final_health_release.as_ref().unwrap().wait();
+                }
+            }
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            if let Some(started) = self.read_started.as_ref() {
+                started.wait();
+                self.read_release.as_ref().unwrap().wait();
+            }
+            Ok(NativeHttpResponse {
+                status_code: self.read_status,
+                payload: json!({
+                    "apiVersion": "1.0",
+                    "minimumClientVersion": "0.1.0",
+                    "capabilities": ["familiars", "cursors"],
+                    "operations": ["familiars.list"],
+                    "data": { "familiars": [] },
+                }),
             })
         }
     }
@@ -1149,11 +1441,18 @@ mod tests {
         fn delete_if_matches(
             &self,
             _instance_id: &str,
-            _origin: &str,
-            _credential_id: &str,
+            origin: &str,
+            credential_id: &str,
         ) -> Result<bool, KeyringError> {
             self.deletes.fetch_add(1, Ordering::SeqCst);
-            Ok(true)
+            let mut stored = self.credential.lock().unwrap();
+            let matches = stored.as_ref().is_some_and(|current| {
+                current.origin == origin && current.credential_id == credential_id
+            });
+            if matches {
+                *stored = None;
+            }
+            Ok(matches)
         }
     }
 
@@ -1674,6 +1973,7 @@ mod tests {
             Arc::new(FakeTransport {
                 health_started: Some(health_started.clone()),
                 health_release: Some(health_release.clone()),
+                ..FakeTransport::default()
             }),
             Arc::new(FakeKeyring {
                 credential: Mutex::new(None),
@@ -1794,8 +2094,292 @@ mod tests {
         let confirmed =
             tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap();
 
-        assert_eq!(confirmed["status"], "revoked");
+        assert_eq!(
+            confirmed,
+            json!({
+                "status": "revoked",
+                "health": client_v1_health_envelope(),
+            })
+        );
         assert_eq!(keyring.deletes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn managed_credential_status_uses_only_sdk_discriminated_shapes() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+
+        let missing = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: record.clone(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let missing_handle = missing.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(missing.cave_health(missing_handle.clone())).unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(missing.cave_credential_status(missing_handle)).unwrap(),
+            json!({ "status": "missing" })
+        );
+
+        for (read_status, access) in [
+            (200, "chat:read"),
+            (403, "scope_denied"),
+            (429, "rate_limited"),
+            (500, "service_unavailable"),
+        ] {
+            let state = NativeConnectionState::with_test_collaborators(
+                Arc::new(FakeTransport {
+                    read_status,
+                    ..FakeTransport::default()
+                }),
+                Arc::new(FakeKeyring {
+                    credential: Mutex::new(Some(Credential {
+                        bearer: "native-only-bearer".to_owned(),
+                        credential_id: "credential-a".to_owned(),
+                        origin: "http://127.0.0.1:4310/".to_owned(),
+                    })),
+                    deletes: AtomicUsize::new(0),
+                }),
+                Arc::new(StaticDiscovery {
+                    record: record.clone(),
+                }),
+                Arc::new(FakeLauncher),
+            );
+            let handle = state.cave_read_discovery().unwrap().handle;
+            tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+            assert_eq!(
+                tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap(),
+                json!({
+                    "status": "valid",
+                    "access": access,
+                    "health": client_v1_health_envelope(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn stale_status_health_cannot_publish_after_discovery_record_replacement() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let discovery = Arc::new(MutableDiscovery {
+            record: Mutex::new(record),
+        });
+        let final_health_started = Arc::new(Barrier::new(2));
+        let final_health_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(StatusRaceTransport {
+                health_calls: AtomicUsize::new(0),
+                final_health_started: Some(final_health_started.clone()),
+                final_health_release: Some(final_health_release.clone()),
+                read_started: None,
+                read_release: None,
+                read_status: 200,
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(Some(Credential {
+                    bearer: "native-only-bearer".to_owned(),
+                    credential_id: "credential-a".to_owned(),
+                    origin: "http://127.0.0.1:4310/".to_owned(),
+                })),
+                deletes: AtomicUsize::new(0),
+            }),
+            discovery.clone(),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+        let status_state = state.clone();
+        let status_handle = handle.clone();
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(status_state.cave_credential_status(status_handle))
+        });
+        final_health_started.wait();
+        let mut replacement = discovery.record.lock().unwrap();
+        replacement.bytes = serde_json::to_vec(&json!({
+            "endpoint": "http://127.0.0.1:4311",
+        }))
+        .unwrap();
+        replacement.record.inode = 3;
+        drop(replacement);
+        final_health_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap_err().code,
+            "stale_discovery_handle"
+        );
+    }
+
+    #[test]
+    fn stale_status_health_cannot_publish_after_credential_replacement() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "native-only-bearer".to_owned(),
+                credential_id: "credential-a".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let final_health_started = Arc::new(Barrier::new(2));
+        let final_health_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(StatusRaceTransport {
+                health_calls: AtomicUsize::new(0),
+                final_health_started: Some(final_health_started.clone()),
+                final_health_release: Some(final_health_release.clone()),
+                read_started: None,
+                read_release: None,
+                read_status: 200,
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery { record }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+        let status_state = state.clone();
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(status_state.cave_credential_status(handle))
+        });
+        final_health_started.wait();
+        *keyring.credential.lock().unwrap() = Some(Credential {
+            bearer: "newer-native-only-bearer".to_owned(),
+            credential_id: "credential-b".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+        });
+        final_health_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap(),
+            json!({
+                "status": "disconnected",
+                "reason": "credential_update_in_progress",
+            })
+        );
+    }
+
+    #[test]
+    fn stale_revocation_read_cannot_delete_a_replacement_credential() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "native-only-bearer".to_owned(),
+                credential_id: "credential-a".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let read_started = Arc::new(Barrier::new(2));
+        let read_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(StatusRaceTransport {
+                health_calls: AtomicUsize::new(0),
+                final_health_started: None,
+                final_health_release: None,
+                read_started: Some(read_started.clone()),
+                read_release: Some(read_release.clone()),
+                read_status: 401,
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery { record }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        state.runtime().unwrap().unauthorized.identity = Some(UnauthorizedIdentity {
+            instance_id: "owner-local-discovery-record".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+            credential_id: "credential-a".to_owned(),
+            first_unauthorized_at: Instant::now() - Duration::from_millis(500),
+            rediscovery_healthy: true,
+        });
+
+        let status_state = state.clone();
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(status_state.cave_credential_status(handle))
+        });
+        read_started.wait();
+        *keyring.credential.lock().unwrap() = Some(Credential {
+            bearer: "newer-native-only-bearer".to_owned(),
+            credential_id: "credential-b".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+        });
+        read_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap(),
+            json!({
+                "status": "disconnected",
+                "reason": "credential_update_in_progress",
+            })
+        );
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            keyring
+                .credential
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .credential_id,
+            "credential-b"
+        );
     }
 
     #[test]
@@ -1905,6 +2489,7 @@ mod tests {
             Arc::new(FakeTransport {
                 health_started: Some(started.clone()),
                 health_release: Some(release.clone()),
+                ..FakeTransport::default()
             }),
             Arc::new(FakeKeyring {
                 credential: Mutex::new(None),
