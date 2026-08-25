@@ -58,6 +58,11 @@ struct StoredCredential {
     origin: String,
 }
 
+pub(crate) enum AuthorizedRelocation {
+    Stored,
+    CurrentOriginPresent,
+}
+
 pub(crate) trait CredentialCustody: Send + Sync {
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError>;
     fn store_if_current(
@@ -68,6 +73,15 @@ pub(crate) trait CredentialCustody: Send + Sync {
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError>;
+    // This is deliberately distinct from the generic CAS: pairing may invoke it
+    // only after revalidating the current discovery authority and generation.
+    fn store_after_authorized_origin_relocation(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        bearer: &str,
+        credential_id: &str,
+    ) -> Result<AuthorizedRelocation, KeyringError>;
     fn delete_if_matches(
         &self,
         instance_id: &str,
@@ -275,13 +289,8 @@ impl CredentialCustody for NativeKeyring {
         let raw = Self::entry(instance_id)?
             .get_password()
             .map_err(map_keyring_error)?;
-        let stored =
-            serde_json::from_str::<StoredCredential>(&raw).map_err(|_| KeyringError::Failure)?;
-        if stored.bearer.is_empty()
-            || stored.credential_id.is_empty()
-            || stored.origin.is_empty()
-            || stored.origin != origin
-        {
+        let stored = parse_stored_credential(&raw)?;
+        if stored.origin != origin {
             return Err(KeyringError::NotFound);
         }
         Ok(Credential {
@@ -305,10 +314,7 @@ impl CredentialCustody for NativeKeyring {
         let _guard = acquire_mutation_lock()?;
         let entry = Self::entry(instance_id)?;
         let current = match entry.get_password() {
-            Ok(value) => Some(
-                serde_json::from_str::<StoredCredential>(&value)
-                    .map_err(|_| KeyringError::Failure)?,
-            ),
+            Ok(value) => Some(parse_stored_credential(&value)?),
             Err(keyring::Error::NoEntry) => None,
             Err(error) => return Err(map_keyring_error(error)),
         };
@@ -337,6 +343,39 @@ impl CredentialCustody for NativeKeyring {
             .map(|()| true)
     }
 
+    fn store_after_authorized_origin_relocation(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        bearer: &str,
+        credential_id: &str,
+    ) -> Result<AuthorizedRelocation, KeyringError> {
+        if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
+            return Err(KeyringError::Failure);
+        }
+        let _guard = acquire_mutation_lock()?;
+        let entry = Self::entry(instance_id)?;
+        let current = match entry.get_password() {
+            Ok(value) => Some(parse_stored_credential(&value)?),
+            Err(keyring::Error::NoEntry) => None,
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        if current
+            .as_ref()
+            .is_some_and(|stored| stored.origin == origin)
+        {
+            return Ok(AuthorizedRelocation::CurrentOriginPresent);
+        }
+        let value = serde_json::to_string(&StoredCredential {
+            bearer: bearer.to_owned(),
+            credential_id: credential_id.to_owned(),
+            origin: origin.to_owned(),
+        })
+        .map_err(|_| KeyringError::Failure)?;
+        entry.set_password(&value).map_err(map_keyring_error)?;
+        Ok(AuthorizedRelocation::Stored)
+    }
+
     fn delete_if_matches(
         &self,
         instance_id: &str,
@@ -350,8 +389,7 @@ impl CredentialCustody for NativeKeyring {
             Err(keyring::Error::NoEntry) => return Ok(false),
             Err(error) => return Err(map_keyring_error(error)),
         };
-        let stored =
-            serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
+        let stored = parse_stored_credential(&value)?;
         if stored.origin != origin
             || stored.bearer != expected_credential.bearer
             || stored.credential_id != expected_credential.credential_id
@@ -364,6 +402,15 @@ impl CredentialCustody for NativeKeyring {
             Err(error) => Err(map_keyring_error(error)),
         }
     }
+}
+
+fn parse_stored_credential(raw: &str) -> Result<StoredCredential, KeyringError> {
+    let stored =
+        serde_json::from_str::<StoredCredential>(raw).map_err(|_| KeyringError::Failure)?;
+    if stored.bearer.is_empty() || stored.credential_id.is_empty() || stored.origin.is_empty() {
+        return Err(KeyringError::Failure);
+    }
+    Ok(stored)
 }
 
 impl NativeKeyring {
@@ -389,7 +436,25 @@ fn map_keyring_error(error: keyring::Error) -> KeyringError {
 
 #[cfg(test)]
 mod tests {
-    use super::{acquire_windows_mutex, KeyringError, WindowsMutexApi, WindowsMutexWait};
+    use super::{
+        acquire_windows_mutex, parse_stored_credential, KeyringError, WindowsMutexApi,
+        WindowsMutexWait,
+    };
+
+    #[test]
+    fn corrupt_stored_credentials_fail_closed() {
+        for stored in [
+            "not-json",
+            r#"{"bearer":"","credential_id":"credential","origin":"http://127.0.0.1/"}"#,
+            r#"{"bearer":"bearer","credential_id":"","origin":"http://127.0.0.1/"}"#,
+            r#"{"bearer":"bearer","credential_id":"credential","origin":""}"#,
+        ] {
+            assert!(matches!(
+                parse_stored_credential(stored),
+                Err(KeyringError::Failure)
+            ));
+        }
+    }
 
     #[test]
     fn windows_mutex_accepts_abandonment_and_releases_its_handle() {

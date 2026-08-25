@@ -11,7 +11,7 @@ use crate::{
         pin_owner_discovery_record, CaveChild, CaveClock, CaveSleeper, CaveTaskRunner,
         NativeDiagnostic, NativeResult, OwnerDiscoveryRecord, PinnedCaveAuthority,
     },
-    keyring::{Credential, KeyringError},
+    keyring::{AuthorizedRelocation, Credential, KeyringError},
     transport::{CaveReadPath, NativeHttpResponse, NativePage, NativePairingExchange},
     NativeConnectionState,
 };
@@ -595,16 +595,29 @@ impl NativeConnectionState {
         }) {
             return Err(NativeDiagnostic::new("stale_connection_attempt", true));
         }
-        let persisted = self
-            .keyring
-            .store_if_current(
-                &attempt.instance_id,
-                attempt.authority.origin().as_str(),
-                expected_credential,
-                &exchanged.bearer,
-                &exchanged.credential_id,
-            )
-            .map_err(|error| error.diagnostic())?;
+        let persisted = match expected_credential {
+            Some(expected_credential) => self
+                .keyring
+                .store_if_current(
+                    &attempt.instance_id,
+                    attempt.authority.origin().as_str(),
+                    Some(expected_credential),
+                    &exchanged.bearer,
+                    &exchanged.credential_id,
+                )
+                .map_err(|error| error.diagnostic())?,
+            None => matches!(
+                self.keyring
+                    .store_after_authorized_origin_relocation(
+                        &attempt.instance_id,
+                        attempt.authority.origin().as_str(),
+                        &exchanged.bearer,
+                        &exchanged.credential_id,
+                    )
+                    .map_err(|error| error.diagnostic())?,
+                AuthorizedRelocation::Stored
+            ),
+        };
         if persisted {
             runtime.pairing = None;
             runtime.unauthorized.reset();
@@ -1678,6 +1691,28 @@ mod tests {
                 origin: origin.to_owned(),
             });
             Ok(true)
+        }
+
+        fn store_after_authorized_origin_relocation(
+            &self,
+            _instance_id: &str,
+            origin: &str,
+            bearer: &str,
+            credential_id: &str,
+        ) -> Result<AuthorizedRelocation, KeyringError> {
+            let mut stored = self.credential.lock().unwrap();
+            if stored
+                .as_ref()
+                .is_some_and(|current| current.origin == origin)
+            {
+                return Ok(AuthorizedRelocation::CurrentOriginPresent);
+            }
+            *stored = Some(Credential {
+                bearer: bearer.to_owned(),
+                credential_id: credential_id.to_owned(),
+                origin: origin.to_owned(),
+            });
+            Ok(AuthorizedRelocation::Stored)
         }
 
         fn delete_if_matches(
@@ -2822,6 +2857,126 @@ mod tests {
             "stale_connection_attempt"
         );
         assert!(keyring.credential.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn pairing_relocates_an_old_origin_credential_after_revalidating_current_authority() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "old-bearer".to_owned(),
+                credential_id: "credential-old".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let mut record = deadline_record();
+        record.bytes = serde_json::to_vec(&json!({
+            "endpoint": "http://127.0.0.1:4311",
+        }))
+        .unwrap();
+        record.record.inode = 3;
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(ExchangeRaceTransport {
+                old_exchange_started: Arc::new(Barrier::new(1)),
+                old_exchange_release: Arc::new(Barrier::new(1)),
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery { record }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        install_pending_pairing(&state, &handle, "new-request");
+
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                state.cave_pairing_exchange(handle, "new-request".to_owned())
+            )
+            .unwrap(),
+            json!({ "status": "paired" })
+        );
+        let stored = keyring.credential.lock().unwrap();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.origin, "http://127.0.0.1:4311/");
+        assert_eq!(stored.credential_id, "credential-new");
+    }
+
+    #[test]
+    fn pairing_does_not_overwrite_an_unexpected_current_origin_credential() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "old-bearer".to_owned(),
+                credential_id: "credential-old".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let exchange_started = Arc::new(Barrier::new(2));
+        let exchange_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(ExchangeRaceTransport {
+                old_exchange_started: exchange_started.clone(),
+                old_exchange_release: exchange_release.clone(),
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        install_pending_pairing(&state, &handle, "old-request");
+
+        let pairing_state = state.clone();
+        let pairing = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                pairing_state.cave_pairing_exchange(handle, "old-request".to_owned()),
+            )
+        });
+        exchange_started.wait();
+        *keyring.credential.lock().unwrap() = Some(Credential {
+            bearer: "newer-bearer".to_owned(),
+            credential_id: "credential-newer".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+        });
+        exchange_release.wait();
+        assert_eq!(
+            pairing.join().unwrap().unwrap_err().code,
+            "credential_update_in_progress"
+        );
+        let stored = keyring.credential.lock().unwrap();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.credential_id, "credential-newer");
+        assert_eq!(stored.bearer, "newer-bearer");
+    }
+
+    #[test]
+    fn authorized_relocation_never_replaces_a_current_origin_credential() {
+        let keyring = FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "newer-bearer".to_owned(),
+                credential_id: "credential-newer".to_owned(),
+                origin: "http://127.0.0.1:4311/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        };
+
+        assert!(matches!(
+            keyring
+                .store_after_authorized_origin_relocation(
+                    "owner-record",
+                    "http://127.0.0.1:4311/",
+                    "late-bearer",
+                    "credential-late",
+                )
+                .unwrap(),
+            AuthorizedRelocation::CurrentOriginPresent
+        ));
+        let stored = keyring.credential.lock().unwrap();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.credential_id, "credential-newer");
+        assert_eq!(stored.bearer, "newer-bearer");
     }
 
     #[test]
