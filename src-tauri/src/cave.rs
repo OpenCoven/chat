@@ -248,7 +248,7 @@ enum WindowsProcessState {
 }
 
 #[cfg(any(windows, test))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct WindowsDiscoveryStartedAt {
     filetime: u64,
 }
@@ -331,11 +331,13 @@ fn parse_windows_discovery_started_at(value: &str) -> Option<WindowsDiscoverySta
             cursor += 1;
         }
         let digits = cursor - fraction_start;
-        if !(1..=7).contains(&digits) {
+        if !(1..=9).contains(&digits) {
             return None;
         }
-        let mut fraction = decimal_u32(&bytes[fraction_start..cursor])? as u64;
-        for _ in digits..7 {
+        let recorded_digits = digits.min(7);
+        let mut fraction =
+            decimal_u32(&bytes[fraction_start..fraction_start + recorded_digits])? as u64;
+        for _ in recorded_digits..7 {
             fraction *= 10;
         }
         fraction
@@ -1318,6 +1320,38 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
+                "invalid_discovery_record"
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_process_liveness_accepts_sdk_rfc3339_fractional_precision_through_nanoseconds() {
+        for fraction in ["", ".1", ".123", ".12345678", ".123456789"] {
+            let record = format!(r#"{{"pid":42,"startedAt":"2026-01-01T00:00:00{fraction}Z"}}"#);
+            let (_, started_at) =
+                parse_windows_discovery_liveness_metadata(record.as_bytes()).unwrap();
+            assert!(
+                windows_record_process_is_alive(
+                    record.as_bytes(),
+                    &FixedWindowsProcess(Ok(WindowsProcessState::Running {
+                        creation_time: started_at.filetime,
+                    })),
+                )
+                .unwrap(),
+                "fraction {fraction:?} should be accepted"
+            );
+        }
+
+        for invalid in [
+            r#"{"pid":42,"startedAt":"2026-01-01T00:00:00.1234567890Z"}"#,
+            r#"{"pid":42,"startedAt":"2026-01-01T00:00:00.Z"}"#,
+        ] {
+            assert_eq!(
+                parse_windows_discovery_liveness_metadata(invalid.as_bytes())
+                    .unwrap_err()
+                    .code,
                 "invalid_discovery_record"
             );
         }
