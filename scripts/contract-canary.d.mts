@@ -22,9 +22,16 @@ export type ContractCanaryLock = {
   sdk: ContractCanarySdkLockEntry;
   cave: ContractCanaryCaveLockEntry;
 };
+export type ContractCanaryCheckoutHeadsLock = {
+  sdk: Pick<ContractCanarySdkLockEntry, 'repository' | 'revision'>;
+  cave: Pick<ContractCanaryCaveLockEntry, 'repository' | 'revision'>;
+};
+export type ContractCanaryPackedFixtureLock = {
+  cave: Pick<ContractCanaryCaveLockEntry, 'revision'>;
+};
 export function readContractCanaryLock(lockPath?: string): ContractCanaryLock;
 export function assertContractCanaryCheckoutHeads(
-  lock: ContractCanaryLock,
+  lock: ContractCanaryCheckoutHeadsLock,
   options: { sdkRoot: string; caveRoot: string },
 ): { sdkHead: string; caveHead: string };
 export function assertCleanGitCheckout(
@@ -40,7 +47,7 @@ export function assertCleanContractCanaryCheckouts(options: {
 };
 export function createContractCanaryVerifier(): string;
 export function assertPackedFixtureMatchesCaveCheckout(
-  lock: Pick<ContractCanaryLock, 'cave'>,
+  lock: ContractCanaryPackedFixtureLock,
   harnessRoot: string,
   caveRoot: string,
 ): void;

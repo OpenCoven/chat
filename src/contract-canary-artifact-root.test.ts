@@ -17,6 +17,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import {
   assertCleanGitCheckout,
+  type assertContractCanaryCheckoutHeads,
   assertPackedFixtureMatchesCaveCheckout,
   createContractCanaryVerifier,
   parseArgs,
@@ -216,6 +217,45 @@ describe('contract canary temp directory safety', () => {
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
+  });
+
+  test('declares canary helper inputs at their consumed shapes', () => {
+    type CheckoutHeadsInput = Parameters<typeof assertContractCanaryCheckoutHeads>[0];
+    type PackedFixtureInput = Parameters<typeof assertPackedFixtureMatchesCaveCheckout>[0];
+
+    const checkoutHeadsInput = {
+      sdk: {
+        repository: 'OpenCoven/sdk',
+        revision: 'a86773cb6ba45084495c00ca364f8646865f1606',
+      },
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+        revision: '4adc97b1bdafd1012ce4c66de598e82f49329f79',
+      },
+    } satisfies CheckoutHeadsInput;
+    const packedFixtureInput = {
+      cave: {
+        revision: '4adc97b1bdafd1012ce4c66de598e82f49329f79',
+      },
+    } satisfies PackedFixtureInput;
+
+    const missingCheckoutRevision: CheckoutHeadsInput = {
+      sdk: {
+        repository: 'OpenCoven/sdk',
+        revision: 'a86773cb6ba45084495c00ca364f8646865f1606',
+      },
+      // @ts-expect-error Checkout validation consumes cave.revision.
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+      },
+    };
+    // @ts-expect-error Packed fixture validation consumes cave.revision.
+    const missingFixtureRevision: PackedFixtureInput = { cave: {} };
+
+    expect(checkoutHeadsInput.sdk.repository).toBe('OpenCoven/sdk');
+    expect(packedFixtureInput.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
+    expect(missingCheckoutRevision).toBeDefined();
+    expect(missingFixtureRevision).toBeDefined();
   });
 
   test.each([
