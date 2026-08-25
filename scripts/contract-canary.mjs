@@ -11,6 +11,25 @@ const defaultSdkRoot = resolve(root, '.cross-repo', 'sdk');
 const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
 const defaultLockPath = resolve(root, 'contract-canary.lock.json');
 const reviewedRevisionPattern = /^[0-9a-f]{40}$/i;
+const sha256Pattern = /^[0-9a-f]{64}$/i;
+const SDK_ARTIFACTS = Object.freeze({
+  core: {
+    packageName: '@opencoven/sdk-core',
+    fileName: 'sdk-core-0.1.0.tgz',
+  },
+  cave: {
+    packageName: '@opencoven/cave-client',
+    fileName: 'cave-client-0.1.0.tgz',
+  },
+  coven: {
+    packageName: '@opencoven/coven-client',
+    fileName: 'coven-client-0.1.0.tgz',
+  },
+  sdk: {
+    packageName: '@opencoven/sdk',
+    fileName: 'sdk-0.1.0.tgz',
+  },
+});
 
 function printUsage() {
   process.stdout.write(
@@ -43,19 +62,44 @@ function validateLockEntry(lockData, key, expectedRepository) {
     );
   }
 
-  const artifacts = entry.artifacts;
-  if (
-    key === 'sdk' &&
-    (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts))
-  ) {
-    throw new Error('contract-canary.lock.json sdk.artifacts must be an object.');
-  }
-
   return {
     repository: entry.repository,
     revision: entry.revision,
-    ...(key === 'sdk' ? { artifacts } : {}),
+    ...(key === 'sdk' ? { artifacts: validateSdkArtifacts(entry.artifacts) } : {}),
   };
+}
+
+function validateSdkArtifacts(artifacts) {
+  if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts)) {
+    throw new Error('contract-canary.lock.json sdk.artifacts must be an object.');
+  }
+  const expectedKeys = Object.keys(SDK_ARTIFACTS);
+  const artifactKeys = Object.keys(artifacts);
+  if (
+    artifactKeys.length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.hasOwn(artifacts, key))
+  ) {
+    throw new Error(
+      'contract-canary.lock.json sdk.artifacts must contain exactly core, cave, coven, and sdk.',
+    );
+  }
+  for (const [key, expected] of Object.entries(SDK_ARTIFACTS)) {
+    const artifact = artifacts[key];
+    if (
+      artifact === null ||
+      typeof artifact !== 'object' ||
+      Array.isArray(artifact) ||
+      Object.keys(artifact).length !== 2 ||
+      !Object.hasOwn(artifact, 'packageName') ||
+      !Object.hasOwn(artifact, 'sha256') ||
+      artifact.packageName !== expected.packageName ||
+      typeof artifact.sha256 !== 'string' ||
+      !sha256Pattern.test(artifact.sha256)
+    ) {
+      throw new Error(`contract-canary.lock.json sdk.artifacts.${key} is invalid.`);
+    }
+  }
+  return artifacts;
 }
 
 export function readContractCanaryLock(lockPath = defaultLockPath) {
@@ -294,25 +338,6 @@ function createPublicPackageOverrides(tarballs) {
   };
 }
 
-const SDK_ARTIFACTS = Object.freeze({
-  core: {
-    packageName: '@opencoven/sdk-core',
-    fileName: 'sdk-core-0.1.0.tgz',
-  },
-  cave: {
-    packageName: '@opencoven/cave-client',
-    fileName: 'cave-client-0.1.0.tgz',
-  },
-  coven: {
-    packageName: '@opencoven/coven-client',
-    fileName: 'coven-client-0.1.0.tgz',
-  },
-  sdk: {
-    packageName: '@opencoven/sdk',
-    fileName: 'sdk-0.1.0.tgz',
-  },
-});
-
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
@@ -324,7 +349,7 @@ function assertArtifactDigests(lock, tarballs) {
     if (
       locked?.packageName !== artifact.packageName ||
       typeof locked.sha256 !== 'string' ||
-      !/^[0-9a-f]{64}$/iu.test(locked.sha256) ||
+      !sha256Pattern.test(locked.sha256) ||
       typeof tarball !== 'string' ||
       sha256(tarball) !== locked.sha256
     ) {

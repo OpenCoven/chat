@@ -1,12 +1,12 @@
-export type ContractCanaryArtifact = {
-  packageName: string;
+export type ContractCanaryArtifact<PackageName extends string = string> = {
+  packageName: PackageName;
   sha256: string;
 };
 export type ContractCanarySdkArtifacts = {
-  core: ContractCanaryArtifact;
-  cave: ContractCanaryArtifact;
-  coven: ContractCanaryArtifact;
-  sdk: ContractCanaryArtifact;
+  core: ContractCanaryArtifact<'@opencoven/sdk-core'>;
+  cave: ContractCanaryArtifact<'@opencoven/cave-client'>;
+  coven: ContractCanaryArtifact<'@opencoven/coven-client'>;
+  sdk: ContractCanaryArtifact<'@opencoven/sdk'>;
 };
 export type ContractCanarySdkLockEntry = {
   repository: string;

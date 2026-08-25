@@ -217,6 +217,63 @@ describe('contract canary temp directory safety', () => {
     expect(lock.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
   });
+
+  test.each([
+    {
+      name: 'missing artifact',
+      mutate(artifacts: Record<string, unknown>) {
+        delete artifacts.coven;
+      },
+    },
+    {
+      name: 'unexpected artifact',
+      mutate(artifacts: Record<string, unknown>) {
+        artifacts.extra = {
+          packageName: '@opencoven/extra',
+          sha256: 'a'.repeat(64),
+        };
+      },
+    },
+    {
+      name: 'unsafe package name',
+      mutate(artifacts: Record<string, unknown>) {
+        artifacts.core = {
+          packageName: '../sdk-core',
+          sha256: 'a'.repeat(64),
+        };
+      },
+    },
+    {
+      name: 'malformed digest',
+      mutate(artifacts: Record<string, unknown>) {
+        artifacts.core = {
+          packageName: '@opencoven/sdk-core',
+          sha256: 'not-a-sha256',
+        };
+      },
+    },
+    {
+      name: 'extra artifact property',
+      mutate(artifacts: Record<string, unknown>) {
+        artifacts.core = {
+          packageName: '@opencoven/sdk-core',
+          sha256: 'a'.repeat(64),
+          extra: true,
+        };
+      },
+    },
+  ])('rejects a $name in the SDK artifact lock map', ({ mutate }) => {
+    const scratchRoot = createRepoLocalScratchRoot('invalid-sdk-artifacts');
+    const lockPath = resolve(scratchRoot, 'contract-canary.lock.json');
+    const lock = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'contract-canary.lock.json'), 'utf8'),
+    );
+
+    mutate(lock.sdk.artifacts);
+    writeFileSync(lockPath, JSON.stringify(lock));
+
+    expect(() => readContractCanaryLock(lockPath)).toThrow(/sdk\.artifacts/);
+  });
 });
 
 describe('contract canary checkout cleanliness', () => {
