@@ -789,6 +789,27 @@ impl NativeConnectionState {
         Ok(exchanged.response)
     }
 
+    pub(crate) fn cave_cancel_pairing(
+        &self,
+        handle: String,
+        request_id: String,
+    ) -> NativeResult<Value> {
+        self.capture_handle(&handle)?;
+        let mut runtime = self.runtime()?;
+        let (generation, authority) = runtime.require_authority(&handle)?;
+        runtime.require_current(generation, &handle, &authority)?;
+        let matches_current = runtime.pairing.as_ref().is_some_and(|pairing| {
+            pairing.request_id == request_id
+                && pairing.generation == generation
+                && pairing.authority.is_same_pin(&authority)
+        });
+        if matches_current {
+            runtime.pairing = None;
+            return Ok(json!({ "status": "cancelled" }));
+        }
+        Ok(json!({ "status": "missing" }))
+    }
+
     pub(crate) async fn cave_credential_status(&self, handle: String) -> NativeResult<Value> {
         let (generation, authority) = self.capture_handle(&handle)?;
         let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
@@ -1483,6 +1504,66 @@ mod tests {
                 bearer: bearer.to_owned(),
                 credential_id: credential_id.to_owned(),
             })
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
+    struct CancellationPollRaceTransport {
+        creates: AtomicUsize,
+        poll_started: Arc<Barrier>,
+        poll_release: Arc<Barrier>,
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for CancellationPollRaceTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            let create_number = self.creates.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(NativePairingCreated {
+                secret: format!("pairing-secret-{create_number}"),
+                response: json!({ "requestId": format!("request-{create_number}") }),
+            })
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            self.poll_started.wait();
+            self.poll_release.wait();
+            Ok(json!({ "status": "pending" }))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
         }
 
         async fn authenticated_read(
@@ -2476,6 +2557,166 @@ mod tests {
         assert_eq!(stored.credential_id, "credential-new");
         assert_eq!(stored.bearer, "new-bearer");
         assert_eq!(stored.origin, "http://127.0.0.1:4311/");
+    }
+
+    #[test]
+    fn cancellation_clears_only_the_matching_pending_pairing() {
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        install_pending_pairing(&state, &handle, "old-request");
+
+        assert_eq!(
+            state
+                .cave_cancel_pairing(handle.clone(), "old-request".to_owned())
+                .unwrap(),
+            json!({ "status": "cancelled" })
+        );
+        install_pending_pairing(&state, &handle, "new-request");
+        assert_eq!(
+            state
+                .cave_cancel_pairing(handle.clone(), "old-request".to_owned())
+                .unwrap(),
+            json!({ "status": "missing" })
+        );
+        assert_eq!(
+            state
+                .runtime()
+                .unwrap()
+                .pairing
+                .as_ref()
+                .unwrap()
+                .request_id,
+            "new-request"
+        );
+        assert_eq!(
+            state
+                .cave_cancel_pairing(handle, "new-request".to_owned())
+                .unwrap(),
+            json!({ "status": "cancelled" })
+        );
+        assert!(state.runtime().unwrap().pairing.is_none());
+    }
+
+    #[test]
+    fn cancellation_unblocks_a_new_pairing_while_the_old_poll_is_in_flight() {
+        let poll_started = Arc::new(Barrier::new(2));
+        let poll_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(CancellationPollRaceTransport {
+                creates: AtomicUsize::new(0),
+                poll_started: poll_started.clone(),
+                poll_release: poll_release.clone(),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_pairing_create(handle.clone(), json!({})))
+                .unwrap(),
+            json!({ "requestId": "request-1" })
+        );
+
+        let poll_state = state.clone();
+        let poll_handle = handle.clone();
+        let poll = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                poll_state.cave_pairing_poll(poll_handle, "request-1".to_owned()),
+            )
+        });
+        poll_started.wait();
+
+        assert_eq!(
+            state
+                .cave_cancel_pairing(handle.clone(), "request-1".to_owned())
+                .unwrap(),
+            json!({ "status": "cancelled" })
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_pairing_create(handle.clone(), json!({})))
+                .unwrap(),
+            json!({ "requestId": "request-2" })
+        );
+
+        poll_release.wait();
+        assert_eq!(
+            poll.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
+        assert_eq!(
+            state
+                .runtime()
+                .unwrap()
+                .pairing
+                .as_ref()
+                .unwrap()
+                .request_id,
+            "request-2"
+        );
+    }
+
+    #[test]
+    fn cancellation_prevents_an_in_flight_exchange_from_persisting() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(None),
+            deletes: AtomicUsize::new(0),
+        });
+        let exchange_started = Arc::new(Barrier::new(2));
+        let exchange_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(ExchangeRaceTransport {
+                old_exchange_started: exchange_started.clone(),
+                old_exchange_release: exchange_release.clone(),
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        install_pending_pairing(&state, &handle, "old-request");
+
+        let exchange_state = state.clone();
+        let exchange = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                exchange_state.cave_pairing_exchange(handle.clone(), "old-request".to_owned()),
+            )
+        });
+        exchange_started.wait();
+        let cancellation_handle = state.runtime().unwrap().authority_handle.clone().unwrap();
+        assert_eq!(
+            state
+                .cave_cancel_pairing(cancellation_handle, "old-request".to_owned())
+                .unwrap(),
+            json!({ "status": "cancelled" })
+        );
+        exchange_release.wait();
+
+        assert_eq!(
+            exchange.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
+        assert!(keyring.credential.lock().unwrap().is_none());
     }
 
     #[test]

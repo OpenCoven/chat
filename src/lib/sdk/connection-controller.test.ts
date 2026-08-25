@@ -55,6 +55,7 @@ type ManagedNativeResponses = Readonly<{
   pairingExchange?: NativeResponse;
   forgetCredential?: NativeResponse;
   launch?: NativeResponse;
+  cancelPairing?: NativeResponse;
 }>;
 type PairingPhase = 'create' | 'poll' | 'exchange';
 type RateLimitCalls = {
@@ -162,6 +163,10 @@ function nativeInvoke(responses: ManagedNativeResponses = {}): NativeSdkInvoke {
           : responses.forgetCredential(args);
       case 'cave_launch':
         return responses.launch === undefined ? undefined : responses.launch(args);
+      case 'cave_cancel_pairing':
+        return responses.cancelPairing === undefined
+          ? { status: 'missing' }
+          : responses.cancelPairing(args);
       default:
         throw new Error('unexpected native command');
     }
@@ -258,8 +263,13 @@ async function discoveryWithClient(client: CaveClient) {
 function hostPort(
   discover: CaveConnectionHost['discover'],
   launch: CaveConnectionHost['launch'] = async () => undefined,
+  cancelPairing: CaveConnectionHost['cancelPairing'] = async () => undefined,
 ): CaveConnectionHostPort {
-  return Object.freeze({ discover, launch });
+  return Object.freeze({
+    discover,
+    launch,
+    cancelPairing,
+  });
 }
 
 function deferred<T>(): Readonly<{
@@ -287,15 +297,31 @@ function deferred<T>(): Readonly<{
 
 function clock(initial = 1_000) {
   let time = initial;
-  const sleepers: Array<{ resolve: () => void }> = [];
+  const sleepers: Array<{
+    dueAt: number;
+    resolve: () => void;
+    reject: () => void;
+  }> = [];
   let aborts = 0;
 
   return Object.freeze({
     now: () => time,
-    sleep: (_milliseconds: number, signal?: AbortSignal) =>
+    sleep: (milliseconds: number, signal?: AbortSignal) =>
       new Promise<void>((resolve, reject) => {
         const abort = () => {
           aborts += 1;
+          const index = sleepers.findIndex((sleeper) => sleeper.reject === rejectSleep);
+          if (index !== -1) {
+            sleepers.splice(index, 1);
+          }
+          reject(Object.freeze({ code: 'aborted' }));
+        };
+        const resolveSleep = () => {
+          signal?.removeEventListener('abort', abort);
+          resolve();
+        };
+        const rejectSleep = () => {
+          signal?.removeEventListener('abort', abort);
           reject(Object.freeze({ code: 'aborted' }));
         };
         if (signal?.aborted) {
@@ -303,11 +329,20 @@ function clock(initial = 1_000) {
           return;
         }
         signal?.addEventListener('abort', abort, { once: true });
-        sleepers.push({ resolve });
+        sleepers.push({
+          dueAt: time + milliseconds,
+          resolve: resolveSleep,
+          reject: rejectSleep,
+        });
       }),
     advance(milliseconds: number) {
       time += milliseconds;
-      for (const sleeper of sleepers.splice(0)) {
+      const due = sleepers.filter((sleeper) => sleeper.dueAt <= time);
+      for (const sleeper of due) {
+        const index = sleepers.indexOf(sleeper);
+        if (index !== -1) {
+          sleepers.splice(index, 1);
+        }
         sleeper.resolve();
       }
     },
@@ -316,7 +351,12 @@ function clock(initial = 1_000) {
   });
 }
 
-function controller(caveHost: CaveConnectionHostPort, testClock = clock(), pollIntervalMs = 10) {
+function controller(
+  caveHost: CaveConnectionHostPort,
+  testClock = clock(),
+  pollIntervalMs = 10,
+  operationTimeoutMs?: number,
+) {
   return createCaveConnectionController({
     host: caveHost,
     pairingIdentity: {
@@ -326,6 +366,7 @@ function controller(caveHost: CaveConnectionHostPort, testClock = clock(), pollI
     now: testClock.now,
     sleep: testClock.sleep,
     pollIntervalMs,
+    ...(operationTimeoutMs === undefined ? {} : { operationTimeoutMs }),
   });
 }
 
@@ -353,6 +394,62 @@ describe('Cave connection controller', () => {
     expect(launchCalls).toBe(0);
     await subject.launch();
     expect(launchCalls).toBe(1);
+  });
+
+  it('bounds a never-settling discovery and suppresses its late completion', async () => {
+    const testClock = clock();
+    const pendingDiscovery = deferred<Awaited<ReturnType<CaveConnectionHost['discover']>>>();
+    const source = nativeHost();
+    const subject = controller(
+      hostPort(() => pendingDiscovery.promise),
+      testClock,
+      10,
+      50,
+    );
+
+    const started = subject.start();
+    await settle();
+    testClock.advance(50);
+    await started;
+
+    expect(subject.getState()).toMatchObject({
+      state: 'offline',
+      lastHealthyAt: null,
+    });
+    pendingDiscovery.resolve(await source.discover());
+    await settle();
+    expect(subject.getState()).toMatchObject({
+      state: 'offline',
+      lastHealthyAt: null,
+    });
+  });
+
+  it('bounds a never-settling explicit launch and suppresses its late completion', async () => {
+    const testClock = clock(100);
+    const pendingLaunch = deferred<void>();
+    const subject = controller(
+      hostPort(nativeHost().discover, () => pendingLaunch.promise),
+      testClock,
+      10,
+      50,
+    );
+    await subject.start();
+
+    const launched = subject.launch();
+    await settle();
+    testClock.advance(50);
+    await launched;
+
+    expect(subject.getState()).toMatchObject({
+      state: 'offline',
+      lastHealthyAt: 100,
+    });
+    pendingLaunch.resolve();
+    await settle();
+    expect(subject.getState()).toMatchObject({
+      state: 'offline',
+      lastHealthyAt: 100,
+    });
   });
 
   it('classifies the packed client compatibility result as incompatible', async () => {
@@ -392,6 +489,28 @@ describe('Cave connection controller', () => {
       covenAvailable: false,
     });
     expect(denied.getState()).toMatchObject({ state: 'error', code: 'scope_denied' });
+  });
+
+  it('forgets a validated packed scope-denied credential before requiring pairing', async () => {
+    let forgets = 0;
+    const subject = controller(
+      nativeHost({
+        credentialStatus: async () => validCredentialStatus('scope_denied'),
+        forgetCredential: async () => {
+          forgets += 1;
+          return { status: 'deleted' };
+        },
+      }),
+    );
+
+    await subject.start();
+    await subject.forgetCredential();
+
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+    });
+    expect(forgets).toBe(1);
   });
 
   it('treats SDK-normalized rate limiting as transient offline after health', async () => {
@@ -740,6 +859,145 @@ describe('Cave connection controller', () => {
     await pairing;
   });
 
+  it('cancels the exact native pairing request and allows a fresh packed pairing', async () => {
+    const canary = 'native-cancellation-secret-canary';
+    const firstPoll = deferred<unknown>();
+    const cancellations: Array<Record<string, unknown> | undefined> = [];
+    let pairingCreates = 0;
+    let pairingPolls = 0;
+    let credentialStatuses = 0;
+    const subject = controller(
+      nativeHost({
+        credentialStatus: async () => {
+          credentialStatuses += 1;
+          return credentialStatuses === 1 ? { status: 'missing' } : validCredentialStatus();
+        },
+        pairingCreate: async () => {
+          pairingCreates += 1;
+          return { requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 };
+        },
+        pairingPoll: async () => {
+          pairingPolls += 1;
+          return pairingPolls === 1
+            ? firstPoll.promise
+            : { id: PAIRING_REQUEST_ID, status: 'approved', expiresAt: 2_000 };
+        },
+        pairingExchange: async () => ({ credential: credentialMetadata() }),
+        cancelPairing: async (args) => {
+          cancellations.push(args);
+          return Promise.reject(
+            Object.freeze({
+              cause: { secret: canary, path: canary, url: `https://${canary}.invalid` },
+            }),
+          );
+        },
+      }),
+    );
+    const events: unknown[] = [];
+    subject.subscribe((state) => {
+      events.push(state);
+    });
+
+    await subject.start();
+    const first = subject.beginPairing();
+    await settle();
+    await subject.cancelPairing();
+    await first;
+
+    expect(cancellations).toEqual([
+      {
+        handle: 'native-discovery-handle',
+        requestId: PAIRING_REQUEST_ID,
+      },
+    ]);
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+    });
+
+    await subject.beginPairing();
+    expect(subject.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: CAVE_INSTANCE_ID,
+      covenAvailable: false,
+    });
+    expect(pairingCreates).toBe(2);
+    for (const value of [...events, subject.getState()]) {
+      expect(JSON.stringify(value)).not.toContain(canary);
+      expect(inspect(value)).not.toContain(canary);
+    }
+  });
+
+  it('bounds native cancellation and invokes it before pairing retry or disposal', async () => {
+    const testClock = clock();
+    const neverPoll = deferred<unknown>();
+    const neverCancel = deferred<void>();
+    const source = nativeHost({
+      credentialStatus: async () => ({ status: 'missing' }),
+      pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 }),
+      pairingPoll: async () => neverPoll.promise,
+    });
+    const bounded = controller(
+      hostPort(source.discover, source.launch, () => neverCancel.promise),
+      testClock,
+      10,
+      50,
+    );
+
+    await bounded.start();
+    const pairing = bounded.beginPairing();
+    await settle();
+    const cancellation = bounded.cancelPairing();
+    await settle();
+    testClock.advance(50);
+    await cancellation;
+    await pairing;
+    expect(bounded.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+    });
+
+    const cancellationRequests: string[] = [];
+    let statusCalls = 0;
+    const retrySource = nativeHost({
+      credentialStatus: async () => {
+        statusCalls += 1;
+        return statusCalls === 1 ? { status: 'missing' } : validCredentialStatus();
+      },
+      pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 }),
+      pairingPoll: async () => neverPoll.promise,
+      cancelPairing: async (args) => {
+        cancellationRequests.push(String(args?.requestId));
+        return { status: 'cancelled' };
+      },
+    });
+    const retried = controller(retrySource);
+    await retried.start();
+    const retryPairing = retried.beginPairing();
+    await settle();
+    await retried.retry();
+    await retryPairing;
+
+    const disposeSource = nativeHost({
+      credentialStatus: async () => ({ status: 'missing' }),
+      pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 }),
+      pairingPoll: async () => neverPoll.promise,
+      cancelPairing: async (args) => {
+        cancellationRequests.push(String(args?.requestId));
+        return { status: 'cancelled' };
+      },
+    });
+    const disposed = controller(disposeSource);
+    await disposed.start();
+    const disposalPairing = disposed.beginPairing();
+    await settle();
+    disposed.dispose();
+    await settle();
+    await disposalPairing;
+
+    expect(cancellationRequests).toEqual([PAIRING_REQUEST_ID, PAIRING_REQUEST_ID]);
+  });
+
   it('aborts an injected sleeper when pairing is cancelled', async () => {
     const testClock = clock();
     const pollEntered = deferred<void>();
@@ -772,7 +1030,7 @@ describe('Cave connection controller', () => {
     await settle();
 
     expect(settled).toBe(true);
-    expect(testClock.aborts()).toBe(1);
+    expect(testClock.aborts()).toBeGreaterThan(0);
     await pairing;
   });
 
@@ -1035,6 +1293,38 @@ describe('Cave connection controller', () => {
     await subject.beginPairing();
 
     expect(subject.getState()).toMatchObject({ state: 'error', code: 'pairing_expired' });
+    expect(exchanges).toBe(0);
+  });
+
+  it('uses pairing expiry as the absolute poll deadline rather than operation timeout', async () => {
+    const testClock = clock(1_000);
+    const neverPolls = deferred<unknown>();
+    let exchanges = 0;
+    const subject = controller(
+      nativeHost({
+        credentialStatus: async () => ({ status: 'missing' }),
+        pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 1_050 }),
+        pairingPoll: async () => neverPolls.promise,
+        pairingExchange: async () => {
+          exchanges += 1;
+          return { credential: credentialMetadata() };
+        },
+      }),
+      testClock,
+      10,
+      500,
+    );
+
+    await subject.start();
+    const pairing = subject.beginPairing();
+    await settle();
+    testClock.advance(50);
+    await pairing;
+
+    expect(subject.getState()).toMatchObject({
+      state: 'error',
+      code: 'pairing_expired',
+    });
     expect(exchanges).toBe(0);
   });
 

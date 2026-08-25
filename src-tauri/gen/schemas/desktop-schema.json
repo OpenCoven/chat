@@ -183,6 +183,12 @@
           "markdownDescription": "Enables the app_identity command without any pre-configured scope."
         },
         {
+          "description": "Enables the cave_cancel_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-cancel-pairing",
+          "markdownDescription": "Enables the cave_cancel_pairing command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cave_credential_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cave-credential-status",
@@ -265,6 +271,12 @@
           "type": "string",
           "const": "deny-app-identity",
           "markdownDescription": "Denies the app_identity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_cancel_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-cancel-pairing",
+          "markdownDescription": "Denies the cave_cancel_pairing command without any pre-configured scope."
         },
         {
           "description": "Denies the cave_credential_status command without any pre-configured scope.",

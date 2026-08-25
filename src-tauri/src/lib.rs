@@ -17,10 +17,10 @@ use keyring::{CredentialCustody, NativeKeyring};
 use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
-    app_identity, cave_credential_status, cave_forget_credential, cave_get_conversation,
-    cave_health, cave_launch, cave_list_conversation_messages, cave_list_conversations,
-    cave_list_familiars, cave_list_projects, cave_pairing_create, cave_pairing_exchange,
-    cave_pairing_poll, cave_read_discovery, registered_command_names,
+    app_identity, cave_cancel_pairing, cave_credential_status, cave_forget_credential,
+    cave_get_conversation, cave_health, cave_launch, cave_list_conversation_messages,
+    cave_list_conversations, cave_list_familiars, cave_list_projects, cave_pairing_create,
+    cave_pairing_exchange, cave_pairing_poll, cave_read_discovery, registered_command_names,
 };
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 
@@ -112,6 +112,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             cave_pairing_create,
             cave_pairing_poll,
             cave_pairing_exchange,
+            cave_cancel_pairing,
             cave_credential_status,
             cave_forget_credential,
             cave_list_familiars,
@@ -165,6 +166,7 @@ mod smoke_tests {
                 "cave_pairing_create",
                 "cave_pairing_poll",
                 "cave_pairing_exchange",
+                "cave_cancel_pairing",
                 "cave_credential_status",
                 "cave_forget_credential",
                 "cave_list_familiars",
