@@ -21,6 +21,12 @@ export function assertCleanContractCanaryCheckouts(options: {
   sdk: { staged: number; unstaged: number; untracked: number };
   cave: { staged: number; unstaged: number; untracked: number };
 };
+export function createContractCanaryVerifier(): string;
+export function assertPackedFixtureMatchesCaveCheckout(
+  lock: { cave: { revision: string } },
+  harnessRoot: string,
+  caveRoot: string,
+): void;
 export function parseArgs(argv: string[]): {
   sdkRoot: string;
   caveRoot: string;

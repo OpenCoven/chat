@@ -367,6 +367,95 @@ function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
   return JSON.parse(readFileSync(manifestPath, 'utf8'));
 }
 
+export function createContractCanaryVerifier() {
+  return `import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { createMemorySecretStore } from '@opencoven/sdk-core/browser';
+import { parseVerifiedCaveContractFixture } from '@opencoven/cave-client';
+import { createManagedCaveClient } from '@opencoven/cave-client/managed';
+import { createCovenClient } from '@opencoven/coven-client';
+import { createOpenCovenSdk } from '@opencoven/sdk';
+
+const inertAdapter = async () => {
+  throw new Error('Contract canary verifier must not perform I/O.');
+};
+
+const memoryStore = createMemorySecretStore();
+await memoryStore.set('contract-canary', 'inert');
+
+if ((await memoryStore.get('contract-canary')) !== 'inert') {
+  throw new Error('SDK core browser memory store did not preserve its inert value.');
+}
+
+await memoryStore.delete('contract-canary');
+
+const managedCaveClient = createManagedCaveClient({
+  transport: {
+    health: inertAdapter,
+    managedPairingCreate: inertAdapter,
+    managedPairingPoll: inertAdapter,
+    managedPairingExchange: inertAdapter,
+    managedCredentialStatus: inertAdapter,
+    managedForgetCredential: inertAdapter,
+  },
+});
+const covenClient = createCovenClient({
+  transport: {
+    health: inertAdapter,
+  },
+});
+const sdk = createOpenCovenSdk({
+  cave: managedCaveClient,
+  coven: covenClient,
+});
+const availability = sdk.availability();
+
+if (!availability.cave || !availability.coven) {
+  throw new Error('OpenCoven SDK did not retain inert Cave and Coven clients.');
+}
+
+const fixtureDirectory = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  'node_modules',
+  '@opencoven',
+  'cave-client',
+  'fixtures',
+);
+const fixture = readFileSync(resolve(fixtureDirectory, 'contract-fixture.json'), 'utf8');
+const digest = readFileSync(resolve(fixtureDirectory, 'contract-fixture.sha256'), 'utf8');
+const parsed = parseVerifiedCaveContractFixture(fixture, digest);
+
+if (parsed.contract.apiVersion !== '1.0') {
+  throw new Error(\`Unexpected apiVersion: \${parsed.contract.apiVersion}\`);
+}
+
+if (parsed.examples.status.status !== 'ok') {
+  throw new Error(\`Unexpected status example: \${parsed.examples.status.status}\`);
+}
+
+const staleFixture = JSON.parse(fixture);
+delete staleFixture.contract.minimumClientVersion;
+
+let rejected = false;
+
+try {
+  parseVerifiedCaveContractFixture(\`\${JSON.stringify(staleFixture, null, 2)}\\n\`, digest);
+} catch (error) {
+  rejected = error instanceof Error && error.message.includes('digest mismatch');
+}
+
+if (!rejected) {
+  throw new Error(
+    'Chat contract canary accepted a required-field mutation without a digest update.',
+  );
+}
+
+process.stdout.write('Chat contract canary passed.\\n');
+`;
+}
+
 function createHarness(harnessRoot, tarballs) {
   mkdirSync(resolve(harnessRoot, 'src'), { recursive: true });
 
@@ -487,53 +576,7 @@ export function readFamiliarSurface(
 `,
   );
 
-  writeFileSync(
-    resolve(harnessRoot, 'verify.mjs'),
-    `import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import { parseVerifiedCaveContractFixture } from '@opencoven/cave-client';
-
-const fixtureDirectory = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  'node_modules',
-  '@opencoven',
-  'cave-client',
-  'fixtures',
-);
-const fixture = readFileSync(resolve(fixtureDirectory, 'contract-fixture.json'), 'utf8');
-const digest = readFileSync(resolve(fixtureDirectory, 'contract-fixture.sha256'), 'utf8');
-const parsed = parseVerifiedCaveContractFixture(fixture, digest);
-
-if (parsed.contract.apiVersion !== '1.0') {
-  throw new Error(\`Unexpected apiVersion: \${parsed.contract.apiVersion}\`);
-}
-
-if (parsed.examples.status.status !== 'ok') {
-  throw new Error(\`Unexpected status example: \${parsed.examples.status.status}\`);
-}
-
-const staleFixture = JSON.parse(fixture);
-delete staleFixture.contract.minimumClientVersion;
-
-let rejected = false;
-
-try {
-  parseVerifiedCaveContractFixture(\`\${JSON.stringify(staleFixture, null, 2)}\\n\`, digest);
-} catch (error) {
-  rejected = error instanceof Error && error.message.includes('digest mismatch');
-}
-
-if (!rejected) {
-  throw new Error(
-    'Chat contract canary accepted a required-field mutation without a digest update.',
-  );
-}
-
-process.stdout.write('Chat contract canary passed.\\n');
-`,
-  );
+  writeFileSync(resolve(harnessRoot, 'verify.mjs'), createContractCanaryVerifier());
 }
 
 export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {

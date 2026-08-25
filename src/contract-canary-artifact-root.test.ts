@@ -18,6 +18,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import {
   assertCleanGitCheckout,
   assertPackedFixtureMatchesCaveCheckout,
+  createContractCanaryVerifier,
   parseArgs,
   readContractCanaryLock,
 } from '../scripts/contract-canary.mjs';
@@ -286,6 +287,37 @@ describe('contract canary checkout cleanliness', () => {
         /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
       );
       expect(canary).toContain('assertPackedFixtureMatchesCaveCheckout');
+    });
+
+    test('generates and executes a verifier for every shipped public entrypoint', () => {
+      const scratchRoot = createRepoLocalScratchRoot('verify-entrypoints');
+      const harnessRoot = resolve(scratchRoot, 'harness');
+      const verifierPath = resolve(harnessRoot, 'verify.mjs');
+      const verifier = createContractCanaryVerifier();
+
+      mkdirSync(harnessRoot, { recursive: true });
+      writeFileSync(verifierPath, verifier);
+      symlinkSync(
+        resolve(process.cwd(), 'node_modules'),
+        resolve(harnessRoot, 'node_modules'),
+        'dir',
+      );
+
+      for (const entrypoint of [
+        '@opencoven/sdk-core/browser',
+        '@opencoven/cave-client',
+        '@opencoven/cave-client/managed',
+        '@opencoven/coven-client',
+        '@opencoven/sdk',
+      ]) {
+        expect(verifier).toContain(`from '${entrypoint}'`);
+      }
+
+      expect(
+        execFileSync(process.execPath, [verifierPath], {
+          encoding: 'utf8',
+        }),
+      ).toBe('Chat contract canary passed.\n');
     });
   });
 });
