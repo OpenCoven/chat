@@ -89,6 +89,7 @@ pub struct NativePage {
 impl ConstrainedTransport {
     fn client() -> NativeResult<Client> {
         Client::builder()
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))
             .build()
@@ -361,9 +362,17 @@ fn managed_pairing_exchange(value: Value) -> NativeResult<(String, String, Value
 #[cfg(test)]
 mod tests {
     use std::{
+        env,
+        ffi::OsString,
+        io::ErrorKind,
         io::{Read, Write},
         net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex, OnceLock,
+        },
         thread,
+        time::{Duration, Instant},
     };
 
     use serde_json::json;
@@ -375,6 +384,59 @@ mod tests {
     use crate::cave::{
         pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
     };
+
+    const PROXY_ENVIRONMENT_VARIABLES: [&str; 6] = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ];
+    const PROXY_BYPASS_ENVIRONMENT_VARIABLES: [&str; 2] = ["NO_PROXY", "no_proxy"];
+    static PROXY_ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct ScopedEnvironment {
+        original: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl ScopedEnvironment {
+        fn proxy(proxy: &str) -> Self {
+            let changes = PROXY_ENVIRONMENT_VARIABLES
+                .into_iter()
+                .map(|name| (name, Some(OsString::from(proxy))))
+                .chain(
+                    PROXY_BYPASS_ENVIRONMENT_VARIABLES
+                        .into_iter()
+                        .map(|name| (name, None)),
+                )
+                .collect::<Vec<_>>();
+            let original = changes
+                .iter()
+                .map(|(name, _)| (*name, env::var_os(name)))
+                .collect::<Vec<_>>();
+
+            for (name, value) in changes {
+                match value {
+                    Some(value) => env::set_var(name, value),
+                    None => env::remove_var(name),
+                }
+            }
+
+            Self { original }
+        }
+    }
+
+    impl Drop for ScopedEnvironment {
+        fn drop(&mut self) {
+            for (name, value) in self.original.drain(..) {
+                match value {
+                    Some(value) => env::set_var(name, value),
+                    None => env::remove_var(name),
+                }
+            }
+        }
+    }
 
     #[test]
     fn managed_pairing_creation_removes_the_secret_before_crossing_ipc() {
@@ -460,5 +522,87 @@ mod tests {
             .unwrap()
             .contains(&["test", "credential"].join("-")));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn constrained_transport_ignores_ambient_proxy_variables_for_loopback_requests() {
+        let _environment_lock = PROXY_ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_environment = PROXY_ENVIRONMENT_VARIABLES
+            .into_iter()
+            .chain(PROXY_BYPASS_ENVIRONMENT_VARIABLES)
+            .map(|name| (name, env::var_os(name)))
+            .collect::<Vec<_>>();
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target = thread::spawn(move || {
+            let (mut stream, _) = target_listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let length = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..length])
+                .starts_with("GET /api/client/v1/health "));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":{}}",
+                )
+                .unwrap();
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        proxy_listener.set_nonblocking(true).unwrap();
+        let proxy_address = proxy_listener.local_addr().unwrap();
+        let proxy_received = Arc::new(AtomicBool::new(false));
+        let proxy_received_by_server = Arc::clone(&proxy_received);
+        let proxy = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < deadline {
+                match proxy_listener.accept() {
+                    Ok((mut stream, _)) => {
+                        proxy_received_by_server.store(true, Ordering::SeqCst);
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        return;
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+
+        let environment = ScopedEnvironment::proxy(&format!("http://{proxy_address}"));
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": format!("http://{target_address}"),
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let authority = pin_owner_discovery_record(&record, 1).unwrap();
+
+        let response =
+            tauri::async_runtime::block_on(ConstrainedTransport.health(&authority)).unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.payload, json!({"data": {}}));
+        target.join().unwrap();
+        proxy.join().unwrap();
+        assert!(!proxy_received.load(Ordering::SeqCst));
+
+        drop(environment);
+        for (name, value) in original_environment {
+            assert_eq!(env::var_os(name), value);
+        }
     }
 }
