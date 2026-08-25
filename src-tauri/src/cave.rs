@@ -24,9 +24,9 @@ impl NativeDiagnostic {
 
 pub type NativeResult<T> = Result<T, NativeDiagnostic>;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const DISCOVERY_FILE_NAME: &str = "client-v1-discovery.json";
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const MAX_DISCOVERY_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Serialize)]
@@ -193,7 +193,471 @@ fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+struct WindowsFileMetadata {
+    is_directory: bool,
+    is_regular: bool,
+    is_reparse_point: bool,
+    owner_matches_current_user: bool,
+    len: u64,
+    volume_serial: u64,
+    file_index: u64,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone)]
+struct WindowsOpenedDiscovery {
+    initial: WindowsFileMetadata,
+    opened: WindowsFileMetadata,
+    bytes: Vec<u8>,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+enum WindowsDiscoveryIoError {
+    Missing,
+    Unavailable,
+}
+
+#[cfg(any(windows, test))]
+trait WindowsDiscoveryBackend {
+    fn canonical_root(&self) -> Result<PathBuf, WindowsDiscoveryIoError>;
+    fn open_directory(&self, path: &Path) -> Result<WindowsFileMetadata, WindowsDiscoveryIoError>;
+    fn open_discovery(
+        &self,
+        path: &Path,
+    ) -> Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError>;
+    fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError>;
+}
+
+#[cfg(any(windows, test))]
+fn windows_discovery_error(error: WindowsDiscoveryIoError) -> NativeDiagnostic {
+    match error {
+        WindowsDiscoveryIoError::Missing => NativeDiagnostic::new("cave_discovery_not_found", true),
+        WindowsDiscoveryIoError::Unavailable => {
+            NativeDiagnostic::new("cave_discovery_unavailable", true)
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+fn same_windows_file(left: WindowsFileMetadata, right: WindowsFileMetadata) -> bool {
+    left.volume_serial == right.volume_serial && left.file_index == right.file_index
+}
+
+#[cfg(any(windows, test))]
+fn validate_windows_directory(metadata: WindowsFileMetadata) -> NativeResult<()> {
+    if !metadata.is_directory
+        || metadata.is_regular
+        || metadata.is_reparse_point
+        || !metadata.owner_matches_current_user
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn validate_windows_file(metadata: WindowsFileMetadata) -> NativeResult<()> {
+    if !metadata.is_regular
+        || metadata.is_directory
+        || metadata.is_reparse_point
+        || !metadata.owner_matches_current_user
+        || metadata.file_index == 0
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    if metadata.len > MAX_DISCOVERY_BYTES {
+        return Err(NativeDiagnostic::new("discovery_body_limit", false));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn read_windows_discovery_with(
+    backend: &dyn WindowsDiscoveryBackend,
+) -> NativeResult<OwnerDiscoveryRecord> {
+    let root = backend.canonical_root().map_err(windows_discovery_error)?;
+    let coven = root.join(".coven");
+    let cave = coven.join("cave");
+    for directory in [&root, &coven, &cave] {
+        validate_windows_directory(
+            backend
+                .open_directory(directory)
+                .map_err(windows_discovery_error)?,
+        )?;
+    }
+
+    let opened = backend
+        .open_discovery(&cave.join(DISCOVERY_FILE_NAME))
+        .map_err(windows_discovery_error)?;
+    validate_windows_file(opened.initial)?;
+    validate_windows_file(opened.opened)?;
+    if !same_windows_file(opened.initial, opened.opened) {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    if opened.bytes.len() > MAX_DISCOVERY_BYTES as usize {
+        return Err(NativeDiagnostic::new("discovery_body_limit", false));
+    }
+
+    Ok(OwnerDiscoveryRecord {
+        handle: String::new(),
+        bytes: opened.bytes,
+        record: OwnerDiscoveryRecordMetadata {
+            identity: backend.owner_identity().map_err(windows_discovery_error)?,
+            device: opened.opened.volume_serial,
+            inode: opened.opened.file_index,
+            process_alive: false,
+        },
+    })
+}
+
+#[cfg(windows)]
+mod windows_discovery {
+    use std::{
+        ffi::OsString,
+        fs::File,
+        io::Read,
+        os::windows::{
+            ffi::{OsStrExt, OsStringExt},
+            io::{AsRawHandle, FromRawHandle},
+        },
+        path::{Path, PathBuf},
+        ptr,
+    };
+
+    use sha2::{Digest, Sha256};
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, GetLastError, LocalFree, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
+            GENERIC_ALL, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        Security::{
+            AclSizeInformation,
+            Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
+            EqualSid, GetAce, GetAclInformation, GetLengthSid, GetTokenInformation, IsWellKnownSid,
+            TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE,
+            ACE_HEADER, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+            OWNER_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        },
+        Storage::FileSystem::{
+            CreateFileW, GetFileInformationByHandle, GetFileType, BY_HANDLE_FILE_INFORMATION,
+            DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
+            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, OPEN_EXISTING, WRITE_DAC,
+            WRITE_OWNER,
+        },
+        System::{
+            SystemServices::ACCESS_ALLOWED_ACE_TYPE,
+            Threading::{GetCurrentProcess, OpenProcessToken},
+        },
+        UI::Shell::GetUserProfileDirectoryW,
+    };
+
+    use super::{
+        WindowsDiscoveryBackend, WindowsDiscoveryIoError, WindowsFileMetadata,
+        WindowsOpenedDiscovery, MAX_DISCOVERY_BYTES,
+    };
+
+    struct Handle(HANDLE);
+
+    impl Handle {
+        fn into_raw(self) -> HANDLE {
+            let handle = self.0;
+            std::mem::forget(self);
+            handle
+        }
+    }
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    pub(super) struct NativeWindowsDiscovery {
+        root: PathBuf,
+        sid: Vec<u8>,
+        identity: String,
+    }
+
+    impl NativeWindowsDiscovery {
+        pub(super) fn new() -> Result<Self, WindowsDiscoveryIoError> {
+            let token = open_current_token()?;
+            let sid = token_user_sid(token.0)?;
+            let root = user_profile_directory(token.0)?;
+            let identity = format!("{:x}", Sha256::digest(&sid));
+            Ok(Self {
+                root,
+                sid,
+                identity,
+            })
+        }
+
+        fn open(&self, path: &Path, directory: bool) -> Result<Handle, WindowsDiscoveryIoError> {
+            let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+            wide.push(0);
+            let flags = FILE_FLAG_OPEN_REPARSE_POINT
+                | if directory {
+                    FILE_FLAG_BACKUP_SEMANTICS
+                } else {
+                    0
+                };
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    FILE_GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    ptr::null(),
+                    OPEN_EXISTING,
+                    flags,
+                    ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(last_file_error());
+            }
+            Ok(Handle(handle))
+        }
+
+        fn metadata(&self, handle: HANDLE) -> Result<WindowsFileMetadata, WindowsDiscoveryIoError> {
+            let mut information = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
+            if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {
+                return Err(WindowsDiscoveryIoError::Unavailable);
+            }
+            let owner_matches_current_user = owner_matches(handle, &self.sid)?;
+            let attributes = information.dwFileAttributes;
+            let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+            Ok(WindowsFileMetadata {
+                is_directory,
+                is_regular: !is_directory && unsafe { GetFileType(handle) } == FILE_TYPE_DISK,
+                is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+                owner_matches_current_user,
+                len: ((information.nFileSizeHigh as u64) << 32) | information.nFileSizeLow as u64,
+                volume_serial: information.dwVolumeSerialNumber as u64,
+                file_index: ((information.nFileIndexHigh as u64) << 32)
+                    | information.nFileIndexLow as u64,
+            })
+        }
+    }
+
+    pub(super) fn current_user_identity() -> Result<String, WindowsDiscoveryIoError> {
+        NativeWindowsDiscovery::new().map(|discovery| discovery.identity)
+    }
+
+    impl WindowsDiscoveryBackend for NativeWindowsDiscovery {
+        fn canonical_root(&self) -> Result<PathBuf, WindowsDiscoveryIoError> {
+            Ok(self.root.clone())
+        }
+
+        fn open_directory(
+            &self,
+            path: &Path,
+        ) -> Result<WindowsFileMetadata, WindowsDiscoveryIoError> {
+            let handle = self.open(path, true)?;
+            self.metadata(handle.0)
+        }
+
+        fn open_discovery(
+            &self,
+            path: &Path,
+        ) -> Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError> {
+            let initial_handle = self.open(path, false)?;
+            let initial = self.metadata(initial_handle.0)?;
+            let opened_handle = self.open(path, false)?;
+            let opened = self.metadata(opened_handle.0)?;
+            let mut file = unsafe { File::from_raw_handle(opened_handle.into_raw() as _) };
+            let mut bytes = Vec::with_capacity(opened.len.min(MAX_DISCOVERY_BYTES) as usize);
+            file.by_ref()
+                .take(MAX_DISCOVERY_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| WindowsDiscoveryIoError::Unavailable)?;
+            Ok(WindowsOpenedDiscovery {
+                initial,
+                opened: self.metadata(file.as_raw_handle() as _)?,
+                bytes,
+            })
+        }
+
+        fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError> {
+            Ok(self.identity.clone())
+        }
+    }
+
+    fn open_current_token() -> Result<Handle, WindowsDiscoveryIoError> {
+        let mut token = ptr::null_mut();
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        Ok(Handle(token))
+    }
+
+    fn token_user_sid(token: HANDLE) -> Result<Vec<u8>, WindowsDiscoveryIoError> {
+        let mut length = 0;
+        unsafe {
+            GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut length);
+        }
+        if length == 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let mut buffer = vec![0_u8; length as usize];
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                length,
+                &mut length,
+            )
+        } == 0
+        {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let user = unsafe { &*(buffer.as_ptr().cast::<TOKEN_USER>()) };
+        let sid_length = unsafe { GetLengthSid(user.User.Sid) };
+        if sid_length == 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let sid = unsafe {
+            std::slice::from_raw_parts(user.User.Sid.cast::<u8>(), sid_length as usize).to_vec()
+        };
+        Ok(sid)
+    }
+
+    fn user_profile_directory(token: HANDLE) -> Result<PathBuf, WindowsDiscoveryIoError> {
+        let mut length = 0;
+        unsafe {
+            GetUserProfileDirectoryW(token, ptr::null_mut(), &mut length);
+        }
+        if length == 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let mut buffer = vec![0_u16; length as usize];
+        if unsafe { GetUserProfileDirectoryW(token, buffer.as_mut_ptr(), &mut length) } == 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let length = buffer
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(buffer.len());
+        Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
+    }
+
+    fn owner_matches(
+        handle: HANDLE,
+        current_user_sid: &[u8],
+    ) -> Result<bool, WindowsDiscoveryIoError> {
+        let mut owner = ptr::null_mut();
+        let mut dacl = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let result = unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                ptr::null_mut(),
+                &mut dacl,
+                ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if result != 0 {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        let owner_matches = !owner.is_null()
+            && unsafe { EqualSid(owner, current_user_sid.as_ptr().cast_mut().cast()) } != 0;
+        let dacl_is_safe = dacl_permits_only_trusted_writers(dacl, current_user_sid);
+        unsafe {
+            LocalFree(descriptor.cast());
+        }
+        Ok(owner_matches && dacl_is_safe?)
+    }
+
+    fn dacl_permits_only_trusted_writers(
+        dacl: *mut ACL,
+        current_user_sid: &[u8],
+    ) -> Result<bool, WindowsDiscoveryIoError> {
+        if dacl.is_null() {
+            return Ok(false);
+        }
+        let mut information = unsafe { std::mem::zeroed::<ACL_SIZE_INFORMATION>() };
+        if unsafe {
+            GetAclInformation(
+                dacl,
+                (&mut information as *mut ACL_SIZE_INFORMATION).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        } == 0
+        {
+            return Err(WindowsDiscoveryIoError::Unavailable);
+        }
+        for index in 0..information.AceCount {
+            let mut ace = ptr::null_mut();
+            if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
+                return Err(WindowsDiscoveryIoError::Unavailable);
+            }
+            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+            if header.AceType as u32 != ACCESS_ALLOWED_ACE_TYPE {
+                return Ok(false);
+            }
+            let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+            if allowed.Mask & writable_file_rights() != 0
+                && !trusted_writer(
+                    (&allowed.SidStart as *const u32).cast_mut().cast(),
+                    current_user_sid,
+                )
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn writable_file_rights() -> u32 {
+        GENERIC_ALL
+            | GENERIC_WRITE
+            | FILE_WRITE_DATA
+            | FILE_APPEND_DATA
+            | FILE_WRITE_EA
+            | FILE_WRITE_ATTRIBUTES
+            | DELETE
+            | WRITE_DAC
+            | WRITE_OWNER
+    }
+
+    fn trusted_writer(sid: *mut std::ffi::c_void, current_user_sid: &[u8]) -> bool {
+        (unsafe { EqualSid(sid, current_user_sid.as_ptr().cast_mut().cast()) } != 0)
+            || (unsafe { IsWellKnownSid(sid, WinLocalSystemSid) } != 0)
+            || (unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) } != 0)
+    }
+
+    fn last_file_error() -> WindowsDiscoveryIoError {
+        match unsafe { GetLastError() } {
+            ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => WindowsDiscoveryIoError::Missing,
+            _ => WindowsDiscoveryIoError::Unavailable,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
+    let backend =
+        windows_discovery::NativeWindowsDiscovery::new().map_err(windows_discovery_error)?;
+    read_windows_discovery_with(&backend)
+}
+
+#[cfg(windows)]
+pub(crate) fn current_windows_user_identity() -> Result<String, ()> {
+    windows_discovery::current_user_identity().map_err(|_| ())
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
     Err(NativeDiagnostic::new("native_discovery_unavailable", true))
 }
@@ -345,15 +809,25 @@ pub(crate) fn launch_installed_cave() -> NativeResult<Child> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    #[cfg(not(windows))]
+    use std::{
+        collections::VecDeque,
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
 
     use serde_json::json;
 
     #[cfg(unix)]
     use super::record_process_is_alive;
+    #[cfg(unix)]
+    use super::{approved_cave_paths, build_cave_command, resolve_installed_cave_binary_from};
+    use super::{pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata};
+
+    #[cfg(not(windows))]
     use super::{
-        approved_cave_paths, build_cave_command, pin_owner_discovery_record,
-        resolve_installed_cave_binary_from, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
+        read_windows_discovery_with, WindowsDiscoveryBackend, WindowsDiscoveryIoError,
+        WindowsFileMetadata, WindowsOpenedDiscovery,
     };
 
     #[cfg(unix)]
@@ -394,8 +868,178 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn discovery_metadata_reports_a_dead_record_process_as_not_alive() {
         assert!(!record_process_is_alive(br#"{ "pid": -1 }"#));
+    }
+
+    #[cfg(not(windows))]
+    #[derive(Default)]
+    struct FakeWindowsDiscovery {
+        root: PathBuf,
+        directories: Mutex<VecDeque<Result<WindowsFileMetadata, WindowsDiscoveryIoError>>>,
+        file: Option<Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError>>,
+        identity: String,
+    }
+
+    #[cfg(not(windows))]
+    impl WindowsDiscoveryBackend for FakeWindowsDiscovery {
+        fn canonical_root(&self) -> Result<PathBuf, WindowsDiscoveryIoError> {
+            Ok(self.root.clone())
+        }
+
+        fn open_directory(
+            &self,
+            _path: &Path,
+        ) -> Result<WindowsFileMetadata, WindowsDiscoveryIoError> {
+            self.directories
+                .lock()
+                .expect("directory queue")
+                .pop_front()
+                .expect("directory result")
+        }
+
+        fn open_discovery(
+            &self,
+            _path: &Path,
+        ) -> Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError> {
+            self.file.clone().expect("discovery result")
+        }
+
+        fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError> {
+            Ok(self.identity.clone())
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn safe_windows_metadata(volume_serial: u64, file_index: u64) -> WindowsFileMetadata {
+        WindowsFileMetadata {
+            is_directory: false,
+            is_regular: true,
+            is_reparse_point: false,
+            owner_matches_current_user: true,
+            len: 42,
+            volume_serial,
+            file_index,
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn windows_error_code(result: super::NativeResult<OwnerDiscoveryRecord>) -> &'static str {
+        match result {
+            Err(error) => error.code,
+            Ok(_) => panic!("expected Windows discovery to fail"),
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_discovery_rejects_foreign_owner_and_reparse_points() {
+        let root = PathBuf::from(r"C:\Users\Coven");
+        let directory = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            ..safe_windows_metadata(1, 2)
+        };
+        let discovery = WindowsOpenedDiscovery {
+            initial: safe_windows_metadata(1, 3),
+            opened: safe_windows_metadata(1, 3),
+            bytes: br#"{"endpoint":"http://127.0.0.1:4310"}"#.to_vec(),
+        };
+
+        let foreign_owner = FakeWindowsDiscovery {
+            root: root.clone(),
+            directories: Mutex::new(VecDeque::from(vec![
+                Ok(directory),
+                Ok(directory),
+                Ok(WindowsFileMetadata {
+                    owner_matches_current_user: false,
+                    ..directory
+                }),
+            ])),
+            file: Some(Ok(discovery.clone())),
+            identity: "current-user".to_owned(),
+        };
+        assert_eq!(
+            windows_error_code(read_windows_discovery_with(&foreign_owner)),
+            "unsafe_discovery_record"
+        );
+
+        let reparse = FakeWindowsDiscovery {
+            root,
+            directories: Mutex::new(VecDeque::from(vec![
+                Ok(directory),
+                Ok(WindowsFileMetadata {
+                    is_reparse_point: true,
+                    ..directory
+                }),
+                Ok(directory),
+            ])),
+            file: Some(Ok(discovery)),
+            identity: "current-user".to_owned(),
+        };
+        assert_eq!(
+            windows_error_code(read_windows_discovery_with(&reparse)),
+            "unsafe_discovery_record"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_discovery_preserves_missing_and_unavailable_results() {
+        let missing = FakeWindowsDiscovery {
+            root: PathBuf::from(r"C:\Users\Coven"),
+            directories: Mutex::new(VecDeque::from(vec![Err(WindowsDiscoveryIoError::Missing)])),
+            file: None,
+            identity: "current-user".to_owned(),
+        };
+        assert_eq!(
+            windows_error_code(read_windows_discovery_with(&missing)),
+            "cave_discovery_not_found"
+        );
+
+        let unavailable = FakeWindowsDiscovery {
+            root: PathBuf::from(r"C:\Users\Coven"),
+            directories: Mutex::new(VecDeque::from(vec![Err(
+                WindowsDiscoveryIoError::Unavailable,
+            )])),
+            file: None,
+            identity: "current-user".to_owned(),
+        };
+        assert_eq!(
+            windows_error_code(read_windows_discovery_with(&unavailable)),
+            "cave_discovery_unavailable"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_discovery_rejects_file_replacement_before_reading() {
+        let root = PathBuf::from(r"C:\Users\Coven");
+        let directory = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            ..safe_windows_metadata(1, 2)
+        };
+        let reader = FakeWindowsDiscovery {
+            root,
+            directories: Mutex::new(VecDeque::from(vec![
+                Ok(directory),
+                Ok(directory),
+                Ok(directory),
+            ])),
+            file: Some(Ok(WindowsOpenedDiscovery {
+                initial: safe_windows_metadata(1, 3),
+                opened: safe_windows_metadata(1, 4),
+                bytes: br#"{"endpoint":"http://127.0.0.1:4310"}"#.to_vec(),
+            })),
+            identity: "current-user".to_owned(),
+        };
+
+        assert_eq!(
+            windows_error_code(read_windows_discovery_with(&reader)),
+            "unsafe_discovery_record"
+        );
     }
 }

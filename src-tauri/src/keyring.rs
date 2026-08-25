@@ -1,11 +1,16 @@
+#[cfg(unix)]
 use std::{
-    fs,
+    env, fs,
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
-#[cfg(unix)]
-use std::env;
+#[cfg(any(windows, test))]
+use std::marker::PhantomData;
 
+#[cfg(windows)]
+use sha2::{Digest, Sha256};
+
+#[cfg(unix)]
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
@@ -66,11 +71,13 @@ pub(crate) trait CredentialCustody: Send + Sync {
 #[derive(Clone, Default)]
 pub(crate) struct NativeKeyring;
 
+#[cfg(unix)]
 fn mutation_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+#[cfg(unix)]
 struct CredentialMutationGuard {
     _process: MutexGuard<'static, ()>,
     _file: fs::File,
@@ -96,57 +103,162 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
     Ok(root.join("credential-mutation.lock"))
 }
 
-#[cfg(not(unix))]
-fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
-    Err(KeyringError::Unavailable)
-}
-
+#[cfg(unix)]
 fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
-    #[cfg(unix)]
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
     let process = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
     let path = credential_lock_path()?;
-    let file = {
-        #[cfg(unix)]
-        {
-            fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&path)
-                .map_err(|_| KeyringError::Unavailable)?
-        }
-        #[cfg(not(unix))]
-        {
-            fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&path)
-                .map_err(|_| KeyringError::Unavailable)?
-        }
-    };
-    #[cfg(unix)]
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|_| KeyringError::Unavailable)?;
+    let metadata = file.metadata().map_err(|_| KeyringError::Unavailable)?;
+    if !metadata.is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
     {
-        let metadata = file.metadata().map_err(|_| KeyringError::Unavailable)?;
-        if !metadata.is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
-            || metadata.mode() & 0o077 != 0
-        {
-            return Err(KeyringError::Unavailable);
-        }
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|_| KeyringError::Unavailable)?;
+        return Err(KeyringError::Unavailable);
     }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|_| KeyringError::Unavailable)?;
     file.lock_exclusive()
         .map_err(|_| KeyringError::Unavailable)?;
     Ok(CredentialMutationGuard {
         _process: process,
         _file: file,
     })
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+enum WindowsMutexWait {
+    Acquired,
+    Abandoned,
+    TimedOut,
+    Failed,
+}
+
+#[cfg(any(windows, test))]
+trait WindowsMutexApi {
+    type Handle;
+
+    fn create(&self, name: &str) -> Result<Self::Handle, KeyringError>;
+    fn wait(&self, handle: &Self::Handle) -> WindowsMutexWait;
+    fn release(&self, handle: &Self::Handle);
+    fn close(&self, handle: Self::Handle);
+}
+
+#[cfg(any(windows, test))]
+struct WindowsMutexGuard<'a, Api: WindowsMutexApi> {
+    api: &'a Api,
+    handle: Option<Api::Handle>,
+    _scope: PhantomData<&'a ()>,
+}
+
+#[cfg(any(windows, test))]
+impl<Api: WindowsMutexApi> Drop for WindowsMutexGuard<'_, Api> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            self.api.release(&handle);
+            self.api.close(handle);
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+fn acquire_windows_mutex<'a, Api: WindowsMutexApi>(
+    api: &'a Api,
+    name: &str,
+) -> Result<WindowsMutexGuard<'a, Api>, KeyringError> {
+    let handle = api.create(name)?;
+    match api.wait(&handle) {
+        WindowsMutexWait::Acquired | WindowsMutexWait::Abandoned => Ok(WindowsMutexGuard {
+            api,
+            handle: Some(handle),
+            _scope: PhantomData,
+        }),
+        WindowsMutexWait::TimedOut | WindowsMutexWait::Failed => {
+            api.close(handle);
+            Err(KeyringError::Unavailable)
+        }
+    }
+}
+
+#[cfg(windows)]
+struct NativeWindowsMutexApi;
+
+#[cfg(windows)]
+impl WindowsMutexApi for NativeWindowsMutexApi {
+    type Handle = windows_sys::Win32::Foundation::HANDLE;
+
+    fn create(&self, name: &str) -> Result<Self::Handle, KeyringError> {
+        use std::os::windows::ffi::OsStrExt;
+
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+
+        let mut wide = std::ffi::OsStr::new(name).encode_wide().collect::<Vec<_>>();
+        wide.push(0);
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, wide.as_ptr()) };
+        if handle.is_null() {
+            return Err(KeyringError::Unavailable);
+        }
+        Ok(handle)
+    }
+
+    fn wait(&self, handle: &Self::Handle) -> WindowsMutexWait {
+        use windows_sys::Win32::{
+            Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT},
+            System::Threading::WaitForSingleObject,
+        };
+
+        match unsafe { WaitForSingleObject(*handle, 5_000) } {
+            WAIT_OBJECT_0 => WindowsMutexWait::Acquired,
+            WAIT_ABANDONED => WindowsMutexWait::Abandoned,
+            WAIT_TIMEOUT => WindowsMutexWait::TimedOut,
+            _ => WindowsMutexWait::Failed,
+        }
+    }
+
+    fn release(&self, handle: &Self::Handle) {
+        unsafe {
+            windows_sys::Win32::System::Threading::ReleaseMutex(*handle);
+        }
+    }
+
+    fn close(&self, handle: Self::Handle) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(windows)]
+struct CredentialMutationGuard {
+    _mutex: WindowsMutexGuard<'static, NativeWindowsMutexApi>,
+}
+
+#[cfg(windows)]
+fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    static MUTEX: NativeWindowsMutexApi = NativeWindowsMutexApi;
+
+    let identity =
+        crate::cave::current_windows_user_identity().map_err(|_| KeyringError::Unavailable)?;
+    let scope = format!("{SERVICE}:{CREDENTIAL_ACCOUNT_PREFIX}:{identity}");
+    let name = format!(
+        "Local\\OpenCoven.Chat.{:x}",
+        Sha256::digest(scope.as_bytes())
+    );
+    acquire_windows_mutex(&MUTEX, &name).map(|mutex| CredentialMutationGuard { _mutex: mutex })
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn acquire_mutation_lock() -> Result<(), KeyringError> {
+    Err(KeyringError::Unavailable)
 }
 
 impl CredentialCustody for NativeKeyring {
@@ -257,5 +369,116 @@ fn map_keyring_error(error: keyring::Error) -> KeyringError {
         keyring::Error::NoEntry => KeyringError::NotFound,
         keyring::Error::NoStorageAccess(_) => KeyringError::Unavailable,
         _ => KeyringError::Failure,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{acquire_windows_mutex, KeyringError, WindowsMutexApi, WindowsMutexWait};
+
+    #[test]
+    fn windows_mutex_accepts_abandonment_and_releases_its_handle() {
+        let mutex = FakeWindowsMutex::with_wait(WindowsMutexWait::Abandoned);
+        {
+            let _guard = acquire_windows_mutex(&mutex, "Local\\OpenCoven.Chat.test").unwrap();
+            assert_eq!(mutex.wait_calls(), 1);
+        }
+        assert_eq!(mutex.release_calls(), 1);
+        assert_eq!(mutex.close_calls(), 1);
+    }
+
+    #[test]
+    fn windows_mutex_serializes_contenders_and_releases_after_each_guard() {
+        let mutex = FakeWindowsMutex::with_wait(WindowsMutexWait::Acquired);
+        {
+            let _first = acquire_windows_mutex(&mutex, "Local\\OpenCoven.Chat.test").unwrap();
+            assert_eq!(mutex.wait_calls(), 1);
+            assert!(matches!(
+                acquire_windows_mutex(&mutex, "Local\\OpenCoven.Chat.test"),
+                Err(KeyringError::Unavailable)
+            ));
+            assert_eq!(mutex.release_calls(), 0);
+        }
+        {
+            let _second = acquire_windows_mutex(&mutex, "Local\\OpenCoven.Chat.test").unwrap();
+            assert_eq!(mutex.wait_calls(), 3);
+        }
+        assert_eq!(mutex.release_calls(), 2);
+        assert_eq!(mutex.close_calls(), 3);
+    }
+
+    #[test]
+    fn windows_mutex_fails_closed_on_timeout_or_api_failure() {
+        for wait in [WindowsMutexWait::TimedOut, WindowsMutexWait::Failed] {
+            let mutex = FakeWindowsMutex::with_wait(wait);
+            assert!(matches!(
+                acquire_windows_mutex(&mutex, "Local\\OpenCoven.Chat.test"),
+                Err(KeyringError::Unavailable)
+            ));
+            assert_eq!(mutex.release_calls(), 0);
+            assert_eq!(mutex.close_calls(), 1);
+        }
+    }
+
+    struct FakeWindowsMutex {
+        wait: WindowsMutexWait,
+        waits: std::sync::atomic::AtomicUsize,
+        releases: std::sync::atomic::AtomicUsize,
+        closes: std::sync::atomic::AtomicUsize,
+        held: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeWindowsMutex {
+        fn with_wait(wait: WindowsMutexWait) -> Self {
+            Self {
+                wait,
+                waits: std::sync::atomic::AtomicUsize::new(0),
+                releases: std::sync::atomic::AtomicUsize::new(0),
+                closes: std::sync::atomic::AtomicUsize::new(0),
+                held: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        fn wait_calls(&self) -> usize {
+            self.waits.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn release_calls(&self) -> usize {
+            self.releases.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn close_calls(&self) -> usize {
+            self.closes.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl WindowsMutexApi for FakeWindowsMutex {
+        type Handle = ();
+
+        fn create(&self, _name: &str) -> Result<Self::Handle, KeyringError> {
+            Ok(())
+        }
+
+        fn wait(&self, _handle: &Self::Handle) -> WindowsMutexWait {
+            self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if matches!(self.wait, WindowsMutexWait::Acquired)
+                && self.held.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                WindowsMutexWait::TimedOut
+            } else {
+                self.wait
+            }
+        }
+
+        fn release(&self, _handle: &Self::Handle) {
+            self.releases
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.held.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn close(&self, _handle: Self::Handle) {
+            self.closes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 }

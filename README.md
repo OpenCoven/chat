@@ -11,6 +11,9 @@ does not initiate a Cave connection.
 - No browser direct HTTP calls or generic native request command are implemented.
 - Pairing secrets, bearer credentials, headers, and keychain values remain in
   Rust. Browser results are bounded non-secret DTOs and diagnostics.
+- On Windows, native discovery accepts only the current token's canonical
+  `.coven/cave` record after handle-based owner, ACL, identity, and reparse
+  validation. Native keyring mutations use a current-user named mutex.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
 - The webview uses frozen packed `@opencoven/cave-client/managed` and
   `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
