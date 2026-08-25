@@ -232,16 +232,13 @@ function failureFrom(error: unknown): SafeFailure {
   });
 }
 
-function isOfflineFailure(failure: SafeFailure, category: DiagnosticCategory): boolean {
+function isOfflineFailure(failure: SafeFailure): boolean {
   return (
     failure.code === 'not_found' ||
-    (failure.code === 'rate_limited' && category !== 'pairing') ||
+    failure.code === 'rate_limited' ||
     failure.code === 'service_unavailable' ||
     failure.code === 'timeout' ||
-    (failure.retryable &&
-      failure.code !== 'rate_limited' &&
-      failure.code !== 'pairing_denied' &&
-      failure.code !== 'pairing_expired')
+    (failure.retryable && failure.code !== 'pairing_denied' && failure.code !== 'pairing_expired')
   );
 }
 
@@ -355,7 +352,7 @@ export function createCaveConnectionController(
       setState(generation, { state: 'incompatible', diagnosticId });
       return;
     }
-    if (isOfflineFailure(failure, category)) {
+    if (isOfflineFailure(failure)) {
       setState(generation, {
         state: 'offline',
         lastHealthyAt: machine.lastHealthyAt,

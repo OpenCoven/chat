@@ -1,4 +1,10 @@
 import { inspect } from 'node:util';
+import {
+  type CaveClient,
+  type CaveManagedCredentialTransport,
+  type CavePairingRequest,
+  createManagedCaveClient,
+} from '@opencoven/cave-client/managed';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type CaveConnectionHostPort,
@@ -6,7 +12,7 @@ import {
 } from './connection-controller';
 import type { CaveConnectionHost } from './connection-host';
 import { createCaveConnectionHost } from './connection-host';
-import type { NativeSdkInvoke } from './native-boundary';
+import { createCaveManagedCredentialTransport, type NativeSdkInvoke } from './native-boundary';
 
 const CAVE_INSTANCE_ID = '00000000-0000-4000-8000-000000000000';
 const NEXT_CAVE_INSTANCE_ID = '00000000-0000-4000-8000-000000000002';
@@ -50,6 +56,13 @@ type ManagedNativeResponses = Readonly<{
   forgetCredential?: NativeResponse;
   launch?: NativeResponse;
 }>;
+type PairingPhase = 'create' | 'poll' | 'exchange';
+type RateLimitCalls = {
+  pairingRequests: CavePairingRequest[];
+  polls: number;
+  exchanges: number;
+  credentialStatuses: number;
+};
 
 function healthEnvelope(instanceId = CAVE_INSTANCE_ID, minimumClientVersion = '0.1.0') {
   return {
@@ -120,8 +133,8 @@ function credentialMetadata() {
   };
 }
 
-function nativeHost(responses: ManagedNativeResponses = {}): CaveConnectionHost {
-  const invoke: NativeSdkInvoke = async (command, args) => {
+function nativeInvoke(responses: ManagedNativeResponses = {}): NativeSdkInvoke {
+  return async (command, args) => {
     switch (command) {
       case 'cave_read_discovery':
         return responses.discovery === undefined ? discoverySnapshot() : responses.discovery(args);
@@ -153,8 +166,93 @@ function nativeHost(responses: ManagedNativeResponses = {}): CaveConnectionHost 
         throw new Error('unexpected native command');
     }
   };
+}
 
-  return createCaveConnectionHost(invoke);
+function nativeHost(responses: ManagedNativeResponses = {}): CaveConnectionHost {
+  return createCaveConnectionHost(nativeInvoke(responses));
+}
+
+function rateLimitedClient(
+  phase: PairingPhase,
+  fail: () => Promise<never>,
+  calls: RateLimitCalls,
+  onRateLimit?: () => void,
+): CaveClient {
+  const transport = createCaveManagedCredentialTransport(
+    nativeInvoke({
+      credentialStatus: async () => {
+        calls.credentialStatuses += 1;
+        return { status: 'missing' };
+      },
+      pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 }),
+      pairingPoll: async () => ({
+        id: PAIRING_REQUEST_ID,
+        status: 'approved',
+        expiresAt: 2_000,
+      }),
+      pairingExchange: async () => ({ credential: credentialMetadata() }),
+    }),
+    'native-rate-limit-handle',
+  );
+  const pairingCreate: CaveManagedCredentialTransport['managedPairingCreate'] = async (
+    request,
+    context,
+  ) => {
+    calls.pairingRequests.push(request);
+    if (phase === 'create') {
+      onRateLimit?.();
+      return fail();
+    }
+    return transport.managedPairingCreate(request, context);
+  };
+  const pairingPoll: CaveManagedCredentialTransport['managedPairingPoll'] = async (
+    requestId,
+    context,
+  ) => {
+    calls.polls += 1;
+    if (phase === 'poll') {
+      onRateLimit?.();
+      return fail();
+    }
+    return transport.managedPairingPoll(requestId, context);
+  };
+  const pairingExchange: CaveManagedCredentialTransport['managedPairingExchange'] = async (
+    requestId,
+    context,
+  ) => {
+    calls.exchanges += 1;
+    if (phase === 'exchange') {
+      onRateLimit?.();
+      return fail();
+    }
+    return transport.managedPairingExchange(requestId, context);
+  };
+
+  return createManagedCaveClient({
+    transport: Object.freeze({
+      ...transport,
+      managedPairingCreate: pairingCreate,
+      managedPairingPoll: pairingPoll,
+      managedPairingExchange: pairingExchange,
+    }),
+  });
+}
+
+function rateLimitedCalls(): RateLimitCalls {
+  return {
+    pairingRequests: [],
+    polls: 0,
+    exchanges: 0,
+    credentialStatuses: 0,
+  };
+}
+
+async function discoveryWithClient(client: CaveClient) {
+  const discovered = await nativeHost().discover();
+  return Object.freeze({
+    ...discovered,
+    client,
+  });
 }
 
 function hostPort(
@@ -413,6 +511,113 @@ describe('Cave connection controller', () => {
       caveInstanceId: CAVE_INSTANCE_ID,
       covenAvailable: false,
     });
+  });
+
+  it('publishes offline for packed rate limits at every pairing phase without retrying', async () => {
+    const canary = 'pairing-rate-limit-secret-canary';
+
+    for (const phase of ['create', 'poll', 'exchange'] as const) {
+      const calls = rateLimitedCalls();
+      const events: unknown[] = [];
+      const packedClient = rateLimitedClient(
+        phase,
+        () =>
+          Promise.reject(
+            Object.freeze({
+              code: 'rate_limited',
+              retryable: true,
+              cause: {
+                path: canary,
+                secret: canary,
+                url: `https://${canary}.invalid`,
+              },
+            }),
+          ),
+        calls,
+      );
+      const testClock = clock(100);
+      const subject = controller(
+        hostPort(async () => discoveryWithClient(packedClient)),
+        testClock,
+      );
+      subject.subscribe((state) => {
+        events.push(state);
+      });
+
+      await subject.start();
+      await subject.beginPairing();
+      await settle();
+
+      expect(subject.getState()).toMatchObject({
+        state: 'offline',
+        lastHealthyAt: 100,
+      });
+      expect(calls.credentialStatuses).toBe(1);
+      expect(calls.pairingRequests).toEqual([
+        {
+          appName: 'OpenCoven Chat',
+          installationId: INSTALLATION_ID,
+          scopes: ['chat:read'],
+        },
+      ]);
+      expect(calls.polls).toBe(phase === 'create' ? 0 : 1);
+      expect(calls.exchanges).toBe(phase === 'exchange' ? 1 : 0);
+      for (const value of [...events, subject.getState()]) {
+        expect(JSON.stringify(value)).not.toContain(canary);
+        expect(inspect(value)).not.toContain(canary);
+      }
+    }
+  });
+
+  it('does not let stale packed pairing rate limits overwrite a retry', async () => {
+    const canary = 'stale-pairing-rate-limit-canary';
+
+    for (const phase of ['create', 'poll', 'exchange'] as const) {
+      const calls = rateLimitedCalls();
+      const rateLimit = deferred<never>();
+      const enteredRateLimit = deferred<void>();
+      const packedClient = rateLimitedClient(
+        phase,
+        () => rateLimit.promise,
+        calls,
+        () => enteredRateLimit.resolve(),
+      );
+      const replacement = nativeHost({
+        health: async () => healthEnvelope(NEXT_CAVE_INSTANCE_ID),
+        credentialStatus: async () => validCredentialStatus('chat:read', NEXT_CAVE_INSTANCE_ID),
+      });
+      const discover = vi
+        .fn<CaveConnectionHost['discover']>()
+        .mockImplementationOnce(async () => discoveryWithClient(packedClient))
+        .mockImplementationOnce(replacement.discover);
+      const subject = controller(hostPort(discover));
+
+      await subject.start();
+      const pairing = subject.beginPairing();
+      await enteredRateLimit.promise;
+      await subject.retry();
+      rateLimit.reject(
+        Object.freeze({
+          code: 'rate_limited',
+          retryable: true,
+          cause: {
+            path: canary,
+            secret: canary,
+            url: `https://${canary}.invalid`,
+          },
+        }),
+      );
+      await pairing;
+
+      expect(subject.getState()).toEqual({
+        state: 'ready',
+        caveInstanceId: NEXT_CAVE_INSTANCE_ID,
+        covenAvailable: false,
+      });
+      expect(calls.pairingRequests).toHaveLength(1);
+      expect(calls.polls).toBe(phase === 'create' ? 0 : 1);
+      expect(calls.exchanges).toBe(phase === 'exchange' ? 1 : 0);
+    }
   });
 
   it('handles packed pairing denial, expiry, and cancellation without exchange', async () => {
