@@ -55,6 +55,18 @@ describe('chat demo shell', () => {
     expect(screen.getByRole('heading', { name: 'Cody' })).toBeVisible();
   });
 
+  it('switches the active familiar from the left rail', () => {
+    render(<DemoShell />);
+
+    expect(screen.queryByRole('combobox', { name: 'Agent for this conversation' })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Active familiar' }), {
+      target: { value: 'cody' },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Cody' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Active familiar' })).toHaveValue('cody');
+  });
+
   it('keeps one narrow overlay open at a time and closes it with Escape', () => {
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = vi.fn().mockReturnValue({ matches: true });

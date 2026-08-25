@@ -7,7 +7,7 @@ const astra = MOCK_FAMILIARS.find((familiar) => familiar.id === 'astra');
 
 describe('ChatInspector', () => {
   it('shows the active familiar and its bounded authority', () => {
-    render(<ChatInspector familiar={astra} onFamiliarChange={vi.fn()} onClose={vi.fn()} />);
+    render(<ChatInspector familiar={astra} onClose={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: 'Astra' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Access' }));
@@ -18,7 +18,7 @@ describe('ChatInspector', () => {
   });
 
   it('moves between tabs with arrow keys', () => {
-    render(<ChatInspector familiar={astra} onFamiliarChange={vi.fn()} onClose={vi.fn()} />);
+    render(<ChatInspector familiar={astra} onClose={vi.fn()} />);
 
     const overview = screen.getByRole('tab', { name: 'Overview' });
     overview.focus();
@@ -30,7 +30,7 @@ describe('ChatInspector', () => {
 
   it('opens app settings in place and returns to the agent', () => {
     const onClose = vi.fn();
-    render(<ChatInspector familiar={astra} onFamiliarChange={vi.fn()} onClose={onClose} />);
+    render(<ChatInspector familiar={astra} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'App settings' }));
     expect(screen.getByRole('heading', { name: 'App settings' })).toBeVisible();
@@ -53,21 +53,8 @@ describe('ChatInspector', () => {
     expect(screen.getByRole('heading', { name: 'Astra' })).toBeVisible();
   });
 
-  it('changes the familiar through the contextual selector', () => {
-    const onFamiliarChange = vi.fn();
-    render(
-      <ChatInspector familiar={astra} onFamiliarChange={onFamiliarChange} onClose={vi.fn()} />,
-    );
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'Agent for this conversation' }), {
-      target: { value: 'cody' },
-    });
-
-    expect(onFamiliarChange).toHaveBeenCalledWith('cody');
-  });
-
   it('keeps settings reachable when the familiar is unavailable', () => {
-    render(<ChatInspector familiar={undefined} onFamiliarChange={vi.fn()} onClose={vi.fn()} />);
+    render(<ChatInspector familiar={undefined} onClose={vi.fn()} />);
 
     expect(screen.getByText('Agent unavailable')).toBeVisible();
     expect(screen.getByText('Choose a conversation to see its agent.')).toBeVisible();

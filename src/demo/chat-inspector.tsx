@@ -6,7 +6,7 @@ import {
   formatDuration,
   formatSuccessRate,
 } from './minimal-familiar-sdk';
-import { contractReport, MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
+import { contractReport, type MockFamiliar } from './mock-familiars';
 import { MOCK_CREDENTIAL, MOCK_HEALTH } from './settings-page';
 
 type InspectorTab = 'overview' | 'access' | 'activity';
@@ -16,7 +16,6 @@ type AppTab = 'general' | 'connection';
 export type ChatInspectorProps = Readonly<{
   familiar: MockFamiliar | undefined;
   onClose: () => void;
-  onFamiliarChange: (familiarId: string) => void;
 }>;
 
 const TABS: readonly InspectorTab[] = ['overview', 'access', 'activity'];
@@ -294,7 +293,7 @@ function AppSettings({
   );
 }
 
-export function ChatInspector({ familiar, onClose, onFamiliarChange }: ChatInspectorProps) {
+export function ChatInspector({ familiar, onClose }: ChatInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [view, setView] = useState<InspectorView>('agent');
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -348,21 +347,6 @@ export function ChatInspector({ familiar, onClose, onFamiliarChange }: ChatInspe
           ›
         </button>
       </header>
-
-      {familiar ? (
-        <select
-          className="inspector-agent-select"
-          aria-label="Agent for this conversation"
-          value={familiar.id}
-          onChange={(event) => onFamiliarChange(event.target.value)}
-        >
-          {MOCK_FAMILIARS.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-      ) : null}
 
       <div className="inspector-tabs" role="tablist" aria-label="Agent details">
         {TABS.map((name, index) => (

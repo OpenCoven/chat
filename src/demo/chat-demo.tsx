@@ -641,7 +641,36 @@ export function ChatDemo() {
         hidden={!conversationsOpen}
       >
         <header className="sidebar-header">
-          <h1>Chats</h1>
+          <label className="familiar-switcher">
+            <Avatar
+              label={activeFamiliar?.name ?? 'No familiar'}
+              seed={activeFamiliar?.id ?? 'none'}
+              size={34}
+            />
+            <span className="familiar-switcher-copy">
+              <span className="familiar-switcher-name">
+                {activeFamiliar?.name ?? 'Choose familiar'}
+              </span>
+              <span className="familiar-switcher-role">
+                <span className="familiar-switcher-status" aria-hidden="true" />
+                {activeFamiliar?.role ?? 'No familiar selected'}
+              </span>
+            </span>
+            <span className="familiar-switcher-chevron" aria-hidden="true">
+              ⌄
+            </span>
+            <select
+              aria-label="Active familiar"
+              value={activeFamiliar?.id ?? ''}
+              onChange={(event) => changeActiveFamiliar(event.target.value)}
+            >
+              {MOCK_FAMILIARS.map((familiar) => (
+                <option key={familiar.id} value={familiar.id}>
+                  {familiar.name} — {familiar.role}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="glass-control"
@@ -899,11 +928,7 @@ export function ChatDemo() {
       </main>
 
       <aside id="agent-inspector" aria-label="Agent inspector" hidden={!inspectorOpen}>
-        <ChatInspector
-          familiar={activeFamiliar}
-          onClose={() => setInspectorOpen(false)}
-          onFamiliarChange={changeActiveFamiliar}
-        />
+        <ChatInspector familiar={activeFamiliar} onClose={() => setInspectorOpen(false)} />
       </aside>
 
       {reader ? <DocumentReader document={reader} onClose={() => setReader(null)} /> : null}
