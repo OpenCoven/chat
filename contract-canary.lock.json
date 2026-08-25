@@ -1,11 +1,29 @@
 {
-  "version": 1,
+  "version": 2,
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "6880e64b864864ee75de90f36d5c11d9d98f83f2"
+    "revision": "a86773cb6ba45084495c00ca364f8646865f1606",
+    "artifacts": {
+      "core": {
+        "packageName": "@opencoven/sdk-core",
+        "sha256": "9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe"
+      },
+      "cave": {
+        "packageName": "@opencoven/cave-client",
+        "sha256": "7e8b1d1ea757c2e9361b2ec7968485279d171ec30b04437bb1b96072980da3f6"
+      },
+      "coven": {
+        "packageName": "@opencoven/coven-client",
+        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+      },
+      "sdk": {
+        "packageName": "@opencoven/sdk",
+        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+      }
+    }
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "2fe0abd05c88329c6b93660b986f40605c939ae1"
+    "revision": "4adc97b1bdafd1012ce4c66de598e82f49329f79"
   }
 }

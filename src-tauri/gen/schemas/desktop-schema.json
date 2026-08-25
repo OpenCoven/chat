@@ -189,6 +189,84 @@
           "markdownDescription": "Enables the cancel_pairing command without any pre-configured scope."
         },
         {
+          "description": "Enables the cave_credential_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-credential-status",
+          "markdownDescription": "Enables the cave_credential_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_forget_credential command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-forget-credential",
+          "markdownDescription": "Enables the cave_forget_credential command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_get_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-get-conversation",
+          "markdownDescription": "Enables the cave_get_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-health",
+          "markdownDescription": "Enables the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_launch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-launch",
+          "markdownDescription": "Enables the cave_launch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_conversation_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-conversation-messages",
+          "markdownDescription": "Enables the cave_list_conversation_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-conversations",
+          "markdownDescription": "Enables the cave_list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_familiars command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-familiars",
+          "markdownDescription": "Enables the cave_list_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_projects command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-projects",
+          "markdownDescription": "Enables the cave_list_projects command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_create command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-create",
+          "markdownDescription": "Enables the cave_pairing_create command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_exchange command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-exchange",
+          "markdownDescription": "Enables the cave_pairing_exchange command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_poll command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-poll",
+          "markdownDescription": "Enables the cave_pairing_poll command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_read_discovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-read-discovery",
+          "markdownDescription": "Enables the cave_read_discovery command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_connection_state command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-connection-state",
@@ -241,6 +319,84 @@
           "type": "string",
           "const": "deny-cancel-pairing",
           "markdownDescription": "Denies the cancel_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_credential_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-credential-status",
+          "markdownDescription": "Denies the cave_credential_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_forget_credential command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-forget-credential",
+          "markdownDescription": "Denies the cave_forget_credential command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_get_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-get-conversation",
+          "markdownDescription": "Denies the cave_get_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-health",
+          "markdownDescription": "Denies the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_launch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-launch",
+          "markdownDescription": "Denies the cave_launch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_conversation_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-conversation-messages",
+          "markdownDescription": "Denies the cave_list_conversation_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-conversations",
+          "markdownDescription": "Denies the cave_list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_familiars command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-familiars",
+          "markdownDescription": "Denies the cave_list_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_projects command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-projects",
+          "markdownDescription": "Denies the cave_list_projects command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_create command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-create",
+          "markdownDescription": "Denies the cave_pairing_create command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_exchange command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-exchange",
+          "markdownDescription": "Denies the cave_pairing_exchange command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_poll command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-poll",
+          "markdownDescription": "Denies the cave_pairing_poll command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_read_discovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-read-discovery",
+          "markdownDescription": "Denies the cave_read_discovery command without any pre-configured scope."
         },
         {
           "description": "Denies the get_connection_state command without any pre-configured scope.",

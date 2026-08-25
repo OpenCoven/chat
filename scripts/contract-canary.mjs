@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -42,9 +43,18 @@ function validateLockEntry(lockData, key, expectedRepository) {
     );
   }
 
+  const artifacts = entry.artifacts;
+  if (
+    key === 'sdk' &&
+    (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts))
+  ) {
+    throw new Error('contract-canary.lock.json sdk.artifacts must be an object.');
+  }
+
   return {
     repository: entry.repository,
     revision: entry.revision,
+    ...(key === 'sdk' ? { artifacts } : {}),
   };
 }
 
@@ -53,8 +63,8 @@ export function readContractCanaryLock(lockPath = defaultLockPath) {
 
   const lockData = JSON.parse(readFileSync(lockPath, 'utf8'));
 
-  if (lockData.version !== 1) {
-    throw new Error('contract-canary.lock.json version must be 1.');
+  if (lockData.version !== 2) {
+    throw new Error('contract-canary.lock.json version must be 2.');
   }
 
   return {
@@ -280,8 +290,59 @@ function createPublicPackageOverrides(tarballs) {
     '@opencoven/cave-client': `file:${tarballs.cave}`,
     '@opencoven/coven-client': `file:${tarballs.coven}`,
     '@opencoven/sdk': `file:${tarballs.sdk}`,
-    '@opencoven/dev-cli': `file:${tarballs.cli}`,
   };
+}
+
+const SDK_ARTIFACTS = Object.freeze({
+  core: {
+    packageName: '@opencoven/sdk-core',
+    fileName: 'sdk-core-0.1.0.tgz',
+  },
+  cave: {
+    packageName: '@opencoven/cave-client',
+    fileName: 'cave-client-0.1.0.tgz',
+  },
+  coven: {
+    packageName: '@opencoven/coven-client',
+    fileName: 'coven-client-0.1.0.tgz',
+  },
+  sdk: {
+    packageName: '@opencoven/sdk',
+    fileName: 'sdk-0.1.0.tgz',
+  },
+});
+
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function assertArtifactDigests(lock, tarballs) {
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const locked = lock.sdk.artifacts[key];
+    const tarball = tarballs[key];
+    if (
+      locked?.packageName !== artifact.packageName ||
+      typeof locked.sha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/iu.test(locked.sha256) ||
+      typeof tarball !== 'string' ||
+      sha256(tarball) !== locked.sha256
+    ) {
+      throw new Error(
+        `Packed SDK ${artifact.packageName} does not match its locked artifact digest.`,
+      );
+    }
+  }
+}
+
+function frozenTarballs(lock) {
+  const tarballs = {};
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const path = resolve(root, 'vendor', 'opencoven-sdk', artifact.fileName);
+    requirePath(path, `Frozen ${artifact.packageName} artifact`);
+    tarballs[key] = path;
+  }
+  assertArtifactDigests(lock, tarballs);
+  return tarballs;
 }
 
 function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
@@ -319,9 +380,12 @@ function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
           build: 'tsc --pretty false --noEmit',
           verify: 'node verify.mjs',
         },
-        dependencies: {
-          '@opencoven/cave-client': `file:${tarballs.cave}`,
-        },
+        dependencies: Object.fromEntries(
+          Object.entries(SDK_ARTIFACTS).map(([key, artifact]) => [
+            artifact.packageName,
+            `file:${tarballs[key]}`,
+          ]),
+        ),
         devDependencies: {
           '@types/node': '24.13.3',
           typescript: '6.0.3',
@@ -363,6 +427,15 @@ function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
   type CaveFamiliar,
   type CaveFamiliarAnalytics,
 } from '@opencoven/cave-client';
+import { createManagedCaveClient } from '@opencoven/cave-client/managed';
+import type { OperationContext } from '@opencoven/sdk-core/browser';
+import { createCovenClient } from '@opencoven/coven-client';
+import { createOpenCovenSdk } from '@opencoven/sdk';
+
+void createManagedCaveClient;
+void (undefined as unknown as OperationContext);
+void createCovenClient;
+void createOpenCovenSdk;
 
 export function loadAuthorityFixture(
   fixtureContents: string,
@@ -481,6 +554,7 @@ export function main(argv = process.argv.slice(2)) {
   requirePath(caveFixturePath, 'Cave authority fixture');
   requirePath(caveDigestPath, 'Cave authority fixture digest');
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
+  runPnpm(['install', '--frozen-lockfile'], options.sdkRoot);
 
   let artifactContext;
 
@@ -497,8 +571,10 @@ export function main(argv = process.argv.slice(2)) {
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
     const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
+    assertArtifactDigests(lock, tarballs);
+    const frozen = frozenTarballs(lock);
 
-    createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
+    createHarness(harnessRoot, frozen, caveFixturePath, caveDigestPath);
     installHarnessOfflineAfterWarming(harnessRoot);
 
     if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {

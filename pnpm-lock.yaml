@@ -4,10 +4,28 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@opencoven/cave-client': file:vendor/opencoven-sdk/cave-client-0.1.0.tgz
+  '@opencoven/coven-client': file:vendor/opencoven-sdk/coven-client-0.1.0.tgz
+  '@opencoven/sdk': file:vendor/opencoven-sdk/sdk-0.1.0.tgz
+  '@opencoven/sdk-core': file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
+
 importers:
 
   .:
     dependencies:
+      '@opencoven/cave-client':
+        specifier: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz
+        version: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz
+      '@opencoven/coven-client':
+        specifier: file:vendor/opencoven-sdk/coven-client-0.1.0.tgz
+        version: file:vendor/opencoven-sdk/coven-client-0.1.0.tgz
+      '@opencoven/sdk':
+        specifier: file:vendor/opencoven-sdk/sdk-0.1.0.tgz
+        version: file:vendor/opencoven-sdk/sdk-0.1.0.tgz
+      '@opencoven/sdk-core':
+        specifier: file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
+        version: file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
       '@tauri-apps/api':
         specifier: 2.11.1
         version: 2.11.1
@@ -191,6 +209,26 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@opencoven/cave-client@file:vendor/opencoven-sdk/cave-client-0.1.0.tgz':
+    resolution: {integrity: sha512-yiViYHfuUP51CiYAZ15xy/j7WgO+BlrnkXz3DMYp4yYFVmt0ohLHuF1isienmK6sAfLn8GGW5fuZaJkoss206Q==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=24.18.0 <25'}
+
+  '@opencoven/coven-client@file:vendor/opencoven-sdk/coven-client-0.1.0.tgz':
+    resolution: {integrity: sha512-FWh/RhxvYOC/5sEJ0mhiHuXXbV6u6pBsIpiKwZKhquAJ4fL6/W3f7cmxYUyhOp0h9pzhXYOFaLJiljN4nxgFGA==, tarball: file:vendor/opencoven-sdk/coven-client-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=24.18.0 <25'}
+
+  '@opencoven/sdk-core@file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz':
+    resolution: {integrity: sha512-ZLfkfFNETnLjwg/Lxa5nIXrYs1L1q+y0fChyzZdorIpB1Rq8NeJt2S2PLQsaQXLls3GyCSkVe9+SCD2qoITkiA==, tarball: file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=24.18.0 <25'}
+
+  '@opencoven/sdk@file:vendor/opencoven-sdk/sdk-0.1.0.tgz':
+    resolution: {integrity: sha512-7th09MZYgl6zAlxfj8LUdSWqCObsVILL+ZnWZfvRRpXo62TNTqad1aF/EvGU70SmOmyodqV9xnn37qbdqDDMgA==, tarball: file:vendor/opencoven-sdk/sdk-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=24.18.0 <25'}
 
   '@oxc-project/types@0.144.0':
     resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
@@ -1026,6 +1064,22 @@ snapshots:
   '@exodus/bytes@1.15.1': {}
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@opencoven/cave-client@file:vendor/opencoven-sdk/cave-client-0.1.0.tgz':
+    dependencies:
+      '@opencoven/sdk-core': file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
+
+  '@opencoven/coven-client@file:vendor/opencoven-sdk/coven-client-0.1.0.tgz':
+    dependencies:
+      '@opencoven/sdk-core': file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
+
+  '@opencoven/sdk-core@file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz': {}
+
+  '@opencoven/sdk@file:vendor/opencoven-sdk/sdk-0.1.0.tgz':
+    dependencies:
+      '@opencoven/cave-client': file:vendor/opencoven-sdk/cave-client-0.1.0.tgz
+      '@opencoven/coven-client': file:vendor/opencoven-sdk/coven-client-0.1.0.tgz
+      '@opencoven/sdk-core': file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
 
   '@oxc-project/types@0.144.0': {}
 

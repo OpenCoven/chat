@@ -7,72 +7,66 @@ mod transport;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use cave::NativeDiagnostic;
-use cave::{CaveLauncher, NativeCaveLauncher};
-use connection::{
-    ConnectionKeyring, ConnectionRuntime, ConnectionTransport, NativeConnectionTransport,
+use cave::{
+    CaveDiscoveryReader, CaveLauncher, NativeCaveDiscoveryReader, NativeCaveLauncher,
+    NativeDiagnostic,
 };
-use keyring::NativeKeyring;
+use connection::ConnectionRuntime;
+use keyring::{CredentialCustody, NativeKeyring};
+use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
-    app_identity, cancel_pairing, get_connection_state, launch_cave, refresh_connection,
-    registered_command_names, retry_connection, start_conversation, start_pairing,
-    submit_manual_discovery,
+    app_identity, cave_credential_status, cave_forget_credential, cave_get_conversation,
+    cave_health, cave_launch, cave_list_conversation_messages, cave_list_conversations,
+    cave_list_familiars, cave_list_projects, cave_pairing_create, cave_pairing_exchange,
+    cave_pairing_poll, cave_read_discovery, registered_command_names,
 };
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 
 #[derive(Clone)]
 pub struct NativeConnectionState {
-    connection: Arc<Mutex<ConnectionRuntime>>,
-    transport: Arc<dyn ConnectionTransport>,
-    keyring: Arc<dyn ConnectionKeyring>,
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    transport: Arc<dyn NativeCaveTransport>,
+    keyring: Arc<dyn CredentialCustody>,
+    discovery: Arc<dyn CaveDiscoveryReader>,
     launcher: Arc<dyn CaveLauncher>,
 }
 
 impl Default for NativeConnectionState {
     fn default() -> Self {
         Self {
-            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
-            transport: Arc::new(NativeConnectionTransport),
+            runtime: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport: Arc::new(ConstrainedTransport),
             keyring: Arc::new(NativeKeyring),
+            discovery: Arc::new(NativeCaveDiscoveryReader),
             launcher: Arc::new(NativeCaveLauncher),
-        }
-    }
-}
-
-#[cfg(test)]
-impl NativeConnectionState {
-    pub(crate) fn with_collaborators(
-        transport: Arc<dyn ConnectionTransport>,
-        keyring: Arc<dyn ConnectionKeyring>,
-    ) -> Self {
-        Self {
-            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
-            transport,
-            keyring,
-            launcher: Arc::new(NativeCaveLauncher),
-        }
-    }
-
-    pub(crate) fn with_collaborators_and_launcher(
-        transport: Arc<dyn ConnectionTransport>,
-        keyring: Arc<dyn ConnectionKeyring>,
-        launcher: Arc<dyn CaveLauncher>,
-    ) -> Self {
-        Self {
-            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
-            transport,
-            keyring,
-            launcher,
         }
     }
 }
 
 impl NativeConnectionState {
     fn runtime(&self) -> Result<MutexGuard<'_, ConnectionRuntime>, NativeDiagnostic> {
-        self.connection
+        self.runtime
             .lock()
             .map_err(|_| NativeDiagnostic::new("connection_state_unavailable", true))
+    }
+}
+
+#[cfg(test)]
+impl NativeConnectionState {
+    pub(crate) fn with_test_collaborators(
+        transport: Arc<dyn NativeCaveTransport>,
+        keyring: Arc<dyn CredentialCustody>,
+        discovery: Arc<dyn CaveDiscoveryReader>,
+        launcher: Arc<dyn CaveLauncher>,
+    ) -> Self {
+        Self {
+            runtime: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport,
+            keyring,
+            discovery,
+            launcher,
+        }
     }
 }
 
@@ -81,14 +75,19 @@ fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(NativeConnectionState::default())
         .invoke_handler(tauri::generate_handler![
             app_identity,
-            get_connection_state,
-            refresh_connection,
-            launch_cave,
-            submit_manual_discovery,
-            start_pairing,
-            cancel_pairing,
-            retry_connection,
-            start_conversation
+            cave_read_discovery,
+            cave_launch,
+            cave_health,
+            cave_pairing_create,
+            cave_pairing_poll,
+            cave_pairing_exchange,
+            cave_credential_status,
+            cave_forget_credential,
+            cave_list_familiars,
+            cave_list_projects,
+            cave_list_conversations,
+            cave_get_conversation,
+            cave_list_conversation_messages
         ])
 }
 
@@ -124,19 +123,24 @@ mod smoke_tests {
     }
 
     #[test]
-    fn registers_the_reviewed_native_command_table() {
+    fn registers_only_the_managed_sdk_adapter_commands() {
         assert_eq!(
             registered_command_names(),
             &[
                 "app_identity",
-                "get_connection_state",
-                "refresh_connection",
-                "launch_cave",
-                "submit_manual_discovery",
-                "start_pairing",
-                "cancel_pairing",
-                "retry_connection",
-                "start_conversation",
+                "cave_read_discovery",
+                "cave_launch",
+                "cave_health",
+                "cave_pairing_create",
+                "cave_pairing_poll",
+                "cave_pairing_exchange",
+                "cave_credential_status",
+                "cave_forget_credential",
+                "cave_list_familiars",
+                "cave_list_projects",
+                "cave_list_conversations",
+                "cave_get_conversation",
+                "cave_list_conversation_messages",
             ]
         );
     }

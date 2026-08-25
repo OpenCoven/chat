@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use std::sync::{Mutex, OnceLock};
 
-use crate::cave::{NativeDiagnostic, ValidatedCaveAuthority};
+use serde::{Deserialize, Serialize};
+
+use crate::cave::NativeDiagnostic;
 
 const SERVICE: &str = "ai.opencoven.chat";
-const INSTALLATION_ACCOUNT: &str = "cave-client-v1-installation";
 const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
 
 #[derive(Debug)]
@@ -24,102 +24,97 @@ impl KeyringError {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct NativeKeyring;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CredentialMetadata {
-    pub credential_id: String,
+#[derive(Clone)]
+pub(crate) struct Credential {
+    pub(crate) bearer: String,
+    pub(crate) credential_id: String,
+    pub(crate) origin: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct StoredCredential {
     bearer: String,
     credential_id: String,
-    origin_binding: String,
-    epoch: u64,
+    origin: String,
 }
 
-pub(crate) struct Credential {
-    pub(crate) bearer: String,
-    pub(crate) credential_id: String,
-    pub(crate) origin_binding: String,
-    pub(crate) epoch: u64,
+pub(crate) trait CredentialCustody: Send + Sync {
+    fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError>;
+    fn store(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        bearer: &str,
+        credential_id: &str,
+    ) -> Result<(), KeyringError>;
+    fn delete_if_matches(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        credential_id: &str,
+    ) -> Result<bool, KeyringError>;
 }
 
-impl NativeKeyring {
-    pub(crate) fn installation_id(&self) -> Result<String, KeyringError> {
-        let entry = Self::entry(INSTALLATION_ACCOUNT)?;
+#[derive(Clone, Default)]
+pub(crate) struct NativeKeyring;
 
-        match entry.get_password() {
-            Ok(value) if Uuid::parse_str(&value).is_ok() => Ok(value),
-            Ok(_) => Err(KeyringError::Failure),
-            Err(keyring::Error::NoEntry) => {
-                let installation_id = Uuid::new_v4().to_string();
-                entry
-                    .set_password(&installation_id)
-                    .map_err(map_keyring_error)?;
-                Ok(installation_id)
-            }
-            Err(error) => Err(map_keyring_error(error)),
-        }
-    }
+fn mutation_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
-    pub(crate) fn read_credential(&self, instance_id: &str) -> Result<Credential, KeyringError> {
-        let value = Self::entry(&credential_account(instance_id))?
+impl CredentialCustody for NativeKeyring {
+    fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
+        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let raw = Self::entry(instance_id)?
             .get_password()
             .map_err(map_keyring_error)?;
         let stored =
-            serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
-
+            serde_json::from_str::<StoredCredential>(&raw).map_err(|_| KeyringError::Failure)?;
         if stored.bearer.is_empty()
             || stored.credential_id.is_empty()
-            || stored.origin_binding.is_empty()
+            || stored.origin.is_empty()
+            || stored.origin != origin
         {
-            return Err(KeyringError::Failure);
+            return Err(KeyringError::NotFound);
         }
-
         Ok(Credential {
             bearer: stored.bearer,
             credential_id: stored.credential_id,
-            origin_binding: stored.origin_binding,
-            epoch: stored.epoch,
+            origin: stored.origin,
         })
     }
 
-    pub(crate) fn store_credential(
+    fn store(
         &self,
-        authority: &ValidatedCaveAuthority,
+        instance_id: &str,
+        origin: &str,
         bearer: &str,
         credential_id: &str,
-    ) -> Result<CredentialMetadata, KeyringError> {
-        if bearer.is_empty() || credential_id.is_empty() {
+    ) -> Result<(), KeyringError> {
+        if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
             return Err(KeyringError::Failure);
         }
-
-        let serialized = serde_json::to_string(&StoredCredential {
+        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let value = serde_json::to_string(&StoredCredential {
             bearer: bearer.to_owned(),
             credential_id: credential_id.to_owned(),
-            origin_binding: authority.origin_binding(),
-            epoch: authority.identity().epoch,
+            origin: origin.to_owned(),
         })
         .map_err(|_| KeyringError::Failure)?;
-
-        Self::entry(&credential_account(&authority.identity().instance_id))?
-            .set_password(&serialized)
-            .map_err(map_keyring_error)?;
-        Ok(CredentialMetadata {
-            credential_id: credential_id.to_owned(),
-        })
+        Self::entry(instance_id)?
+            .set_password(&value)
+            .map_err(map_keyring_error)
     }
 
-    pub(crate) fn delete_credential_if_matches(
+    fn delete_if_matches(
         &self,
-        authority: &ValidatedCaveAuthority,
+        instance_id: &str,
+        origin: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
-        let entry = Self::entry(&credential_account(&authority.identity().instance_id))?;
+        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let entry = Self::entry(instance_id)?;
         let value = match entry.get_password() {
             Ok(value) => value,
             Err(keyring::Error::NoEntry) => return Ok(false),
@@ -127,26 +122,27 @@ impl NativeKeyring {
         };
         let stored =
             serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
-        if stored.credential_id != credential_id
-            || stored.origin_binding != authority.origin_binding()
-            || stored.epoch != authority.identity().epoch
-        {
+        if stored.origin != origin || stored.credential_id != credential_id {
             return Ok(false);
         }
-
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(true),
             Err(error) => Err(map_keyring_error(error)),
         }
     }
-
-    fn entry(account: &str) -> Result<keyring::Entry, KeyringError> {
-        keyring::Entry::new(SERVICE, account).map_err(map_keyring_error)
-    }
 }
 
-fn credential_account(instance_id: &str) -> String {
-    format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}")
+impl NativeKeyring {
+    fn entry(instance_id: &str) -> Result<keyring::Entry, KeyringError> {
+        if instance_id.is_empty() || instance_id.len() > 128 {
+            return Err(KeyringError::Failure);
+        }
+        keyring::Entry::new(
+            SERVICE,
+            &format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"),
+        )
+        .map_err(map_keyring_error)
+    }
 }
 
 fn map_keyring_error(error: keyring::Error) -> KeyringError {

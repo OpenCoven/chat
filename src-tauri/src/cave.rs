@@ -1,10 +1,11 @@
 use std::{
-    net::IpAddr,
+    env, fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use url::{Host, Url};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -20,6 +21,217 @@ impl NativeDiagnostic {
 }
 
 pub type NativeResult<T> = Result<T, NativeDiagnostic>;
+
+const DISCOVERY_FILE_NAME: &str = "client-v1-discovery.json";
+const MAX_DISCOVERY_BYTES: u64 = 16 * 1024;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerDiscoveryRecord {
+    pub bytes: Vec<u8>,
+    pub record: OwnerDiscoveryRecordMetadata,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerDiscoveryRecordMetadata {
+    pub identity: String,
+    pub device: u64,
+    pub inode: u64,
+    pub process_alive: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct PinnedCaveAuthority {
+    origin: Url,
+}
+
+impl PinnedCaveAuthority {
+    pub(crate) fn origin(&self) -> &Url {
+        &self.origin
+    }
+
+    pub(crate) fn is_same_pin(&self, other: &Self) -> bool {
+        self.origin == other.origin
+    }
+
+    pub(crate) fn endpoint(&self, path: &str) -> NativeResult<Url> {
+        self.origin
+            .join(path)
+            .map_err(|_| NativeDiagnostic::new("invalid_cave_destination", false))
+    }
+}
+
+pub(crate) trait CaveDiscoveryReader: Send + Sync {
+    fn read(&self) -> NativeResult<OwnerDiscoveryRecord>;
+}
+
+#[derive(Default)]
+pub(crate) struct NativeCaveDiscoveryReader;
+
+impl CaveDiscoveryReader for NativeCaveDiscoveryReader {
+    fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+        read_owner_discovery_record()
+    }
+}
+
+#[cfg(unix)]
+fn owner_discovery_root() -> NativeResult<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = env::var_os("COVEN_CAVE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("COVEN_HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join("cave"))
+        })
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".coven/cave")))
+        .ok_or_else(|| NativeDiagnostic::new("cave_discovery_not_found", true))?;
+    let metadata = fs::symlink_metadata(&root)
+        .map_err(|_| NativeDiagnostic::new("cave_discovery_not_found", true))?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+
+    let canonical = root
+        .canonicalize()
+        .map_err(|_| NativeDiagnostic::new("unsafe_discovery_record", false))?;
+    if canonical != root {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    Ok(canonical)
+}
+
+#[cfg(not(unix))]
+fn owner_discovery_root() -> NativeResult<PathBuf> {
+    Err(NativeDiagnostic::new("native_discovery_unavailable", true))
+}
+
+#[cfg(unix)]
+fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    let root = owner_discovery_root()?;
+    let path = root.join(DISCOVERY_FILE_NAME);
+    let initial = fs::symlink_metadata(&path)
+        .map_err(|_| NativeDiagnostic::new("cave_discovery_not_found", true))?;
+    if initial.file_type().is_symlink()
+        || !initial.is_file()
+        || initial.uid() != unsafe { libc::geteuid() }
+        || initial.mode() & 0o077 != 0
+        || initial.len() > MAX_DISCOVERY_BYTES
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|_| NativeDiagnostic::new("unsafe_discovery_record", false))?;
+    let opened = file
+        .metadata()
+        .map_err(|_| NativeDiagnostic::new("unsafe_discovery_record", false))?;
+    if !opened.is_file()
+        || opened.uid() != unsafe { libc::geteuid() }
+        || opened.mode() & 0o077 != 0
+        || opened.len() > MAX_DISCOVERY_BYTES
+        || opened.dev() != initial.dev()
+        || opened.ino() != initial.ino()
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|_| NativeDiagnostic::new("cave_discovery_unavailable", true))?;
+    if bytes.len() > MAX_DISCOVERY_BYTES as usize {
+        return Err(NativeDiagnostic::new("discovery_body_limit", false));
+    }
+    let process_alive = record_process_is_alive(&bytes);
+
+    Ok(OwnerDiscoveryRecord {
+        bytes,
+        record: OwnerDiscoveryRecordMetadata {
+            identity: "owner-local-discovery-record".to_owned(),
+            device: opened.dev(),
+            inode: opened.ino(),
+            process_alive,
+        },
+    })
+}
+
+#[cfg(not(unix))]
+fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
+    Err(NativeDiagnostic::new("native_discovery_unavailable", true))
+}
+
+#[cfg(unix)]
+fn record_process_is_alive(bytes: &[u8]) -> bool {
+    let Some(pid) = serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|record| record.get("pid").and_then(serde_json::Value::as_i64))
+        .filter(|pid| *pid > 0)
+    else {
+        return false;
+    };
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn record_process_is_alive(_bytes: &[u8]) -> bool {
+    false
+}
+
+/*
+ * The SDK remains the discovery-record parser. The native side only obtains
+ * the raw endpoint field to pin the outbound transport to the same
+ * owner-checked record it returned to the SDK.
+ */
+pub(crate) fn pin_owner_discovery_record(
+    record: &OwnerDiscoveryRecord,
+    generation: u64,
+) -> NativeResult<PinnedCaveAuthority> {
+    let value: serde_json::Value = serde_json::from_slice(&record.bytes)
+        .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    let endpoint = value
+        .get("endpoint")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    let mut origin = Url::parse(endpoint)
+        .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    validate_loopback_origin(&origin)?;
+    origin.set_path("/");
+
+    let _ = generation;
+    Ok(PinnedCaveAuthority { origin })
+}
+
+fn validate_loopback_origin(url: &Url) -> NativeResult<()> {
+    let is_loopback = match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        Some(Host::Domain(_)) | None => false,
+    };
+    if !is_loopback
+        || url.scheme() != "http"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    Ok(())
+}
 
 pub(crate) trait CaveChild: Send {
     fn try_wait(&mut self) -> NativeResult<bool>;
@@ -43,8 +255,12 @@ impl CaveChild for NativeChild {
     }
 
     fn terminate(&mut self) -> NativeResult<()> {
+        match self.0.kill() {
+            Ok(()) | Err(_) => {}
+        }
         self.0
-            .kill()
+            .wait()
+            .map(|_| ())
             .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
     }
 }
@@ -52,160 +268,6 @@ impl CaveChild for NativeChild {
 impl CaveLauncher for NativeCaveLauncher {
     fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
         Ok(Box::new(NativeChild(launch_installed_cave()?)))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CaveIdentity {
-    pub instance_id: String,
-    pub epoch: u64,
-}
-
-#[derive(Clone)]
-pub(crate) struct ValidatedCaveAuthority {
-    discovery_url: Url,
-    client_origin: Url,
-    identity: CaveIdentity,
-}
-
-impl ValidatedCaveAuthority {
-    pub(crate) fn discovery_url(&self) -> &Url {
-        &self.discovery_url
-    }
-
-    pub(crate) fn client_url(&self, path: &str) -> NativeResult<Url> {
-        self.client_origin
-            .join(path)
-            .map_err(|_| NativeDiagnostic::new("invalid_cave_destination", false))
-    }
-
-    pub(crate) fn identity(&self) -> &CaveIdentity {
-        &self.identity
-    }
-
-    pub(crate) fn origin_binding(&self) -> String {
-        self.client_origin.as_str().to_owned()
-    }
-
-    pub(crate) fn is_same_pin(&self, other: &Self) -> bool {
-        self.discovery_url == other.discovery_url
-            && self.client_origin == other.client_origin
-            && self.identity == other.identity
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn test_authority(instance_id: &str, epoch: u64) -> ValidatedCaveAuthority {
-    ValidatedCaveAuthority {
-        discovery_url: Url::parse("http://127.0.0.1:4310/api/v1/discovery").unwrap(),
-        client_origin: Url::parse("http://127.0.0.1:4310/").unwrap(),
-        identity: CaveIdentity {
-            instance_id: instance_id.to_owned(),
-            epoch,
-        },
-    }
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DiscoverySnapshot {
-    pub instance_id: String,
-    pub epoch: u64,
-}
-
-impl From<&ValidatedCaveAuthority> for DiscoverySnapshot {
-    fn from(authority: &ValidatedCaveAuthority) -> Self {
-        Self {
-            instance_id: authority.identity.instance_id.clone(),
-            epoch: authority.identity.epoch,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DiscoveryDocument {
-    instance_id: String,
-    epoch: u64,
-    #[serde(alias = "endpoint")]
-    client_v1_url: String,
-}
-
-pub(crate) fn validate_discovery_url(value: &str) -> NativeResult<Url> {
-    let url =
-        Url::parse(value).map_err(|_| NativeDiagnostic::new("invalid_discovery_url", false))?;
-
-    validate_loopback_host(&url, "non_loopback_discovery")?;
-
-    if url.scheme() != "http" {
-        return Err(NativeDiagnostic::new("invalid_discovery_scheme", false));
-    }
-
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(NativeDiagnostic::new("unsafe_discovery_url", false));
-    }
-
-    if url.path() != "/api/v1/discovery" {
-        return Err(NativeDiagnostic::new("invalid_discovery_path", false));
-    }
-
-    Ok(url)
-}
-
-pub(crate) fn parse_discovery_document(
-    discovery_url: Url,
-    document: DiscoveryDocument,
-) -> NativeResult<ValidatedCaveAuthority> {
-    if document.instance_id.is_empty() {
-        return Err(NativeDiagnostic::new("invalid_discovery_response", false));
-    }
-
-    let mut client_origin = Url::parse(&document.client_v1_url)
-        .map_err(|_| NativeDiagnostic::new("invalid_discovery_response", false))?;
-
-    validate_loopback_host(&client_origin, "non_loopback_discovery")?;
-
-    if client_origin.scheme() != "http"
-        || !client_origin.username().is_empty()
-        || client_origin.password().is_some()
-        || client_origin.query().is_some()
-        || client_origin.fragment().is_some()
-        || !matches!(client_origin.path(), "" | "/")
-    {
-        return Err(NativeDiagnostic::new("unsafe_discovery_response", false));
-    }
-
-    client_origin.set_path("/");
-
-    Ok(ValidatedCaveAuthority {
-        discovery_url,
-        client_origin,
-        identity: CaveIdentity {
-            instance_id: document.instance_id,
-            epoch: document.epoch,
-        },
-    })
-}
-
-fn validate_loopback_host(url: &Url, code: &'static str) -> NativeResult<()> {
-    let Some(host) = url.host() else {
-        return Err(NativeDiagnostic::new(code, false));
-    };
-
-    let is_loopback = match host {
-        Host::Ipv4(address) => IpAddr::V4(address).is_loopback(),
-        Host::Ipv6(address) => IpAddr::V6(address).is_loopback(),
-        Host::Domain(_) => false,
-    };
-
-    if is_loopback {
-        Ok(())
-    } else {
-        Err(NativeDiagnostic::new(code, false))
     }
 }
 
@@ -249,44 +311,61 @@ pub(crate) fn build_cave_command(path: &Path) -> Command {
 
 pub(crate) fn launch_installed_cave() -> NativeResult<Child> {
     let executable = resolve_installed_cave_binary()?;
-
     build_cave_command(&executable)
         .spawn()
         .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
-}
-
-pub(crate) fn canonical_discovery_url() -> NativeResult<Url> {
-    validate_discovery_url("http://127.0.0.1:4310/api/v1/discovery")
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
+    use serde_json::json;
+
     use super::{
-        approved_cave_paths, build_cave_command, resolve_installed_cave_binary_from,
-        validate_discovery_url,
+        approved_cave_paths, build_cave_command, pin_owner_discovery_record,
+        record_process_is_alive, resolve_installed_cave_binary_from, OwnerDiscoveryRecord,
+        OwnerDiscoveryRecordMetadata,
     };
-
-    #[test]
-    fn manual_discovery_rejects_non_loopback_hosts() {
-        let error = validate_discovery_url("https://example.com/discovery").unwrap_err();
-        assert_eq!(error.code, "non_loopback_discovery");
-    }
-
-    #[test]
-    fn manual_discovery_rejects_non_cave_api_paths() {
-        let error = validate_discovery_url("http://127.0.0.1:4310/health").unwrap_err();
-        assert_eq!(error.code, "invalid_discovery_path");
-    }
 
     #[test]
     fn cave_launch_resolves_and_uses_an_exact_approved_installed_path() {
         let approved = Path::new(approved_cave_paths()[0]);
         let executable =
             resolve_installed_cave_binary_from(|candidate| candidate == approved).unwrap();
-        let command = build_cave_command(&executable);
+        assert_eq!(build_cave_command(&executable).get_program(), approved);
+    }
 
-        assert_eq!(command.get_program(), approved);
+    #[test]
+    fn owner_checked_record_pins_only_a_loopback_origin() {
+        let record = OwnerDiscoveryRecord {
+            bytes: serde_json::to_vec(&json!({
+                "version": 1,
+                "endpoint": "http://127.0.0.1:4310",
+                "pid": 1,
+                "nonce": "not-validated-here",
+                "startedAt": "2026-01-01T00:00:00Z",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+
+        assert_eq!(
+            pin_owner_discovery_record(&record, 3)
+                .unwrap()
+                .origin()
+                .as_str(),
+            "http://127.0.0.1:4310/",
+        );
+    }
+
+    #[test]
+    fn discovery_metadata_reports_a_dead_record_process_as_not_alive() {
+        assert!(!record_process_is_alive(br#"{ "pid": -1 }"#));
     }
 }

@@ -1,21 +1,20 @@
 # OpenCoven Chat
 
-Phase 0 of OpenCoven Chat is a production-oriented scaffold for the future
-desktop client. It intentionally stops at the shell, toolchains, tests, and
-least-privilege native host. Pairing, canonical Cave reads, and chat behavior
-are not implemented in this phase.
+OpenCoven Chat is a production-oriented desktop scaffold with a least-privilege
+native adapter for the read-only Cave SDK. The current UI remains a demo; it
+does not initiate a Cave connection.
 
 ## Security boundaries
 
-- The main window can invoke only the custom `app_identity` Tauri command.
-- No direct arbitrary HTTP calls are implemented.
-- No credentials, localStorage canonical data, or secret handling ship in Phase 0.
+- The main window can invoke only the reviewed `app_identity` and
+  SDK-managed Cave adapter commands.
+- No browser direct HTTP calls or generic native request command are implemented.
+- Pairing secrets, bearer credentials, headers, and keychain values remain in
+  Rust. Browser results are bounded non-secret DTOs and diagnostics.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
-- Future Cave integration must use only the public `@opencoven/cave-client`
-  package boundary.
-- Until package publication is explicitly approved, the cross-repository canary
-  installs packed `@opencoven/cave-client` tarballs into a temporary copy
-  instead of adding a source-relative or absolute path dependency.
+- The webview uses frozen packed `@opencoven/cave-client/managed` and
+  `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
+  source or makes repository-relative imports.
 
 ## Prerequisites
 
@@ -46,7 +45,7 @@ pnpm exec playwright install chromium
 | `pnpm lint` | Run Biome checks |
 | `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
-| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Pack reviewed SDK tarballs and verify the Cave authority fixture through the public `@opencoven/cave-client` entry point |
+| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
@@ -63,7 +62,7 @@ The current application renders:
 - a visible unavailable Cave connection state
 - an accessible placeholder status region
 - a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
-- a documented future Cave client boundary
+- a typed SDK-managed native Cave boundary that remains unused by the demo UI
 - the desktop bundle identifier and scaffold phase
 
 Anything beyond that is intentionally deferred to later beads.
@@ -82,10 +81,8 @@ placeholder whose palette varies by prompt. A refresh resets everything.
 
 Two consequences worth knowing:
 
-- **Dev and production differ deliberately.** `devUrl` carries `?demo=chat`, so
-  only `tauri dev` opens the demo. A production build loads `dist/index.html`
-  with no query string and still shows the Phase 0 scaffold, which is what the
-  app actually is.
+- **The demo is explicit.** `tauri.conf.json` uses the production shell route;
+  no demo query is embedded in `devUrl`.
 - **The scaffold is still the default view.** Without the query flag the app
   renders the scaffold, which is what every unit test and both end-to-end specs
   assert.
@@ -113,10 +110,10 @@ the transcript then records which answer it got.
 
 ## Reviewed counterpart lock
 
-`contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
-immutable 40-character commit SHAs. CI reads that tracked lock, checks out those
-exact revisions, rejects dirty SDK or Cave checkouts, and verifies the
-checked-out HEADs before running the canary.
+`contract-canary.lock.json` pins reviewed SDK and Cave commits plus SHA-256
+digests for all four frozen public SDK tarballs. CI rejects dirty counterpart
+checkouts, verifies their immutable HEADs, rebuilds the SDK tarballs for digest
+comparison, and installs the frozen artifacts into an isolated consumer.
 
 Local explicit-root canary runs still use
 `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,

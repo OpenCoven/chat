@@ -28,14 +28,19 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "app_identity",
-            "get_connection_state",
-            "refresh_connection",
-            "launch_cave",
-            "submit_manual_discovery",
-            "start_pairing",
-            "cancel_pairing",
-            "retry_connection",
-            "start_conversation",
+            "cave_read_discovery",
+            "cave_launch",
+            "cave_health",
+            "cave_pairing_create",
+            "cave_pairing_poll",
+            "cave_pairing_exchange",
+            "cave_credential_status",
+            "cave_forget_credential",
+            "cave_list_familiars",
+            "cave_list_projects",
+            "cave_list_conversations",
+            "cave_get_conversation",
+            "cave_list_conversation_messages",
         ]),
     ))
     .expect("failed to run tauri-build");
