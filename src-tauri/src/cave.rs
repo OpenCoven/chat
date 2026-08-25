@@ -21,6 +21,40 @@ impl NativeDiagnostic {
 
 pub type NativeResult<T> = Result<T, NativeDiagnostic>;
 
+pub(crate) trait CaveChild: Send {
+    fn try_wait(&mut self) -> NativeResult<bool>;
+    fn terminate(&mut self) -> NativeResult<()>;
+}
+
+pub(crate) trait CaveLauncher: Send + Sync {
+    fn launch(&self) -> NativeResult<Box<dyn CaveChild>>;
+}
+
+pub(crate) struct NativeCaveLauncher;
+
+struct NativeChild(Child);
+
+impl CaveChild for NativeChild {
+    fn try_wait(&mut self) -> NativeResult<bool> {
+        self.0
+            .try_wait()
+            .map(|status| status.is_some())
+            .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+    }
+
+    fn terminate(&mut self) -> NativeResult<()> {
+        self.0
+            .kill()
+            .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+    }
+}
+
+impl CaveLauncher for NativeCaveLauncher {
+    fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+        Ok(Box::new(NativeChild(launch_installed_cave()?)))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CaveIdentity {
     pub instance_id: String,
@@ -47,6 +81,16 @@ impl ValidatedCaveAuthority {
 
     pub(crate) fn identity(&self) -> &CaveIdentity {
         &self.identity
+    }
+
+    pub(crate) fn origin_binding(&self) -> String {
+        self.client_origin.as_str().to_owned()
+    }
+
+    pub(crate) fn is_same_pin(&self, other: &Self) -> bool {
+        self.discovery_url == other.discovery_url
+            && self.client_origin == other.client_origin
+            && self.identity == other.identity
     }
 }
 
@@ -209,6 +253,10 @@ pub(crate) fn launch_installed_cave() -> NativeResult<Child> {
     build_cave_command(&executable)
         .spawn()
         .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+}
+
+pub(crate) fn canonical_discovery_url() -> NativeResult<Url> {
+    validate_discovery_url("http://127.0.0.1:4310/api/v1/discovery")
 }
 
 #[cfg(test)]

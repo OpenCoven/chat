@@ -39,10 +39,10 @@ pub async fn refresh_connection(
 }
 
 #[tauri::command]
-pub fn launch_cave(
+pub async fn launch_cave(
     state: State<'_, NativeConnectionState>,
 ) -> Result<ConnectionStateDto, crate::cave::NativeDiagnostic> {
-    state.launch_cave()
+    state.launch_cave().await
 }
 
 #[tauri::command]

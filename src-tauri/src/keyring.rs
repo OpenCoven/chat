@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cave::NativeDiagnostic;
+use crate::cave::{NativeDiagnostic, ValidatedCaveAuthority};
 
 const SERVICE: &str = "ai.opencoven.chat";
 const INSTALLATION_ACCOUNT: &str = "cave-client-v1-installation";
@@ -37,11 +37,15 @@ pub(crate) struct CredentialMetadata {
 struct StoredCredential {
     bearer: String,
     credential_id: String,
+    origin_binding: String,
+    epoch: u64,
 }
 
 pub(crate) struct Credential {
     pub(crate) bearer: String,
     pub(crate) credential_id: String,
+    pub(crate) origin_binding: String,
+    pub(crate) epoch: u64,
 }
 
 impl NativeKeyring {
@@ -69,19 +73,24 @@ impl NativeKeyring {
         let stored =
             serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
 
-        if stored.bearer.is_empty() || stored.credential_id.is_empty() {
+        if stored.bearer.is_empty()
+            || stored.credential_id.is_empty()
+            || stored.origin_binding.is_empty()
+        {
             return Err(KeyringError::Failure);
         }
 
         Ok(Credential {
             bearer: stored.bearer,
             credential_id: stored.credential_id,
+            origin_binding: stored.origin_binding,
+            epoch: stored.epoch,
         })
     }
 
     pub(crate) fn store_credential(
         &self,
-        instance_id: &str,
+        authority: &ValidatedCaveAuthority,
         bearer: &str,
         credential_id: &str,
     ) -> Result<CredentialMetadata, KeyringError> {
@@ -92,10 +101,12 @@ impl NativeKeyring {
         let serialized = serde_json::to_string(&StoredCredential {
             bearer: bearer.to_owned(),
             credential_id: credential_id.to_owned(),
+            origin_binding: authority.origin_binding(),
+            epoch: authority.identity().epoch,
         })
         .map_err(|_| KeyringError::Failure)?;
 
-        Self::entry(&credential_account(instance_id))?
+        Self::entry(&credential_account(&authority.identity().instance_id))?
             .set_password(&serialized)
             .map_err(map_keyring_error)?;
         Ok(CredentialMetadata {
@@ -103,9 +114,28 @@ impl NativeKeyring {
         })
     }
 
-    pub(crate) fn delete_credential(&self, instance_id: &str) -> Result<(), KeyringError> {
-        match Self::entry(&credential_account(instance_id))?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+    pub(crate) fn delete_credential_if_matches(
+        &self,
+        authority: &ValidatedCaveAuthority,
+        credential_id: &str,
+    ) -> Result<bool, KeyringError> {
+        let entry = Self::entry(&credential_account(&authority.identity().instance_id))?;
+        let value = match entry.get_password() {
+            Ok(value) => value,
+            Err(keyring::Error::NoEntry) => return Ok(false),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let stored =
+            serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
+        if stored.credential_id != credential_id
+            || stored.origin_binding != authority.origin_binding()
+            || stored.epoch != authority.identity().epoch
+        {
+            return Ok(false);
+        }
+
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(true),
             Err(error) => Err(map_keyring_error(error)),
         }
     }

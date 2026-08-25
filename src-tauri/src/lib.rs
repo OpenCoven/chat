@@ -8,6 +8,7 @@ mod transport;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cave::NativeDiagnostic;
+use cave::{CaveLauncher, NativeCaveLauncher};
 use connection::{
     ConnectionKeyring, ConnectionRuntime, ConnectionTransport, NativeConnectionTransport,
 };
@@ -25,6 +26,7 @@ pub struct NativeConnectionState {
     connection: Arc<Mutex<ConnectionRuntime>>,
     transport: Arc<dyn ConnectionTransport>,
     keyring: Arc<dyn ConnectionKeyring>,
+    launcher: Arc<dyn CaveLauncher>,
 }
 
 impl Default for NativeConnectionState {
@@ -33,6 +35,7 @@ impl Default for NativeConnectionState {
             connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
             transport: Arc::new(NativeConnectionTransport),
             keyring: Arc::new(NativeKeyring),
+            launcher: Arc::new(NativeCaveLauncher),
         }
     }
 }
@@ -47,6 +50,20 @@ impl NativeConnectionState {
             connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
             transport,
             keyring,
+            launcher: Arc::new(NativeCaveLauncher),
+        }
+    }
+
+    pub(crate) fn with_collaborators_and_launcher(
+        transport: Arc<dyn ConnectionTransport>,
+        keyring: Arc<dyn ConnectionKeyring>,
+        launcher: Arc<dyn CaveLauncher>,
+    ) -> Self {
+        Self {
+            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport,
+            keyring,
+            launcher,
         }
     }
 }
