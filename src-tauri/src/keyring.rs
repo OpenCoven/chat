@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use url::{Host, Url};
 
 use crate::cave::NativeDiagnostic;
 
@@ -58,13 +59,19 @@ struct StoredCredential {
     origin: String,
 }
 
-pub(crate) enum AuthorizedRelocation {
-    Stored,
-    CurrentOriginPresent,
+pub(crate) enum CredentialSlot {
+    Missing,
+    Current(Credential),
+    Stale(Credential),
 }
 
 pub(crate) trait CredentialCustody: Send + Sync {
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError>;
+    fn read_for_pairing_update(
+        &self,
+        instance_id: &str,
+        origin: &str,
+    ) -> Result<CredentialSlot, KeyringError>;
     fn store_if_current(
         &self,
         instance_id: &str,
@@ -73,15 +80,14 @@ pub(crate) trait CredentialCustody: Send + Sync {
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError>;
-    // This is deliberately distinct from the generic CAS: pairing may invoke it
-    // only after revalidating the current discovery authority and generation.
-    fn store_after_authorized_origin_relocation(
+    fn replace_stale_if_current(
         &self,
         instance_id: &str,
         origin: &str,
+        expected_stale_credential: &Credential,
         bearer: &str,
         credential_id: &str,
-    ) -> Result<AuthorizedRelocation, KeyringError>;
+    ) -> Result<bool, KeyringError>;
     fn delete_if_matches(
         &self,
         instance_id: &str,
@@ -285,19 +291,35 @@ fn acquire_mutation_lock() -> Result<(), KeyringError> {
 
 impl CredentialCustody for NativeKeyring {
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
-        let _guard = acquire_mutation_lock()?;
-        let raw = Self::entry(instance_id)?
-            .get_password()
-            .map_err(map_keyring_error)?;
-        let stored = parse_stored_credential(&raw)?;
-        if stored.origin != origin {
-            return Err(KeyringError::NotFound);
+        match self.read_for_pairing_update(instance_id, origin)? {
+            CredentialSlot::Current(credential) => Ok(credential),
+            CredentialSlot::Missing | CredentialSlot::Stale(_) => Err(KeyringError::NotFound),
         }
-        Ok(Credential {
+    }
+
+    fn read_for_pairing_update(
+        &self,
+        instance_id: &str,
+        origin: &str,
+    ) -> Result<CredentialSlot, KeyringError> {
+        validate_credential_origin(origin)?;
+        let _guard = acquire_mutation_lock()?;
+        let raw = Self::entry(instance_id)?.get_password();
+        let stored = match raw {
+            Ok(raw) => parse_stored_credential(&raw)?,
+            Err(keyring::Error::NoEntry) => return Ok(CredentialSlot::Missing),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let credential = Credential {
             bearer: stored.bearer,
             credential_id: stored.credential_id,
             origin: stored.origin,
-        })
+        };
+        if credential.origin == origin {
+            Ok(CredentialSlot::Current(credential))
+        } else {
+            Ok(CredentialSlot::Stale(credential))
+        }
     }
 
     fn store_if_current(
@@ -308,7 +330,11 @@ impl CredentialCustody for NativeKeyring {
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
-        if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
+        validate_credential_origin(origin)?;
+        if let Some(expected_credential) = expected_credential {
+            validate_credential_origin(&expected_credential.origin)?;
+        }
+        if bearer.is_empty() || credential_id.is_empty() {
             return Err(KeyringError::Failure);
         }
         let _guard = acquire_mutation_lock()?;
@@ -343,37 +369,47 @@ impl CredentialCustody for NativeKeyring {
             .map(|()| true)
     }
 
-    fn store_after_authorized_origin_relocation(
+    fn replace_stale_if_current(
         &self,
         instance_id: &str,
         origin: &str,
+        expected_stale_credential: &Credential,
         bearer: &str,
         credential_id: &str,
-    ) -> Result<AuthorizedRelocation, KeyringError> {
-        if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
+    ) -> Result<bool, KeyringError> {
+        validate_credential_origin(origin)?;
+        validate_credential_origin(&expected_stale_credential.origin)?;
+        if bearer.is_empty()
+            || credential_id.is_empty()
+            || expected_stale_credential.origin == origin
+        {
             return Err(KeyringError::Failure);
         }
         let _guard = acquire_mutation_lock()?;
         let entry = Self::entry(instance_id)?;
-        let current = match entry.get_password() {
-            Ok(value) => Some(parse_stored_credential(&value)?),
-            Err(keyring::Error::NoEntry) => None,
+        let value = match entry.get_password() {
+            Ok(value) => value,
+            Err(keyring::Error::NoEntry) => return Ok(false),
             Err(error) => return Err(map_keyring_error(error)),
         };
-        if current
-            .as_ref()
-            .is_some_and(|stored| stored.origin == origin)
+        let stored = parse_stored_credential(&value)?;
+        if stored.origin == origin
+            || stored.bearer != expected_stale_credential.bearer
+            || stored.credential_id != expected_stale_credential.credential_id
+            || stored.origin != expected_stale_credential.origin
         {
-            return Ok(AuthorizedRelocation::CurrentOriginPresent);
+            return Ok(false);
         }
-        let value = serde_json::to_string(&StoredCredential {
+        let replacement = serde_json::to_string(&StoredCredential {
             bearer: bearer.to_owned(),
             credential_id: credential_id.to_owned(),
             origin: origin.to_owned(),
         })
         .map_err(|_| KeyringError::Failure)?;
-        entry.set_password(&value).map_err(map_keyring_error)?;
-        Ok(AuthorizedRelocation::Stored)
+        entry
+            .set_password(&replacement)
+            .map_err(map_keyring_error)
+            .map(|()| true)
     }
 
     fn delete_if_matches(
@@ -382,6 +418,8 @@ impl CredentialCustody for NativeKeyring {
         origin: &str,
         expected_credential: &Credential,
     ) -> Result<bool, KeyringError> {
+        validate_credential_origin(origin)?;
+        validate_credential_origin(&expected_credential.origin)?;
         let _guard = acquire_mutation_lock()?;
         let entry = Self::entry(instance_id)?;
         let value = match entry.get_password() {
@@ -410,7 +448,29 @@ fn parse_stored_credential(raw: &str) -> Result<StoredCredential, KeyringError> 
     if stored.bearer.is_empty() || stored.credential_id.is_empty() || stored.origin.is_empty() {
         return Err(KeyringError::Failure);
     }
+    validate_credential_origin(&stored.origin)?;
     Ok(stored)
+}
+
+fn validate_credential_origin(origin: &str) -> Result<(), KeyringError> {
+    let url = Url::parse(origin).map_err(|_| KeyringError::Failure)?;
+    let is_loopback = match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        Some(Host::Domain(_)) | None => false,
+    };
+    if !is_loopback
+        || url.scheme() != "http"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.path() != "/"
+        || url.as_str() != origin
+    {
+        return Err(KeyringError::Failure);
+    }
+    Ok(())
 }
 
 impl NativeKeyring {
@@ -448,6 +508,10 @@ mod tests {
             r#"{"bearer":"","credential_id":"credential","origin":"http://127.0.0.1/"}"#,
             r#"{"bearer":"bearer","credential_id":"","origin":"http://127.0.0.1/"}"#,
             r#"{"bearer":"bearer","credential_id":"credential","origin":""}"#,
+            r#"{"bearer":"bearer","credential_id":"credential","origin":"https://127.0.0.1/"}"#,
+            r#"{"bearer":"bearer","credential_id":"credential","origin":"http://example.test/"}"#,
+            r#"{"bearer":"bearer","credential_id":"credential","origin":"http://user@127.0.0.1/"}"#,
+            r#"{"bearer":"bearer","credential_id":"credential","origin":"http://127.0.0.1/path"}"#,
         ] {
             assert!(matches!(
                 parse_stored_credential(stored),
