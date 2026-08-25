@@ -20,8 +20,16 @@ export type CaveConnectionHost = Readonly<{
     }>
   >;
   launch: () => Promise<void>;
-  cancelPairing: (requestId: string) => Promise<void>;
+  resetPairing: () => Promise<void>;
 }>;
+
+function isPairingResetResult(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const result = value as Record<string, unknown>;
+  return Object.keys(result).length === 1 && result.status === 'invalidated';
+}
 
 export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectionHost {
   let currentHandle: string | undefined;
@@ -43,12 +51,18 @@ export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectio
     launch: async () => {
       await invokeNative(invoke, 'cave_launch');
     },
-    cancelPairing: async (requestId) => {
+    resetPairing: async () => {
       const handle = currentHandle;
       if (handle === undefined) {
         throw nativeUnavailable();
       }
-      await invokeNative(invoke, 'cave_cancel_pairing', { handle, requestId });
+      const result = await invokeNative(invoke, 'cave_reset_pairing', { handle });
+      if (!isPairingResetResult(result)) {
+        throw nativeUnavailable();
+      }
+      if (currentHandle === handle) {
+        currentHandle = undefined;
+      }
     },
   });
 }

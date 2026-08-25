@@ -16,7 +16,7 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "cave_pairing_create",
     "cave_pairing_poll",
     "cave_pairing_exchange",
-    "cave_cancel_pairing",
+    "cave_reset_pairing",
     "cave_credential_status",
     "cave_forget_credential",
     "cave_list_familiars",
@@ -79,12 +79,11 @@ pub async fn cave_pairing_exchange(
 }
 
 #[tauri::command]
-pub fn cave_cancel_pairing(
+pub fn cave_reset_pairing(
     handle: String,
-    request_id: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_cancel_pairing(handle, request_id)
+    state.cave_reset_pairing(handle)
 }
 
 #[tauri::command]

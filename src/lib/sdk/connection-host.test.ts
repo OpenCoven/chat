@@ -37,7 +37,7 @@ describe('Cave connection host', () => {
     ]);
   });
 
-  it('cancels only the requested pairing through the discovered opaque handle', async () => {
+  it('resets pairing through the discovered opaque handle and then clears it', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockImplementation(async (command) => {
       if (command === 'cave_read_discovery') {
         return {
@@ -61,19 +61,19 @@ describe('Cave connection host', () => {
           },
         };
       }
-      return { status: 'missing' };
+      return command === 'cave_reset_pairing' ? { status: 'invalidated' } : { status: 'missing' };
     });
     const host = createCaveConnectionHost(invoke);
 
     await host.discover();
-    await host.cancelPairing('00000000-0000-4000-8000-000000000003');
+    await host.resetPairing();
 
     expect(invoke.mock.calls.at(-1)).toEqual([
-      'cave_cancel_pairing',
+      'cave_reset_pairing',
       {
         handle: 'native-discovery-handle',
-        requestId: '00000000-0000-4000-8000-000000000003',
       },
     ]);
+    await expect(host.resetPairing()).rejects.toMatchObject({ code: 'service_unavailable' });
   });
 });

@@ -32,7 +32,7 @@ type CaveConnectionClient = Pick<
 
 export type CaveConnectionHostPort = Pick<
   CaveConnectionHost,
-  'cancelPairing' | 'discover' | 'launch'
+  'discover' | 'launch' | 'resetPairing'
 >;
 
 export type CavePairingIdentity = Readonly<{
@@ -68,10 +68,6 @@ type ActiveOperation = 'none' | 'discovering' | 'pairing' | 'forgetting' | 'laun
 type ClientAssociation = Readonly<{
   client: CaveConnectionClient;
   caveInstanceId: string;
-}>;
-type ActivePairing = Readonly<{
-  requestId: string;
-  cancel: (requestId: string) => Promise<void>;
 }>;
 type ConnectionAttempt = Readonly<{
   generation: number;
@@ -323,8 +319,9 @@ export function createCaveConnectionController(
 
   let machine = initialMachine();
   let association: ClientAssociation | undefined;
-  let activePairing: ActivePairing | undefined;
   let activePromise: Promise<void> | undefined;
+  let pairingResetPromise: Promise<void> | undefined;
+  let disposeCleanupPromise: Promise<void> | undefined;
   let activeAbortController: AbortController | undefined;
   let disposed = false;
   let diagnosticSequence = 0;
@@ -363,10 +360,6 @@ export function createCaveConnectionController(
 
   function clearAssociation(): void {
     association = undefined;
-  }
-
-  function clearActivePairing(): void {
-    activePairing = undefined;
   }
 
   function deadlineBounded<T>(
@@ -458,7 +451,6 @@ export function createCaveConnectionController(
 
     if (category !== 'launch') {
       clearAssociation();
-      clearActivePairing();
     }
     const diagnosticId = recordDiagnostic(failure.code, failure.retryable, category);
     if (failure.incompatible) {
@@ -533,7 +525,6 @@ export function createCaveConnectionController(
       case 'revoked':
         setHealthy(generation, credentialStatus.health);
         clearAssociation();
-        clearActivePairing();
         setState(generation, {
           state: 'revoked',
           diagnosticId: recordDiagnostic('unauthorized', false, 'credential'),
@@ -646,15 +637,7 @@ export function createCaveConnectionController(
     let polls = 0;
     while (current(generation)) {
       if (options.now() >= pairing.expiresAt) {
-        setFailure(
-          generation,
-          Object.freeze({
-            code: 'pairing_expired',
-            retryable: false,
-            incompatible: false,
-          }),
-          'pairing',
-        );
+        await resetPairingAndReconcile();
         return;
       }
       if (polls >= maxPairingPolls) {
@@ -679,16 +662,11 @@ export function createCaveConnectionController(
           signal,
         );
       } catch (error) {
-        if (current(generation) && options.now() >= pairing.expiresAt) {
-          setFailure(
-            generation,
-            Object.freeze({
-              code: 'pairing_expired',
-              retryable: false,
-              incompatible: false,
-            }),
-            'pairing',
-          );
+        if (
+          current(generation) &&
+          (error === OPERATION_DEADLINE_EXCEEDED || options.now() >= pairing.expiresAt)
+        ) {
+          await resetPairingAndReconcile();
           return;
         }
         setFailure(generation, failureFrom(error), 'pairing');
@@ -702,15 +680,7 @@ export function createCaveConnectionController(
       switch (pairingStatus.status) {
         case 'approved': {
           if (options.now() >= pairing.expiresAt) {
-            setFailure(
-              generation,
-              Object.freeze({
-                code: 'pairing_expired',
-                retryable: false,
-                incompatible: false,
-              }),
-              'pairing',
-            );
+            await resetPairingAndReconcile();
             return;
           }
           const exchangeTimeoutMs = Math.min(operationTimeoutMs, pairing.expiresAt - options.now());
@@ -721,16 +691,11 @@ export function createCaveConnectionController(
               signal,
             );
           } catch (error) {
-            if (current(generation) && options.now() >= pairing.expiresAt) {
-              setFailure(
-                generation,
-                Object.freeze({
-                  code: 'pairing_expired',
-                  retryable: false,
-                  incompatible: false,
-                }),
-                'pairing',
-              );
+            if (
+              current(generation) &&
+              (error === OPERATION_DEADLINE_EXCEEDED || options.now() >= pairing.expiresAt)
+            ) {
+              await resetPairingAndReconcile();
               return;
             }
             setFailure(generation, failureFrom(error), 'pairing');
@@ -754,28 +719,12 @@ export function createCaveConnectionController(
           );
           return;
         case 'expired':
-          setFailure(
-            generation,
-            Object.freeze({
-              code: 'pairing_expired',
-              retryable: false,
-              incompatible: false,
-            }),
-            'pairing',
-          );
+          await resetPairingAndReconcile();
           return;
         case 'pending': {
           const remaining = pairing.expiresAt - options.now();
           if (remaining <= 0) {
-            setFailure(
-              generation,
-              Object.freeze({
-                code: 'pairing_expired',
-                retryable: false,
-                incompatible: false,
-              }),
-              'pairing',
-            );
+            await resetPairingAndReconcile();
             return;
           }
           try {
@@ -787,6 +736,10 @@ export function createCaveConnectionController(
               signal,
             );
           } catch (error) {
+            if (current(generation) && options.now() >= pairing.expiresAt) {
+              await resetPairingAndReconcile();
+              return;
+            }
             setFailure(generation, failureFrom(error), 'pairing');
             return;
           }
@@ -826,6 +779,70 @@ export function createCaveConnectionController(
     return activePromise;
   }
 
+  function resetPairingAndReconcile(): Promise<void> {
+    if (pairingResetPromise !== undefined) {
+      return pairingResetPromise;
+    }
+    if (disposed || machine.active !== 'pairing') {
+      return Promise.resolve();
+    }
+
+    activeAbortController?.abort();
+    clearAssociation();
+    const attempt = activate('pairing', { state: 'discovering' });
+    const task = (async () => {
+      try {
+        await deadlineBounded(options.host.resetPairing(), operationTimeoutMs, attempt.signal);
+      } catch {
+        // A fresh owner-checked discovery is authoritative after a reset failure.
+      }
+      if (!current(attempt.generation)) {
+        return;
+      }
+      await discover(attempt.generation, attempt.signal);
+    })();
+    const reset = holdActivePromise(attempt.generation, task);
+    pairingResetPromise = reset;
+    void reset.then(
+      () => {
+        if (pairingResetPromise === reset) {
+          pairingResetPromise = undefined;
+        }
+      },
+      () => {
+        if (pairingResetPromise === reset) {
+          pairingResetPromise = undefined;
+        }
+      },
+    );
+    return reset;
+  }
+
+  function resetPairingAfterDispose(): Promise<void> {
+    if (disposeCleanupPromise !== undefined) {
+      return disposeCleanupPromise;
+    }
+    const existingReset = pairingResetPromise;
+    const signal = new AbortController().signal;
+    disposeCleanupPromise = (async () => {
+      if (existingReset !== undefined) {
+        await existingReset;
+      } else {
+        try {
+          await deadlineBounded(options.host.resetPairing(), operationTimeoutMs, signal);
+        } catch {
+          // The owner-checked discovery below invalidates any still-live authority.
+        }
+      }
+      try {
+        await deadlineBounded(options.host.discover(), operationTimeoutMs, signal);
+      } catch {
+        // Disposal intentionally has no public failure state.
+      }
+    })();
+    return disposeCleanupPromise;
+  }
+
   function startDiscovery(force: boolean): Promise<void> {
     if (disposed) {
       return Promise.resolve();
@@ -845,7 +862,6 @@ export function createCaveConnectionController(
     }
 
     clearAssociation();
-    clearActivePairing();
     const attempt = activate('discovering', { state: 'discovering' });
     return holdActivePromise(attempt.generation, discover(attempt.generation, attempt.signal));
   }
@@ -856,7 +872,7 @@ export function createCaveConnectionController(
 
   function retry(): Promise<void> {
     if (machine.active === 'pairing') {
-      return cancelPairing().then(() => startDiscovery(true));
+      return cancelPairing();
     }
     return startDiscovery(true);
   }
@@ -919,6 +935,10 @@ export function createCaveConnectionController(
           attempt.signal,
         );
       } catch (error) {
+        if (error === OPERATION_DEADLINE_EXCEEDED) {
+          await resetPairingAndReconcile();
+          return;
+        }
         setFailure(attempt.generation, failureFrom(error), 'pairing');
         return;
       }
@@ -926,10 +946,6 @@ export function createCaveConnectionController(
         return;
       }
 
-      activePairing = Object.freeze({
-        requestId: pairing.requestId,
-        cancel: options.host.cancelPairing,
-      });
       setState(
         attempt.generation,
         {
@@ -945,33 +961,7 @@ export function createCaveConnectionController(
   }
 
   function cancelPairing(): Promise<void> {
-    if (disposed || machine.active !== 'pairing' || association === undefined) {
-      return Promise.resolve();
-    }
-    const pairing = activePairing;
-    const attempt = activate('pairing', {
-      state: 'pairing_required',
-      caveInstanceId: association.caveInstanceId,
-    });
-    clearActivePairing();
-    setState(attempt.generation, machine.state, 'pairing');
-    const task = (async () => {
-      if (pairing !== undefined) {
-        try {
-          await deadlineBounded(
-            pairing.cancel(pairing.requestId),
-            operationTimeoutMs,
-            attempt.signal,
-          );
-        } catch {
-          // Cancellation failures are not connection state.
-        }
-      }
-      if (current(attempt.generation)) {
-        setState(attempt.generation, machine.state);
-      }
-    })();
-    return holdActivePromise(attempt.generation, task);
+    return resetPairingAndReconcile();
   }
 
   function forgetCredential(): Promise<void> {
@@ -1032,20 +1022,17 @@ export function createCaveConnectionController(
     if (disposed) {
       return;
     }
-    const pairing = activePairing;
-    if (pairing !== undefined) {
-      const cancellationSignal = new AbortController().signal;
-      void deadlineBounded(
-        pairing.cancel(pairing.requestId),
-        operationTimeoutMs,
-        cancellationSignal,
-      ).catch(() => undefined);
+    if (machine.active === 'pairing' || pairingResetPromise !== undefined) {
+      if (pairingResetPromise === undefined) {
+        activeAbortController?.abort();
+      }
+      void resetPairingAfterDispose();
+    } else {
+      activeAbortController?.abort();
     }
-    activeAbortController?.abort();
     activeAbortController = undefined;
     disposed = true;
     clearAssociation();
-    clearActivePairing();
     publish({
       type: 'dispose',
       generation: machine.generation + 1,
