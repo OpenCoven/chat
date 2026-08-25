@@ -17,6 +17,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import {
   assertCleanGitCheckout,
+  assertPackedFixtureMatchesCaveCheckout,
   parseArgs,
   readContractCanaryLock,
 } from '../scripts/contract-canary.mjs';
@@ -280,6 +281,7 @@ describe('contract canary checkout cleanliness', () => {
     test('uses the installed packed Cave fixture as the harness authority', () => {
       const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
 
+      expect(assertPackedFixtureMatchesCaveCheckout).toBeTypeOf('function');
       expect(canary).toMatch(
         /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
       );

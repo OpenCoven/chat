@@ -531,6 +531,11 @@ if (!rejected) {
   );
 }
 
+process.stdout.write('Chat contract canary passed.\\n');
+`,
+  );
+}
+
 export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {
   const fixtureDirectory = resolve(
     harnessRoot,
@@ -588,11 +593,6 @@ export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRo
   ) {
     throw new Error('Packed Cave fixture provenance does not match the reviewed Cave checkout.');
   }
-}
-
-process.stdout.write('Chat contract canary passed.\\n');
-`,
-  );
 }
 
 export function main(argv = process.argv.slice(2)) {
