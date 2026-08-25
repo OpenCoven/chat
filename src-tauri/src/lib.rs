@@ -8,7 +8,9 @@ mod transport;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cave::NativeDiagnostic;
-use connection::ConnectionRuntime;
+use connection::{
+    ConnectionKeyring, ConnectionRuntime, ConnectionTransport, NativeConnectionTransport,
+};
 use keyring::NativeKeyring;
 
 pub use commands::{
@@ -18,10 +20,35 @@ pub use commands::{
 };
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct NativeConnectionState {
     connection: Arc<Mutex<ConnectionRuntime>>,
-    keyring: NativeKeyring,
+    transport: Arc<dyn ConnectionTransport>,
+    keyring: Arc<dyn ConnectionKeyring>,
+}
+
+impl Default for NativeConnectionState {
+    fn default() -> Self {
+        Self {
+            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport: Arc::new(NativeConnectionTransport),
+            keyring: Arc::new(NativeKeyring),
+        }
+    }
+}
+
+#[cfg(test)]
+impl NativeConnectionState {
+    pub(crate) fn with_collaborators(
+        transport: Arc<dyn ConnectionTransport>,
+        keyring: Arc<dyn ConnectionKeyring>,
+    ) -> Self {
+        Self {
+            connection: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport,
+            keyring,
+        }
+    }
 }
 
 impl NativeConnectionState {

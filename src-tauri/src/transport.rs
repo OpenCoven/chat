@@ -1,4 +1,5 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::cave::{
     parse_discovery_document, DiscoveryDocument, NativeDiagnostic, NativeResult,
@@ -46,6 +47,8 @@ pub(crate) enum PairingStatus {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartConversationInput {
+    pub familiar_id: String,
+    pub project_root: String,
     pub title: Option<String>,
 }
 
@@ -55,16 +58,18 @@ pub struct ConversationStartDto {
     pub conversation_id: String,
 }
 
+struct ConversationStartRequest {
+    body: serde_json::Value,
+    idempotency_header: &'static str,
+    idempotency_key: String,
+}
+
 impl ConstrainedTransport {
     pub(crate) fn new(authority: ValidatedCaveAuthority) -> NativeResult<Self> {
         Ok(Self {
             client: client()?,
             authority,
         })
-    }
-
-    pub(crate) fn authority(&self) -> &ValidatedCaveAuthority {
-        &self.authority
     }
 
     pub(crate) async fn discover(discovery_url: url::Url) -> NativeResult<ValidatedCaveAuthority> {
@@ -100,14 +105,7 @@ impl ConstrainedTransport {
         let response = self
             .client
             .post(self.endpoint("api/client/v1/pairing/requests")?)
-            .json(&serde_json::json!({
-                "installationId": installation_id,
-                "app": {
-                    "name": crate::APP_NAME,
-                    "identifier": crate::APP_IDENTIFIER,
-                },
-                "scopes": PAIRING_SCOPES,
-            }))
+            .json(&pairing_request(installation_id))
             .send()
             .await
             .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))?;
@@ -164,18 +162,7 @@ impl ConstrainedTransport {
             .send()
             .await
             .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))?;
-        let response: PairingExchangeResponse = read_client_data(response).await?;
-
-        if response.bearer.is_empty() || response.credential_id.is_empty() {
-            return Err(NativeDiagnostic::new("invalid_pairing_response", false));
-        }
-
-        Ok(PairingGrant {
-            bearer: response.bearer,
-            metadata: crate::keyring::CredentialMetadata {
-                credential_id: response.credential_id,
-            },
-        })
+        parse_pairing_exchange_response(read_client_data(response).await?)
     }
 
     pub(crate) async fn start_conversation(
@@ -183,11 +170,13 @@ impl ConstrainedTransport {
         bearer: &str,
         input: StartConversationInput,
     ) -> NativeResult<ConversationStartDto> {
+        let request = conversation_start_request(&input);
         let response = self
             .client
             .post(self.endpoint("api/client/v1/conversations")?)
             .header(reqwest::header::AUTHORIZATION, format!("Bearer {bearer}"))
-            .json(&input)
+            .header(request.idempotency_header, request.idempotency_key)
+            .json(&request.body)
             .send()
             .await
             .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))?;
@@ -245,13 +234,12 @@ struct PairingStatusResponse {
 #[serde(rename_all = "camelCase")]
 struct PairingExchangeResponse {
     bearer: String,
-    credential_id: String,
+    credential: PairingCredentialResponse,
 }
 
 #[derive(Deserialize)]
-struct ClientV1Envelope<T> {
-    ok: bool,
-    data: T,
+struct PairingCredentialResponse {
+    id: String,
 }
 
 fn client() -> NativeResult<reqwest::Client> {
@@ -294,12 +282,46 @@ async fn read_json<T: DeserializeOwned>(mut response: reqwest::Response) -> Nati
 }
 
 async fn read_client_data<T: DeserializeOwned>(response: reqwest::Response) -> NativeResult<T> {
-    let envelope: ClientV1Envelope<T> = read_json(response).await?;
+    read_json(response).await
+}
 
-    if envelope.ok {
-        Ok(envelope.data)
-    } else {
-        Err(NativeDiagnostic::new("invalid_cave_response", false))
+fn pairing_request(installation_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "appName": crate::APP_NAME,
+        "installationId": installation_id,
+        "scopes": PAIRING_SCOPES,
+    })
+}
+
+fn parse_pairing_exchange_response(value: serde_json::Value) -> NativeResult<PairingGrant> {
+    let response = serde_json::from_value::<PairingExchangeResponse>(value)
+        .map_err(|_| NativeDiagnostic::new("invalid_pairing_response", false))?;
+
+    if response.bearer.is_empty() || response.credential.id.is_empty() {
+        return Err(NativeDiagnostic::new("invalid_pairing_response", false));
+    }
+
+    Ok(PairingGrant {
+        bearer: response.bearer,
+        metadata: crate::keyring::CredentialMetadata {
+            credential_id: response.credential.id,
+        },
+    })
+}
+
+fn conversation_start_request(input: &StartConversationInput) -> ConversationStartRequest {
+    let mut body = serde_json::json!({
+        "familiarId": input.familiar_id,
+        "projectRoot": input.project_root,
+    });
+    if let Some(title) = &input.title {
+        body["title"] = serde_json::Value::String(title.clone());
+    }
+
+    ConversationStartRequest {
+        body,
+        idempotency_header: "Idempotency-Key",
+        idempotency_key: Uuid::new_v4().to_string(),
     }
 }
 
@@ -314,7 +336,58 @@ pub fn validate_sse_frame_size(size: usize) -> NativeResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_sse_frame_size;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{
+        conversation_start_request, pairing_request, parse_pairing_exchange_response,
+        validate_sse_frame_size, StartConversationInput, PAIRING_SCOPES,
+    };
+
+    #[test]
+    fn pairing_request_matches_the_locked_flat_client_v1_fixture() {
+        assert_eq!(
+            pairing_request("installation-7"),
+            json!({
+                "appName": crate::APP_NAME,
+                "installationId": "installation-7",
+                "scopes": PAIRING_SCOPES,
+            })
+        );
+    }
+
+    #[test]
+    fn pairing_exchange_parses_the_locked_nested_credential_fixture() {
+        let grant = parse_pairing_exchange_response(json!({
+            "bearer": "issued-bearer",
+            "credential": {
+                "id": "credential-7",
+            },
+        }))
+        .unwrap();
+
+        assert_eq!(grant.metadata.credential_id, "credential-7");
+    }
+
+    #[test]
+    fn conversation_startup_sends_required_payload_and_uuid_idempotency_key() {
+        let request = conversation_start_request(&StartConversationInput {
+            familiar_id: "astra".to_owned(),
+            project_root: "/workspace/chat".to_owned(),
+            title: Some("Review transport".to_owned()),
+        });
+
+        assert_eq!(
+            request.body,
+            json!({
+                "familiarId": "astra",
+                "projectRoot": "/workspace/chat",
+                "title": "Review transport",
+            })
+        );
+        assert_eq!(request.idempotency_header, "Idempotency-Key");
+        assert!(Uuid::parse_str(&request.idempotency_key).is_ok());
+    }
 
     #[test]
     fn rejects_oversized_sse_frames() {

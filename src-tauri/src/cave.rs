@@ -50,6 +50,18 @@ impl ValidatedCaveAuthority {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn test_authority(instance_id: &str, epoch: u64) -> ValidatedCaveAuthority {
+    ValidatedCaveAuthority {
+        discovery_url: Url::parse("http://127.0.0.1:4310/api/v1/discovery").unwrap(),
+        client_origin: Url::parse("http://127.0.0.1:4310/").unwrap(),
+        identity: CaveIdentity {
+            instance_id: instance_id.to_owned(),
+            epoch,
+        },
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoverySnapshot {
@@ -174,10 +186,16 @@ pub(crate) fn approved_cave_paths() -> &'static [&'static str] {
 }
 
 pub(crate) fn resolve_installed_cave_binary() -> NativeResult<PathBuf> {
+    resolve_installed_cave_binary_from(|candidate| candidate.is_file())
+}
+
+pub(crate) fn resolve_installed_cave_binary_from(
+    is_installed_file: impl Fn(&Path) -> bool,
+) -> NativeResult<PathBuf> {
     approved_cave_paths()
         .iter()
         .map(PathBuf::from)
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_installed_file(candidate))
         .ok_or_else(|| NativeDiagnostic::new("cave_not_installed", true))
 }
 
@@ -197,7 +215,10 @@ pub(crate) fn launch_installed_cave() -> NativeResult<Child> {
 mod tests {
     use std::path::Path;
 
-    use super::{build_cave_command, validate_discovery_url};
+    use super::{
+        approved_cave_paths, build_cave_command, resolve_installed_cave_binary_from,
+        validate_discovery_url,
+    };
 
     #[test]
     fn manual_discovery_rejects_non_loopback_hosts() {
@@ -212,14 +233,12 @@ mod tests {
     }
 
     #[test]
-    fn cave_launch_uses_exact_installed_path() {
-        let command = build_cave_command(Path::new(
-            "/Applications/OpenCoven Cave.app/Contents/MacOS/OpenCoven Cave",
-        ));
+    fn cave_launch_resolves_and_uses_an_exact_approved_installed_path() {
+        let approved = Path::new(approved_cave_paths()[0]);
+        let executable =
+            resolve_installed_cave_binary_from(|candidate| candidate == approved).unwrap();
+        let command = build_cave_command(&executable);
 
-        assert_eq!(
-            command.get_program(),
-            Path::new("/Applications/OpenCoven Cave.app/Contents/MacOS/OpenCoven Cave")
-        );
+        assert_eq!(command.get_program(), approved);
     }
 }

@@ -65,6 +65,31 @@ function listRuntimeSourceFiles(relativePath: string): string[] {
   return files.sort();
 }
 
+function registeredCommandNames(source: string): string[] {
+  const declaration = source.match(
+    /pub const REGISTERED_COMMANDS: &\[&str\] = &\[(?<commands>[\s\S]*?)\];/,
+  );
+
+  if (!declaration?.groups?.commands) {
+    throw new Error('REGISTERED_COMMANDS must remain an explicit command table.');
+  }
+
+  return [...declaration.groups.commands.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+}
+
+function invokeHandlerCommandNames(source: string): string[] {
+  const invocation = source.match(/tauri::generate_handler!\[(?<commands>[\s\S]*?)\]/);
+
+  if (!invocation?.groups?.commands) {
+    throw new Error('Tauri commands must remain an explicit invoke handler list.');
+  }
+
+  return invocation.groups.commands
+    .split(',')
+    .map((command) => command.trim())
+    .filter((command) => command.length > 0);
+}
+
 describe('Phase 1 specification guards', () => {
   it('ignores sibling worktrees from the repository root', () => {
     const output = execFileSync(
@@ -181,8 +206,10 @@ describe('Phase 1 specification guards', () => {
       'start_conversation',
     ];
 
+    expect(registeredCommandNames(commands)).toEqual(expected);
+    expect(invokeHandlerCommandNames(lib)).toEqual(expected);
+
     for (const command of expected) {
-      expect(commands).toContain(`"${command}"`);
       expect(lib).toContain(command);
     }
 
