@@ -1,11 +1,12 @@
 import {
-  type CaveCredentialMetadata,
+  type CaveClient,
   type CaveCredentialStatus,
   type CaveHealth,
-  type CavePairingRequest,
-  type CavePairingState,
+  type CavePairingSession,
   isCaveClientError,
 } from '@opencoven/cave-client/managed';
+
+import type { CaveConnectionHost } from './connection-host';
 
 export type SdkConnectionState =
   | Readonly<{ state: 'idle' }>
@@ -18,30 +19,17 @@ export type SdkConnectionState =
   | Readonly<{ state: 'offline'; lastHealthyAt: number | null; diagnosticId: string }>
   | Readonly<{ state: 'error'; code: string; diagnosticId: string }>;
 
-export type CavePairingSessionPort = Readonly<{
-  requestId: string;
-  expiresAt: number;
-  poll: () => Promise<
-    Readonly<{
-      id: string;
-      status: CavePairingState;
-      expiresAt: number;
-    }>
-  >;
-  exchange: () => Promise<CaveCredentialMetadata>;
-}>;
+type CavePairingSessionPort = Pick<
+  CavePairingSession,
+  'exchange' | 'expiresAt' | 'poll' | 'requestId'
+>;
 
-export type CaveConnectionClient = Readonly<{
-  health: () => Promise<CaveHealth>;
-  credentialStatus: () => Promise<CaveCredentialStatus>;
-  createPairing: (request: CavePairingRequest) => Promise<CavePairingSessionPort>;
-  forgetCredential: () => Promise<boolean>;
-}>;
+type CaveConnectionClient = Pick<
+  CaveClient,
+  'createPairing' | 'credentialStatus' | 'forgetCredential' | 'health'
+>;
 
-export type CaveConnectionHostPort = Readonly<{
-  discover: () => Promise<Readonly<{ client: CaveConnectionClient }>>;
-  launch: () => Promise<void>;
-}>;
+export type CaveConnectionHostPort = Pick<CaveConnectionHost, 'discover' | 'launch'>;
 
 export type CavePairingIdentity = Readonly<{
   appName: string;
@@ -244,9 +232,10 @@ function failureFrom(error: unknown): SafeFailure {
   });
 }
 
-function isOfflineFailure(failure: SafeFailure): boolean {
+function isOfflineFailure(failure: SafeFailure, category: DiagnosticCategory): boolean {
   return (
     failure.code === 'not_found' ||
+    (failure.code === 'rate_limited' && category !== 'pairing') ||
     failure.code === 'service_unavailable' ||
     failure.code === 'timeout' ||
     (failure.retryable &&
@@ -366,7 +355,7 @@ export function createCaveConnectionController(
       setState(generation, { state: 'incompatible', diagnosticId });
       return;
     }
-    if (isOfflineFailure(failure)) {
+    if (isOfflineFailure(failure, category)) {
       setState(generation, {
         state: 'offline',
         lastHealthyAt: machine.lastHealthyAt,
@@ -537,11 +526,7 @@ export function createCaveConnectionController(
         return;
       }
 
-      let pairingStatus: Readonly<{
-        id: string;
-        status: CavePairingState;
-        expiresAt: number;
-      }>;
+      let pairingStatus: Awaited<ReturnType<CavePairingSessionPort['poll']>>;
       try {
         pairingStatus = await pairing.poll();
       } catch (error) {
