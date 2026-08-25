@@ -16,6 +16,14 @@ does not initiate a Cave connection.
   `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
   source or makes repository-relative imports.
 
+### Current native-host limitation
+
+Client v1 cannot atomically bind a health proof to the later pairing-secret or
+bearer request. Production release evidence therefore remains blocked on
+[coven-cave#4996](https://github.com/OpenCoven/coven-cave/issues/4996).
+This bead does not implement Coven Unix connected-peer or Windows named-pipe
+trust adapters; those adapters are deferred to the next reviewed native wave.
+
 ## Prerequisites
 
 - Node.js `24.18.1`

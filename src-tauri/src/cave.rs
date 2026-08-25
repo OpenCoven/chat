@@ -1,11 +1,13 @@
 use std::{
-    env, fs,
-    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command},
 };
 
+#[cfg(unix)]
+use std::{env, fs, io::Read};
+
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use url::{Host, Url};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -22,12 +24,15 @@ impl NativeDiagnostic {
 
 pub type NativeResult<T> = Result<T, NativeDiagnostic>;
 
+#[cfg(unix)]
 const DISCOVERY_FILE_NAME: &str = "client-v1-discovery.json";
+#[cfg(unix)]
 const MAX_DISCOVERY_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnerDiscoveryRecord {
+    pub handle: String,
     pub bytes: Vec<u8>,
     pub record: OwnerDiscoveryRecordMetadata,
 }
@@ -44,6 +49,10 @@ pub struct OwnerDiscoveryRecordMetadata {
 #[derive(Clone)]
 pub(crate) struct PinnedCaveAuthority {
     origin: Url,
+    digest: [u8; 32],
+    credential_binding: String,
+    device: u64,
+    inode: u64,
 }
 
 impl PinnedCaveAuthority {
@@ -51,14 +60,30 @@ impl PinnedCaveAuthority {
         &self.origin
     }
 
+    pub(crate) fn credential_binding(&self) -> &str {
+        &self.credential_binding
+    }
+
     pub(crate) fn is_same_pin(&self, other: &Self) -> bool {
         self.origin == other.origin
+            && self.digest == other.digest
+            && self.credential_binding == other.credential_binding
+            && self.device == other.device
+            && self.inode == other.inode
+    }
+
+    pub(crate) fn discovery_digest(bytes: &[u8]) -> [u8; 32] {
+        Sha256::digest(bytes).into()
     }
 
     pub(crate) fn endpoint(&self, path: &str) -> NativeResult<Url> {
         self.origin
             .join(path)
             .map_err(|_| NativeDiagnostic::new("invalid_cave_destination", false))
+    }
+
+    pub(crate) fn matches_owner_record(&self, record: &OwnerDiscoveryRecord) -> bool {
+        pin_owner_discovery_record(record, 0).is_ok_and(|candidate| self.is_same_pin(&candidate))
     }
 }
 
@@ -107,11 +132,6 @@ fn owner_discovery_root() -> NativeResult<PathBuf> {
     Ok(canonical)
 }
 
-#[cfg(not(unix))]
-fn owner_discovery_root() -> NativeResult<PathBuf> {
-    Err(NativeDiagnostic::new("native_discovery_unavailable", true))
-}
-
 #[cfg(unix)]
 fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
     use std::fs::OpenOptions;
@@ -156,10 +176,16 @@ fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
     }
     let process_alive = record_process_is_alive(&bytes);
 
+    let identity = {
+        use std::os::unix::ffi::OsStrExt;
+
+        format!("{:x}", Sha256::digest(path.as_os_str().as_bytes()))
+    };
     Ok(OwnerDiscoveryRecord {
+        handle: String::new(),
         bytes,
         record: OwnerDiscoveryRecordMetadata {
-            identity: "owner-local-discovery-record".to_owned(),
+            identity,
             device: opened.dev(),
             inode: opened.ino(),
             process_alive,
@@ -185,15 +211,10 @@ fn record_process_is_alive(bytes: &[u8]) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-#[cfg(not(unix))]
-fn record_process_is_alive(_bytes: &[u8]) -> bool {
-    false
-}
-
 /*
- * The SDK remains the discovery-record parser. The native side only obtains
- * the raw endpoint field to pin the outbound transport to the same
- * owner-checked record it returned to the SDK.
+ * This is native transport binding only. The packed SDK remains the sole
+ * discovery-record and Client v1 protocol parser; native code reads only the
+ * loopback origin needed to constrain its privileged HTTP client.
  */
 pub(crate) fn pin_owner_discovery_record(
     record: &OwnerDiscoveryRecord,
@@ -211,7 +232,13 @@ pub(crate) fn pin_owner_discovery_record(
     origin.set_path("/");
 
     let _ = generation;
-    Ok(PinnedCaveAuthority { origin })
+    Ok(PinnedCaveAuthority {
+        origin,
+        digest: PinnedCaveAuthority::discovery_digest(&record.bytes),
+        credential_binding: record.record.identity.clone(),
+        device: record.record.device,
+        inode: record.record.inode,
+    })
 }
 
 fn validate_loopback_origin(url: &Url) -> NativeResult<()> {
@@ -322,12 +349,14 @@ mod tests {
 
     use serde_json::json;
 
+    #[cfg(unix)]
+    use super::record_process_is_alive;
     use super::{
         approved_cave_paths, build_cave_command, pin_owner_discovery_record,
-        record_process_is_alive, resolve_installed_cave_binary_from, OwnerDiscoveryRecord,
-        OwnerDiscoveryRecordMetadata,
+        resolve_installed_cave_binary_from, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
     };
 
+    #[cfg(unix)]
     #[test]
     fn cave_launch_resolves_and_uses_an_exact_approved_installed_path() {
         let approved = Path::new(approved_cave_paths()[0]);
@@ -339,6 +368,7 @@ mod tests {
     #[test]
     fn owner_checked_record_pins_only_a_loopback_origin() {
         let record = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "version": 1,
                 "endpoint": "http://127.0.0.1:4310",

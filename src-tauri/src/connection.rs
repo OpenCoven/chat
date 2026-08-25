@@ -21,6 +21,7 @@ struct PendingPairing {
     instance_id: String,
     generation: u64,
     exchange_committed: bool,
+    poll_in_flight: bool,
 }
 
 struct ManagedLaunch {
@@ -91,6 +92,7 @@ impl UnauthorizedTracker {
 pub(crate) struct ConnectionRuntime {
     generation: u64,
     authority: Option<PinnedCaveAuthority>,
+    authority_handle: Option<String>,
     instance_id: Option<String>,
     pairing: Option<PendingPairing>,
     pairing_in_flight: bool,
@@ -106,15 +108,18 @@ impl ConnectionRuntime {
         self.generation
     }
 
-    fn require_authority(&self) -> NativeResult<(u64, PinnedCaveAuthority)> {
+    fn require_authority(&self, handle: &str) -> NativeResult<(u64, PinnedCaveAuthority)> {
+        if self.authority_handle.as_deref() != Some(handle) {
+            return Err(NativeDiagnostic::new("invalid_discovery_handle", false));
+        }
         self.authority
             .clone()
             .map(|authority| (self.generation, authority))
             .ok_or_else(|| NativeDiagnostic::new("cave_discovery_required", true))
     }
 
-    fn require_authorized(&self) -> NativeResult<(u64, PinnedCaveAuthority, String)> {
-        let (generation, authority) = self.require_authority()?;
+    fn require_authorized(&self, handle: &str) -> NativeResult<(u64, PinnedCaveAuthority, String)> {
+        let (generation, authority) = self.require_authority(handle)?;
         self.instance_id
             .clone()
             .map(|instance_id| (generation, authority, instance_id))
@@ -123,7 +128,7 @@ impl ConnectionRuntime {
 
     fn accept_discovery(
         &mut self,
-        record: &OwnerDiscoveryRecord,
+        record: &mut OwnerDiscoveryRecord,
     ) -> NativeResult<PinnedCaveAuthority> {
         let generation = self.new_generation();
         let authority = pin_owner_discovery_record(record, generation)?;
@@ -132,6 +137,8 @@ impl ConnectionRuntime {
             .as_ref()
             .is_none_or(|current| !current.is_same_pin(&authority));
         self.authority = Some(authority.clone());
+        record.handle = uuid::Uuid::new_v4().to_string();
+        self.authority_handle = Some(record.handle.clone());
         self.instance_id = None;
         self.pairing = None;
         self.pairing_in_flight = false;
@@ -145,9 +152,11 @@ impl ConnectionRuntime {
     fn require_current(
         &self,
         generation: u64,
+        handle: &str,
         authority: &PinnedCaveAuthority,
     ) -> NativeResult<()> {
         if self.generation != generation
+            || self.authority_handle.as_deref() != Some(handle)
             || self
                 .authority
                 .as_ref()
@@ -173,18 +182,34 @@ impl ConnectionRuntime {
 
 impl NativeConnectionState {
     pub(crate) fn cave_read_discovery(&self) -> NativeResult<OwnerDiscoveryRecord> {
-        let record = self.discovery.read()?;
-        self.runtime()?.accept_discovery(&record)?;
+        let mut record = self.discovery.read()?;
+        self.runtime()?.accept_discovery(&mut record)?;
         Ok(record)
     }
 
-    pub(crate) async fn cave_health(&self) -> NativeResult<Value> {
-        let (generation, authority) = self.runtime()?.require_authority()?;
+    fn capture_handle(&self, handle: &str) -> NativeResult<(u64, PinnedCaveAuthority)> {
+        let record = self.discovery.read()?;
+        let mut runtime = self.runtime()?;
+        let (generation, authority) = runtime.require_authority(handle)?;
+        if !authority.matches_owner_record(&record) {
+            runtime.authority = None;
+            runtime.authority_handle = None;
+            runtime.instance_id = None;
+            runtime.pairing = None;
+            runtime.pairing_in_flight = false;
+            runtime.new_generation();
+            return Err(NativeDiagnostic::new("stale_discovery_handle", true));
+        }
+        Ok((generation, authority))
+    }
+
+    pub(crate) async fn cave_health(&self, handle: String) -> NativeResult<Value> {
+        let (generation, authority) = self.capture_handle(&handle)?;
         let response = self.transport.health(&authority).await?;
         require_success(&response)?;
-        let instance_id = extract_instance_id(&response.payload)?;
         let mut runtime = self.runtime()?;
-        runtime.require_current(generation, &authority)?;
+        runtime.require_current(generation, &handle, &authority)?;
+        let instance_id = authority.credential_binding().to_owned();
         runtime.instance_id = Some(instance_id.clone());
         runtime
             .unauthorized
@@ -192,10 +217,15 @@ impl NativeConnectionState {
         Ok(response.payload)
     }
 
-    pub(crate) async fn cave_pairing_create(&self, request: Value) -> NativeResult<Value> {
+    pub(crate) async fn cave_pairing_create(
+        &self,
+        handle: String,
+        request: Value,
+    ) -> NativeResult<Value> {
+        self.capture_handle(&handle)?;
         let (generation, authority, instance_id) = {
             let mut runtime = self.runtime()?;
-            let captured = runtime.require_authorized()?;
+            let captured = runtime.require_authorized(&handle)?;
             if runtime.pairing_in_flight || runtime.pairing.is_some() {
                 return Err(NativeDiagnostic::new("pairing_in_progress", true));
             }
@@ -206,7 +236,7 @@ impl NativeConnectionState {
         let mut runtime = self.runtime()?;
         runtime.pairing_in_flight = false;
         let created = result?;
-        runtime.require_current(generation, &authority)?;
+        runtime.require_current(generation, &handle, &authority)?;
         runtime.pairing = Some(PendingPairing {
             request_id: pairing_request_id(&created.response)?,
             secret: created.secret,
@@ -214,27 +244,71 @@ impl NativeConnectionState {
             instance_id,
             generation,
             exchange_committed: false,
+            poll_in_flight: false,
         });
         Ok(created.response)
     }
 
-    pub(crate) async fn cave_pairing_poll(&self, request_id: String) -> NativeResult<Value> {
-        let (generation, authority, secret) = self.pairing_capture(&request_id, false)?;
-        let response = self
+    pub(crate) async fn cave_pairing_poll(
+        &self,
+        handle: String,
+        request_id: String,
+    ) -> NativeResult<Value> {
+        self.capture_handle(&handle)?;
+        let (generation, authority, secret) = {
+            let mut runtime = self.runtime()?;
+            let pairing = runtime
+                .pairing
+                .as_ref()
+                .filter(|pairing| pairing.request_id == request_id && !pairing.exchange_committed)
+                .ok_or_else(|| NativeDiagnostic::new("pairing_not_found", true))?;
+            let generation = pairing.generation;
+            let authority = pairing.authority.clone();
+            let secret = pairing.secret.clone();
+            runtime.require_current(generation, &handle, &authority)?;
+            if pairing.poll_in_flight {
+                return Err(NativeDiagnostic::new("pairing_in_progress", true));
+            }
+            runtime.pairing.as_mut().unwrap().poll_in_flight = true;
+            (generation, authority, secret)
+        };
+        let result = self
             .transport
             .pairing_poll(&authority, &request_id, &secret)
-            .await?;
-        self.runtime()?.require_current(generation, &authority)?;
-        Ok(response)
+            .await;
+        let mut runtime = self.runtime()?;
+        let is_current = runtime.generation == generation
+            && runtime.authority_handle.as_deref() == Some(&handle)
+            && runtime.pairing.as_mut().is_some_and(|pairing| {
+                if pairing.request_id == request_id {
+                    pairing.poll_in_flight = false;
+                    true
+                } else {
+                    false
+                }
+            });
+        if !is_current {
+            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+        }
+        runtime.require_current(generation, &handle, &authority)?;
+        result
     }
 
-    pub(crate) async fn cave_pairing_exchange(&self, request_id: String) -> NativeResult<Value> {
+    pub(crate) async fn cave_pairing_exchange(
+        &self,
+        handle: String,
+        request_id: String,
+    ) -> NativeResult<Value> {
+        self.capture_handle(&handle)?;
         let (generation, authority, instance_id, secret) = {
             let mut runtime = self.runtime()?;
             let Some(pairing) = runtime.pairing.as_mut() else {
                 return Err(NativeDiagnostic::new("pairing_not_found", true));
             };
-            if pairing.request_id != request_id || pairing.exchange_committed {
+            if pairing.request_id != request_id
+                || pairing.exchange_committed
+                || pairing.poll_in_flight
+            {
                 return Err(NativeDiagnostic::new("pairing_not_found", true));
             }
             pairing.exchange_committed = true;
@@ -273,15 +347,18 @@ impl NativeConnectionState {
                 .authority
                 .as_ref()
                 .is_some_and(|current| current.is_same_pin(&authority))
+            && runtime.authority_handle.as_deref() == Some(&handle)
         {
             runtime.pairing = None;
             runtime.unauthorized.reset();
+            return Ok(exchanged.response);
         }
-        Ok(exchanged.response)
+        Err(NativeDiagnostic::new("stale_connection_attempt", true))
     }
 
-    pub(crate) async fn cave_credential_status(&self) -> NativeResult<Value> {
-        let (generation, authority, instance_id) = self.runtime()?.require_authorized()?;
+    pub(crate) async fn cave_credential_status(&self, handle: String) -> NativeResult<Value> {
+        let (generation, authority) = self.capture_handle(&handle)?;
+        let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
             Ok(credential) => credential,
             Err(KeyringError::NotFound) => return Ok(json!({ "status": "missing" })),
@@ -289,7 +366,7 @@ impl NativeConnectionState {
         };
         {
             let mut runtime = self.runtime()?;
-            runtime.require_current(generation, &authority)?;
+            runtime.require_current(generation, &handle, &authority)?;
             if runtime.revocation_in_flight {
                 return Ok(json!({
                     "status": "disconnected",
@@ -315,7 +392,10 @@ impl NativeConnectionState {
             Ok(response) => response,
             Err(error) => {
                 let mut runtime = self.runtime()?;
-                if runtime.require_current(generation, &authority).is_ok() {
+                if runtime
+                    .require_current(generation, &handle, &authority)
+                    .is_ok()
+                {
                     runtime.revocation_in_flight = false;
                 }
                 return Err(error);
@@ -323,7 +403,7 @@ impl NativeConnectionState {
         };
         {
             let mut runtime = self.runtime()?;
-            runtime.require_current(generation, &authority)?;
+            runtime.require_current(generation, &handle, &authority)?;
             runtime.revocation_in_flight = false;
             if response.status_code == 401 {
                 let action = runtime.unauthorized.record(&instance_id, &credential);
@@ -359,8 +439,9 @@ impl NativeConnectionState {
         }))
     }
 
-    pub(crate) fn cave_forget_credential(&self) -> NativeResult<Value> {
-        let (_, authority, instance_id) = self.runtime()?.require_authorized()?;
+    pub(crate) fn cave_forget_credential(&self, handle: String) -> NativeResult<Value> {
+        self.capture_handle(&handle)?;
+        let (_, authority, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
             Ok(credential) => credential,
             Err(KeyringError::NotFound) => return Ok(json!({ "status": "missing" })),
@@ -377,8 +458,13 @@ impl NativeConnectionState {
         Ok(json!({ "status": if deleted { "deleted" } else { "credential_update_in_progress" } }))
     }
 
-    pub(crate) async fn cave_read(&self, path: CaveReadPath) -> NativeResult<Value> {
-        let (generation, authority, instance_id) = self.runtime()?.require_authorized()?;
+    pub(crate) async fn cave_read(
+        &self,
+        handle: String,
+        path: CaveReadPath,
+    ) -> NativeResult<Value> {
+        let (generation, authority) = self.capture_handle(&handle)?;
+        let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = self
             .keyring
             .read(&instance_id, authority.origin().as_str())
@@ -387,8 +473,11 @@ impl NativeConnectionState {
             .transport
             .authenticated_read(&authority, &credential.bearer, path)
             .await?;
-        self.runtime()?.require_current(generation, &authority)?;
-        require_success(&response)?;
+        let mut runtime = self.runtime()?;
+        runtime.require_current(generation, &handle, &authority)?;
+        if response.status_code != 401 {
+            runtime.unauthorized.reset();
+        }
         Ok(response.payload)
     }
 
@@ -434,8 +523,9 @@ impl NativeConnectionState {
                                 .as_ref()
                                 .is_some_and(|launch| launch.generation == generation)
                             {
-                                runtime.authority = Some(authority);
-                                runtime.instance_id = extract_instance_id(&response.payload).ok();
+                                runtime.authority = Some(authority.clone());
+                                runtime.instance_id =
+                                    Some(authority.credential_binding().to_owned());
                                 runtime.launch_in_flight = false;
                                 return Ok(());
                             }
@@ -443,7 +533,11 @@ impl NativeConnectionState {
                     }
                 }
             }
-            tokio::time::sleep(backoff).await;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            tokio::time::sleep(backoff.min(remaining)).await;
             backoff = (backoff * 2).min(Duration::from_secs(2));
         }
         let mut runtime = self.runtime()?;
@@ -452,27 +546,6 @@ impl NativeConnectionState {
         }
         runtime.launch_in_flight = false;
         Err(NativeDiagnostic::new("cave_readiness_timeout", true))
-    }
-
-    fn pairing_capture(
-        &self,
-        request_id: &str,
-        require_uncommitted: bool,
-    ) -> NativeResult<(u64, PinnedCaveAuthority, String)> {
-        let runtime = self.runtime()?;
-        let pairing = runtime
-            .pairing
-            .as_ref()
-            .filter(|pairing| {
-                pairing.request_id == request_id
-                    && (!require_uncommitted || !pairing.exchange_committed)
-            })
-            .ok_or_else(|| NativeDiagnostic::new("pairing_not_found", true))?;
-        Ok((
-            pairing.generation,
-            pairing.authority.clone(),
-            pairing.secret.clone(),
-        ))
     }
 }
 
@@ -496,18 +569,6 @@ fn pairing_request_id(value: &Value) -> NativeResult<String> {
         .get("requestId")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))
-}
-
-fn extract_instance_id(value: &Value) -> NativeResult<String> {
-    value
-        .get("data")
-        .and_then(Value::as_object)
-        .and_then(|data| data.get("instanceId"))
-        .or_else(|| value.get("instanceId"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty() && value.len() <= 128)
         .map(str::to_owned)
         .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))
 }
@@ -542,6 +603,16 @@ mod tests {
     impl CaveDiscoveryReader for StaticDiscovery {
         fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
             Ok(self.record.clone())
+        }
+    }
+
+    struct MutableDiscovery {
+        record: Mutex<OwnerDiscoveryRecord>,
+    }
+
+    impl CaveDiscoveryReader for MutableDiscovery {
+        fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+            Ok(self.record.lock().unwrap().clone())
         }
     }
 
@@ -678,6 +749,7 @@ mod tests {
             deletes: AtomicUsize::new(0),
         });
         let record = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "endpoint": "http://127.0.0.1:4310",
             }))
@@ -695,11 +767,13 @@ mod tests {
             Arc::new(StaticDiscovery { record }),
             Arc::new(FakeLauncher),
         );
-        state.cave_read_discovery().unwrap();
-        tauri::async_runtime::block_on(state.cave_health()).unwrap();
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
 
-        let first = tauri::async_runtime::block_on(state.cave_credential_status()).unwrap();
-        let repeated = tauri::async_runtime::block_on(state.cave_credential_status()).unwrap();
+        let first =
+            tauri::async_runtime::block_on(state.cave_credential_status(handle.clone())).unwrap();
+        let repeated =
+            tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap();
 
         assert_eq!(first["status"], "disconnected");
         assert_eq!(repeated["status"], "disconnected");
@@ -718,6 +792,7 @@ mod tests {
             deletes: AtomicUsize::new(0),
         });
         let record = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "endpoint": "http://127.0.0.1:4310",
             }))
@@ -736,9 +811,9 @@ mod tests {
             Arc::new(FakeLauncher),
         );
 
-        state.cave_read_discovery().unwrap();
-        tauri::async_runtime::block_on(state.cave_health()).unwrap();
-        tauri::async_runtime::block_on(state.cave_credential_status()).unwrap();
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap();
         state
             .runtime()
             .unwrap()
@@ -748,9 +823,10 @@ mod tests {
             .unwrap()
             .first_unauthorized_at = Instant::now() - Duration::from_millis(500);
 
-        state.cave_read_discovery().unwrap();
-        tauri::async_runtime::block_on(state.cave_health()).unwrap();
-        let confirmed = tauri::async_runtime::block_on(state.cave_credential_status()).unwrap();
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let confirmed =
+            tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap();
 
         assert_eq!(confirmed["status"], "revoked");
         assert_eq!(keyring.deletes.load(Ordering::SeqCst), 1);
@@ -759,6 +835,7 @@ mod tests {
     #[test]
     fn launch_keeps_one_child_reservation_after_owner_checked_readiness() {
         let record = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "endpoint": "http://127.0.0.1:4310",
             }))
@@ -793,6 +870,7 @@ mod tests {
     #[test]
     fn stale_health_completion_cannot_replace_a_new_discovery_generation() {
         let record_a = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "endpoint": "http://127.0.0.1:4310",
             }))
@@ -805,6 +883,7 @@ mod tests {
             },
         };
         let record_b = OwnerDiscoveryRecord {
+            handle: String::new(),
             bytes: serde_json::to_vec(&json!({
                 "endpoint": "http://127.0.0.1:4311",
             }))
@@ -830,16 +909,18 @@ mod tests {
             Arc::new(StaticDiscovery { record: record_a }),
             Arc::new(FakeLauncher),
         );
-        state.cave_read_discovery().unwrap();
+        let handle = state.cave_read_discovery().unwrap().handle;
 
         let stale_state = state.clone();
-        let completion =
-            std::thread::spawn(move || tauri::async_runtime::block_on(stale_state.cave_health()));
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(stale_state.cave_health(handle))
+        });
         started.wait();
+        let mut record_b = record_b;
         state
             .runtime()
             .unwrap()
-            .accept_discovery(&record_b)
+            .accept_discovery(&mut record_b)
             .unwrap();
         release.wait();
 
@@ -847,5 +928,75 @@ mod tests {
             completion.join().unwrap().unwrap_err().code,
             "stale_connection_attempt"
         );
+    }
+
+    #[test]
+    fn forged_or_replaced_discovery_handles_cannot_reach_the_transport() {
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let discovery = Arc::new(MutableDiscovery {
+            record: Mutex::new(record),
+        });
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            discovery.clone(),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_health("forged-handle".to_owned()))
+                .unwrap_err()
+                .code,
+            "invalid_discovery_handle"
+        );
+
+        discovery.record.lock().unwrap().bytes = serde_json::to_vec(&json!({
+            "endpoint": "http://127.0.0.1:4311",
+        }))
+        .unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_health(handle))
+                .unwrap_err()
+                .code,
+            "stale_discovery_handle"
+        );
+    }
+
+    #[test]
+    fn discovery_ipc_snapshot_does_not_serialize_the_native_origin() {
+        let record = OwnerDiscoveryRecord {
+            handle: "opaque-native-handle".to_owned(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+
+        let serialized = serde_json::to_string(&record).unwrap();
+
+        assert!(!serialized.contains("http://127.0.0.1:4310"));
+        assert!(serialized.contains("opaque-native-handle"));
     }
 }

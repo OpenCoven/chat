@@ -220,6 +220,32 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('keeps the generated desktop schema aligned with the reviewed command table', () => {
+    const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
+    const expectedCommands = [
+      'app_identity',
+      'cave_read_discovery',
+      'cave_launch',
+      'cave_health',
+      'cave_pairing_create',
+      'cave_pairing_poll',
+      'cave_pairing_exchange',
+      'cave_credential_status',
+      'cave_forget_credential',
+      'cave_list_familiars',
+      'cave_list_projects',
+      'cave_list_conversations',
+      'cave_get_conversation',
+      'cave_list_conversation_messages',
+    ];
+    const schemaCommands = [...schema.matchAll(/"const": "(?:allow|deny)-([^"]+)"/g)]
+      .map((match) => match[1]!.replaceAll('-', '_'))
+      .filter((command) => !command.startsWith('core_'))
+      .sort();
+
+    expect(schemaCommands).toEqual([...expectedCommands, ...expectedCommands].sort());
+  });
+
   it('points Tauri devUrl at the production route instead of a demo query', () => {
     const config = readJson<{ build: { devUrl: string } }>('src-tauri/tauri.conf.json');
 
@@ -257,6 +283,17 @@ describe('Phase 1 specification guards', () => {
       /pub\s+(?:async\s+)?fn\s+(?:generic_request|request|fetch|network)/,
     );
     expect(commands).not.toMatch(/(?:token|bearer|authorization|header)/i);
+    for (const command of expected.filter(
+      (command) =>
+        command !== 'app_identity' &&
+        command !== 'cave_read_discovery' &&
+        command !== 'cave_launch',
+    )) {
+      expect(commands).toMatch(
+        new RegExp(`pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(\\s*handle:\\s*String`),
+      );
+    }
+    expect(commands).not.toMatch(/\b(?:origin|endpoint|url):\s*String/);
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {

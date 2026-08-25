@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -281,6 +281,7 @@ function isolatedInstallArgs({ offline }) {
  */
 function installHarnessOfflineAfterWarming(harnessRoot) {
   runPnpm(isolatedInstallArgs({ offline: false }), harnessRoot);
+  rmSync(resolve(harnessRoot, 'node_modules'), { force: true, recursive: true });
   runPnpm(isolatedInstallArgs({ offline: true }), harnessRoot);
 }
 
@@ -366,7 +367,7 @@ function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
   return JSON.parse(readFileSync(manifestPath, 'utf8'));
 }
 
-function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
+function createHarness(harnessRoot, tarballs) {
   mkdirSync(resolve(harnessRoot, 'src'), { recursive: true });
 
   writeFileSync(
@@ -489,11 +490,20 @@ export function readFamiliarSurface(
   writeFileSync(
     resolve(harnessRoot, 'verify.mjs'),
     `import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { parseVerifiedCaveContractFixture } from '@opencoven/cave-client';
 
-const fixture = readFileSync(${JSON.stringify(fixturePath)}, 'utf8');
-const digest = readFileSync(${JSON.stringify(digestPath)}, 'utf8');
+const fixtureDirectory = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  'node_modules',
+  '@opencoven',
+  'cave-client',
+  'fixtures',
+);
+const fixture = readFileSync(resolve(fixtureDirectory, 'contract-fixture.json'), 'utf8');
+const digest = readFileSync(resolve(fixtureDirectory, 'contract-fixture.sha256'), 'utf8');
 const parsed = parseVerifiedCaveContractFixture(fixture, digest);
 
 if (parsed.contract.apiVersion !== '1.0') {
@@ -521,6 +531,65 @@ if (!rejected) {
   );
 }
 
+export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {
+  const fixtureDirectory = resolve(
+    harnessRoot,
+    'node_modules',
+    '@opencoven',
+    'cave-client',
+    'fixtures',
+  );
+  const installedFixturePath = resolve(fixtureDirectory, 'contract-fixture.json');
+  const installedDigestPath = resolve(fixtureDirectory, 'contract-fixture.sha256');
+  const installedProvenancePath = resolve(fixtureDirectory, 'contract-fixture.provenance.json');
+  const checkoutFixturePath = resolve(
+    caveRoot,
+    'src',
+    'lib',
+    'server',
+    'client-v1',
+    'contract-fixture.json',
+  );
+  const checkoutDigestPath = resolve(
+    caveRoot,
+    'src',
+    'lib',
+    'server',
+    'client-v1',
+    'contract-fixture.sha256',
+  );
+
+  for (const [path, label] of [
+    [installedFixturePath, 'Packed Cave fixture'],
+    [installedDigestPath, 'Packed Cave fixture digest'],
+    [installedProvenancePath, 'Packed Cave fixture provenance'],
+    [checkoutFixturePath, 'Cave checkout fixture'],
+    [checkoutDigestPath, 'Cave checkout fixture digest'],
+  ]) {
+    requirePath(path, label);
+  }
+
+  const provenance = JSON.parse(readFileSync(installedProvenancePath, 'utf8'));
+  const installedFixture = readFileSync(installedFixturePath);
+  const installedDigest = readFileSync(installedDigestPath, 'utf8').trim().toLowerCase();
+  const checkoutFixture = readFileSync(checkoutFixturePath);
+  const checkoutDigest = readFileSync(checkoutDigestPath, 'utf8').trim().toLowerCase();
+
+  if (
+    provenance?.repository !== 'https://github.com/OpenCoven/coven-cave' ||
+    provenance?.commit !== lock.cave.revision ||
+    provenance?.fixturePath !== 'src/lib/server/client-v1/contract-fixture.json' ||
+    provenance?.digestPath !== 'src/lib/server/client-v1/contract-fixture.sha256' ||
+    provenance?.sha256 !== installedDigest ||
+    !/^[0-9a-f]{64}$/iu.test(installedDigest) ||
+    sha256(installedFixturePath) !== installedDigest ||
+    checkoutDigest !== installedDigest ||
+    !installedFixture.equals(checkoutFixture)
+  ) {
+    throw new Error('Packed Cave fixture provenance does not match the reviewed Cave checkout.');
+  }
+}
+
 process.stdout.write('Chat contract canary passed.\\n');
 `,
   );
@@ -529,30 +598,12 @@ process.stdout.write('Chat contract canary passed.\\n');
 export function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const lock = readContractCanaryLock();
-  const caveFixturePath = resolve(
-    options.caveRoot,
-    'src',
-    'lib',
-    'server',
-    'client-v1',
-    'contract-fixture.json',
-  );
-  const caveDigestPath = resolve(
-    options.caveRoot,
-    'src',
-    'lib',
-    'server',
-    'client-v1',
-    'contract-fixture.sha256',
-  );
   const sdkVerifyContracts = resolve(options.sdkRoot, 'scripts', 'verify-contracts.mjs');
 
   requirePath(options.sdkRoot, 'SDK root');
   requirePath(options.caveRoot, 'Cave root');
   assertCleanContractCanaryCheckouts(options);
   assertContractCanaryCheckoutHeads(lock, options);
-  requirePath(caveFixturePath, 'Cave authority fixture');
-  requirePath(caveDigestPath, 'Cave authority fixture digest');
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
   runPnpm(['install', '--frozen-lockfile'], options.sdkRoot);
 
@@ -574,8 +625,9 @@ export function main(argv = process.argv.slice(2)) {
     assertArtifactDigests(lock, tarballs);
     const frozen = frozenTarballs(lock);
 
-    createHarness(harnessRoot, frozen, caveFixturePath, caveDigestPath);
+    createHarness(harnessRoot, frozen);
     installHarnessOfflineAfterWarming(harnessRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot);
 
     if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {
       throw new Error('Packed @opencoven/cave-client unexpectedly installed source files.');

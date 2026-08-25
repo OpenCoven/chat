@@ -1,5 +1,12 @@
-use std::sync::{Mutex, OnceLock};
+use std::{
+    fs,
+    sync::{Mutex, MutexGuard, OnceLock},
+};
 
+#[cfg(unix)]
+use std::env;
+
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::cave::NativeDiagnostic;
@@ -63,9 +70,87 @@ fn mutation_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+struct CredentialMutationGuard {
+    _process: MutexGuard<'static, ()>,
+    _file: fs::File,
+}
+
+#[cfg(unix)]
+fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
+    let root = std::path::PathBuf::from(home).join(".coven").join("chat");
+    fs::create_dir_all(&root).map_err(|_| KeyringError::Unavailable)?;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .map_err(|_| KeyringError::Unavailable)?;
+    let metadata = fs::symlink_metadata(&root).map_err(|_| KeyringError::Unavailable)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    Ok(root.join("credential-mutation.lock"))
+}
+
+#[cfg(not(unix))]
+fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+    Err(KeyringError::Unavailable)
+}
+
+fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    #[cfg(unix)]
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    let process = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+    let path = credential_lock_path()?;
+    let file = {
+        #[cfg(unix)]
+        {
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+                .map_err(|_| KeyringError::Unavailable)?
+        }
+        #[cfg(not(unix))]
+        {
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&path)
+                .map_err(|_| KeyringError::Unavailable)?
+        }
+    };
+    #[cfg(unix)]
+    {
+        let metadata = file.metadata().map_err(|_| KeyringError::Unavailable)?;
+        if !metadata.is_file()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.mode() & 0o077 != 0
+        {
+            return Err(KeyringError::Unavailable);
+        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|_| KeyringError::Unavailable)?;
+    }
+    file.lock_exclusive()
+        .map_err(|_| KeyringError::Unavailable)?;
+    Ok(CredentialMutationGuard {
+        _process: process,
+        _file: file,
+    })
+}
+
 impl CredentialCustody for NativeKeyring {
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
-        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let _guard = acquire_mutation_lock()?;
         let raw = Self::entry(instance_id)?
             .get_password()
             .map_err(map_keyring_error)?;
@@ -95,7 +180,7 @@ impl CredentialCustody for NativeKeyring {
         if bearer.is_empty() || credential_id.is_empty() || origin.is_empty() {
             return Err(KeyringError::Failure);
         }
-        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let _guard = acquire_mutation_lock()?;
         let value = serde_json::to_string(&StoredCredential {
             bearer: bearer.to_owned(),
             credential_id: credential_id.to_owned(),
@@ -113,7 +198,7 @@ impl CredentialCustody for NativeKeyring {
         origin: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
-        let _guard = mutation_lock().lock().map_err(|_| KeyringError::Failure)?;
+        let _guard = acquire_mutation_lock()?;
         let entry = Self::entry(instance_id)?;
         let value = match entry.get_password() {
             Ok(value) => value,

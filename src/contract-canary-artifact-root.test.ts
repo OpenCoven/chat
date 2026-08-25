@@ -264,4 +264,26 @@ describe('contract canary checkout cleanliness', () => {
       expectedMessage.replace('PLACEHOLDER', worktreeRoot),
     );
   });
+
+  describe('contract canary packed consumer isolation', () => {
+    test('removes the warm consumer install before its offline assertion', () => {
+      const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
+      const warm = canary.indexOf('isolatedInstallArgs({ offline: false })');
+      const removal = canary.indexOf("rmSync(resolve(harnessRoot, 'node_modules')");
+      const offline = canary.indexOf('isolatedInstallArgs({ offline: true })');
+
+      expect(warm).toBeGreaterThan(-1);
+      expect(removal).toBeGreaterThan(warm);
+      expect(offline).toBeGreaterThan(removal);
+    });
+
+    test('uses the installed packed Cave fixture as the harness authority', () => {
+      const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
+
+      expect(canary).toMatch(
+        /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
+      );
+      expect(canary).toContain('assertPackedFixtureMatchesCaveCheckout');
+    });
+  });
 });

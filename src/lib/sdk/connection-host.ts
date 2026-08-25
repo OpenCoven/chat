@@ -7,25 +7,35 @@ import {
 
 import {
   createCaveManagedCredentialTransport,
-  createCaveManagedDiscoverySource,
+  createCaveManagedDiscoveryBinding,
   invokeNative,
   type NativeSdkInvoke,
 } from './native-boundary';
 
 export type CaveConnectionHost = Readonly<{
-  client: CaveClient;
-  discover: () => Promise<CaveManagedDiscoveredEndpoint>;
+  discover: () => Promise<
+    Readonly<{
+      endpoint: CaveManagedDiscoveredEndpoint;
+      client: CaveClient;
+    }>
+  >;
   launch: () => Promise<void>;
 }>;
 
 export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectionHost {
-  const discovery = createCaveManagedDiscoverySource(invoke);
-
   return Object.freeze({
-    client: createManagedCaveClient({
-      transport: createCaveManagedCredentialTransport(invoke),
-    }),
-    discover: () => discoverManagedCaveEndpoint(discovery),
+    discover: async () => {
+      const binding = createCaveManagedDiscoveryBinding(invoke);
+      const endpoint = await discoverManagedCaveEndpoint(binding.source);
+      const handle = binding.takeHandle();
+
+      return Object.freeze({
+        endpoint,
+        client: createManagedCaveClient({
+          transport: createCaveManagedCredentialTransport(invoke, handle),
+        }),
+      });
+    },
     launch: async () => {
       await invokeNative(invoke, 'cave_launch');
     },

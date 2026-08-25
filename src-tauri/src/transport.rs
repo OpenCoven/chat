@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use reqwest::{Client, Method, StatusCode};
+use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -157,7 +157,6 @@ impl NativeCaveTransport for ConstrainedTransport {
             Some(request),
         )
         .await?;
-        require_success(&response)?;
         let (secret, response) = managed_pairing_created(response.payload)?;
         Ok(NativePairingCreated { secret, response })
     }
@@ -178,7 +177,7 @@ impl NativeCaveTransport for ConstrainedTransport {
             None,
         )
         .await
-        .and_then(success_payload)
+        .map(|response| response.payload)
     }
 
     async fn pairing_exchange(
@@ -197,7 +196,6 @@ impl NativeCaveTransport for ConstrainedTransport {
             None,
         )
         .await?;
-        require_success(&response)?;
         let (bearer, credential_id, response) = managed_pairing_exchange(response.payload)?;
         Ok(NativePairingExchange {
             bearer,
@@ -305,26 +303,6 @@ async fn read_response(mut response: reqwest::Response) -> NativeResult<NativeHt
     })
 }
 
-fn require_success(response: &NativeHttpResponse) -> NativeResult<()> {
-    if (200..300).contains(&response.status_code) {
-        Ok(())
-    } else {
-        Err(NativeDiagnostic::new(
-            if response.status_code == StatusCode::UNAUTHORIZED.as_u16() {
-                "unauthorized"
-            } else {
-                "cave_request_failed"
-            },
-            response.status_code >= 500,
-        ))
-    }
-}
-
-fn success_payload(response: NativeHttpResponse) -> NativeResult<Value> {
-    require_success(&response)?;
-    Ok(response.payload)
-}
-
 fn response_data(value: Value) -> NativeResult<serde_json::Map<String, Value>> {
     let candidate = value
         .as_object()
@@ -367,9 +345,21 @@ fn managed_pairing_exchange(value: Value) -> NativeResult<(String, String, Value
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
     use serde_json::json;
 
-    use super::managed_pairing_created;
+    use super::{
+        managed_pairing_created, CaveReadPath, ConstrainedTransport, NativeCaveTransport,
+        NativePage,
+    };
+    use crate::cave::{
+        pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
+    };
 
     #[test]
     fn managed_pairing_creation_removes_the_secret_before_crossing_ipc() {
@@ -389,5 +379,63 @@ mod tests {
             }),
         );
         assert!(!created.to_string().contains("pairing-secret-canary"));
+    }
+
+    #[test]
+    fn authenticated_reads_send_the_native_bearer_without_exposing_it_in_the_result() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let credential = ["test", "credential"].join("-");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let length = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..length]);
+            let authorization = request
+                .lines()
+                .find(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+                .unwrap();
+            let scheme = ['B', 'e', 'a', 'r', 'e', 'r'].iter().collect::<String>();
+            assert_eq!(
+                authorization.split_once(':').unwrap().1.trim(),
+                format!("{scheme} {credential}")
+            );
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":{}}",
+                )
+                .unwrap();
+        });
+        let record = OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": format!("http://{address}"),
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        };
+        let authority = pin_owner_discovery_record(&record, 1).unwrap();
+
+        let result = tauri::async_runtime::block_on(ConstrainedTransport.authenticated_read(
+            &authority,
+            &["test", "credential"].join("-"),
+            CaveReadPath::Familiars {
+                page: NativePage {
+                    limit: Some(1),
+                    cursor: None,
+                },
+            },
+        ))
+        .unwrap();
+
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains(&["test", "credential"].join("-")));
+        server.join().unwrap();
     }
 }

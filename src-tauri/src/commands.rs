@@ -44,94 +44,114 @@ pub async fn cave_launch(state: State<'_, NativeConnectionState>) -> Result<(), 
 
 #[tauri::command]
 pub async fn cave_health(
+    handle: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_health().await
+    state.cave_health(handle).await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_create(
+    handle: String,
     request: Value,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_create(request).await
+    state.cave_pairing_create(handle, request).await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_poll(
+    handle: String,
     request_id: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_poll(request_id).await
+    state.cave_pairing_poll(handle, request_id).await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_exchange(
+    handle: String,
     request_id: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_exchange(request_id).await
+    state.cave_pairing_exchange(handle, request_id).await
 }
 
 #[tauri::command]
 pub async fn cave_credential_status(
+    handle: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_credential_status().await
+    state.cave_credential_status(handle).await
 }
 
 #[tauri::command]
 pub fn cave_forget_credential(
+    handle: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_forget_credential()
+    state.cave_forget_credential(handle)
 }
 
 #[tauri::command]
 pub async fn cave_list_familiars(
+    handle: String,
     page: crate::transport::NativePage,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_read(CaveReadPath::Familiars { page }).await
+    state
+        .cave_read(handle, CaveReadPath::Familiars { page })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_list_projects(
+    handle: String,
     page: crate::transport::NativePage,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_read(CaveReadPath::Projects { page }).await
+    state
+        .cave_read(handle, CaveReadPath::Projects { page })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_list_conversations(
+    handle: String,
     page: crate::transport::NativePage,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_read(CaveReadPath::Conversations { page }).await
+    state
+        .cave_read(handle, CaveReadPath::Conversations { page })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_get_conversation(
+    handle: String,
     conversation_id: String,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
     state
-        .cave_read(CaveReadPath::Conversation { conversation_id })
+        .cave_read(handle, CaveReadPath::Conversation { conversation_id })
         .await
 }
 
 #[tauri::command]
 pub async fn cave_list_conversation_messages(
+    handle: String,
     conversation_id: String,
     page: crate::transport::NativePage,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
     state
-        .cave_read(CaveReadPath::ConversationMessages {
-            conversation_id,
-            page,
-        })
+        .cave_read(
+            handle,
+            CaveReadPath::ConversationMessages {
+                conversation_id,
+                page,
+            },
+        )
         .await
 }
 
