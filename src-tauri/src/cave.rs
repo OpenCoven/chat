@@ -1,11 +1,13 @@
 use std::{
     path::{Path, PathBuf},
     process::{Child, Command},
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
 use std::{env, fs, io::Read};
 
+use async_trait::async_trait;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::{Host, Url};
@@ -724,9 +726,65 @@ fn validate_loopback_origin(url: &Url) -> NativeResult<()> {
     Ok(())
 }
 
+pub(crate) trait CaveClock: Send + Sync {
+    fn now(&self) -> Duration;
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeCaveClock {
+    started_at: Instant,
+}
+
+impl Default for NativeCaveClock {
+    fn default() -> Self {
+        Self {
+            started_at: Instant::now(),
+        }
+    }
+}
+
+impl CaveClock for NativeCaveClock {
+    fn now(&self) -> Duration {
+        self.started_at.elapsed()
+    }
+}
+
+#[async_trait]
+pub(crate) trait CaveSleeper: Send + Sync {
+    async fn sleep(&self, duration: Duration);
+}
+
+#[derive(Default)]
+pub(crate) struct NativeCaveSleeper;
+
+#[async_trait]
+impl CaveSleeper for NativeCaveSleeper {
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+}
+
+pub(crate) trait CaveTaskRunner: Send + Sync {
+    fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()>;
+}
+
+#[derive(Default)]
+pub(crate) struct NativeCaveTaskRunner;
+
+impl CaveTaskRunner for NativeCaveTaskRunner {
+    fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+        std::thread::Builder::new()
+            .name("opencoven-cave-worker".to_owned())
+            .spawn(task)
+            .map(|_| ())
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))
+    }
+}
+
 pub(crate) trait CaveChild: Send {
     fn try_wait(&mut self) -> NativeResult<bool>;
     fn terminate(&mut self) -> NativeResult<()>;
+    fn wait(&mut self) -> NativeResult<()>;
 }
 
 pub(crate) trait CaveLauncher: Send + Sync {
@@ -749,6 +807,10 @@ impl CaveChild for NativeChild {
         match self.0.kill() {
             Ok(()) | Err(_) => {}
         }
+        Ok(())
+    }
+
+    fn wait(&mut self) -> NativeResult<()> {
         self.0
             .wait()
             .map(|_| ())

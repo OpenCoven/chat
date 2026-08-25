@@ -1,11 +1,15 @@
-use std::time::{Duration, Instant};
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use serde_json::{json, Value};
 
 use crate::{
     cave::{
-        pin_owner_discovery_record, CaveChild, NativeDiagnostic, NativeResult,
-        OwnerDiscoveryRecord, PinnedCaveAuthority,
+        pin_owner_discovery_record, CaveChild, CaveClock, CaveSleeper, CaveTaskRunner,
+        NativeDiagnostic, NativeResult, OwnerDiscoveryRecord, PinnedCaveAuthority,
     },
     keyring::{Credential, KeyringError},
     transport::{CaveReadPath, NativeHttpResponse, NativePage},
@@ -13,6 +17,37 @@ use crate::{
 };
 
 const LAUNCH_READINESS_DEADLINE: Duration = Duration::from_secs(30);
+
+#[derive(Clone)]
+struct LaunchDeadline {
+    clock: Arc<dyn CaveClock>,
+    expires_at: Duration,
+}
+
+impl LaunchDeadline {
+    fn start(clock: Arc<dyn CaveClock>) -> Self {
+        Self {
+            expires_at: clock.now() + LAUNCH_READINESS_DEADLINE,
+            clock,
+        }
+    }
+
+    fn remaining(&self) -> NativeResult<Duration> {
+        let remaining = self.expires_at.saturating_sub(self.clock.now());
+        if remaining.is_zero() {
+            return Err(launch_deadline_expired());
+        }
+        Ok(remaining)
+    }
+
+    fn check(&self) -> NativeResult<()> {
+        self.remaining().map(|_| ())
+    }
+}
+
+fn launch_deadline_expired() -> NativeDiagnostic {
+    NativeDiagnostic::new("service_unavailable", true)
+}
 
 struct PendingPairing {
     request_id: String,
@@ -25,8 +60,10 @@ struct PendingPairing {
 }
 
 struct ManagedLaunch {
-    child: Box<dyn CaveChild>,
+    child: Option<Box<dyn CaveChild>>,
     generation: u64,
+    cleanup_requested: bool,
+    cleanup_started: bool,
 }
 
 #[derive(Default)]
@@ -98,6 +135,7 @@ pub(crate) struct ConnectionRuntime {
     pairing_in_flight: bool,
     launch: Option<ManagedLaunch>,
     launch_in_flight: bool,
+    spawn_in_flight: Option<u64>,
     revocation_in_flight: bool,
     unauthorized: UnauthorizedTracker,
 }
@@ -177,17 +215,281 @@ impl ConnectionRuntime {
         Ok(())
     }
 
-    fn reap_launch(&mut self) -> NativeResult<()> {
-        if self
-            .launch
-            .as_mut()
-            .is_some_and(|launch| launch.child.try_wait().unwrap_or(true))
-        {
-            self.launch = None;
-            self.launch_in_flight = false;
+    fn reap_launch(&mut self) -> Option<u64> {
+        let launch = self.launch.as_mut()?;
+        if launch.cleanup_requested {
+            return (!launch.cleanup_started && launch.child.is_some())
+                .then_some(launch.generation);
         }
-        Ok(())
+        match launch
+            .child
+            .as_mut()
+            .map(|child| child.try_wait())
+            .transpose()
+        {
+            Ok(Some(true)) => {
+                self.launch = None;
+                self.launch_in_flight = false;
+                None
+            }
+            Ok(Some(false)) => None,
+            Ok(None) | Err(_) => {
+                launch.cleanup_requested = true;
+                self.launch_in_flight = false;
+                Some(launch.generation)
+            }
+        }
     }
+}
+
+async fn await_until_deadline<T>(
+    deadline: &LaunchDeadline,
+    sleeper: &dyn CaveSleeper,
+    future: impl Future<Output = T>,
+) -> NativeResult<T> {
+    let remaining = deadline.remaining()?;
+    tokio::select! {
+        biased;
+        output = future => Ok(output),
+        _ = sleeper.sleep(remaining) => Err(launch_deadline_expired()),
+    }
+}
+
+async fn run_blocking_until_deadline<T: Send + 'static>(
+    deadline: &LaunchDeadline,
+    sleeper: &dyn CaveSleeper,
+    task_runner: &Arc<dyn CaveTaskRunner>,
+    task: impl FnOnce() -> NativeResult<T> + Send + 'static,
+) -> NativeResult<T> {
+    deadline.check()?;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    task_runner.execute(Box::new(move || {
+        let _ = sender.send(task());
+    }))?;
+    await_until_deadline(deadline, sleeper, async move {
+        receiver
+            .await
+            .unwrap_or_else(|_| Err(NativeDiagnostic::new("service_unavailable", true)))
+    })
+    .await?
+}
+
+fn schedule_child_cleanup(
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    task_runner: Arc<dyn CaveTaskRunner>,
+    generation: u64,
+) {
+    let should_schedule = runtime
+        .lock()
+        .ok()
+        .and_then(|mut runtime| {
+            let launch = runtime
+                .launch
+                .as_mut()
+                .filter(|launch| launch.generation == generation && launch.cleanup_requested)?;
+            if launch.cleanup_started || launch.child.is_none() {
+                return None;
+            }
+            launch.cleanup_started = true;
+            Some(())
+        })
+        .is_some();
+    if !should_schedule {
+        return;
+    }
+
+    let cleanup_runtime = runtime.clone();
+    if task_runner
+        .execute(Box::new(move || {
+            let child = cleanup_runtime.lock().ok().and_then(|mut runtime| {
+                runtime.launch.as_mut().and_then(|launch| {
+                    (launch.generation == generation && launch.cleanup_requested)
+                        .then(|| launch.child.take())
+                        .flatten()
+                })
+            });
+            if let Some(mut child) = child {
+                let _ = child.terminate();
+                let cleaned = child.wait().is_ok();
+                match cleanup_runtime.lock() {
+                    Ok(mut runtime) if cleaned => {
+                        if runtime.launch.as_ref().is_some_and(|launch| {
+                            launch.generation == generation && launch.cleanup_requested
+                        }) {
+                            runtime.launch = None;
+                        }
+                    }
+                    Ok(mut runtime) => {
+                        if let Some(launch) = runtime.launch.as_mut().filter(|launch| {
+                            launch.generation == generation && launch.cleanup_requested
+                        }) {
+                            launch.child = Some(child);
+                            launch.cleanup_started = false;
+                        } else {
+                            retain_cleanup_child(child);
+                        }
+                    }
+                    Err(_) if !cleaned => retain_cleanup_child(child),
+                    Err(_) => {}
+                }
+            }
+        }))
+        .is_err()
+    {
+        if let Ok(mut runtime) = runtime.lock() {
+            if let Some(launch) = runtime
+                .launch
+                .as_mut()
+                .filter(|launch| launch.generation == generation && launch.cleanup_requested)
+            {
+                launch.cleanup_started = false;
+            }
+        }
+    }
+}
+
+fn retain_cleanup_child(mut child: Box<dyn CaveChild>) {
+    loop {
+        let _ = child.terminate();
+        if child.wait().is_ok() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn abandon_launch(
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    task_runner: Arc<dyn CaveTaskRunner>,
+    generation: u64,
+) {
+    let cleanup_required = runtime
+        .lock()
+        .ok()
+        .map(|mut runtime| {
+            if runtime.generation == generation {
+                runtime.clear_authority_state();
+                runtime.new_generation();
+                runtime.launch_in_flight = false;
+            }
+            let launch_matches = runtime
+                .launch
+                .as_ref()
+                .is_some_and(|launch| launch.generation == generation);
+            let spawn_matches = runtime.spawn_in_flight == Some(generation);
+            if launch_matches || spawn_matches {
+                runtime.launch_in_flight = false;
+            }
+            if let Some(launch) = runtime
+                .launch
+                .as_mut()
+                .filter(|launch| launch.generation == generation)
+            {
+                launch.cleanup_requested = true;
+                return launch.child.is_some() && !launch.cleanup_started;
+            }
+            false
+        })
+        .unwrap_or(false);
+    if cleanup_required {
+        schedule_child_cleanup(runtime, task_runner, generation);
+    }
+}
+
+struct LaunchAttempt {
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    task_runner: Arc<dyn CaveTaskRunner>,
+    generation: u64,
+    completed: bool,
+}
+
+impl LaunchAttempt {
+    fn complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for LaunchAttempt {
+    fn drop(&mut self) {
+        if !self.completed {
+            abandon_launch(
+                self.runtime.clone(),
+                self.task_runner.clone(),
+                self.generation,
+            );
+        }
+    }
+}
+
+fn start_launch_worker(
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    task_runner: Arc<dyn CaveTaskRunner>,
+    launcher: Arc<dyn crate::cave::CaveLauncher>,
+    deadline: LaunchDeadline,
+    generation: u64,
+) -> NativeResult<tokio::sync::oneshot::Receiver<NativeResult<()>>> {
+    {
+        let mut runtime = runtime
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("connection_state_unavailable", true))?;
+        runtime.spawn_in_flight = Some(generation);
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let worker_runtime = runtime.clone();
+    if let Err(error) = task_runner.execute(Box::new(move || {
+        let result = deadline.check().and_then(|_| launcher.launch());
+        let mut child_to_cleanup = None;
+        let outcome = match result {
+            Ok(child) => match worker_runtime.lock() {
+                Ok(mut runtime)
+                    if runtime.generation == generation
+                        && runtime.launch_in_flight
+                        && runtime.spawn_in_flight == Some(generation) =>
+                {
+                    runtime.launch = Some(ManagedLaunch {
+                        child: Some(child),
+                        generation,
+                        cleanup_requested: false,
+                        cleanup_started: false,
+                    });
+                    runtime.spawn_in_flight = None;
+                    Ok(())
+                }
+                Ok(mut runtime) => {
+                    if runtime.spawn_in_flight == Some(generation) {
+                        runtime.spawn_in_flight = None;
+                    }
+                    child_to_cleanup = Some(child);
+                    Err(NativeDiagnostic::new("stale_connection_attempt", true))
+                }
+                Err(_) => {
+                    child_to_cleanup = Some(child);
+                    Err(NativeDiagnostic::new("connection_state_unavailable", true))
+                }
+            },
+            Err(error) => {
+                if let Ok(mut runtime) = worker_runtime.lock() {
+                    if runtime.spawn_in_flight == Some(generation) {
+                        runtime.spawn_in_flight = None;
+                    }
+                }
+                Err(error)
+            }
+        };
+        let _ = sender.send(outcome);
+        if let Some(mut child) = child_to_cleanup {
+            let _ = child.terminate();
+            let _ = child.wait();
+        }
+    })) {
+        if let Ok(mut runtime) = runtime.lock() {
+            if runtime.spawn_in_flight == Some(generation) {
+                runtime.spawn_in_flight = None;
+            }
+        }
+        return Err(error);
+    }
+    Ok(receiver)
 }
 
 impl NativeConnectionState {
@@ -531,71 +833,146 @@ impl NativeConnectionState {
     }
 
     pub(crate) async fn cave_launch(&self) -> NativeResult<()> {
-        let deadline = Instant::now() + LAUNCH_READINESS_DEADLINE;
-        let generation = {
+        let deadline = LaunchDeadline::start(self.clock.clone());
+        deadline.check()?;
+        let reservation = {
             let mut runtime = self.runtime()?;
-            runtime.reap_launch()?;
-            if runtime.launch_in_flight || runtime.launch.is_some() {
+            let pending_cleanup = runtime.reap_launch();
+            if runtime.launch_in_flight
+                || runtime.launch.is_some()
+                || runtime.spawn_in_flight.is_some()
+            {
+                Err(pending_cleanup)
+            } else {
+                deadline.check()?;
+                runtime.clear_authority_state();
+                runtime.launch_in_flight = true;
+                Ok(runtime.new_generation())
+            }
+        };
+        let generation = match reservation {
+            Ok(generation) => generation,
+            Err(pending_cleanup) => {
+                if let Some(generation) = pending_cleanup {
+                    schedule_child_cleanup(
+                        self.runtime.clone(),
+                        self.task_runner.clone(),
+                        generation,
+                    );
+                }
                 return Err(NativeDiagnostic::new("cave_launch_in_progress", true));
             }
-            runtime.clear_authority_state();
-            runtime.launch_in_flight = true;
-            runtime.new_generation()
         };
-        let child = match self.launcher.launch() {
-            Ok(child) => child,
-            Err(error) => {
-                self.runtime()?.launch_in_flight = false;
-                return Err(error);
-            }
+        let mut attempt = LaunchAttempt {
+            runtime: self.runtime.clone(),
+            task_runner: self.task_runner.clone(),
+            generation,
+            completed: false,
         };
-        self.runtime()?.launch = Some(ManagedLaunch { child, generation });
+        let launch_complete = start_launch_worker(
+            self.runtime.clone(),
+            self.task_runner.clone(),
+            self.launcher.clone(),
+            deadline.clone(),
+            generation,
+        )?;
+        await_until_deadline(&deadline, self.sleeper.as_ref(), async move {
+            launch_complete
+                .await
+                .unwrap_or_else(|_| Err(NativeDiagnostic::new("service_unavailable", true)))
+        })
+        .await??;
+        deadline.check()?;
 
         let mut backoff = Duration::from_millis(100);
-        while Instant::now() < deadline {
+        loop {
+            deadline.check()?;
             {
                 let mut runtime = self.runtime()?;
-                if runtime.launch.as_mut().is_none_or(|launch| {
-                    launch.generation != generation || launch.child.try_wait().unwrap_or(true)
+                if runtime.generation != generation
+                    || runtime.launch.as_ref().is_none_or(|launch| {
+                        launch.generation != generation || launch.cleanup_requested
+                    })
+                {
+                    return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+                }
+                if runtime.launch.as_mut().is_some_and(|launch| {
+                    launch
+                        .child
+                        .as_mut()
+                        .is_none_or(|child| child.try_wait().unwrap_or(true))
                 }) {
                     runtime.launch = None;
                     runtime.launch_in_flight = false;
                     return Err(NativeDiagnostic::new("cave_exited", true));
                 }
             }
-            if let Ok(record) = self.discovery.read() {
-                if let Ok(authority) = pin_owner_discovery_record(&record, generation) {
-                    if let Ok(response) = self.transport.health(&authority).await {
-                        if require_success(&response).is_ok() {
-                            let mut runtime = self.runtime()?;
-                            if runtime
-                                .launch
-                                .as_ref()
-                                .is_some_and(|launch| launch.generation == generation)
-                            {
-                                runtime.authority = Some(authority.clone());
-                                runtime.instance_id =
-                                    Some(authority.credential_binding().to_owned());
-                                runtime.launch_in_flight = false;
-                                return Ok(());
+            let record =
+                run_blocking_until_deadline(&deadline, self.sleeper.as_ref(), &self.task_runner, {
+                    let discovery = self.discovery.clone();
+                    move || discovery.read()
+                })
+                .await;
+            match record {
+                Ok(record) => {
+                    if let Ok(authority) = pin_owner_discovery_record(&record, generation) {
+                        let health = await_until_deadline(
+                            &deadline,
+                            self.sleeper.as_ref(),
+                            self.transport.health(&authority),
+                        )
+                        .await;
+                        if let Ok(Ok(response)) = health {
+                            if require_success(&response).is_ok() {
+                                let revalidated = run_blocking_until_deadline(
+                                    &deadline,
+                                    self.sleeper.as_ref(),
+                                    &self.task_runner,
+                                    {
+                                        let discovery = self.discovery.clone();
+                                        move || discovery.read()
+                                    },
+                                )
+                                .await;
+                                match revalidated {
+                                    Ok(record) if authority.matches_owner_record(&record) => {}
+                                    Err(error) if error.code == "service_unavailable" => {
+                                        return Err(error);
+                                    }
+                                    _ => continue,
+                                }
+                                deadline.check()?;
+                                let mut runtime = self.runtime()?;
+                                if runtime.launch.as_ref().is_some_and(|launch| {
+                                    launch.generation == generation
+                                        && !launch.cleanup_requested
+                                        && launch.child.is_some()
+                                }) && runtime.generation == generation
+                                {
+                                    runtime.authority = Some(authority.clone());
+                                    runtime.instance_id =
+                                        Some(authority.credential_binding().to_owned());
+                                    runtime.launch_in_flight = false;
+                                    attempt.complete();
+                                    return Ok(());
+                                }
+                                return Err(NativeDiagnostic::new(
+                                    "stale_connection_attempt",
+                                    true,
+                                ));
                             }
+                        } else if health.is_err() {
+                            return Err(launch_deadline_expired());
                         }
                     }
                 }
+                Err(error) if error.code == "service_unavailable" => return Err(error),
+                Err(_) => {}
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            tokio::time::sleep(backoff.min(remaining)).await;
+            let remaining = deadline.remaining()?;
+            self.sleeper.sleep(backoff.min(remaining)).await;
             backoff = (backoff * 2).min(Duration::from_secs(2));
         }
-        let mut runtime = self.runtime()?;
-        if let Some(mut launch) = runtime.launch.take() {
-            let _ = launch.child.terminate();
-        }
-        runtime.launch_in_flight = false;
-        Err(NativeDiagnostic::new("cave_readiness_timeout", true))
     }
 }
 
@@ -625,9 +1002,12 @@ fn pairing_request_id(value: &Value) -> NativeResult<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Barrier, Mutex,
+        },
+        time::Duration,
     };
 
     use async_trait::async_trait;
@@ -635,7 +1015,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        cave::{CaveDiscoveryReader, CaveLauncher, NativeDiagnostic, OwnerDiscoveryRecordMetadata},
+        cave::{
+            CaveClock, CaveDiscoveryReader, CaveLauncher, CaveSleeper, CaveTaskRunner,
+            NativeDiagnostic, OwnerDiscoveryRecordMetadata,
+        },
         keyring::CredentialCustody,
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
     };
@@ -792,6 +1175,10 @@ mod tests {
         fn terminate(&mut self) -> NativeResult<()> {
             Ok(())
         }
+
+        fn wait(&mut self) -> NativeResult<()> {
+            Ok(())
+        }
     }
 
     struct ReadyLauncher {
@@ -803,6 +1190,518 @@ mod tests {
             self.launches.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(ReadyChild))
         }
+    }
+
+    #[derive(Default)]
+    struct TestLaunchClock(Mutex<Duration>);
+
+    impl TestLaunchClock {
+        fn advance(&self, duration: Duration) {
+            *self.0.lock().unwrap() += duration;
+        }
+    }
+
+    impl CaveClock for TestLaunchClock {
+        fn now(&self) -> Duration {
+            *self.0.lock().unwrap()
+        }
+    }
+
+    struct TestSleeper {
+        clock: Arc<TestLaunchClock>,
+    }
+
+    #[async_trait]
+    impl CaveSleeper for TestSleeper {
+        async fn sleep(&self, duration: Duration) {
+            self.clock.advance(duration);
+        }
+    }
+
+    struct InlineTaskRunner;
+
+    impl CaveTaskRunner for InlineTaskRunner {
+        fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            task();
+            Ok(())
+        }
+    }
+
+    struct TestChild;
+
+    impl CaveChild for TestChild {
+        fn try_wait(&mut self) -> NativeResult<bool> {
+            Ok(false)
+        }
+
+        fn terminate(&mut self) -> NativeResult<()> {
+            Ok(())
+        }
+
+        fn wait(&mut self) -> NativeResult<()> {
+            Ok(())
+        }
+    }
+
+    struct DeadlineLauncher {
+        clock: Arc<TestLaunchClock>,
+        launch_duration: Duration,
+        child: Mutex<Option<Box<dyn CaveChild>>>,
+    }
+
+    impl DeadlineLauncher {
+        fn new(
+            clock: Arc<TestLaunchClock>,
+            launch_duration: Duration,
+            child: Box<dyn CaveChild>,
+        ) -> Self {
+            Self {
+                clock,
+                launch_duration,
+                child: Mutex::new(Some(child)),
+            }
+        }
+    }
+
+    impl CaveLauncher for DeadlineLauncher {
+        fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+            self.clock.advance(self.launch_duration);
+            self.child
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(|| NativeDiagnostic::new("cave_launch_failed", true))
+        }
+    }
+
+    struct ImmediateHealth;
+
+    #[async_trait]
+    impl NativeCaveTransport for ImmediateHealth {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: json!({}),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
+    fn deadline_record() -> OwnerDiscoveryRecord {
+        OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "endpoint": "http://127.0.0.1:4310",
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-local-discovery-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        }
+    }
+
+    fn deadline_state(
+        clock: Arc<TestLaunchClock>,
+        transport: Arc<dyn NativeCaveTransport>,
+        launcher: Arc<dyn CaveLauncher>,
+        task_runner: Arc<dyn CaveTaskRunner>,
+    ) -> NativeConnectionState {
+        deadline_state_with_discovery(
+            clock,
+            transport,
+            launcher,
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            task_runner,
+        )
+    }
+
+    fn deadline_state_with_discovery(
+        clock: Arc<TestLaunchClock>,
+        transport: Arc<dyn NativeCaveTransport>,
+        launcher: Arc<dyn CaveLauncher>,
+        discovery: Arc<dyn CaveDiscoveryReader>,
+        task_runner: Arc<dyn CaveTaskRunner>,
+    ) -> NativeConnectionState {
+        NativeConnectionState::with_test_launch_collaborators(
+            transport,
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            discovery,
+            launcher,
+            clock.clone(),
+            Arc::new(TestSleeper { clock }),
+            task_runner,
+        )
+    }
+
+    struct PollingDiscovery {
+        clock: Arc<TestLaunchClock>,
+        reads: AtomicUsize,
+        read_duration: Duration,
+    }
+
+    impl CaveDiscoveryReader for PollingDiscovery {
+        fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.clock.advance(self.read_duration);
+            Err(NativeDiagnostic::new("cave_discovery_not_found", true))
+        }
+    }
+
+    struct AdvancingDiscovery {
+        clock: Arc<TestLaunchClock>,
+        record: OwnerDiscoveryRecord,
+        read_duration: Duration,
+    }
+
+    impl CaveDiscoveryReader for AdvancingDiscovery {
+        fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+            self.clock.advance(self.read_duration);
+            Ok(self.record.clone())
+        }
+    }
+
+    struct PendingHealth;
+
+    #[async_trait]
+    impl NativeCaveTransport for PendingHealth {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            std::future::pending().await
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
+    struct InlineThenThreadTaskRunner {
+        inline_tasks: AtomicUsize,
+    }
+
+    impl CaveTaskRunner for InlineThenThreadTaskRunner {
+        fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            if self.inline_tasks.fetch_add(1, Ordering::SeqCst) < 2 {
+                task();
+                return Ok(());
+            }
+            std::thread::Builder::new()
+                .spawn(task)
+                .map(|_| ())
+                .map_err(|_| NativeDiagnostic::new("service_unavailable", true))
+        }
+    }
+
+    #[derive(Default)]
+    struct BlockingChildState {
+        terminated: AtomicUsize,
+        reaped: AtomicUsize,
+    }
+
+    struct BlockingChild {
+        state: Arc<BlockingChildState>,
+        cleanup_started: Arc<Barrier>,
+        cleanup_release: Arc<Barrier>,
+    }
+
+    impl CaveChild for BlockingChild {
+        fn try_wait(&mut self) -> NativeResult<bool> {
+            Ok(false)
+        }
+
+        fn terminate(&mut self) -> NativeResult<()> {
+            self.state.terminated.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn wait(&mut self) -> NativeResult<()> {
+            self.cleanup_started.wait();
+            self.cleanup_release.wait();
+            self.state.reaped.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct OneChildLauncher {
+        child: Mutex<Option<Box<dyn CaveChild>>>,
+    }
+
+    impl CaveLauncher for OneChildLauncher {
+        fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+            self.child
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(|| NativeDiagnostic::new("cave_launch_failed", true))
+        }
+    }
+
+    #[test]
+    fn launch_deadline_begins_before_reservation_and_spawn() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let launcher = Arc::new(DeadlineLauncher::new(
+            clock.clone(),
+            Duration::from_secs(30),
+            Box::new(TestChild),
+        ));
+        let state = deadline_state(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            launcher,
+            Arc::new(InlineTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(clock.now(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn readiness_polling_and_backoff_stop_at_the_absolute_deadline() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let discovery = Arc::new(PollingDiscovery {
+            clock: clock.clone(),
+            reads: AtomicUsize::new(0),
+            read_duration: Duration::ZERO,
+        });
+        let state = deadline_state_with_discovery(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            discovery.clone(),
+            Arc::new(InlineTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert!(discovery.reads.load(Ordering::SeqCst) > 1);
+    }
+
+    #[test]
+    fn hanging_health_cannot_extend_the_launch_attempt() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock.clone(),
+            Arc::new(PendingHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(InlineTaskRunner),
+        );
+        let prelaunch_handle = state.cave_read_discovery().unwrap().handle;
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_health(prelaunch_handle))
+                .unwrap_err()
+                .code,
+            "invalid_discovery_handle"
+        );
+    }
+
+    #[test]
+    fn blocking_child_cleanup_is_transferred_without_extending_the_deadline() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let cleanup_started = Arc::new(Barrier::new(2));
+        let cleanup_release = Arc::new(Barrier::new(2));
+        let child_state = Arc::new(BlockingChildState::default());
+        let state = deadline_state(
+            clock.clone(),
+            Arc::new(PendingHealth),
+            Arc::new(OneChildLauncher {
+                child: Mutex::new(Some(Box::new(BlockingChild {
+                    state: child_state.clone(),
+                    cleanup_started: cleanup_started.clone(),
+                    cleanup_release: cleanup_release.clone(),
+                }))),
+            }),
+            Arc::new(InlineThenThreadTaskRunner {
+                inline_tasks: AtomicUsize::new(0),
+            }),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(clock.now(), Duration::from_secs(30));
+        cleanup_started.wait();
+        assert_eq!(child_state.terminated.load(Ordering::SeqCst), 1);
+        cleanup_release.wait();
+        for _ in 0..1_000 {
+            if child_state.reaped.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(child_state.reaped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn launch_succeeds_just_inside_the_absolute_deadline() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            Arc::new(DeadlineLauncher::new(
+                clock.clone(),
+                Duration::from_secs(29),
+                Box::new(TestChild),
+            )),
+            Arc::new(InlineTaskRunner),
+        );
+
+        tauri::async_runtime::block_on(state.cave_launch()).unwrap();
+
+        assert_eq!(clock.now(), Duration::from_secs(29));
+    }
+
+    #[test]
+    fn synthetic_elapsed_time_stays_within_one_budget_across_launch_phases() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state_with_discovery(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            Arc::new(DeadlineLauncher::new(
+                clock.clone(),
+                Duration::from_secs(10),
+                Box::new(TestChild),
+            )),
+            Arc::new(AdvancingDiscovery {
+                clock: clock.clone(),
+                record: deadline_record(),
+                read_duration: Duration::from_secs(5),
+            }),
+            Arc::new(InlineTaskRunner),
+        );
+
+        tauri::async_runtime::block_on(state.cave_launch()).unwrap();
+
+        assert_eq!(clock.now(), Duration::from_secs(20));
+        assert!(clock.now() <= LAUNCH_READINESS_DEADLINE);
+    }
+
+    #[test]
+    fn superseded_launch_cannot_publish_readiness() {
+        let record = deadline_record();
+        let health_started = Arc::new(Barrier::new(2));
+        let health_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport {
+                health_started: Some(health_started.clone()),
+                health_release: Some(health_release.clone()),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery { record }),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+        );
+        let launch_state = state.clone();
+        let completion =
+            std::thread::spawn(move || tauri::async_runtime::block_on(launch_state.cave_launch()));
+
+        health_started.wait();
+        let replacement_handle = state.cave_read_discovery().unwrap().handle;
+        health_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
+        let runtime = state.runtime().unwrap();
+        assert_eq!(
+            runtime.authority_handle.as_deref(),
+            Some(replacement_handle.as_str())
+        );
+        assert!(runtime.instance_id.is_none());
     }
 
     #[test]

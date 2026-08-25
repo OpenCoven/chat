@@ -8,7 +8,8 @@ mod transport;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cave::{
-    CaveDiscoveryReader, CaveLauncher, NativeCaveDiscoveryReader, NativeCaveLauncher,
+    CaveClock, CaveDiscoveryReader, CaveLauncher, CaveSleeper, CaveTaskRunner, NativeCaveClock,
+    NativeCaveDiscoveryReader, NativeCaveLauncher, NativeCaveSleeper, NativeCaveTaskRunner,
     NativeDiagnostic,
 };
 use connection::ConnectionRuntime;
@@ -30,6 +31,9 @@ pub struct NativeConnectionState {
     keyring: Arc<dyn CredentialCustody>,
     discovery: Arc<dyn CaveDiscoveryReader>,
     launcher: Arc<dyn CaveLauncher>,
+    clock: Arc<dyn CaveClock>,
+    sleeper: Arc<dyn CaveSleeper>,
+    task_runner: Arc<dyn CaveTaskRunner>,
 }
 
 impl Default for NativeConnectionState {
@@ -40,6 +44,9 @@ impl Default for NativeConnectionState {
             keyring: Arc::new(NativeKeyring),
             discovery: Arc::new(NativeCaveDiscoveryReader),
             launcher: Arc::new(NativeCaveLauncher),
+            clock: Arc::new(NativeCaveClock::default()),
+            sleeper: Arc::new(NativeCaveSleeper),
+            task_runner: Arc::new(NativeCaveTaskRunner),
         }
     }
 }
@@ -66,6 +73,30 @@ impl NativeConnectionState {
             keyring,
             discovery,
             launcher,
+            clock: Arc::new(NativeCaveClock::default()),
+            sleeper: Arc::new(NativeCaveSleeper),
+            task_runner: Arc::new(NativeCaveTaskRunner),
+        }
+    }
+
+    pub(crate) fn with_test_launch_collaborators(
+        transport: Arc<dyn NativeCaveTransport>,
+        keyring: Arc<dyn CredentialCustody>,
+        discovery: Arc<dyn CaveDiscoveryReader>,
+        launcher: Arc<dyn CaveLauncher>,
+        clock: Arc<dyn CaveClock>,
+        sleeper: Arc<dyn CaveSleeper>,
+        task_runner: Arc<dyn CaveTaskRunner>,
+    ) -> Self {
+        Self {
+            runtime: Arc::new(Mutex::new(ConnectionRuntime::default())),
+            transport,
+            keyring,
+            discovery,
+            launcher,
+            clock,
+            sleeper,
+            task_runner,
         }
     }
 }
