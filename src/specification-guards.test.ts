@@ -65,7 +65,7 @@ function listRuntimeSourceFiles(relativePath: string): string[] {
   return files.sort();
 }
 
-describe('Phase 0 specification guards', () => {
+describe('Phase 1 specification guards', () => {
   it('ignores sibling worktrees from the repository root', () => {
     const output = execFileSync(
       'git',
@@ -87,13 +87,23 @@ describe('Phase 0 specification guards', () => {
     expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
   });
 
-  it('keeps the default Tauri capability least-privileged for app_identity', () => {
+  it('keeps the default Tauri capability least-privileged for native connection commands', () => {
     const capability = JSON.parse(
       readText('src-tauri/capabilities/default.json'),
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
-    expect(capability.permissions).toEqual(['allow-app-identity']);
+    expect(capability.permissions).toEqual([
+      'allow-app-identity',
+      'allow-get-connection-state',
+      'allow-refresh-connection',
+      'allow-launch-cave',
+      'allow-submit-manual-discovery',
+      'allow-start-pairing',
+      'allow-cancel-pairing',
+      'allow-retry-connection',
+      'allow-start-conversation',
+    ]);
 
     for (const permission of capability.permissions) {
       expect(typeof permission).toBe('string');
@@ -132,10 +142,54 @@ describe('Phase 0 specification guards', () => {
     ).toContain('!src-tauri/gen/schemas/desktop-schema.json');
   });
 
-  it('autogenerates app command permissions only for app_identity', () => {
+  it('autogenerates permissions only for the reviewed native command boundary', () => {
     const buildScript = readText('src-tauri/build.rs');
 
-    expect(buildScript).toMatch(/AppManifest::new\(\)\s*\.commands\(&\["app_identity"\]\)/);
+    for (const command of [
+      'app_identity',
+      'get_connection_state',
+      'refresh_connection',
+      'launch_cave',
+      'submit_manual_discovery',
+      'start_pairing',
+      'cancel_pairing',
+      'retry_connection',
+      'start_conversation',
+    ]) {
+      expect(buildScript).toContain(`"${command}"`);
+    }
+  });
+
+  it('points Tauri devUrl at the production route instead of a demo query', () => {
+    const config = readJson<{ build: { devUrl: string } }>('src-tauri/tauri.conf.json');
+
+    expect(config.build.devUrl).toBe('http://127.0.0.1:4173/');
+  });
+
+  it('registers only narrow non-secret native connection commands', () => {
+    const commands = readText('src-tauri/src/commands.rs');
+    const lib = readText('src-tauri/src/lib.rs');
+    const expected = [
+      'app_identity',
+      'get_connection_state',
+      'refresh_connection',
+      'launch_cave',
+      'submit_manual_discovery',
+      'start_pairing',
+      'cancel_pairing',
+      'retry_connection',
+      'start_conversation',
+    ];
+
+    for (const command of expected) {
+      expect(commands).toContain(`"${command}"`);
+      expect(lib).toContain(command);
+    }
+
+    expect(commands).not.toMatch(
+      /pub\s+(?:async\s+)?fn\s+(?:generic_request|request|fetch|network)/,
+    );
+    expect(commands).not.toMatch(/(?:token|bearer|authorization|header)/i);
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {

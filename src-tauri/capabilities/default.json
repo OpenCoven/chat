@@ -3,5 +3,15 @@
   "identifier": "default",
   "description": "Capability for the OpenCoven Chat main window.",
   "windows": ["main"],
-  "permissions": ["allow-app-identity"]
+  "permissions": [
+    "allow-app-identity",
+    "allow-get-connection-state",
+    "allow-refresh-connection",
+    "allow-launch-cave",
+    "allow-submit-manual-discovery",
+    "allow-start-pairing",
+    "allow-cancel-pairing",
+    "allow-retry-connection",
+    "allow-start-conversation"
+  ]
 }

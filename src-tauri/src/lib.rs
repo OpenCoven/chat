@@ -1,11 +1,51 @@
+mod cave;
 mod commands;
+mod connection;
+mod keyring;
 mod metadata;
+mod transport;
 
-pub use commands::{app_identity, registered_command_names};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use cave::NativeDiagnostic;
+use connection::ConnectionRuntime;
+use keyring::NativeKeyring;
+
+pub use commands::{
+    app_identity, cancel_pairing, get_connection_state, launch_cave, refresh_connection,
+    registered_command_names, retry_connection, start_conversation, start_pairing,
+    submit_manual_discovery,
+};
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 
+#[derive(Clone, Default)]
+pub struct NativeConnectionState {
+    connection: Arc<Mutex<ConnectionRuntime>>,
+    keyring: NativeKeyring,
+}
+
+impl NativeConnectionState {
+    fn runtime(&self) -> Result<MutexGuard<'_, ConnectionRuntime>, NativeDiagnostic> {
+        self.connection
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("connection_state_unavailable", true))
+    }
+}
+
 fn builder() -> tauri::Builder<tauri::Wry> {
-    tauri::Builder::default().invoke_handler(tauri::generate_handler![app_identity])
+    tauri::Builder::default()
+        .manage(NativeConnectionState::default())
+        .invoke_handler(tauri::generate_handler![
+            app_identity,
+            get_connection_state,
+            refresh_connection,
+            launch_cave,
+            submit_manual_discovery,
+            start_pairing,
+            cancel_pairing,
+            retry_connection,
+            start_conversation
+        ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,7 +80,20 @@ mod smoke_tests {
     }
 
     #[test]
-    fn registers_the_initial_command_table() {
-        assert_eq!(registered_command_names(), &["app_identity"]);
+    fn registers_the_reviewed_native_command_table() {
+        assert_eq!(
+            registered_command_names(),
+            &[
+                "app_identity",
+                "get_connection_state",
+                "refresh_connection",
+                "launch_cave",
+                "submit_manual_discovery",
+                "start_pairing",
+                "cancel_pairing",
+                "retry_connection",
+                "start_conversation",
+            ]
+        );
     }
 }

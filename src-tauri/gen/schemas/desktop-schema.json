@@ -183,10 +183,106 @@
           "markdownDescription": "Enables the app_identity command without any pre-configured scope."
         },
         {
+          "description": "Enables the cancel_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-pairing",
+          "markdownDescription": "Enables the cancel_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_connection_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-connection-state",
+          "markdownDescription": "Enables the get_connection_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the launch_cave command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-launch-cave",
+          "markdownDescription": "Enables the launch_cave command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the refresh_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-connection",
+          "markdownDescription": "Enables the refresh_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the retry_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-connection",
+          "markdownDescription": "Enables the retry_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-conversation",
+          "markdownDescription": "Enables the start_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-pairing",
+          "markdownDescription": "Enables the start_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the submit_manual_discovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-submit-manual-discovery",
+          "markdownDescription": "Enables the submit_manual_discovery command without any pre-configured scope."
+        },
+        {
           "description": "Denies the app_identity command without any pre-configured scope.",
           "type": "string",
           "const": "deny-app-identity",
           "markdownDescription": "Denies the app_identity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-pairing",
+          "markdownDescription": "Denies the cancel_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_connection_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-connection-state",
+          "markdownDescription": "Denies the get_connection_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the launch_cave command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-launch-cave",
+          "markdownDescription": "Denies the launch_cave command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the refresh_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-connection",
+          "markdownDescription": "Denies the refresh_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the retry_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-connection",
+          "markdownDescription": "Denies the retry_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-conversation",
+          "markdownDescription": "Denies the start_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-pairing",
+          "markdownDescription": "Denies the start_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the submit_manual_discovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-submit-manual-discovery",
+          "markdownDescription": "Denies the submit_manual_discovery command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

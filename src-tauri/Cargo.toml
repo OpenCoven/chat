@@ -14,8 +14,11 @@ serde_json = "=1.0.145"
 tauri-build = { version = "=2.6.2", features = [] }
 
 [dependencies]
+keyring = "=3.6.3"
+reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 serde = { version = "=1.0.228", features = ["derive"] }
-tauri = { version = "=2.11.2", features = [] }
-
-[dev-dependencies]
 serde_json = "=1.0.145"
+tauri = { version = "=2.11.2", features = [] }
+tokio = { version = "=1.53.1", features = ["time"] }
+url = "=2.5.8"
+uuid = { version = "=1.24.1", features = ["v4"] }

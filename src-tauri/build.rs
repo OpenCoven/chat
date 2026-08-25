@@ -25,9 +25,18 @@ fn main() {
         tauri_config_value(&config, "identifier")
     );
 
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["app_identity"])),
-    )
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "app_identity",
+            "get_connection_state",
+            "refresh_connection",
+            "launch_cave",
+            "submit_manual_discovery",
+            "start_pairing",
+            "cancel_pairing",
+            "retry_connection",
+            "start_conversation",
+        ]),
+    ))
     .expect("failed to run tauri-build");
 }
