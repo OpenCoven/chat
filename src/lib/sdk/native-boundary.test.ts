@@ -5,6 +5,7 @@ import {
   createCaveManagedCredentialTransport,
   createCaveManagedDiscoveryBinding,
   createCaveManagedDiscoverySource,
+  invokeNative,
   type NativeSdkInvoke,
 } from './native-boundary';
 
@@ -116,7 +117,7 @@ describe('Cave managed native boundary', () => {
   });
 
   it('returns a fresh frozen native snapshot and rejects forbidden native fields', async () => {
-    const native = Object.freeze({ status: 'missing' });
+    const native = Object.freeze({ status: 'missing', values: Object.freeze(['safe']) });
     const transport = createCaveManagedCredentialTransport(
       vi.fn<NativeSdkInvoke>().mockResolvedValue(native),
       'native-discovery-handle',
@@ -126,6 +127,8 @@ describe('Cave managed native boundary', () => {
     expect(snapshot).toEqual(native);
     expect(snapshot).not.toBe(native);
     expect(Object.isFrozen(snapshot as object)).toBe(true);
+    expect(Object.isFrozen((snapshot as { values: unknown[] }).values)).toBe(true);
+    expect((snapshot as { values: unknown[] }).values).not.toBe(native.values);
 
     const forbidden = createCaveManagedCredentialTransport(
       vi.fn<NativeSdkInvoke>().mockResolvedValue({
@@ -139,6 +142,73 @@ describe('Cave managed native boundary', () => {
       retryable: false,
       message: 'Cave response was invalid.',
     });
+  });
+
+  it('fails closed on hostile native arrays and nested forbidden fields', async () => {
+    const overriddenMap = ['safe'];
+    Object.setPrototypeOf(
+      overriddenMap,
+      Object.freeze({
+        map() {
+          return ['attacker-controlled-map-result'];
+        },
+      }),
+    );
+
+    const sparse = ['safe'] as unknown[];
+    sparse.length = 2;
+
+    const accessor = ['safe'];
+    Object.defineProperty(accessor, '0', {
+      enumerable: true,
+      get() {
+        return 'attacker-controlled-accessor-result';
+      },
+    });
+
+    const extraKey = ['safe'] as unknown[] & { extra?: string };
+    extraKey.extra = 'attacker-controlled-extra-result';
+
+    const customPrototype = ['safe'];
+    Object.setPrototypeOf(customPrototype, Object.create(Array.prototype));
+
+    const proxy = new Proxy(['safe'], {
+      ownKeys() {
+        throw new Error('attacker-controlled-proxy-trap');
+      },
+    });
+
+    const nestedForbidden = {
+      safe: [{ cause: { path: 'native-path-secret-canary' } }],
+    };
+    const hostileValues: unknown[] = [
+      overriddenMap,
+      sparse,
+      accessor,
+      extraKey,
+      customPrototype,
+      proxy,
+      nestedForbidden,
+    ];
+
+    const diagnostics = await Promise.all(
+      hostileValues.map(async (hostile) => {
+        const diagnostic = await invokeNative(
+          vi.fn<NativeSdkInvoke>().mockResolvedValue(hostile),
+          'cave_health',
+        ).catch((rejection) => rejection);
+        expect(diagnostic).toEqual({
+          code: 'invalid_response',
+          retryable: false,
+          message: 'Cave response was invalid.',
+        });
+        expect(Object.isFrozen(diagnostic as object)).toBe(true);
+        expect(diagnostic).not.toBe(hostile);
+        return diagnostic;
+      }),
+    );
+
+    expect(new Set(diagnostics).size).toBe(diagnostics.length);
   });
 
   it('replaces hostile native rejection objects with a fresh redacted diagnostic', async () => {
@@ -172,6 +242,8 @@ describe('Cave managed native boundary', () => {
       retryable: true,
       message: 'Cave service was unavailable.',
     });
+    expect(Object.isFrozen(error as object)).toBe(true);
+    expect(error).not.toBe(hostile);
     for (const snapshot of snapshots) {
       expect(snapshot).not.toContain(secret);
     }

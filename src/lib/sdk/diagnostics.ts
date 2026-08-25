@@ -48,42 +48,78 @@ export function snapshotNativeResult(value: unknown): unknown {
     }
 
     seen.add(candidate);
+    const prototype = Object.getPrototypeOf(candidate);
     const descriptors = Object.getOwnPropertyDescriptors(candidate);
-    if (
-      Reflect.ownKeys(descriptors).some(
-        (key) =>
-          typeof key !== 'string' ||
-          descriptors[key] === undefined ||
-          !Object.hasOwn(descriptors[key], 'value'),
-      )
-    ) {
-      return invalidNativeResult();
-    }
+    const keys = Reflect.ownKeys(descriptors);
 
     if (Array.isArray(candidate)) {
-      const expected = new Set([
-        'length',
-        ...Array.from({ length: candidate.length }, (_, index) => String(index)),
-      ]);
+      const lengthDescriptor = descriptors.length;
       if (
-        Reflect.ownKeys(descriptors).some((key) => typeof key !== 'string' || !expected.has(key))
+        prototype !== Array.prototype ||
+        lengthDescriptor === undefined ||
+        !Object.hasOwn(lengthDescriptor, 'value') ||
+        typeof lengthDescriptor.value !== 'number' ||
+        !Number.isSafeInteger(lengthDescriptor.value) ||
+        lengthDescriptor.value < 0
       ) {
         return invalidNativeResult();
       }
-      return Object.freeze(candidate.map(snapshot));
+      const length = lengthDescriptor.value;
+      if (
+        length > MAX_NODES - nodes ||
+        keys.length !== length + 1 ||
+        keys.some(
+          (key) =>
+            key !== 'length' &&
+            (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= length),
+        )
+      ) {
+        return invalidNativeResult();
+      }
+
+      const output: unknown[] = [];
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) {
+          return invalidNativeResult();
+        }
+        output.push(snapshot(descriptor.value));
+      }
+      return Object.freeze(output);
+    }
+
+    if (prototype !== Object.prototype && prototype !== null) {
+      return invalidNativeResult();
     }
 
     const output: Record<string, unknown> = {};
-    for (const [key, descriptor] of Object.entries(descriptors)) {
-      if (FORBIDDEN_NATIVE_FIELD.test(key) || !Object.hasOwn(descriptor, 'value')) {
+    for (const key of keys) {
+      if (typeof key !== 'string') {
         return invalidNativeResult();
       }
-      output[key] = snapshot(descriptor.value);
+      const descriptor = descriptors[key];
+      if (
+        descriptor === undefined ||
+        FORBIDDEN_NATIVE_FIELD.test(key) ||
+        !Object.hasOwn(descriptor, 'value')
+      ) {
+        return invalidNativeResult();
+      }
+      Object.defineProperty(output, key, {
+        configurable: false,
+        enumerable: true,
+        value: snapshot(descriptor.value),
+        writable: false,
+      });
     }
     return Object.freeze(output);
   }
 
-  return snapshot(value);
+  try {
+    return snapshot(value);
+  } catch {
+    return invalidNativeResult();
+  }
 }
 
 export function nativeUnavailable(): NativeSdkDiagnostic {
