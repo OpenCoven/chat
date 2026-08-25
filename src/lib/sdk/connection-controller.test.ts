@@ -699,6 +699,89 @@ describe('Cave connection controller', () => {
     }
   });
 
+  it('resets packed SDK timeout errors at every pairing phase before reconciliation', async () => {
+    for (const phase of ['create', 'poll', 'exchange'] as const) {
+      for (const outcome of ['missing', 'ready'] as const) {
+        const calls = rateLimitedCalls();
+        const lateNativeMutation = deferred<void>();
+        let lateMutationSettled = false;
+        const timedOutClient = rateLimitedClient(
+          phase,
+          () => {
+            void lateNativeMutation.promise.then(() => {
+              lateMutationSettled = true;
+            });
+            return Promise.reject(
+              Object.freeze({
+                code: 'timeout',
+                retryable: true,
+              }),
+            );
+          },
+          calls,
+        );
+        const reconciliation = nativeHost({
+          credentialStatus: async () =>
+            outcome === 'ready' ? validCredentialStatus() : { status: 'missing' },
+        });
+        const discover = vi
+          .fn<CaveConnectionHost['discover']>()
+          .mockImplementationOnce(async () => discoveryWithClient(timedOutClient))
+          .mockImplementationOnce(reconciliation.discover);
+        let resets = 0;
+        const events: unknown[] = [];
+        const subject = controller(
+          hostPort(
+            discover,
+            async () => undefined,
+            async () => {
+              resets += 1;
+            },
+          ),
+        );
+        subject.subscribe((state) => {
+          events.push(state);
+        });
+
+        await subject.start();
+        await subject.beginPairing();
+
+        const expected =
+          outcome === 'ready'
+            ? {
+                state: 'ready',
+                caveInstanceId: CAVE_INSTANCE_ID,
+                covenAvailable: false,
+              }
+            : {
+                state: 'pairing_required',
+                caveInstanceId: CAVE_INSTANCE_ID,
+              };
+        expect(resets).toBe(1);
+        expect(subject.getState()).toEqual(expected);
+        expect(calls.pairingRequests).toHaveLength(1);
+        expect(calls.polls).toBe(phase === 'create' ? 0 : 1);
+        expect(calls.exchanges).toBe(phase === 'exchange' ? 1 : 0);
+        expect(events).not.toContainEqual(
+          expect.objectContaining({
+            state: 'offline',
+          }),
+        );
+        expect(events).not.toContainEqual(
+          expect.objectContaining({
+            state: 'error',
+            code: 'pairing_expired',
+          }),
+        );
+
+        lateNativeMutation.resolve();
+        await settle();
+        expect(lateMutationSettled).toBe(true);
+        expect(subject.getState()).toEqual(expected);
+      }
+    }
+  });
+
   it('does not let stale packed pairing rate limits overwrite a retry', async () => {
     const canary = 'stale-pairing-rate-limit-canary';
 

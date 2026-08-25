@@ -255,6 +255,12 @@ function failureFrom(error: unknown): SafeFailure {
   });
 }
 
+function isPairingTimeout(error: unknown): boolean {
+  return (
+    error === OPERATION_DEADLINE_EXCEEDED || (isCaveClientError(error) && error.code === 'timeout')
+  );
+}
+
 function isOfflineFailure(failure: SafeFailure): boolean {
   return (
     failure.code === 'not_found' ||
@@ -664,7 +670,7 @@ export function createCaveConnectionController(
       } catch (error) {
         if (
           current(generation) &&
-          (error === OPERATION_DEADLINE_EXCEEDED || options.now() >= pairing.expiresAt)
+          (isPairingTimeout(error) || options.now() >= pairing.expiresAt)
         ) {
           await resetPairingAndReconcile();
           return;
@@ -693,7 +699,7 @@ export function createCaveConnectionController(
           } catch (error) {
             if (
               current(generation) &&
-              (error === OPERATION_DEADLINE_EXCEEDED || options.now() >= pairing.expiresAt)
+              (isPairingTimeout(error) || options.now() >= pairing.expiresAt)
             ) {
               await resetPairingAndReconcile();
               return;
@@ -935,7 +941,7 @@ export function createCaveConnectionController(
           attempt.signal,
         );
       } catch (error) {
-        if (error === OPERATION_DEADLINE_EXCEEDED) {
+        if (isPairingTimeout(error)) {
           await resetPairingAndReconcile();
           return;
         }
