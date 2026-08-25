@@ -231,6 +231,194 @@ trait WindowsDiscoveryBackend {
         path: &Path,
     ) -> Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError>;
     fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError>;
+    fn process_liveness(&self, bytes: &[u8]) -> NativeResult<bool>;
+}
+
+#[cfg(any(windows, test))]
+trait WindowsProcessInspector {
+    fn inspect_process(&self, pid: u32) -> NativeResult<WindowsProcessState>;
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+enum WindowsProcessState {
+    Exited,
+    NotFound,
+    Running { creation_time: u64 },
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+struct WindowsDiscoveryStartedAt {
+    filetime: u64,
+}
+
+#[cfg(any(windows, test))]
+fn parse_windows_discovery_liveness_metadata(
+    bytes: &[u8],
+) -> NativeResult<(u32, WindowsDiscoveryStartedAt)> {
+    /*
+     * This extracts only process-liveness metadata from the already bounded
+     * record. The packed SDK remains authoritative for the record schema.
+     */
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    let pid = value
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid != 0)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    let started_at = value
+        .get("startedAt")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_windows_discovery_started_at)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    Ok((pid, started_at))
+}
+
+#[cfg(any(windows, test))]
+fn windows_record_process_is_alive(
+    bytes: &[u8],
+    inspector: &dyn WindowsProcessInspector,
+) -> NativeResult<bool> {
+    let (pid, started_at) = parse_windows_discovery_liveness_metadata(bytes)?;
+    match inspector.inspect_process(pid)? {
+        WindowsProcessState::Exited | WindowsProcessState::NotFound => Ok(false),
+        // startedAt is emitted after the owner process has started. A process
+        // created after it is a PID reuse, while an older creation time is the
+        // affirmative proof available from discovery metadata.
+        WindowsProcessState::Running { creation_time } => Ok(creation_time <= started_at.filetime),
+    }
+}
+
+#[cfg(any(windows, test))]
+fn parse_windows_discovery_started_at(value: &str) -> Option<WindowsDiscoveryStartedAt> {
+    const WINDOWS_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
+    const HUNDRED_NANOSECONDS_PER_SECOND: u64 = 10_000_000;
+
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let year = decimal_u32(&bytes[0..4])? as i64;
+    let month = decimal_u32(&bytes[5..7])?;
+    let day = decimal_u32(&bytes[8..10])?;
+    let hour = decimal_u32(&bytes[11..13])?;
+    let minute = decimal_u32(&bytes[14..16])?;
+    let second = decimal_u32(&bytes[17..19])?;
+    if !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+
+    let mut cursor = 19;
+    let fraction = if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let fraction_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        let digits = cursor - fraction_start;
+        if !(1..=7).contains(&digits) {
+            return None;
+        }
+        let mut fraction = decimal_u32(&bytes[fraction_start..cursor])? as u64;
+        for _ in digits..7 {
+            fraction *= 10;
+        }
+        fraction
+    } else {
+        0
+    };
+    let timezone_seconds = match bytes.get(cursor) {
+        Some(b'Z') if cursor + 1 == bytes.len() => 0_i64,
+        Some(b'+') | Some(b'-')
+            if cursor + 6 == bytes.len() && bytes.get(cursor + 3) == Some(&b':') =>
+        {
+            let timezone_hour = decimal_u32(&bytes[cursor + 1..cursor + 3])?;
+            let timezone_minute = decimal_u32(&bytes[cursor + 4..cursor + 6])?;
+            if timezone_hour > 23 || timezone_minute > 59 {
+                return None;
+            }
+            let offset = (timezone_hour as i64)
+                .checked_mul(60)?
+                .checked_add(timezone_minute as i64)?
+                .checked_mul(60)?;
+            if bytes[cursor] == b'+' {
+                -offset
+            } else {
+                offset
+            }
+        }
+        _ => return None,
+    };
+    let unix_seconds = civil_days_since_unix_epoch(year, month, day)?
+        .checked_mul(86_400)?
+        .checked_add(hour as i64 * 3_600)?
+        .checked_add(minute as i64 * 60)?
+        .checked_add(second as i64)?
+        .checked_add(timezone_seconds)?;
+    let filetime_seconds = unix_seconds.checked_add(WINDOWS_EPOCH_OFFSET_SECONDS)?;
+    let filetime = u64::try_from(filetime_seconds)
+        .ok()?
+        .checked_mul(HUNDRED_NANOSECONDS_PER_SECOND)?
+        .checked_add(fraction)?;
+    Some(WindowsDiscoveryStartedAt { filetime })
+}
+
+#[cfg(any(windows, test))]
+fn decimal_u32(bytes: &[u8]) -> Option<u32> {
+    (!bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit))
+        .then(|| std::str::from_utf8(bytes).ok()?.parse().ok())?
+}
+
+#[cfg(any(windows, test))]
+fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+#[cfg(any(windows, test))]
+fn civil_days_since_unix_epoch(year: i64, month: u32, day: u32) -> Option<i64> {
+    let year = year.checked_sub((month <= 2) as i64)?;
+    let era = if year >= 0 {
+        year
+    } else {
+        year.checked_sub(399)?
+    } / 400;
+    let year_of_era = year.checked_sub(era.checked_mul(400)?)?;
+    let month = month as i64;
+    let day_of_year = (153_i64)
+        .checked_mul(month.checked_add(if month > 2 { -3 } else { 9 })?)?
+        .checked_add(2)?
+        / 5
+        + day as i64
+        - 1;
+    let day_of_era = year_of_era
+        .checked_mul(365)?
+        .checked_add(year_of_era / 4)?
+        .checked_sub(year_of_era / 100)?
+        .checked_add(day_of_year)?;
+    era.checked_mul(146_097)?
+        .checked_add(day_of_era)?
+        .checked_sub(719_468)
 }
 
 #[cfg(any(windows, test))]
@@ -302,6 +490,7 @@ fn read_windows_discovery_with(
     if opened.bytes.len() > MAX_DISCOVERY_BYTES as usize {
         return Err(NativeDiagnostic::new("discovery_body_limit", false));
     }
+    let process_alive = backend.process_liveness(&opened.bytes)?;
 
     Ok(OwnerDiscoveryRecord {
         handle: String::new(),
@@ -310,7 +499,7 @@ fn read_windows_discovery_with(
             identity: backend.owner_identity().map_err(windows_discovery_error)?,
             device: opened.opened.volume_serial,
             inode: opened.opened.file_index,
-            process_alive: false,
+            process_alive,
         },
     })
 }
@@ -332,8 +521,9 @@ mod windows_discovery {
     use sha2::{Digest, Sha256};
     use windows_sys::Win32::{
         Foundation::{
-            CloseHandle, GetLastError, LocalFree, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
-            GENERIC_ALL, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+            CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND,
+            ERROR_INVALID_PARAMETER, ERROR_PATH_NOT_FOUND, FILETIME, GENERIC_ALL, GENERIC_WRITE,
+            HANDLE, INVALID_HANDLE_VALUE, STILL_ACTIVE, WAIT_OBJECT_0, WAIT_TIMEOUT,
         },
         Security::{
             AclSizeInformation,
@@ -353,14 +543,18 @@ mod windows_discovery {
         },
         System::{
             SystemServices::ACCESS_ALLOWED_ACE_TYPE,
-            Threading::{GetCurrentProcess, OpenProcessToken},
+            Threading::{
+                GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess,
+                OpenProcessToken, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
         },
         UI::Shell::GetUserProfileDirectoryW,
     };
 
     use super::{
-        WindowsDiscoveryBackend, WindowsDiscoveryIoError, WindowsFileMetadata,
-        WindowsOpenedDiscovery, MAX_DISCOVERY_BYTES,
+        windows_record_process_is_alive, NativeDiagnostic, NativeResult, WindowsDiscoveryBackend,
+        WindowsDiscoveryIoError, WindowsFileMetadata, WindowsOpenedDiscovery,
+        WindowsProcessInspector, WindowsProcessState, MAX_DISCOVERY_BYTES,
     };
 
     struct Handle(HANDLE);
@@ -487,6 +681,63 @@ mod windows_discovery {
 
         fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError> {
             Ok(self.identity.clone())
+        }
+
+        fn process_liveness(&self, bytes: &[u8]) -> NativeResult<bool> {
+            windows_record_process_is_alive(bytes, self)
+        }
+    }
+
+    impl WindowsProcessInspector for NativeWindowsDiscovery {
+        fn inspect_process(&self, pid: u32) -> NativeResult<WindowsProcessState> {
+            // The Win32 SYNCHRONIZE access right is 0x0010_0000.
+            const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
+
+            let handle = unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE_ACCESS,
+                    0,
+                    pid,
+                )
+            };
+            if handle.is_null() {
+                return match unsafe { GetLastError() } {
+                    ERROR_INVALID_PARAMETER => Ok(WindowsProcessState::NotFound),
+                    // Owner-checked discovery does not guarantee this process
+                    // handle is queryable; do not turn denied access into alive.
+                    ERROR_ACCESS_DENIED => {
+                        Err(NativeDiagnostic::new("cave_discovery_unavailable", true))
+                    }
+                    _ => Err(NativeDiagnostic::new("cave_discovery_unavailable", true)),
+                };
+            }
+            let handle = Handle(handle);
+            match unsafe { WaitForSingleObject(handle.0, 0) } {
+                WAIT_OBJECT_0 => return Ok(WindowsProcessState::Exited),
+                WAIT_TIMEOUT => {}
+                _ => return Err(NativeDiagnostic::new("cave_discovery_unavailable", true)),
+            }
+            let mut exit_code = 0;
+            if unsafe { GetExitCodeProcess(handle.0, &mut exit_code) } == 0 {
+                return Err(NativeDiagnostic::new("cave_discovery_unavailable", true));
+            }
+            if exit_code != STILL_ACTIVE as u32 {
+                return Ok(WindowsProcessState::Exited);
+            }
+            let mut created = unsafe { std::mem::zeroed::<FILETIME>() };
+            let mut exited = unsafe { std::mem::zeroed::<FILETIME>() };
+            let mut kernel = unsafe { std::mem::zeroed::<FILETIME>() };
+            let mut user = unsafe { std::mem::zeroed::<FILETIME>() };
+            if unsafe {
+                GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user)
+            } == 0
+            {
+                return Err(NativeDiagnostic::new("cave_discovery_unavailable", true));
+            }
+            Ok(WindowsProcessState::Running {
+                creation_time: ((created.dwHighDateTime as u64) << 32)
+                    | created.dwLowDateTime as u64,
+            })
         }
     }
 
@@ -888,8 +1139,10 @@ mod tests {
 
     #[cfg(not(windows))]
     use super::{
-        read_windows_discovery_with, WindowsDiscoveryBackend, WindowsDiscoveryIoError,
-        WindowsFileMetadata, WindowsOpenedDiscovery,
+        parse_windows_discovery_liveness_metadata, read_windows_discovery_with,
+        windows_record_process_is_alive, NativeDiagnostic, NativeResult, WindowsDiscoveryBackend,
+        WindowsDiscoveryIoError, WindowsFileMetadata, WindowsOpenedDiscovery,
+        WindowsProcessInspector, WindowsProcessState,
     };
 
     #[cfg(unix)]
@@ -937,12 +1190,146 @@ mod tests {
     }
 
     #[cfg(not(windows))]
-    #[derive(Default)]
+    #[test]
+    fn windows_discovery_marks_an_affirmatively_live_owner_process_as_alive() {
+        let root = PathBuf::from(r"C:\Users\Coven");
+        let directory = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            ..safe_windows_metadata(1, 2)
+        };
+        let reader = FakeWindowsDiscovery {
+            root,
+            directories: Mutex::new(VecDeque::from(vec![
+                Ok(directory),
+                Ok(directory),
+                Ok(directory),
+            ])),
+            file: Some(Ok(WindowsOpenedDiscovery {
+                initial: safe_windows_metadata(1, 3),
+                opened: safe_windows_metadata(1, 3),
+                bytes: br#"{
+                    "endpoint": "http://127.0.0.1:4310",
+                    "pid": 42,
+                    "startedAt": "2026-01-01T00:00:00Z"
+                }"#
+                .to_vec(),
+            })),
+            identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
+        };
+
+        assert!(
+            read_windows_discovery_with(&reader)
+                .unwrap()
+                .record
+                .process_alive
+        );
+    }
+
+    #[cfg(not(windows))]
+    struct FixedWindowsProcess(NativeResult<WindowsProcessState>);
+
+    #[cfg(not(windows))]
+    impl WindowsProcessInspector for FixedWindowsProcess {
+        fn inspect_process(&self, _pid: u32) -> NativeResult<WindowsProcessState> {
+            self.0.clone()
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn windows_liveness_record() -> Vec<u8> {
+        br#"{
+            "endpoint": "http://127.0.0.1:4310",
+            "pid": 42,
+            "startedAt": "2026-01-01T00:00:00.000Z"
+        }"#
+        .to_vec()
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_process_liveness_requires_a_live_process_created_no_later_than_started_at() {
+        let record = windows_liveness_record();
+        let (_, started_at) = parse_windows_discovery_liveness_metadata(&record).unwrap();
+
+        assert!(windows_record_process_is_alive(
+            &record,
+            &FixedWindowsProcess(Ok(WindowsProcessState::Running {
+                creation_time: started_at.filetime,
+            })),
+        )
+        .unwrap());
+        assert!(windows_record_process_is_alive(
+            &record,
+            &FixedWindowsProcess(Ok(WindowsProcessState::Running {
+                creation_time: started_at.filetime - 1,
+            })),
+        )
+        .unwrap());
+        assert!(!windows_record_process_is_alive(
+            &record,
+            &FixedWindowsProcess(Ok(WindowsProcessState::Exited)),
+        )
+        .unwrap());
+        assert!(!windows_record_process_is_alive(
+            &record,
+            &FixedWindowsProcess(Ok(WindowsProcessState::NotFound)),
+        )
+        .unwrap());
+        assert!(!windows_record_process_is_alive(
+            &record,
+            &FixedWindowsProcess(Ok(WindowsProcessState::Running {
+                creation_time: started_at.filetime + 1,
+            })),
+        )
+        .unwrap());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_process_liveness_fails_closed_when_process_inspection_is_unavailable() {
+        let unavailable = FixedWindowsProcess(Err(NativeDiagnostic::new(
+            "cave_discovery_unavailable",
+            true,
+        )));
+
+        assert_eq!(
+            windows_record_process_is_alive(&windows_liveness_record(), &unavailable)
+                .unwrap_err()
+                .code,
+            "cave_discovery_unavailable"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_process_liveness_rejects_malformed_or_overflowing_pids() {
+        for malformed in [
+            br#"{"pid": 0, "startedAt": "2026-01-01T00:00:00Z"}"#.as_slice(),
+            br#"{"pid": -1, "startedAt": "2026-01-01T00:00:00Z"}"#.as_slice(),
+            br#"{"pid": 4294967296, "startedAt": "2026-01-01T00:00:00Z"}"#.as_slice(),
+            br#"{"pid": "42", "startedAt": "2026-01-01T00:00:00Z"}"#.as_slice(),
+        ] {
+            assert_eq!(
+                windows_record_process_is_alive(
+                    malformed,
+                    &FixedWindowsProcess(Ok(WindowsProcessState::Running { creation_time: 0 })),
+                )
+                .unwrap_err()
+                .code,
+                "invalid_discovery_record"
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
     struct FakeWindowsDiscovery {
         root: PathBuf,
         directories: Mutex<VecDeque<Result<WindowsFileMetadata, WindowsDiscoveryIoError>>>,
         file: Option<Result<WindowsOpenedDiscovery, WindowsDiscoveryIoError>>,
         identity: String,
+        process: NativeResult<WindowsProcessState>,
     }
 
     #[cfg(not(windows))]
@@ -971,6 +1358,10 @@ mod tests {
 
         fn owner_identity(&self) -> Result<String, WindowsDiscoveryIoError> {
             Ok(self.identity.clone())
+        }
+
+        fn process_liveness(&self, bytes: &[u8]) -> NativeResult<bool> {
+            windows_record_process_is_alive(bytes, &FixedWindowsProcess(self.process.clone()))
         }
     }
 
@@ -1022,6 +1413,7 @@ mod tests {
             ])),
             file: Some(Ok(discovery.clone())),
             identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
         };
         assert_eq!(
             windows_error_code(read_windows_discovery_with(&foreign_owner)),
@@ -1040,6 +1432,7 @@ mod tests {
             ])),
             file: Some(Ok(discovery)),
             identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
         };
         assert_eq!(
             windows_error_code(read_windows_discovery_with(&reparse)),
@@ -1055,6 +1448,7 @@ mod tests {
             directories: Mutex::new(VecDeque::from(vec![Err(WindowsDiscoveryIoError::Missing)])),
             file: None,
             identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
         };
         assert_eq!(
             windows_error_code(read_windows_discovery_with(&missing)),
@@ -1068,6 +1462,7 @@ mod tests {
             )])),
             file: None,
             identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
         };
         assert_eq!(
             windows_error_code(read_windows_discovery_with(&unavailable)),
@@ -1097,6 +1492,7 @@ mod tests {
                 bytes: br#"{"endpoint":"http://127.0.0.1:4310"}"#.to_vec(),
             })),
             identity: "current-user".to_owned(),
+            process: Ok(WindowsProcessState::Running { creation_time: 0 }),
         };
 
         assert_eq!(
