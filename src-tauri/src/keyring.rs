@@ -43,6 +43,14 @@ pub(crate) struct Credential {
     pub(crate) origin: String,
 }
 
+impl Credential {
+    pub(crate) fn is_same_identity(&self, other: &Self) -> bool {
+        self.bearer == other.bearer
+            && self.credential_id == other.credential_id
+            && self.origin == other.origin
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct StoredCredential {
     bearer: String,
@@ -56,7 +64,7 @@ pub(crate) trait CredentialCustody: Send + Sync {
         &self,
         instance_id: &str,
         origin: &str,
-        expected_credential_id: Option<&str>,
+        expected_credential: Option<&Credential>,
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError>;
@@ -64,7 +72,7 @@ pub(crate) trait CredentialCustody: Send + Sync {
         &self,
         instance_id: &str,
         origin: &str,
-        credential_id: &str,
+        expected_credential: &Credential,
     ) -> Result<bool, KeyringError>;
 }
 
@@ -287,7 +295,7 @@ impl CredentialCustody for NativeKeyring {
         &self,
         instance_id: &str,
         origin: &str,
-        expected_credential_id: Option<&str>,
+        expected_credential: Option<&Credential>,
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
@@ -304,10 +312,13 @@ impl CredentialCustody for NativeKeyring {
             Err(keyring::Error::NoEntry) => None,
             Err(error) => return Err(map_keyring_error(error)),
         };
-        let matches_expected = match (current.as_ref(), expected_credential_id) {
+        let matches_expected = match (current.as_ref(), expected_credential) {
             (None, None) => true,
             (Some(stored), Some(expected)) => {
-                stored.origin == origin && stored.credential_id == expected
+                stored.origin == origin
+                    && stored.bearer == expected.bearer
+                    && stored.credential_id == expected.credential_id
+                    && stored.origin == expected.origin
             }
             _ => false,
         };
@@ -330,7 +341,7 @@ impl CredentialCustody for NativeKeyring {
         &self,
         instance_id: &str,
         origin: &str,
-        credential_id: &str,
+        expected_credential: &Credential,
     ) -> Result<bool, KeyringError> {
         let _guard = acquire_mutation_lock()?;
         let entry = Self::entry(instance_id)?;
@@ -341,7 +352,11 @@ impl CredentialCustody for NativeKeyring {
         };
         let stored =
             serde_json::from_str::<StoredCredential>(&value).map_err(|_| KeyringError::Failure)?;
-        if stored.origin != origin || stored.credential_id != credential_id {
+        if stored.origin != origin
+            || stored.bearer != expected_credential.bearer
+            || stored.credential_id != expected_credential.credential_id
+            || stored.origin != expected_credential.origin
+        {
             return Ok(false);
         }
         match entry.delete_credential() {

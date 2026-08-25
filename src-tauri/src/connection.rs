@@ -12,7 +12,7 @@ use crate::{
         NativeDiagnostic, NativeResult, OwnerDiscoveryRecord, PinnedCaveAuthority,
     },
     keyring::{Credential, KeyringError},
-    transport::{CaveReadPath, NativeHttpResponse, NativePage},
+    transport::{CaveReadPath, NativeHttpResponse, NativePage, NativePairingExchange},
     NativeConnectionState,
 };
 
@@ -49,6 +49,7 @@ fn launch_deadline_expired() -> NativeDiagnostic {
     NativeDiagnostic::new("service_unavailable", true)
 }
 
+#[derive(Clone)]
 struct PendingPairing {
     request_id: String,
     secret: String,
@@ -556,18 +557,89 @@ impl NativeConnectionState {
     ) -> NativeResult<CredentialCurrentState> {
         self.revalidate_authorized(generation, handle, authority, instance_id)?;
         let state = match self.keyring.read(instance_id, authority.origin().as_str()) {
-            Ok(current)
-                if current.credential_id == expected.credential_id
-                    && current.origin == expected.origin =>
-            {
-                CredentialCurrentState::Current
-            }
+            Ok(current) if current.is_same_identity(expected) => CredentialCurrentState::Current,
             Ok(_) => CredentialCurrentState::Changed,
             Err(KeyringError::NotFound) => CredentialCurrentState::Missing,
             Err(error) => return Err(error.diagnostic()),
         };
         self.revalidate_authorized(generation, handle, authority, instance_id)?;
         Ok(state)
+    }
+
+    fn commit_pairing_exchange(
+        &self,
+        handle: &str,
+        attempt: &PendingPairing,
+        expected_credential: Option<&Credential>,
+        exchanged: &NativePairingExchange,
+    ) -> NativeResult<bool> {
+        let record = self.discovery.read()?;
+        let mut runtime = self.runtime()?;
+        runtime.require_current_authorized(
+            attempt.generation,
+            handle,
+            &attempt.authority,
+            &attempt.instance_id,
+        )?;
+        if !attempt.authority.matches_owner_record(&record) {
+            runtime.clear_authority_state();
+            runtime.new_generation();
+            return Err(NativeDiagnostic::new("stale_discovery_handle", true));
+        }
+        if runtime.pairing.as_ref().is_none_or(|current| {
+            current.request_id != attempt.request_id
+                || current.generation != attempt.generation
+                || !current.authority.is_same_pin(&attempt.authority)
+                || current.instance_id != attempt.instance_id
+                || !current.exchange_committed
+        }) {
+            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+        }
+        let persisted = self
+            .keyring
+            .store_if_current(
+                &attempt.instance_id,
+                attempt.authority.origin().as_str(),
+                expected_credential,
+                &exchanged.bearer,
+                &exchanged.credential_id,
+            )
+            .map_err(|error| error.diagnostic())?;
+        if persisted {
+            runtime.pairing = None;
+            runtime.unauthorized.reset();
+        }
+        Ok(persisted)
+    }
+
+    fn revalidate_authenticated_read(
+        &self,
+        generation: u64,
+        handle: &str,
+        authority: &PinnedCaveAuthority,
+        instance_id: &str,
+        expected_credential: &Credential,
+        reset_unauthorized: bool,
+    ) -> NativeResult<()> {
+        let record = self.discovery.read()?;
+        let mut runtime = self.runtime()?;
+        runtime.require_current_authorized(generation, handle, authority, instance_id)?;
+        if !authority.matches_owner_record(&record) {
+            runtime.clear_authority_state();
+            runtime.new_generation();
+            return Err(NativeDiagnostic::new("stale_discovery_handle", true));
+        }
+        let current = self
+            .keyring
+            .read(instance_id, authority.origin().as_str())
+            .map_err(|error| error.diagnostic())?;
+        if !current.is_same_identity(expected_credential) {
+            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+        }
+        if reset_unauthorized {
+            runtime.unauthorized.reset();
+        }
+        Ok(())
     }
 
     pub(crate) async fn cave_health(&self, handle: String) -> NativeResult<Value> {
@@ -667,7 +739,7 @@ impl NativeConnectionState {
         request_id: String,
     ) -> NativeResult<Value> {
         self.capture_handle(&handle)?;
-        let (generation, authority, instance_id, secret) = {
+        let pairing = {
             let mut runtime = self.runtime()?;
             let Some(pairing) = runtime.pairing.as_mut() else {
                 return Err(NativeDiagnostic::new("pairing_not_found", true));
@@ -679,76 +751,42 @@ impl NativeConnectionState {
                 return Err(NativeDiagnostic::new("pairing_not_found", true));
             }
             pairing.exchange_committed = true;
-            (
-                pairing.generation,
-                pairing.authority.clone(),
-                pairing.instance_id.clone(),
-                pairing.secret.clone(),
-            )
+            pairing.clone()
         };
-        let expected_credential_id =
-            match self.keyring.read(&instance_id, authority.origin().as_str()) {
-                Ok(credential) => Some(credential.credential_id),
-                Err(KeyringError::NotFound) => None,
-                Err(error) => {
-                    let mut runtime = self.runtime()?;
-                    if runtime.generation == generation
-                        && runtime.authority_handle.as_deref() == Some(&handle)
-                        && runtime
-                            .pairing
-                            .as_mut()
-                            .is_some_and(|pairing| pairing.request_id == request_id)
-                    {
-                        runtime.pairing.as_mut().unwrap().exchange_committed = false;
-                    }
-                    return Err(error.diagnostic());
-                }
-            };
-        let exchanged = self
-            .transport
-            .pairing_exchange(&authority, &request_id, &secret)
-            .await?;
-        self.capture_handle(&handle)?;
-        self.runtime()?
-            .require_current(generation, &handle, &authority)?;
-        let persisted = match self.keyring.store_if_current(
-            &instance_id,
-            authority.origin().as_str(),
-            expected_credential_id.as_deref(),
-            &exchanged.bearer,
-            &exchanged.credential_id,
-        ) {
-            Ok(persisted) => persisted,
+        let expected_credential = match self
+            .keyring
+            .read(&pairing.instance_id, pairing.authority.origin().as_str())
+        {
+            Ok(credential) => Some(credential),
+            Err(KeyringError::NotFound) => None,
             Err(error) => {
                 let mut runtime = self.runtime()?;
-                if runtime.generation == generation
+                if runtime.generation == pairing.generation
+                    && runtime.authority_handle.as_deref() == Some(&handle)
                     && runtime
                         .pairing
-                        .as_ref()
+                        .as_mut()
                         .is_some_and(|pairing| pairing.request_id == request_id)
                 {
-                    runtime.pairing = None;
+                    runtime.pairing.as_mut().unwrap().exchange_committed = false;
                 }
                 return Err(error.diagnostic());
             }
         };
+        let exchanged = self
+            .transport
+            .pairing_exchange(&pairing.authority, &request_id, &pairing.secret)
+            .await?;
+        let persisted = self.commit_pairing_exchange(
+            &handle,
+            &pairing,
+            expected_credential.as_ref(),
+            &exchanged,
+        )?;
         if !persisted {
             return Err(NativeDiagnostic::new("credential_update_in_progress", true));
         }
-
-        let mut runtime = self.runtime()?;
-        if runtime.generation == generation
-            && runtime
-                .authority
-                .as_ref()
-                .is_some_and(|current| current.is_same_pin(&authority))
-            && runtime.authority_handle.as_deref() == Some(&handle)
-        {
-            runtime.pairing = None;
-            runtime.unauthorized.reset();
-            return Ok(exchanged.response);
-        }
-        Err(NativeDiagnostic::new("stale_connection_attempt", true))
+        Ok(exchanged.response)
     }
 
     pub(crate) async fn cave_credential_status(&self, handle: String) -> NativeResult<Value> {
@@ -840,11 +878,7 @@ impl NativeConnectionState {
 
             let deleted = self
                 .keyring
-                .delete_if_matches(
-                    &instance_id,
-                    authority.origin().as_str(),
-                    &credential.credential_id,
-                )
+                .delete_if_matches(&instance_id, authority.origin().as_str(), &credential)
                 .map_err(|error| error.diagnostic())?;
             match self.credential_current_state(
                 generation,
@@ -957,11 +991,7 @@ impl NativeConnectionState {
         }
         let deleted = self
             .keyring
-            .delete_if_matches(
-                &instance_id,
-                authority.origin().as_str(),
-                &credential.credential_id,
-            )
+            .delete_if_matches(&instance_id, authority.origin().as_str(), &credential)
             .map_err(|error| error.diagnostic())?;
         match self.credential_current_state(
             generation,
@@ -993,11 +1023,14 @@ impl NativeConnectionState {
             .transport
             .authenticated_read(&authority, &credential.bearer, path)
             .await?;
-        let mut runtime = self.runtime()?;
-        runtime.require_current(generation, &handle, &authority)?;
-        if response.status_code != 401 {
-            runtime.unauthorized.reset();
-        }
+        self.revalidate_authenticated_read(
+            generation,
+            &handle,
+            &authority,
+            &instance_id,
+            &credential,
+            response.status_code != 401,
+        )?;
         Ok(response.payload)
     }
 
@@ -1396,6 +1429,72 @@ mod tests {
         }
     }
 
+    struct ExchangeRaceTransport {
+        old_exchange_started: Arc<Barrier>,
+        old_exchange_release: Arc<Barrier>,
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for ExchangeRaceTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            if request_id == "old-request" {
+                self.old_exchange_started.wait();
+                self.old_exchange_release.wait();
+            }
+            let (bearer, credential_id) = match request_id {
+                "old-request" => ("old-bearer", "credential-old"),
+                "new-request" => ("new-bearer", "credential-new"),
+                _ => return Err(NativeDiagnostic::new("unused", false)),
+            };
+            Ok(NativePairingExchange {
+                response: json!({ "status": "paired" }),
+                bearer: bearer.to_owned(),
+                credential_id: credential_id.to_owned(),
+            })
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
     struct FakeKeyring {
         credential: Mutex<Option<Credential>>,
         deletes: AtomicUsize,
@@ -1415,15 +1514,15 @@ mod tests {
             &self,
             _instance_id: &str,
             origin: &str,
-            expected_credential_id: Option<&str>,
+            expected_credential: Option<&Credential>,
             bearer: &str,
             credential_id: &str,
         ) -> Result<bool, KeyringError> {
             let mut stored = self.credential.lock().unwrap();
-            let matches_expected = match (stored.as_ref(), expected_credential_id) {
+            let matches_expected = match (stored.as_ref(), expected_credential) {
                 (None, None) => true,
                 (Some(current), Some(expected)) => {
-                    current.origin == origin && current.credential_id == expected
+                    current.origin == origin && current.is_same_identity(expected)
                 }
                 _ => false,
             };
@@ -1442,18 +1541,32 @@ mod tests {
             &self,
             _instance_id: &str,
             origin: &str,
-            credential_id: &str,
+            expected_credential: &Credential,
         ) -> Result<bool, KeyringError> {
             self.deletes.fetch_add(1, Ordering::SeqCst);
             let mut stored = self.credential.lock().unwrap();
             let matches = stored.as_ref().is_some_and(|current| {
-                current.origin == origin && current.credential_id == credential_id
+                current.origin == origin && current.is_same_identity(expected_credential)
             });
             if matches {
                 *stored = None;
             }
             Ok(matches)
         }
+    }
+
+    fn install_pending_pairing(state: &NativeConnectionState, handle: &str, request_id: &str) {
+        let mut runtime = state.runtime().unwrap();
+        let (generation, authority, instance_id) = runtime.require_authorized(handle).unwrap();
+        runtime.pairing = Some(PendingPairing {
+            request_id: request_id.to_owned(),
+            secret: "pairing-secret".to_owned(),
+            authority,
+            instance_id,
+            generation,
+            exchange_committed: false,
+            poll_in_flight: false,
+        });
     }
 
     struct FakeLauncher;
@@ -2303,6 +2416,182 @@ mod tests {
     }
 
     #[test]
+    fn stale_pairing_exchange_cannot_publish_over_a_newer_generation_credential() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(None),
+            deletes: AtomicUsize::new(0),
+        });
+        let old_exchange_started = Arc::new(Barrier::new(2));
+        let old_exchange_release = Arc::new(Barrier::new(2));
+        let discovery = Arc::new(MutableDiscovery {
+            record: Mutex::new(deadline_record()),
+        });
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(ExchangeRaceTransport {
+                old_exchange_started: old_exchange_started.clone(),
+                old_exchange_release: old_exchange_release.clone(),
+            }),
+            keyring.clone(),
+            discovery.clone(),
+            Arc::new(FakeLauncher),
+        );
+        let old_handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(old_handle.clone())).unwrap();
+        install_pending_pairing(&state, &old_handle, "old-request");
+
+        let old_state = state.clone();
+        let old_completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                old_state.cave_pairing_exchange(old_handle, "old-request".to_owned()),
+            )
+        });
+        old_exchange_started.wait();
+
+        let mut replacement = discovery.record.lock().unwrap();
+        replacement.bytes = serde_json::to_vec(&json!({
+            "endpoint": "http://127.0.0.1:4311",
+        }))
+        .unwrap();
+        replacement.record.inode = 3;
+        drop(replacement);
+        let new_handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(new_handle.clone())).unwrap();
+        install_pending_pairing(&state, &new_handle, "new-request");
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                state.cave_pairing_exchange(new_handle, "new-request".to_owned())
+            )
+            .unwrap(),
+            json!({ "status": "paired" })
+        );
+
+        old_exchange_release.wait();
+
+        assert_eq!(
+            old_completion.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
+        let stored = keyring.credential.lock().unwrap();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.credential_id, "credential-new");
+        assert_eq!(stored.bearer, "new-bearer");
+        assert_eq!(stored.origin, "http://127.0.0.1:4311/");
+    }
+
+    #[test]
+    fn authenticated_read_cannot_publish_after_its_credential_is_deleted() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "old-bearer".to_owned(),
+                credential_id: "credential-old".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let read_started = Arc::new(Barrier::new(2));
+        let read_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(StatusRaceTransport {
+                health_calls: AtomicUsize::new(0),
+                final_health_started: None,
+                final_health_release: None,
+                read_started: Some(read_started.clone()),
+                read_release: Some(read_release.clone()),
+                read_status: 200,
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+        let read_state = state.clone();
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(read_state.cave_read(
+                handle,
+                CaveReadPath::Familiars {
+                    page: NativePage {
+                        limit: Some(1),
+                        cursor: None,
+                    },
+                },
+            ))
+        });
+        read_started.wait();
+        *keyring.credential.lock().unwrap() = None;
+        read_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap_err().code,
+            "credential_missing"
+        );
+        assert!(keyring.credential.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn authenticated_read_cannot_publish_after_its_credential_is_replaced() {
+        let keyring = Arc::new(FakeKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "old-bearer".to_owned(),
+                credential_id: "credential-shared".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+        });
+        let read_started = Arc::new(Barrier::new(2));
+        let read_release = Arc::new(Barrier::new(2));
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(StatusRaceTransport {
+                health_calls: AtomicUsize::new(0),
+                final_health_started: None,
+                final_health_release: None,
+                read_started: Some(read_started.clone()),
+                read_release: Some(read_release.clone()),
+                read_status: 200,
+            }),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+        let read_state = state.clone();
+        let completion = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(read_state.cave_read(
+                handle,
+                CaveReadPath::Familiars {
+                    page: NativePage {
+                        limit: Some(1),
+                        cursor: None,
+                    },
+                },
+            ))
+        });
+        read_started.wait();
+        *keyring.credential.lock().unwrap() = Some(Credential {
+            bearer: "new-bearer".to_owned(),
+            credential_id: "credential-shared".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+        });
+        read_release.wait();
+
+        assert_eq!(
+            completion.join().unwrap().unwrap_err().code,
+            "stale_connection_attempt"
+        );
+        let stored = keyring.credential.lock().unwrap();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.credential_id, "credential-shared");
+        assert_eq!(stored.bearer, "new-bearer");
+    }
+
+    #[test]
     fn stale_revocation_read_cannot_delete_a_replacement_credential() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
@@ -2599,12 +2888,17 @@ mod tests {
             })),
             deletes: AtomicUsize::new(0),
         };
+        let expected = Credential {
+            bearer: "old-bearer".to_owned(),
+            credential_id: "credential-old".to_owned(),
+            origin: "http://127.0.0.1:4310/".to_owned(),
+        };
 
         let persisted = keyring
             .store_if_current(
                 "owner-record",
                 "http://127.0.0.1:4310/",
-                Some("credential-old"),
+                Some(&expected),
                 "late-bearer",
                 "credential-old",
             )
