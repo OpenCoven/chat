@@ -57,3 +57,9 @@
   `allow-app-identity`, `allow-app-installation-id`, and Cave adapter
   permissions for the `main` window.
 - No shell, filesystem, opener, or network plugin permissions are configured.
+- The feature-gated `phase1-native-rpc` binary is a headless conformance-only
+  NDJSON bridge. It is excluded from default Cargo and Tauri builds, uses an
+  in-memory test custody instead of the operator keyring, and accepts Cave
+  launch paths only through its two explicit
+  `OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH` and
+  `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.

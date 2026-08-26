@@ -174,6 +174,26 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('feature-gates the headless Phase 1 conformance bridge outside Tauri', () => {
+    const manifest = readText('src-tauri/Cargo.toml');
+    const library = readText('src-tauri/src/lib.rs');
+    const commands = readText('src-tauri/src/commands.rs');
+    const capability = readText('src-tauri/capabilities/default.json');
+    const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
+
+    expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
+    expect(manifest).toMatch(
+      /\[\[bin\]\]\s+name = "phase1-native-rpc"\s+path = "src\/bin\/phase1-native-rpc\.rs"\s+required-features = \["phase1-conformance"\]/,
+    );
+    expect(library).toContain('#[cfg(feature = "phase1-conformance")]\npub mod conformance;');
+
+    for (const control of controls) {
+      expect(commands).not.toContain(control);
+      expect(capability).not.toContain(control);
+      expect(readText('src-tauri/build.rs')).not.toContain(control);
+    }
+  });
+
   it('keeps the capability schema resolvable from a fresh checkout', () => {
     const capability = readJson<CapabilityFile>('src-tauri/capabilities/default.json');
     const schemaPath = resolve(projectRoot, 'src-tauri/capabilities', capability.$schema ?? '');

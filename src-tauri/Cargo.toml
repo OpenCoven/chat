@@ -9,6 +9,14 @@ rust-version = "1.95.0"
 name = "opencoven_chat_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+phase1-conformance = []
+
+[[bin]]
+name = "phase1-native-rpc"
+path = "src/bin/phase1-native-rpc.rs"
+required-features = ["phase1-conformance"]
+
 [build-dependencies]
 serde_json = { version = "=1.0.145", features = ["preserve_order"] }
 tauri-build = { version = "=2.6.2", features = [] }

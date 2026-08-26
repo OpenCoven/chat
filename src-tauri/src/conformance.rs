@@ -1,0 +1,998 @@
+use std::{
+    collections::HashMap,
+    env,
+    io::{self, BufRead, Write},
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex, MutexGuard},
+};
+
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
+
+use crate::{
+    cave::{
+        CaveChild, CaveLauncher, NativeCaveClock, NativeCaveDiscoveryReader, NativeCaveSleeper,
+        NativeCaveTaskRunner, NativeDiagnostic, NativeResult,
+    },
+    keyring::{
+        validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
+    },
+    transport::{CaveReadPath, ConstrainedTransport, NativeCaveTransport, NativePage},
+    NativeConnectionState,
+};
+
+const MAX_LINE_BYTES: usize = 64 * 1024;
+const MAX_REQUEST_ID_BYTES: usize = 128;
+const INVALID_REQUEST_ID: &str = "invalid-request";
+pub const CONFORMANCE_INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
+pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH";
+pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictRequest {
+    id: String,
+    command: String,
+    #[serde(default)]
+    args: Option<Value>,
+}
+
+struct RpcRequest {
+    id: String,
+    command: RpcCommand,
+}
+
+enum RpcCommand {
+    AppInstallationId,
+    CaveReadDiscovery,
+    CaveLaunch,
+    CaveHealth {
+        handle: String,
+    },
+    CavePairingCreate {
+        handle: String,
+        request: Value,
+    },
+    CavePairingPoll {
+        handle: String,
+        request_id: String,
+    },
+    CavePairingExchange {
+        handle: String,
+        request_id: String,
+    },
+    CaveResetPairing {
+        handle: String,
+    },
+    CaveCredentialStatus {
+        handle: String,
+    },
+    CaveForgetCredential {
+        handle: String,
+    },
+    CaveListFamiliars {
+        handle: String,
+        page: NativePage,
+    },
+    CaveListProjects {
+        handle: String,
+        page: NativePage,
+    },
+    CaveListConversations {
+        handle: String,
+        page: NativePage,
+    },
+    CaveGetConversation {
+        handle: String,
+        conversation_id: String,
+    },
+    CaveListConversationMessages {
+        handle: String,
+        conversation_id: String,
+        page: NativePage,
+    },
+    ResetNativeState,
+    Shutdown,
+}
+
+#[derive(Clone)]
+pub struct SharedMemoryCredentialCustody {
+    store: Arc<Mutex<SharedCredentialStore>>,
+}
+
+struct SharedCredentialStore {
+    credentials: HashMap<String, Credential>,
+}
+
+impl SharedMemoryCredentialCustody {
+    pub fn new() -> Self {
+        Self {
+            store: Arc::new(Mutex::new(SharedCredentialStore {
+                credentials: HashMap::new(),
+            })),
+        }
+    }
+
+    fn lock(&self) -> Result<MutexGuard<'_, SharedCredentialStore>, KeyringError> {
+        self.store.lock().map_err(|_| KeyringError::Failure)
+    }
+}
+
+impl Default for SharedMemoryCredentialCustody {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn validate_instance_id(instance_id: &str) -> Result<(), KeyringError> {
+    if instance_id.is_empty() || instance_id.len() > 128 {
+        return Err(KeyringError::Failure);
+    }
+    Ok(())
+}
+
+impl CredentialCustody for SharedMemoryCredentialCustody {
+    fn installation_id(&self) -> Result<String, KeyringError> {
+        Ok(CONFORMANCE_INSTALLATION_ID.to_owned())
+    }
+
+    fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
+        match self.read_for_pairing_update(instance_id, origin)? {
+            CredentialSlot::Current(credential) => Ok(credential),
+            CredentialSlot::Missing | CredentialSlot::Stale(_) => Err(KeyringError::NotFound),
+        }
+    }
+
+    fn read_for_pairing_update(
+        &self,
+        instance_id: &str,
+        origin: &str,
+    ) -> Result<CredentialSlot, KeyringError> {
+        validate_instance_id(instance_id)?;
+        validate_credential_origin(origin)?;
+        let store = self.lock()?;
+        let Some(credential) = store.credentials.get(instance_id).cloned() else {
+            return Ok(CredentialSlot::Missing);
+        };
+        if credential.origin == origin {
+            Ok(CredentialSlot::Current(credential))
+        } else {
+            Ok(CredentialSlot::Stale(credential))
+        }
+    }
+
+    fn store_if_current(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        expected_credential: Option<&Credential>,
+        bearer: &str,
+        credential_id: &str,
+    ) -> Result<bool, KeyringError> {
+        validate_instance_id(instance_id)?;
+        validate_credential_origin(origin)?;
+        if let Some(expected_credential) = expected_credential {
+            validate_credential_origin(&expected_credential.origin)?;
+        }
+        if bearer.is_empty() || credential_id.is_empty() {
+            return Err(KeyringError::Failure);
+        }
+        let mut store = self.lock()?;
+        let matches_expected = match (store.credentials.get(instance_id), expected_credential) {
+            (None, None) => true,
+            (Some(current), Some(expected)) => {
+                current.origin == origin
+                    && current.bearer == expected.bearer
+                    && current.credential_id == expected.credential_id
+                    && current.origin == expected.origin
+            }
+            _ => false,
+        };
+        if !matches_expected {
+            return Ok(false);
+        }
+        store.credentials.insert(
+            instance_id.to_owned(),
+            Credential {
+                bearer: bearer.to_owned(),
+                credential_id: credential_id.to_owned(),
+                origin: origin.to_owned(),
+            },
+        );
+        Ok(true)
+    }
+
+    fn replace_stale_if_current(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        expected_stale_credential: &Credential,
+        bearer: &str,
+        credential_id: &str,
+    ) -> Result<bool, KeyringError> {
+        validate_instance_id(instance_id)?;
+        validate_credential_origin(origin)?;
+        validate_credential_origin(&expected_stale_credential.origin)?;
+        if bearer.is_empty()
+            || credential_id.is_empty()
+            || expected_stale_credential.origin == origin
+        {
+            return Err(KeyringError::Failure);
+        }
+        let mut store = self.lock()?;
+        let Some(current) = store.credentials.get(instance_id) else {
+            return Ok(false);
+        };
+        if current.origin == origin
+            || current.bearer != expected_stale_credential.bearer
+            || current.credential_id != expected_stale_credential.credential_id
+            || current.origin != expected_stale_credential.origin
+        {
+            return Ok(false);
+        }
+        store.credentials.insert(
+            instance_id.to_owned(),
+            Credential {
+                bearer: bearer.to_owned(),
+                credential_id: credential_id.to_owned(),
+                origin: origin.to_owned(),
+            },
+        );
+        Ok(true)
+    }
+
+    fn delete_if_matches(
+        &self,
+        instance_id: &str,
+        origin: &str,
+        expected_credential: &Credential,
+    ) -> Result<bool, KeyringError> {
+        validate_instance_id(instance_id)?;
+        validate_credential_origin(origin)?;
+        validate_credential_origin(&expected_credential.origin)?;
+        let mut store = self.lock()?;
+        let Some(current) = store.credentials.get(instance_id) else {
+            return Ok(false);
+        };
+        if current.origin != origin
+            || current.bearer != expected_credential.bearer
+            || current.credential_id != expected_credential.credential_id
+            || current.origin != expected_credential.origin
+        {
+            return Ok(false);
+        }
+        store.credentials.remove(instance_id);
+        Ok(true)
+    }
+}
+
+pub struct ConformanceCaveLauncher;
+
+struct ConformanceCaveChild(Child);
+
+impl CaveChild for ConformanceCaveChild {
+    fn try_wait(&mut self) -> NativeResult<bool> {
+        self.0
+            .try_wait()
+            .map(|status| status.is_some())
+            .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+    }
+
+    fn terminate(&mut self) -> NativeResult<()> {
+        match self.0.kill() {
+            Ok(()) | Err(_) => {}
+        }
+        Ok(())
+    }
+
+    fn wait(&mut self) -> NativeResult<()> {
+        self.0
+            .wait()
+            .map(|_| ())
+            .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+    }
+}
+
+fn regular_absolute_environment_path(name: &str) -> NativeResult<PathBuf> {
+    let path = env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| NativeDiagnostic::new("cave_launch_configuration_invalid", false))?;
+    if !path.is_absolute() {
+        return Err(NativeDiagnostic::new(
+            "cave_launch_configuration_invalid",
+            false,
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|_| NativeDiagnostic::new("cave_launch_configuration_invalid", false))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(NativeDiagnostic::new(
+            "cave_launch_configuration_invalid",
+            false,
+        ));
+    }
+    Ok(path)
+}
+
+impl CaveLauncher for ConformanceCaveLauncher {
+    fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+        let node = regular_absolute_environment_path(CONFORMANCE_NODE_PATH_ENV)?;
+        let server = regular_absolute_environment_path(CONFORMANCE_CAVE_SERVER_PATH_ENV)?;
+        let child = Command::new(node)
+            .arg(server)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))?;
+        Ok(Box::new(ConformanceCaveChild(child)))
+    }
+}
+
+pub struct RpcRuntime {
+    custody: SharedMemoryCredentialCustody,
+    state: NativeConnectionState,
+}
+
+impl RpcRuntime {
+    pub fn new() -> Self {
+        let custody = SharedMemoryCredentialCustody::new();
+        Self {
+            state: state_with_custody(&custody),
+            custody,
+        }
+    }
+
+    fn reset_native_state(&mut self) {
+        self.state = state_with_custody(&self.custody);
+    }
+
+    pub fn process_line(&mut self, line: &[u8]) -> Value {
+        self.process_line_with_action(line).0
+    }
+
+    fn process_line_with_action(&mut self, line: &[u8]) -> (Value, bool) {
+        let request = match parse_request_line(line) {
+            Ok(request) => request,
+            Err(response) => return (response, false),
+        };
+        let id = request.id;
+        match self.dispatch(request.command) {
+            Ok((result, shutdown)) => (success_response(id, result), shutdown),
+            Err(error) => (failure_response(id, error.code, error.retryable), false),
+        }
+    }
+
+    fn dispatch(&mut self, command: RpcCommand) -> Result<(Value, bool), NativeDiagnostic> {
+        let result = match command {
+            RpcCommand::AppInstallationId => json!(self.state.installation_id()?),
+            RpcCommand::CaveReadDiscovery => value_from(self.state.cave_read_discovery()?)?,
+            RpcCommand::CaveLaunch => {
+                tauri::async_runtime::block_on(self.state.cave_launch())?;
+                Value::Null
+            }
+            RpcCommand::CaveHealth { handle } => {
+                tauri::async_runtime::block_on(self.state.cave_health(handle))?
+            }
+            RpcCommand::CavePairingCreate { handle, request } => {
+                tauri::async_runtime::block_on(self.state.cave_pairing_create(handle, request))?
+            }
+            RpcCommand::CavePairingPoll { handle, request_id } => {
+                tauri::async_runtime::block_on(self.state.cave_pairing_poll(handle, request_id))?
+            }
+            RpcCommand::CavePairingExchange { handle, request_id } => {
+                tauri::async_runtime::block_on(
+                    self.state.cave_pairing_exchange(handle, request_id),
+                )?
+            }
+            RpcCommand::CaveResetPairing { handle } => self.state.cave_reset_pairing(handle)?,
+            RpcCommand::CaveCredentialStatus { handle } => {
+                tauri::async_runtime::block_on(self.state.cave_credential_status(handle))?
+            }
+            RpcCommand::CaveForgetCredential { handle } => {
+                self.state.cave_forget_credential(handle)?
+            }
+            RpcCommand::CaveListFamiliars { handle, page } => tauri::async_runtime::block_on(
+                self.state
+                    .cave_read(handle, CaveReadPath::Familiars { page }),
+            )?,
+            RpcCommand::CaveListProjects { handle, page } => tauri::async_runtime::block_on(
+                self.state
+                    .cave_read(handle, CaveReadPath::Projects { page }),
+            )?,
+            RpcCommand::CaveListConversations { handle, page } => tauri::async_runtime::block_on(
+                self.state
+                    .cave_read(handle, CaveReadPath::Conversations { page }),
+            )?,
+            RpcCommand::CaveGetConversation {
+                handle,
+                conversation_id,
+            } => tauri::async_runtime::block_on(
+                self.state
+                    .cave_read(handle, CaveReadPath::Conversation { conversation_id }),
+            )?,
+            RpcCommand::CaveListConversationMessages {
+                handle,
+                conversation_id,
+                page,
+            } => tauri::async_runtime::block_on(self.state.cave_read(
+                handle,
+                CaveReadPath::ConversationMessages {
+                    conversation_id,
+                    page,
+                },
+            ))?,
+            RpcCommand::ResetNativeState => {
+                self.reset_native_state();
+                json!({ "status": "reset" })
+            }
+            RpcCommand::Shutdown => return Ok((json!({ "status": "shutting_down" }), true)),
+        };
+        Ok((result, false))
+    }
+}
+
+impl Default for RpcRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn state_with_custody(custody: &SharedMemoryCredentialCustody) -> NativeConnectionState {
+    NativeConnectionState::with_test_launch_collaborators(
+        Arc::new(ConstrainedTransport) as Arc<dyn NativeCaveTransport>,
+        Arc::new(custody.clone()) as Arc<dyn CredentialCustody>,
+        Arc::new(NativeCaveDiscoveryReader),
+        Arc::new(ConformanceCaveLauncher),
+        Arc::new(NativeCaveClock::default()),
+        Arc::new(NativeCaveSleeper),
+        Arc::new(NativeCaveTaskRunner),
+    )
+}
+
+fn value_from<T: serde::Serialize>(value: T) -> NativeResult<Value> {
+    serde_json::to_value(value)
+        .map_err(|_| NativeDiagnostic::new("conformance_serialization_failure", false))
+}
+
+fn valid_request_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_REQUEST_ID_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn parsed_request_id(value: &Value) -> &str {
+    value
+        .as_object()
+        .and_then(|object| object.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| valid_request_id(id))
+        .unwrap_or(INVALID_REQUEST_ID)
+}
+
+fn parse_request_line(line: &[u8]) -> Result<RpcRequest, Value> {
+    if line.len() > MAX_LINE_BYTES {
+        return Err(failure_response(
+            INVALID_REQUEST_ID,
+            "invalid_request",
+            false,
+        ));
+    }
+    let value = match serde_json::from_slice::<Value>(line) {
+        Ok(value) => value,
+        Err(_) => {
+            return Err(failure_response(
+                INVALID_REQUEST_ID,
+                "invalid_request",
+                false,
+            ));
+        }
+    };
+    let id = parsed_request_id(&value).to_owned();
+    let object = value
+        .as_object()
+        .ok_or_else(|| failure_response(INVALID_REQUEST_ID, "invalid_request", false))?;
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "id" | "command" | "args"))
+    {
+        return Err(failure_response(id, "invalid_request", false));
+    }
+    if object.contains_key("args") && !object["args"].is_object() {
+        return Err(failure_response(id, "invalid_request", false));
+    }
+    let strict = serde_json::from_slice::<StrictRequest>(line)
+        .map_err(|_| failure_response(id.clone(), "invalid_request", false))?;
+    if !valid_request_id(&strict.id) {
+        return Err(failure_response(
+            INVALID_REQUEST_ID,
+            "invalid_request",
+            false,
+        ));
+    }
+    let command = parse_command(&strict.command, strict.args)
+        .map_err(|(code, retryable)| failure_response(strict.id.clone(), code, retryable))?;
+    Ok(RpcRequest {
+        id: strict.id,
+        command,
+    })
+}
+
+fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'static str, bool)> {
+    let args = args.unwrap_or_else(|| Value::Object(Map::new()));
+    let object = args.as_object().ok_or(("invalid_native_input", false))?;
+    let invalid = || Err(("invalid_native_input", false));
+    match command {
+        "app_installation_id" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::AppInstallationId)
+        }
+        "cave_read_discovery" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::CaveReadDiscovery)
+        }
+        "cave_launch" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::CaveLaunch)
+        }
+        "cave_health" => {
+            expect_exact_args(object, &["handle"])?;
+            Ok(RpcCommand::CaveHealth {
+                handle: required_string(object, "handle")?,
+            })
+        }
+        "cave_pairing_create" => {
+            expect_exact_args(object, &["handle", "request"])?;
+            let request = object
+                .get("request")
+                .filter(|value| value.is_object())
+                .cloned();
+            match request {
+                Some(request) => Ok(RpcCommand::CavePairingCreate {
+                    handle: required_string(object, "handle")?,
+                    request,
+                }),
+                None => invalid(),
+            }
+        }
+        "cave_pairing_poll" => {
+            expect_exact_args(object, &["handle", "requestId"])?;
+            Ok(RpcCommand::CavePairingPoll {
+                handle: required_string(object, "handle")?,
+                request_id: required_string(object, "requestId")?,
+            })
+        }
+        "cave_pairing_exchange" => {
+            expect_exact_args(object, &["handle", "requestId"])?;
+            Ok(RpcCommand::CavePairingExchange {
+                handle: required_string(object, "handle")?,
+                request_id: required_string(object, "requestId")?,
+            })
+        }
+        "cave_reset_pairing" => {
+            expect_exact_args(object, &["handle"])?;
+            Ok(RpcCommand::CaveResetPairing {
+                handle: required_string(object, "handle")?,
+            })
+        }
+        "cave_credential_status" => {
+            expect_exact_args(object, &["handle"])?;
+            Ok(RpcCommand::CaveCredentialStatus {
+                handle: required_string(object, "handle")?,
+            })
+        }
+        "cave_forget_credential" => {
+            expect_exact_args(object, &["handle"])?;
+            Ok(RpcCommand::CaveForgetCredential {
+                handle: required_string(object, "handle")?,
+            })
+        }
+        "cave_list_familiars" => {
+            expect_exact_args(object, &["handle", "page"])?;
+            Ok(RpcCommand::CaveListFamiliars {
+                handle: required_string(object, "handle")?,
+                page: required_page(object)?,
+            })
+        }
+        "cave_list_projects" => {
+            expect_exact_args(object, &["handle", "page"])?;
+            Ok(RpcCommand::CaveListProjects {
+                handle: required_string(object, "handle")?,
+                page: required_page(object)?,
+            })
+        }
+        "cave_list_conversations" => {
+            expect_exact_args(object, &["handle", "page"])?;
+            Ok(RpcCommand::CaveListConversations {
+                handle: required_string(object, "handle")?,
+                page: required_page(object)?,
+            })
+        }
+        "cave_get_conversation" => {
+            expect_exact_args(object, &["handle", "conversationId"])?;
+            Ok(RpcCommand::CaveGetConversation {
+                handle: required_string(object, "handle")?,
+                conversation_id: required_string(object, "conversationId")?,
+            })
+        }
+        "cave_list_conversation_messages" => {
+            expect_exact_args(object, &["handle", "conversationId", "page"])?;
+            Ok(RpcCommand::CaveListConversationMessages {
+                handle: required_string(object, "handle")?,
+                conversation_id: required_string(object, "conversationId")?,
+                page: required_page(object)?,
+            })
+        }
+        "conformance_reset_native_state" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::ResetNativeState)
+        }
+        "conformance_shutdown" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::Shutdown)
+        }
+        _ => Err(("invalid_rpc_command", false)),
+    }
+}
+
+fn expect_exact_args(
+    object: &Map<String, Value>,
+    expected: &[&str],
+) -> Result<(), (&'static str, bool)> {
+    if object.len() != expected.len()
+        || object
+            .keys()
+            .any(|key| !expected.iter().any(|expected| key == expected))
+    {
+        return Err(("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+fn required_string(object: &Map<String, Value>, key: &str) -> Result<String, (&'static str, bool)> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or(("invalid_native_input", false))
+}
+
+fn required_page(object: &Map<String, Value>) -> Result<NativePage, (&'static str, bool)> {
+    let page = object
+        .get("page")
+        .and_then(Value::as_object)
+        .ok_or(("invalid_native_input", false))?;
+    expect_allowed_args(page, &["limit", "cursor"])?;
+    let limit = match page.get("limit") {
+        Some(value) => value
+            .as_u64()
+            .and_then(|limit| u16::try_from(limit).ok())
+            .ok_or(("invalid_native_input", false))?,
+        None => 0,
+    };
+    let cursor = match page.get("cursor") {
+        Some(value) => Some(
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(("invalid_native_input", false))?,
+        ),
+        None => None,
+    };
+    Ok(NativePage {
+        limit: page.contains_key("limit").then_some(limit),
+        cursor,
+    })
+}
+
+fn expect_allowed_args(
+    object: &Map<String, Value>,
+    allowed: &[&str],
+) -> Result<(), (&'static str, bool)> {
+    if object
+        .keys()
+        .any(|key| !allowed.iter().any(|allowed| key == allowed))
+    {
+        return Err(("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+fn success_response(id: String, result: Value) -> Value {
+    json!({
+        "id": id,
+        "ok": true,
+        "result": result,
+    })
+}
+
+fn failure_response(id: impl Into<String>, code: &'static str, retryable: bool) -> Value {
+    json!({
+        "id": id.into(),
+        "ok": false,
+        "error": {
+            "code": code,
+            "retryable": retryable,
+        },
+    })
+}
+
+pub fn run_stdio() -> io::Result<()> {
+    let mut runtime = RpcRuntime::new();
+    let stdin = io::stdin();
+    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    for line in stdin.lock().split(b'\n') {
+        let line = match line {
+            Ok(line) => line,
+            Err(_) => break,
+        };
+        let (response, shutdown) = runtime.process_line_with_action(&line);
+        serde_json::to_writer(&mut stdout, &response)?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+        if shutdown {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        env,
+        sync::{Mutex, OnceLock},
+    };
+
+    use super::{
+        parse_request_line, ConformanceCaveLauncher, RpcRuntime, SharedMemoryCredentialCustody,
+        CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
+    };
+    use crate::{
+        cave::CaveLauncher,
+        keyring::{Credential, CredentialCustody, CredentialSlot, KeyringError},
+    };
+    use serde_json::json;
+
+    const INSTANCE_ID: &str = "instance-1";
+    const FIRST_ORIGIN: &str = "http://127.0.0.1:4310/";
+    const SECOND_ORIGIN: &str = "http://127.0.0.1:4320/";
+    static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn credential(origin: &str, bearer: &str, credential_id: &str) -> Credential {
+        Credential {
+            bearer: bearer.to_owned(),
+            credential_id: credential_id.to_owned(),
+            origin: origin.to_owned(),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_keys_and_malformed_lines_without_echoing_them() {
+        let canary = "native-rpc-input-canary";
+        let unknown_key =
+            format!(r#"{{"id":"request-1","command":"app_installation_id","leak":"{canary}"}}"#);
+        let malformed = format!(r#"{{"id":"request-1","command":"{canary}""#);
+
+        for line in [unknown_key.as_bytes(), malformed.as_bytes()] {
+            let response = match parse_request_line(line) {
+                Ok(_) => panic!("malformed request must fail"),
+                Err(response) => response,
+            };
+
+            assert_eq!(response["ok"], false);
+            assert_eq!(response["error"]["code"], "invalid_request");
+            assert!(!response.to_string().contains(canary));
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_lines_and_unsafe_request_ids() {
+        let oversized = vec![b'x'; MAX_LINE_BYTES + 1];
+        let oversized_response = match parse_request_line(&oversized) {
+            Ok(_) => panic!("oversized request must fail"),
+            Err(response) => response,
+        };
+        let unsafe_response =
+            match parse_request_line(br#"{"id":"unsafe id","command":"app_installation_id"}"#) {
+                Ok(_) => panic!("unsafe request id must fail"),
+                Err(response) => response,
+            };
+
+        assert_eq!(oversized_response["id"], INVALID_REQUEST_ID);
+        assert_eq!(unsafe_response["id"], INVALID_REQUEST_ID);
+        assert_eq!(oversized_response["error"]["code"], "invalid_request");
+    }
+
+    #[test]
+    fn rejects_unknown_commands_and_malformed_exact_args() {
+        let mut runtime = RpcRuntime::new();
+        let unknown = runtime.process_line(br#"{"id":"one","command":"not-a-command"}"#);
+        let extra = runtime.process_line(
+            br#"{"id":"two","command":"cave_health","args":{"handle":"x","extra":true}}"#,
+        );
+        let missing = runtime.process_line(
+            br#"{"id":"three","command":"cave_list_familiars","args":{"handle":"x"}}"#,
+        );
+
+        assert_eq!(unknown["error"]["code"], "invalid_rpc_command");
+        assert_eq!(extra["error"]["code"], "invalid_native_input");
+        assert_eq!(missing["error"]["code"], "invalid_native_input");
+    }
+
+    #[test]
+    fn emits_only_the_safe_response_shapes() {
+        let canary = "bearer-canary-must-not-escape";
+        let success = super::success_response("request-1".to_owned(), json!({"status": "ok"}));
+        let failure = super::failure_response("request-2", "cave_discovery_not_found", true);
+
+        assert_eq!(
+            success,
+            json!({"id":"request-1","ok":true,"result":{"status":"ok"}})
+        );
+        assert_eq!(
+            failure,
+            json!({
+                "id":"request-2",
+                "ok":false,
+                "error":{"code":"cave_discovery_not_found","retryable":true}
+            })
+        );
+        assert!(!failure.to_string().contains(canary));
+        assert!(!failure["error"]
+            .as_object()
+            .unwrap()
+            .contains_key("message"));
+        assert!(!failure["error"].as_object().unwrap().contains_key("cause"));
+    }
+
+    #[test]
+    fn shared_custody_uses_fixed_id_and_matches_current_stale_and_cas_semantics() {
+        let custody = SharedMemoryCredentialCustody::new();
+        let first = credential(FIRST_ORIGIN, "bearer-first-canary", "credential-1");
+        let replacement = credential(SECOND_ORIGIN, "bearer-second-canary", "credential-2");
+
+        assert_eq!(
+            custody.installation_id().unwrap(),
+            CONFORMANCE_INSTALLATION_ID
+        );
+        assert!(custody
+            .store_if_current(
+                INSTANCE_ID,
+                FIRST_ORIGIN,
+                None,
+                &first.bearer,
+                &first.credential_id,
+            )
+            .unwrap());
+        assert!(matches!(
+            custody
+                .read_for_pairing_update(INSTANCE_ID, FIRST_ORIGIN)
+                .unwrap(),
+            CredentialSlot::Current(current) if current.is_same_identity(&first)
+        ));
+        assert!(matches!(
+            custody
+                .read_for_pairing_update(INSTANCE_ID, SECOND_ORIGIN)
+                .unwrap(),
+            CredentialSlot::Stale(current) if current.is_same_identity(&first)
+        ));
+        assert!(!custody
+            .store_if_current(
+                INSTANCE_ID,
+                FIRST_ORIGIN,
+                Some(&replacement),
+                "bearer-third",
+                "credential-3",
+            )
+            .unwrap());
+        assert!(custody
+            .replace_stale_if_current(
+                INSTANCE_ID,
+                SECOND_ORIGIN,
+                &first,
+                &replacement.bearer,
+                &replacement.credential_id,
+            )
+            .unwrap());
+        assert_eq!(
+            custody
+                .read(INSTANCE_ID, SECOND_ORIGIN)
+                .unwrap()
+                .credential_id,
+            replacement.credential_id
+        );
+        assert!(!custody
+            .delete_if_matches(INSTANCE_ID, SECOND_ORIGIN, &first)
+            .unwrap());
+        assert!(custody
+            .delete_if_matches(INSTANCE_ID, SECOND_ORIGIN, &replacement)
+            .unwrap());
+        assert!(matches!(
+            custody.read(INSTANCE_ID, SECOND_ORIGIN),
+            Err(KeyringError::NotFound)
+        ));
+
+        let source = include_str!("conformance.rs");
+        assert!(!source.contains(&["derive(", "Debug"].concat()));
+        assert!(!source.contains(&["derive(", "Serialize"].concat()));
+    }
+
+    #[test]
+    fn shared_custody_reports_failure_after_a_poisoned_lock() {
+        let custody = SharedMemoryCredentialCustody::new();
+        let poisoned = custody.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.store.lock().unwrap();
+            panic!("poison the conformance-only custody lock");
+        })
+        .join();
+
+        assert!(matches!(
+            custody.read_for_pairing_update(INSTANCE_ID, FIRST_ORIGIN),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[test]
+    fn launcher_requires_absolute_regular_node_configuration() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::var_os(CONFORMANCE_NODE_PATH_ENV);
+        env::set_var(CONFORMANCE_NODE_PATH_ENV, "relative-node");
+
+        let error = match ConformanceCaveLauncher.launch() {
+            Ok(_) => panic!("relative node configuration must fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, "cave_launch_configuration_invalid");
+        match original {
+            Some(value) => env::set_var(CONFORMANCE_NODE_PATH_ENV, value),
+            None => env::remove_var(CONFORMANCE_NODE_PATH_ENV),
+        }
+    }
+
+    #[test]
+    fn runtime_uses_native_discovery_and_can_reset_without_touching_a_keyring() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::var_os("COVEN_CAVE_HOME");
+        env::set_var(
+            "COVEN_CAVE_HOME",
+            env::current_dir().unwrap().join("no-cave"),
+        );
+        let mut runtime = RpcRuntime::new();
+
+        let before = runtime.process_line(br#"{"id":"one","command":"app_installation_id"}"#);
+        let discovery = runtime.process_line(br#"{"id":"two","command":"cave_read_discovery"}"#);
+        let reset =
+            runtime.process_line(br#"{"id":"three","command":"conformance_reset_native_state"}"#);
+        let after = runtime.process_line(br#"{"id":"four","command":"app_installation_id"}"#);
+        let (shutdown, should_exit) =
+            runtime.process_line_with_action(br#"{"id":"five","command":"conformance_shutdown"}"#);
+
+        assert_eq!(before["result"], CONFORMANCE_INSTALLATION_ID);
+        assert_eq!(
+            discovery["error"],
+            json!({"code":"cave_discovery_not_found","retryable":true})
+        );
+        assert_eq!(reset["result"], json!({"status": "reset"}));
+        assert_eq!(after["result"], before["result"]);
+        assert_eq!(shutdown["result"], json!({"status": "shutting_down"}));
+        assert!(should_exit);
+
+        match original {
+            Some(value) => env::set_var("COVEN_CAVE_HOME", value),
+            None => env::remove_var("COVEN_CAVE_HOME"),
+        }
+    }
+}

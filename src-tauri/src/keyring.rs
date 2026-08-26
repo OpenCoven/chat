@@ -491,7 +491,7 @@ fn parse_stored_credential(raw: &str) -> Result<StoredCredential, KeyringError> 
     Ok(stored)
 }
 
-fn validate_credential_origin(origin: &str) -> Result<(), KeyringError> {
+pub(crate) fn validate_credential_origin(origin: &str) -> Result<(), KeyringError> {
     let url = Url::parse(origin).map_err(|_| KeyringError::Failure)?;
     let is_loopback = match url.host() {
         Some(Host::Ipv4(address)) => address.is_loopback(),

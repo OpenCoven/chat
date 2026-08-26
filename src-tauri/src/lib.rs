@@ -1,5 +1,7 @@
 mod cave;
 mod commands;
+#[cfg(feature = "phase1-conformance")]
+pub mod conformance;
 mod connection;
 mod keyring;
 mod metadata;
@@ -69,8 +71,9 @@ impl NativeConnectionState {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "phase1-conformance"))]
 impl NativeConnectionState {
+    #[cfg(test)]
     pub(crate) fn with_test_collaborators(
         transport: Arc<dyn NativeCaveTransport>,
         keyring: Arc<dyn CredentialCustody>,
@@ -89,6 +92,7 @@ impl NativeConnectionState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_test_keyring(keyring: Arc<dyn CredentialCustody>) -> Self {
         Self {
             keyring,
