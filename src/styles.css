@@ -35,7 +35,7 @@
   --accent-cyan-dim: #22d3ee;
 
   /* Violet: depth and selection. */
-  --accent-violet: #a78bfa;
+  --accent-violet: #9386d0;
   --accent-violet-deep: #2c1c3f;
 
   --line-subtle: rgba(205, 194, 228, 0.12);
@@ -72,8 +72,8 @@ body {
    */
   background-color: var(--surface-void);
   background-image:
-    repeating-linear-gradient(60deg, rgba(167, 139, 250, 0.045) 0 1px, transparent 1px 46px),
-    repeating-linear-gradient(-60deg, rgba(167, 139, 250, 0.045) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(60deg, rgba(147, 134, 208, 0.045) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(-60deg, rgba(147, 134, 208, 0.045) 0 1px, transparent 1px 46px),
     radial-gradient(
       ellipse at 50% -10%,
       var(--accent-violet-deep) 0%,
@@ -103,7 +103,7 @@ select {
 }
 
 ::selection {
-  background: rgba(167, 139, 250, 0.32);
+  background: rgba(147, 134, 208, 0.32);
   color: var(--text-primary);
 }
 
@@ -311,8 +311,8 @@ code {
 }
 
 .desktop-identity-status--error {
-  border-color: rgba(167, 139, 250, 0.4);
-  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(147, 134, 208, 0.4);
+  background: rgba(147, 134, 208, 0.12);
   color: var(--text-primary);
 }
 

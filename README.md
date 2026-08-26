@@ -1,16 +1,19 @@
 # OpenCoven Chat
 
-OpenCoven Chat is a production-oriented desktop scaffold with a least-privilege
-native adapter for the read-only Cave SDK. The current UI remains a demo; it
-does not initiate a Cave connection.
+OpenCoven Chat is a production-oriented read-only desktop client with a
+least-privilege native adapter for the Cave SDK. The default UI initializes a
+keychain-backed installation identity, connects or pairs with Cave, and renders
+bounded canonical chat reads. Explicit demo routes remain available for later
+write-oriented design exploration.
 
 ## Security boundaries
 
-- The main window can invoke only the reviewed `app_identity` and
-  SDK-managed Cave adapter commands.
+- The main window can invoke only the reviewed `app_identity`,
+  `app_installation_id`, and SDK-managed Cave adapter commands.
 - No browser direct HTTP calls or generic native request command are implemented.
 - Pairing secrets, bearer credentials, headers, and keychain values remain in
-  Rust. Browser results are bounded non-secret DTOs and diagnostics.
+  Rust. A random canonical UUID v4 pairing identity is stored per installation
+  in the native keyring; browser results are bounded non-secret DTOs and diagnostics.
 - On Windows, native discovery accepts only the current token's canonical
   `.coven/cave` record after handle-based owner, ACL, identity, and reparse
   validation. Native keyring mutations use a current-user named mutex.
@@ -64,26 +67,32 @@ pnpm exec playwright install chromium
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |
 | `pnpm app:build` | Build the Tauri desktop scaffold |
 
-## Scaffold scope
+## Phase 1 scope
 
 The current application renders:
 
-- the OpenCoven Chat product identity
-- an explicitly labeled browser preview fallback identity when Tauri is absent
-- a visible unavailable Cave connection state
-- an accessible placeholder status region
-- a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
-- a typed SDK-managed native Cave boundary that remains unused by the demo UI
-- the desktop bundle identifier and scaffold phase
+- the OpenCoven Chat product identity and exact `#9386d0` Coven violet token
+- an explicitly labeled browser fallback when Tauri is absent
+- a typed, non-secret desktop bridge that reads the keyring-backed pairing
+  identity through `app_installation_id` before creating the SDK controller
+- connection states and actions for discovery, launch, pairing, cancellation,
+  retry, revocation, scope repair, and credential removal
+- a read-only canonical Chat surface for familiars, projects, conversations,
+  conversation detail, and messages
+- bounded cursor-driven load-more controls with short in-memory deduplication
+  and caching; authenticated bodies are never written to browser storage
+- the familiar switcher at the top of the left rail
+- explicit `?demo=chat` and `?demo=minimal` local mock surfaces
 
-Anything beyond that is intentionally deferred to later beads.
+Sending messages and other write operations remain deferred to later phases.
 
 ## Proof-of-concept chat demo
 
-`pnpm app:dev` opens the desktop window straight into a mock chat surface, and
-`pnpm dev` serves it at <127.0.0.1:4173/?demo=chat>. It previews what Phases 1
-through 3 will present: conversations, a transcript, generated images, link
-unfurls, `/spec` and `/handoff` artifacts, and a composer.
+`pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
+serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
+<127.0.0.1:4173/?demo=chat>. The demo previews later write-oriented phases:
+generated images, link unfurls, `/spec` and `/handoff` artifacts, and a
+composer.
 
 **It connects to nothing.** No Cave, no network, no persistence. Replies come
 from canned strings and a timer, link unfurls invent their metadata from the
@@ -94,9 +103,8 @@ Two consequences worth knowing:
 
 - **The demo is explicit.** `tauri.conf.json` uses the production shell route;
   no demo query is embedded in `devUrl`.
-- **The scaffold is still the default view.** Without the query flag the app
-  renders the scaffold, which is what every unit test and both end-to-end specs
-  assert.
+- **The production gate is the default view.** Without a demo query flag the
+  app initializes native installation identity and Cave connection state.
 
 `src/demo/` is meant to be deleted when the real read and send paths land. Its
 mock types are shaped close to the canonical ones so that lands as a change of
@@ -146,4 +154,5 @@ verifies that the checked-out HEADs match the tracked lock.
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
 intentionally kept outside the ignore rules so the capability `$schema` can ship
-with fresh checkouts without broadening permissions beyond `allow-app-identity`.
+with fresh checkouts without granting permissions beyond the reviewed app and
+Cave adapter commands.

@@ -14,11 +14,13 @@ use sha2::{Digest, Sha256};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
+use uuid::{Uuid, Variant, Version};
 
 use crate::cave::NativeDiagnostic;
 
 const SERVICE: &str = "ai.opencoven.chat";
 const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
+const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
 
 #[derive(Debug)]
 pub(crate) enum KeyringError {
@@ -66,6 +68,10 @@ pub(crate) enum CredentialSlot {
 }
 
 pub(crate) trait CredentialCustody: Send + Sync {
+    fn installation_id(&self) -> Result<String, KeyringError> {
+        Err(KeyringError::Unavailable)
+    }
+
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError>;
     fn read_for_pairing_update(
         &self,
@@ -290,6 +296,25 @@ fn acquire_mutation_lock() -> Result<(), KeyringError> {
 }
 
 impl CredentialCustody for NativeKeyring {
+    fn installation_id(&self) -> Result<String, KeyringError> {
+        let _guard = acquire_mutation_lock()?;
+        let entry = Self::installation_id_entry()?;
+        match entry.get_password() {
+            Ok(installation_id) => {
+                validate_installation_id(&installation_id)?;
+                Ok(installation_id)
+            }
+            Err(keyring::Error::NoEntry) => {
+                let installation_id = Uuid::new_v4().to_string();
+                entry
+                    .set_password(&installation_id)
+                    .map_err(map_keyring_error)?;
+                Ok(installation_id)
+            }
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
         match self.read_for_pairing_update(instance_id, origin)? {
             CredentialSlot::Current(credential) => Ok(credential),
@@ -442,6 +467,20 @@ impl CredentialCustody for NativeKeyring {
     }
 }
 
+pub(crate) fn validate_installation_id(installation_id: &str) -> Result<(), KeyringError> {
+    if installation_id.len() != 36 {
+        return Err(KeyringError::Failure);
+    }
+    let parsed = Uuid::parse_str(installation_id).map_err(|_| KeyringError::Failure)?;
+    if parsed.get_version() != Some(Version::Random)
+        || parsed.get_variant() != Variant::RFC4122
+        || parsed.to_string() != installation_id
+    {
+        return Err(KeyringError::Failure);
+    }
+    Ok(())
+}
+
 fn parse_stored_credential(raw: &str) -> Result<StoredCredential, KeyringError> {
     let stored =
         serde_json::from_str::<StoredCredential>(raw).map_err(|_| KeyringError::Failure)?;
@@ -474,6 +513,10 @@ fn validate_credential_origin(origin: &str) -> Result<(), KeyringError> {
 }
 
 impl NativeKeyring {
+    fn installation_id_entry() -> Result<keyring::Entry, KeyringError> {
+        keyring::Entry::new(SERVICE, INSTALLATION_ID_ACCOUNT).map_err(map_keyring_error)
+    }
+
     fn entry(instance_id: &str) -> Result<keyring::Entry, KeyringError> {
         if instance_id.is_empty() || instance_id.len() > 128 {
             return Err(KeyringError::Failure);
@@ -497,9 +540,44 @@ fn map_keyring_error(error: keyring::Error) -> KeyringError {
 #[cfg(test)]
 mod tests {
     use super::{
-        acquire_windows_mutex, parse_stored_credential, KeyringError, WindowsMutexApi,
-        WindowsMutexWait,
+        acquire_windows_mutex, parse_stored_credential, validate_installation_id, KeyringError,
+        WindowsMutexApi, WindowsMutexWait,
     };
+
+    #[test]
+    fn accepts_canonical_lowercase_v4_installation_ids() {
+        assert!(validate_installation_id("0b59fec4-5d8e-4d5c-894d-39fcb5f3eef7").is_ok());
+    }
+
+    #[test]
+    fn rejects_malformed_installation_ids() {
+        for installation_id in [
+            "",
+            "0b59fec4-5d8e-4d5c-894d-39fcb5f3eef",
+            "0b59fec4-5d8e-4d5c-894d-39fcb5f3eef70",
+            "0B59FEC4-5D8E-4D5C-894D-39FCB5F3EEF7",
+            "0b59fec45d8e4d5c894d39fcb5f3eef7",
+            "0b59fec4-5d8e-4d5c-794d-39fcb5f3eef7",
+        ] {
+            assert!(matches!(
+                validate_installation_id(installation_id),
+                Err(KeyringError::Failure)
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_non_v4_installation_ids() {
+        for installation_id in [
+            "f47ac10b-58cc-11cf-8f0b-08002be10318",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            assert!(matches!(
+                validate_installation_id(installation_id),
+                Err(KeyringError::Failure)
+            ));
+        }
+    }
 
     #[test]
     fn corrupt_stored_credentials_fail_closed() {

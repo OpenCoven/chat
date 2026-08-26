@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-app-identity",
+    "allow-app-installation-id",
     "allow-cave-read-discovery",
     "allow-cave-launch",
     "allow-cave-health",

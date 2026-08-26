@@ -2,6 +2,7 @@ use std::{fs, path::Path};
 
 const NATIVE_COMMANDS: &[&str] = &[
     "app_identity",
+    "app_installation_id",
     "cave_read_discovery",
     "cave_launch",
     "cave_health",

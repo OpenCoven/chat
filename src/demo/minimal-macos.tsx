@@ -46,7 +46,8 @@ import {
  * sidebar of chats and familiars, a transcript, and a composer, with the
  * activity panel, the approval sheet, the familiar sheet and settings layered
  * over it. Driven entirely by local fixtures — it connects to nothing, and the
- * Phase 0 scaffold is still what the app is. This renders at `?demo=minimal`.
+ * Phase 1 read-only production app is still what ships. This renders at
+ * `?demo=minimal`.
  *
  * Two things the design is arguing, which the code has to keep rather than
  * merely display:

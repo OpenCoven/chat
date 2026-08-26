@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-test('renders the OpenCoven Chat scaffold with an unavailable connection state', async ({
+test('renders the production browser connection gate when Tauri is unavailable', async ({
   page,
 }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'OpenCoven Chat (preview)' })).toBeVisible();
-  await expect(page.getByRole('status', { name: 'Connection state' })).toContainText('Unavailable');
-  await expect(page.getByRole('status', { name: 'Desktop identity status' })).toContainText(
-    'Browser preview fallback active.',
+  await expect(page.getByRole('heading', { name: 'OpenCoven Chat' })).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Connection state' })).toContainText(
+    'Cave connection requires the desktop app.',
   );
+  await expect(page.getByText('Open in the OpenCoven app to connect.')).toBeVisible();
 });

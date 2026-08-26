@@ -16,12 +16,12 @@ if (!rootElement) {
 
 /**
  * `?demo=chat` and `?demo=minimal` render a proof-of-concept surface instead of
- * the Phase 0 scaffold.
+ * the Phase 1 read-only production app.
  *
- * A query flag rather than a replacement: the scaffold is still what the app
- * is, and what its tests and the desktop smoke check assert. Each demo is a
- * preview of Phases 1 through 3 driven entirely by local mock data, and both
- * are meant to be deleted when the real read and send paths land.
+ * A query flag rather than a replacement: the read-only production app is
+ * still what ships, and what the default browser and desktop checks assert.
+ * Each demo is a preview of later phases driven entirely by local mock data,
+ * and both are meant to be deleted when the real richer surfaces land.
  *
  * Two of them because they are two directions, not two revisions. `chat` is
  * the Messages-shaped surface; `minimal` implements the approved "Coven Cave

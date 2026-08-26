@@ -25,10 +25,17 @@ type CavePairingSessionPort = Pick<
   'exchange' | 'expiresAt' | 'poll' | 'requestId'
 >;
 
-type CaveConnectionClient = Pick<
+export type CaveReadClient = Pick<
   CaveClient,
-  'createPairing' | 'credentialStatus' | 'forgetCredential' | 'health'
+  | 'listFamiliars'
+  | 'listProjects'
+  | 'listConversations'
+  | 'getConversation'
+  | 'listConversationMessages'
 >;
+
+type CaveConnectionClient = CaveReadClient &
+  Pick<CaveClient, 'createPairing' | 'credentialStatus' | 'forgetCredential' | 'health'>;
 
 export type CaveConnectionHostPort = Pick<
   CaveConnectionHost,
@@ -54,6 +61,7 @@ export type SdkConnectionListener = (state: SdkConnectionState) => void;
 
 export type CaveConnectionController = Readonly<{
   getState: () => SdkConnectionState;
+  getReadyClient: () => CaveReadClient | null;
   subscribe: (listener: SdkConnectionListener) => () => void;
   start: () => Promise<void>;
   retry: () => Promise<void>;
@@ -530,7 +538,9 @@ export function createCaveConnectionController(
         return;
       case 'revoked':
         setHealthy(generation, credentialStatus.health);
-        clearAssociation();
+        if (!commitAssociation(generation, selectedClient, credentialStatus.health.instanceId)) {
+          return;
+        }
         setState(generation, {
           state: 'revoked',
           diagnosticId: recordDiagnostic('unauthorized', false, 'credential'),
@@ -620,7 +630,7 @@ export function createCaveConnectionController(
   }
 
   async function discover(generation: number, signal: AbortSignal): Promise<void> {
-    let discovered: Readonly<{ client: CaveConnectionClient }>;
+    let discovered: Readonly<{ client: CaveClient }>;
     try {
       discovered = await deadlineBounded(options.host.discover(), operationTimeoutMs, signal);
     } catch (error) {
@@ -976,6 +986,7 @@ export function createCaveConnectionController(
       machine.active !== 'none' ||
       !(
         machine.state.state === 'ready' ||
+        machine.state.state === 'revoked' ||
         (machine.state.state === 'error' && machine.state.code === 'scope_denied')
       ) ||
       association === undefined ||
@@ -987,7 +998,7 @@ export function createCaveConnectionController(
 
     const selectedClient = association.client;
     const caveInstanceId = association.caveInstanceId;
-    const attempt = activate('forgetting');
+    const attempt = activate('forgetting', { state: 'discovering' });
     const task = (async () => {
       try {
         await deadlineBounded(
@@ -1012,6 +1023,13 @@ export function createCaveConnectionController(
 
   function getState(): SdkConnectionState {
     return machine.state;
+  }
+
+  function getReadyClient(): CaveReadClient | null {
+    if (machine.active !== 'none' || machine.state.state !== 'ready' || association === undefined) {
+      return null;
+    }
+    return association.client;
   }
 
   function subscribe(listener: SdkConnectionListener): () => void {
@@ -1048,6 +1066,7 @@ export function createCaveConnectionController(
 
   return Object.freeze({
     getState,
+    getReadyClient,
     subscribe,
     start,
     retry,

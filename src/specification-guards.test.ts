@@ -145,6 +145,7 @@ describe('Phase 1 specification guards', () => {
     expect(capability.windows).toEqual(['main']);
     expect(capability.permissions).toEqual([
       'allow-app-identity',
+      'allow-app-installation-id',
       'allow-cave-read-discovery',
       'allow-cave-launch',
       'allow-cave-health',
@@ -203,6 +204,7 @@ describe('Phase 1 specification guards', () => {
 
     for (const command of [
       'app_identity',
+      'app_installation_id',
       'cave_read_discovery',
       'cave_launch',
       'cave_health',
@@ -226,6 +228,7 @@ describe('Phase 1 specification guards', () => {
     const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
     const expectedCommands = [
       'app_identity',
+      'app_installation_id',
       'cave_read_discovery',
       'cave_launch',
       'cave_health',
@@ -242,7 +245,7 @@ describe('Phase 1 specification guards', () => {
       'cave_list_conversation_messages',
     ];
     const schemaCommands = [...schema.matchAll(/"const": "(?:allow|deny)-([^"]+)"/g)]
-      .map((match) => match[1]!.replaceAll('-', '_'))
+      .map((match) => match[1]?.replaceAll('-', '_') ?? '')
       .filter((command) => !command.startsWith('core_'))
       .sort();
 
@@ -260,6 +263,7 @@ describe('Phase 1 specification guards', () => {
     const lib = readText('src-tauri/src/lib.rs');
     const expected = [
       'app_identity',
+      'app_installation_id',
       'cave_read_discovery',
       'cave_launch',
       'cave_health',
@@ -290,6 +294,7 @@ describe('Phase 1 specification guards', () => {
     for (const command of expected.filter(
       (command) =>
         command !== 'app_identity' &&
+        command !== 'app_installation_id' &&
         command !== 'cave_read_discovery' &&
         command !== 'cave_launch',
     )) {

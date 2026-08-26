@@ -1,6 +1,7 @@
-export const APP_CONNECTION_STATE = 'Unavailable';
+export const APP_CONNECTION_STATE = 'Read-only production';
 export const APP_DISPLAY_NAME = 'OpenCoven Chat';
-export const APP_PHASE = 'phase-0-scaffold';
+export const APP_IDENTIFIER = 'ai.opencoven.chat';
+export const APP_PHASE = 'phase-1-read-only-production';
 export const APP_VERSION = '0.1.0';
 
 /**
@@ -12,10 +13,10 @@ export const APP_VERSION = '0.1.0';
 export const APP_CONNECTION_STATE_SLUG = APP_CONNECTION_STATE.toLowerCase();
 
 export const APP_CONNECTION_SUMMARY =
-  'Unavailable — Phase 0 intentionally does not connect to Cave yet.';
+  'Read-only production — pair with Cave inside the desktop app to browse canonical chat data.';
 
 export const APP_SCAFFOLD_STATUS =
-  'Application scaffold ready. Pairing, canonical reads, and chat behavior are intentionally not implemented.';
+  'Phase 1 ships desktop pairing plus canonical read-only queries. Demo routes remain available at ?demo=chat and ?demo=minimal.';
 
 export type AppIdentity = Readonly<{
   name: string;
@@ -31,6 +32,7 @@ export const PREVIEW_APP_IDENTITY: AppIdentity = Object.freeze({
 
 export const APP_METADATA = Object.freeze({
   name: APP_DISPLAY_NAME,
+  identifier: APP_IDENTIFIER,
   version: APP_VERSION,
-  fingerprint: 'ai.opencoven.chat:phase-0-scaffold:0.1.0',
+  fingerprint: `${APP_IDENTIFIER}:${APP_PHASE}:${APP_VERSION}`,
 });

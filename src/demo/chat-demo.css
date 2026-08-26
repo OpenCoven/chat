@@ -4,8 +4,9 @@
  * Obsidian lens: a graphite messaging canvas with quiet liquid-glass chrome,
  * contextual agent controls, and independently collapsible side panels.
  *
- * Scoped under .chat-demo so it cannot leak into the Phase 0 scaffold, which
- * remains the app's real entry point and keeps the Coven visual direction.
+ * Scoped under .chat-demo so it cannot leak into the Phase 1 read-only
+ * production app, which remains the real entry point and keeps the Coven
+ * visual direction.
  */
 
 .chat-demo {

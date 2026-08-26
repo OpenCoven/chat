@@ -10,6 +10,7 @@ use crate::{
 
 pub const REGISTERED_COMMANDS: &[&str] = &[
     "app_identity",
+    "app_installation_id",
     "cave_read_discovery",
     "cave_launch",
     "cave_health",
@@ -29,6 +30,13 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
 #[tauri::command]
 pub fn app_identity() -> AppIdentity {
     AppIdentity::current()
+}
+
+#[tauri::command]
+pub fn app_installation_id(
+    state: State<'_, NativeConnectionState>,
+) -> Result<String, NativeDiagnostic> {
+    state.installation_id()
 }
 
 #[tauri::command]

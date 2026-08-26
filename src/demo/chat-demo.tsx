@@ -15,9 +15,9 @@ import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
 /**
  * Proof-of-concept chat surface.
  *
- * This is a demo of what Phases 1 through 3 will present, driven entirely by
- * local mock data. It connects to nothing. The Phase 0 scaffold remains the
- * app's real entry point; this renders only at `?demo=chat`.
+ * This is a demo of what later phases will present, driven entirely by local
+ * mock data. It connects to nothing. The Phase 1 read-only production app
+ * remains the real entry point; this renders only at `?demo=chat`.
  */
 
 /**

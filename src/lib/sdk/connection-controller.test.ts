@@ -596,6 +596,61 @@ describe('Cave connection controller', () => {
     expect(credentialStatusCalls).toBe(1);
   });
 
+  it('forgets a confirmed revoked credential and returns to pairing required', async () => {
+    let forgetCalls = 0;
+    const subject = controller(
+      nativeHost({
+        credentialStatus: async () => ({
+          status: 'revoked',
+          health: healthEnvelope(),
+        }),
+        forgetCredential: async () => {
+          forgetCalls += 1;
+          return { status: 'deleted' };
+        },
+      }),
+    );
+
+    await subject.start();
+    expect(subject.getState().state).toBe('revoked');
+    expect(subject.getReadyClient()).toBeNull();
+
+    await subject.forgetCredential();
+
+    expect(forgetCalls).toBe(1);
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+    });
+    expect(subject.getReadyClient()).toBeNull();
+  });
+
+  it('withdraws the ready client before native credential deletion completes', async () => {
+    const deletion = deferred<{ status: string }>();
+    const subject = controller(
+      nativeHost({
+        forgetCredential: async () => deletion.promise,
+      }),
+    );
+
+    await subject.start();
+    expect(subject.getState().state).toBe('ready');
+    expect(subject.getReadyClient()).not.toBeNull();
+
+    const forgetting = subject.forgetCredential();
+
+    expect(subject.getState().state).toBe('discovering');
+    expect(subject.getReadyClient()).toBeNull();
+
+    deletion.resolve({ status: 'deleted' });
+    await forgetting;
+
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+    });
+  });
+
   it('uses the packed managed pairing runtime with only chat:read', async () => {
     const requests: Array<Record<string, unknown> | undefined> = [];
     let credentialStatusCalls = 0;
