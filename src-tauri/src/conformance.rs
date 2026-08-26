@@ -269,28 +269,63 @@ impl CredentialCustody for SharedMemoryCredentialCustody {
 
 pub struct ConformanceCaveLauncher;
 
-struct ConformanceCaveChild(Child);
+struct ConformanceCaveChild {
+    child: Child,
+    reaped: bool,
+}
+
+impl ConformanceCaveChild {
+    fn terminate_and_reap(&mut self) {
+        if self.reaped {
+            return;
+        }
+        let _ = self.child.kill();
+        if self.child.wait().is_ok() {
+            self.reaped = true;
+        }
+    }
+}
 
 impl CaveChild for ConformanceCaveChild {
     fn try_wait(&mut self) -> NativeResult<bool> {
-        self.0
+        if self.reaped {
+            return Ok(true);
+        }
+        self.child
             .try_wait()
-            .map(|status| status.is_some())
+            .map(|status| {
+                self.reaped = status.is_some();
+                self.reaped
+            })
             .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
     }
 
     fn terminate(&mut self) -> NativeResult<()> {
-        match self.0.kill() {
+        if self.reaped {
+            return Ok(());
+        }
+        match self.child.kill() {
             Ok(()) | Err(_) => {}
         }
         Ok(())
     }
 
     fn wait(&mut self) -> NativeResult<()> {
-        self.0
+        if self.reaped {
+            return Ok(());
+        }
+        self.child
             .wait()
-            .map(|_| ())
+            .map(|_| {
+                self.reaped = true;
+            })
             .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))
+    }
+}
+
+impl Drop for ConformanceCaveChild {
+    fn drop(&mut self) {
+        self.terminate_and_reap();
     }
 }
 
@@ -327,7 +362,10 @@ impl CaveLauncher for ConformanceCaveLauncher {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))?;
-        Ok(Box::new(ConformanceCaveChild(child)))
+        Ok(Box::new(ConformanceCaveChild {
+            child,
+            reaped: false,
+        }))
     }
 }
 
@@ -721,16 +759,65 @@ fn failure_response(id: impl Into<String>, code: &'static str, retryable: bool) 
     })
 }
 
+enum BoundedLine {
+    Line(Vec<u8>),
+    Oversized,
+}
+
+fn read_bounded_line(reader: &mut impl BufRead) -> io::Result<Option<BoundedLine>> {
+    let mut line = Vec::with_capacity(8 * 1024);
+    let mut oversized = false;
+    let mut read_any = false;
+
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return if read_any {
+                Ok(Some(if oversized {
+                    BoundedLine::Oversized
+                } else {
+                    BoundedLine::Line(line)
+                }))
+            } else {
+                Ok(None)
+            };
+        }
+        read_any = true;
+
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let content_len = newline.unwrap_or(buffer.len());
+        if !oversized {
+            let remaining = MAX_LINE_BYTES - line.len();
+            let copy_len = content_len.min(remaining);
+            line.extend_from_slice(&buffer[..copy_len]);
+            oversized = content_len > remaining;
+        }
+
+        let consumed = newline.map_or(buffer.len(), |position| position + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(Some(if oversized {
+                BoundedLine::Oversized
+            } else {
+                BoundedLine::Line(line)
+            }));
+        }
+    }
+}
+
 pub fn run_stdio() -> io::Result<()> {
     let mut runtime = RpcRuntime::new();
     let stdin = io::stdin();
+    let mut stdin = stdin.lock();
     let mut stdout = io::BufWriter::new(io::stdout().lock());
-    for line in stdin.lock().split(b'\n') {
-        let line = match line {
-            Ok(line) => line,
-            Err(_) => break,
+    while let Some(line) = read_bounded_line(&mut stdin)? {
+        let (response, shutdown) = match line {
+            BoundedLine::Line(line) => runtime.process_line_with_action(&line),
+            BoundedLine::Oversized => (
+                failure_response(INVALID_REQUEST_ID, "invalid_request", false),
+                false,
+            ),
         };
-        let (response, shutdown) = runtime.process_line_with_action(&line);
         serde_json::to_writer(&mut stdout, &response)?;
         stdout.write_all(b"\n")?;
         stdout.flush()?;
@@ -749,8 +836,9 @@ mod tests {
     };
 
     use super::{
-        parse_request_line, ConformanceCaveLauncher, RpcRuntime, SharedMemoryCredentialCustody,
-        CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
+        parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher, RpcRuntime,
+        SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NODE_PATH_ENV,
+        INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
         cave::CaveLauncher,
@@ -806,6 +894,25 @@ mod tests {
         assert_eq!(oversized_response["id"], INVALID_REQUEST_ID);
         assert_eq!(unsafe_response["id"], INVALID_REQUEST_ID);
         assert_eq!(oversized_response["error"]["code"], "invalid_request");
+    }
+
+    #[test]
+    fn bounded_reader_drains_oversized_lines_before_reading_the_next_request() {
+        let mut input = vec![b'x'; MAX_LINE_BYTES + 1];
+        input.extend_from_slice(b"\n{\"id\":\"next\",\"command\":\"app_installation_id\"}\n");
+        let mut reader = std::io::Cursor::new(input);
+
+        assert!(matches!(
+            read_bounded_line(&mut reader).unwrap(),
+            Some(BoundedLine::Oversized)
+        ));
+        match read_bounded_line(&mut reader).unwrap() {
+            Some(BoundedLine::Line(line)) => {
+                assert_eq!(line, br#"{"id":"next","command":"app_installation_id"}"#);
+            }
+            _ => panic!("the next bounded request must remain readable"),
+        }
+        assert!(read_bounded_line(&mut reader).unwrap().is_none());
     }
 
     #[test]

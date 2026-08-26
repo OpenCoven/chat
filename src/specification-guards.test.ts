@@ -182,6 +182,8 @@ describe('Phase 1 specification guards', () => {
     const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
 
     expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
+    const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
+    expect(features?.trim()).toBe('phase1-conformance = []');
     expect(manifest).toMatch(
       /\[\[bin\]\]\s+name = "phase1-native-rpc"\s+path = "src\/bin\/phase1-native-rpc\.rs"\s+required-features = \["phase1-conformance"\]/,
     );
