@@ -122,7 +122,7 @@ describe('visual foundation', () => {
     const selection = stylesheet.match(/::selection\s*\{([\s\S]*?)\}/);
 
     expect(selection?.[1]).toBeDefined();
-    expect(selection?.[1]).toMatch(/167,\s*139,\s*250|var\(--accent-violet/);
+    expect(selection?.[1]).toMatch(/147,\s*134,\s*208|var\(--accent-violet/);
   });
 
   it('removes nonessential motion under prefers-reduced-motion', () => {

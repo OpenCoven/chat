@@ -2,8 +2,9 @@
  * The Minimal (macOS) surface.
  *
  * An implementation of the approved design of that name. Everything is scoped
- * under .mm-desktop so it cannot leak into the Phase 0 scaffold, which remains
- * the app's real entry point and keeps the Coven visual direction.
+ * under .mm-desktop so it cannot leak into the Phase 1 read-only production
+ * app, which remains the real entry point and keeps the Coven visual
+ * direction.
  *
  * The design carries its own palette rather than the scaffold's: it is a
  * separate direction, not a reskin of the same one, and mixing the two would

@@ -202,6 +202,7 @@ jobs:
           ref: ${{ steps.reviewed-revisions.outputs.cave_revision }}
           path: .cross-repo/coven-cave
           token: ${{ secrets.CANARY_TOKEN || github.token }}
+          fetch-depth: 0
       - name: Assert checked-out reviewed revisions
         run: |
           node --input-type=module <<'EOF'
@@ -289,3 +290,5 @@ jobs:
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
+      - run: corepack pnpm test:native-e2e

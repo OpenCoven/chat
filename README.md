@@ -1,21 +1,41 @@
 # OpenCoven Chat
 
-Phase 0 of OpenCoven Chat is a production-oriented scaffold for the future
-desktop client. It intentionally stops at the shell, toolchains, tests, and
-least-privilege native host. Pairing, canonical Cave reads, and chat behavior
-are not implemented in this phase.
+OpenCoven Chat is a production-oriented read-only desktop client with a
+least-privilege native adapter for the Cave SDK. The default UI initializes a
+keychain-backed installation identity, connects or pairs with Cave, and renders
+bounded canonical chat reads. Explicit demo routes remain available for later
+write-oriented design exploration.
 
 ## Security boundaries
 
-- The main window can invoke only the custom `app_identity` Tauri command.
-- No direct arbitrary HTTP calls are implemented.
-- No credentials, localStorage canonical data, or secret handling ship in Phase 0.
+- The main window can invoke only the reviewed `app_identity`,
+  `app_installation_id`, and SDK-managed Cave adapter commands.
+- No browser direct HTTP calls or generic native request command are implemented.
+- Managed aborts and deadlines cross the bridge only as single-use opaque
+  attempt IDs, a timeout capped at five seconds, and a dedicated narrow cancel
+  command; signals and error causes are never serialized.
+- Keyring mutations are serialized through a bounded native worker. Cancelled
+  or expired queued work is skipped; a mutation already in progress reports a
+  non-retryable `credential_update_in_progress` ambiguity until custody is
+  coherent.
+- Pairing secrets, bearer credentials, headers, and keychain values remain in
+  Rust. A random canonical UUID v4 pairing identity is stored per installation
+  in the native keyring; browser results are bounded non-secret DTOs and diagnostics.
+- On Windows, native discovery accepts only the current token's canonical
+  `.coven/cave` record after handle-based owner, ACL, identity, and reparse
+  validation. Native keyring mutations use a current-user named mutex.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
-- Future Cave integration must use only the public `@opencoven/cave-client`
-  package boundary.
-- Until package publication is explicitly approved, the cross-repository canary
-  installs packed `@opencoven/cave-client` tarballs into a temporary copy
-  instead of adding a source-relative or absolute path dependency.
+- The webview uses frozen packed `@opencoven/cave-client/managed` and
+  `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
+  source or makes repository-relative imports.
+
+### Current native-host limitation
+
+Client v1 cannot atomically bind a health proof to the later pairing-secret or
+bearer request. Production release evidence therefore remains blocked on
+[coven-cave#4996](https://github.com/OpenCoven/coven-cave/issues/4996).
+This bead does not implement Coven Unix connected-peer or Windows named-pipe
+trust adapters; those adapters are deferred to the next reviewed native wave.
 
 ## Prerequisites
 
@@ -46,7 +66,8 @@ pnpm exec playwright install chromium
 | `pnpm lint` | Run Biome checks |
 | `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
-| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Pack reviewed SDK tarballs and verify the Cave authority fixture through the public `@opencoven/cave-client` entry point |
+| `pnpm test:native-e2e` | Run the feature-gated native RPC subprocess integration tests |
+| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
@@ -54,26 +75,32 @@ pnpm exec playwright install chromium
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |
 | `pnpm app:build` | Build the Tauri desktop scaffold |
 
-## Scaffold scope
+## Phase 1 scope
 
 The current application renders:
 
-- the OpenCoven Chat product identity
-- an explicitly labeled browser preview fallback identity when Tauri is absent
-- a visible unavailable Cave connection state
-- an accessible placeholder status region
-- a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
-- a documented future Cave client boundary
-- the desktop bundle identifier and scaffold phase
+- the OpenCoven Chat product identity and exact `#9386d0` Coven violet token
+- an explicitly labeled browser fallback when Tauri is absent
+- a typed, non-secret desktop bridge that reads the keyring-backed pairing
+  identity through `app_installation_id` before creating the SDK controller
+- connection states and actions for discovery, launch, pairing, cancellation,
+  retry, revocation, scope repair, and credential removal
+- a read-only canonical Chat surface for familiars, projects, conversations,
+  conversation detail, and messages
+- bounded cursor-driven load-more controls with short in-memory deduplication
+  and caching; authenticated bodies are never written to browser storage
+- the familiar switcher at the top of the left rail
+- explicit `?demo=chat` and `?demo=minimal` local mock surfaces
 
-Anything beyond that is intentionally deferred to later beads.
+Sending messages and other write operations remain deferred to later phases.
 
 ## Proof-of-concept chat demo
 
-`pnpm app:dev` opens the desktop window straight into a mock chat surface, and
-`pnpm dev` serves it at <127.0.0.1:4173/?demo=chat>. It previews what Phases 1
-through 3 will present: conversations, a transcript, generated images, link
-unfurls, `/spec` and `/handoff` artifacts, and a composer.
+`pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
+serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
+<127.0.0.1:4173/?demo=chat>. The demo previews later write-oriented phases:
+generated images, link unfurls, `/spec` and `/handoff` artifacts, and a
+composer.
 
 **It connects to nothing.** No Cave, no network, no persistence. Replies come
 from canned strings and a timer, link unfurls invent their metadata from the
@@ -82,13 +109,10 @@ placeholder whose palette varies by prompt. A refresh resets everything.
 
 Two consequences worth knowing:
 
-- **Dev and production differ deliberately.** `devUrl` carries `?demo=chat`, so
-  only `tauri dev` opens the demo. A production build loads `dist/index.html`
-  with no query string and still shows the Phase 0 scaffold, which is what the
-  app actually is.
-- **The scaffold is still the default view.** Without the query flag the app
-  renders the scaffold, which is what every unit test and both end-to-end specs
-  assert.
+- **The demo is explicit.** `tauri.conf.json` uses the production shell route;
+  no demo query is embedded in `devUrl`.
+- **The production gate is the default view.** Without a demo query flag the
+  app initializes native installation identity and Cave connection state.
 
 `src/demo/` is meant to be deleted when the real read and send paths land. Its
 mock types are shaped close to the canonical ones so that lands as a change of
@@ -113,10 +137,12 @@ the transcript then records which answer it got.
 
 ## Reviewed counterpart lock
 
-`contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
-immutable 40-character commit SHAs. CI reads that tracked lock, checks out those
-exact revisions, rejects dirty SDK or Cave checkouts, and verifies the
-checked-out HEADs before running the canary.
+`contract-canary.lock.json` pins reviewed SDK and Cave commits plus SHA-256
+digests for all four frozen public SDK tarballs and the Cave producer's current
+Client v1 contract fixture and `hpke-bound-v1` vectors. CI rejects dirty
+counterpart checkouts, verifies their immutable HEADs, rebuilds the SDK
+tarballs for digest comparison, checks packed fixture ancestry and vector byte
+identity, and installs the frozen artifacts into an isolated consumer.
 
 Local explicit-root canary runs still use
 `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,
@@ -138,4 +164,5 @@ verifies that the checked-out HEADs match the tracked lock.
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
 intentionally kept outside the ignore rules so the capability `$schema` can ship
-with fresh checkouts without broadening permissions beyond `allow-app-identity`.
+with fresh checkouts without granting permissions beyond the reviewed app and
+Cave adapter commands.

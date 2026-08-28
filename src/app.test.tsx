@@ -1,160 +1,296 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 
 import { App } from './app';
-import { APP_CONNECTION_SUMMARY, APP_METADATA, APP_SCAFFOLD_STATUS } from './lib/app-metadata';
 import type { DesktopHost } from './lib/desktop-host';
+import type { CaveConnectionController } from './lib/sdk/connection-controller';
+import type { QueryAdapter } from './lib/sdk/query-adapter';
 
-const PREVIEW_IDENTITY = Object.freeze({
-  name: 'OpenCoven Chat (preview)',
-  identifier: 'preview-only',
-  phase: 'phase-0-scaffold-preview',
-});
+const INSTALLATION_ID = '0b59fec4-5d8e-4d5c-894d-39fcb5f3eef7';
 
-function makeDesktopHost(overrides: Partial<DesktopHost> = {}): DesktopHost {
+function createControllerHarness(
+  initialState: CaveConnectionController['getState'] extends () => infer T ? T : never,
+) {
+  let state = initialState;
+  const listeners = new Set<(value: typeof state) => void>();
+
+  const controller = {
+    getState: () => state,
+    getReadyClient: () =>
+      state.state === 'ready'
+        ? ({} as NonNullable<ReturnType<CaveConnectionController['getReadyClient']>>)
+        : null,
+    subscribe: (listener: (value: typeof state) => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    start: vi.fn().mockResolvedValue(undefined),
+    retry: vi.fn().mockResolvedValue(undefined),
+    launch: vi.fn().mockResolvedValue(undefined),
+    beginPairing: vi.fn().mockResolvedValue(undefined),
+    cancelPairing: vi.fn().mockResolvedValue(undefined),
+    forgetCredential: vi.fn().mockResolvedValue(undefined),
+    dispose: vi.fn(),
+  } satisfies CaveConnectionController;
+
+  return Object.freeze({
+    controller,
+    setState(nextState: typeof state) {
+      state = nextState;
+      for (const listener of [...listeners]) {
+        listener(state);
+      }
+    },
+  });
+}
+
+function makeQueryAdapter(): QueryAdapter {
   return {
-    canUseTauriCommands: () => false,
-    readAppIdentity: vi.fn().mockResolvedValue({
-      name: 'OpenCoven Chat',
-      identifier: 'ai.opencoven.chat',
-      phase: 'phase-0-scaffold',
+    listFamiliars: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: {
+        data: [{ id: 'familiar-1', displayName: 'Mara', role: 'Guide' }],
+      },
     }),
-    previewAppIdentity: () => PREVIEW_IDENTITY,
-    ...overrides,
+    listProjects: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: {
+        data: [
+          {
+            id: 'project-1',
+            name: 'OpenCoven Chat',
+            root: '/workspace/chat',
+            createdAt: '2026-08-25T00:00:00.000Z',
+            updatedAt: '2026-08-25T00:00:00.000Z',
+          },
+        ],
+      },
+    }),
+    listConversations: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: {
+        data: [
+          {
+            id: 'conversation-1',
+            familiarId: 'familiar-1',
+            title: 'Read-only check-in',
+            updatedAt: '2026-08-25T00:00:00.000Z',
+          },
+        ],
+      },
+    }),
+    getConversation: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: {
+        id: 'conversation-1',
+        familiarId: 'familiar-1',
+        title: 'Read-only check-in',
+        updatedAt: '2026-08-25T00:00:00.000Z',
+      },
+    }),
+    listMessages: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: {
+        data: [
+          {
+            id: 'message-1',
+            conversationId: 'conversation-1',
+            parentId: null,
+            role: 'assistant',
+            text: 'Hello from Cave.',
+            createdAt: '2026-08-25T00:00:00.000Z',
+            attachmentCount: 0,
+            toolCount: 0,
+          },
+        ],
+      },
+    }),
+    invalidate: vi.fn(),
+    dispose: vi.fn(),
   };
 }
 
 describe('App', () => {
-  it('renders an explicitly labeled browser preview fallback when Tauri is unavailable', () => {
-    const desktopIdentityHost = makeDesktopHost();
+  it('renders the production browser fallback without creating a controller', () => {
+    const controllerFactory = vi.fn();
+    const readInstallationId = vi.fn<DesktopHost['readInstallationId']>();
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(screen.getByRole('heading', { name: 'OpenCoven Chat (preview)' })).toBeVisible();
-    expect(screen.getByRole('status', { name: 'Desktop identity status' })).toHaveTextContent(
-      'Browser preview fallback active. Desktop identity is available only inside Tauri.',
+    render(
+      <App
+        desktopIdentityHost={{ canUseTauriCommands: () => false, readInstallationId }}
+        controllerFactory={controllerFactory}
+      />,
     );
-    expect(screen.getByText('Browser preview fallback')).toBeVisible();
-    expect(desktopIdentityHost.readAppIdentity).not.toHaveBeenCalled();
-  });
 
-  it('shows an unavailable Cave connection state for Phase 0', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
-
+    expect(screen.getByRole('heading', { name: 'OpenCoven Chat' })).toBeVisible();
     expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
-      APP_CONNECTION_SUMMARY,
+      'Cave connection requires the desktop app. Open in the OpenCoven app to connect.',
     );
+    expect(controllerFactory).not.toHaveBeenCalled();
+    expect(readInstallationId).not.toHaveBeenCalled();
   });
 
-  it('documents the future public Cave client boundary without integrating it', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
-
-    const boundary = screen
-      .getByRole('heading', { name: 'Integration boundary' })
-      .closest('section');
-
-    expect(boundary).toHaveTextContent('Future Cave integration must import only from');
-    expect(boundary).toHaveTextContent('@opencoven/cave-client');
-    expect(boundary).toHaveTextContent(
-      'Phase 0 documents the typed package boundary only; runtime code still avoids private Cave schemas and source-relative SDK links.',
+  it('bootstraps the controller with the native installation ID exactly once in StrictMode', async () => {
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
+    });
+    const queryAdapter = makeQueryAdapter();
+    const readInstallationId = vi
+      .fn<DesktopHost['readInstallationId']>()
+      .mockResolvedValue(INSTALLATION_ID);
+    const controllerFactory = vi.fn(() => harness.controller);
+    const { unmount } = render(
+      <StrictMode>
+        <App
+          desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+          controllerFactory={controllerFactory}
+          queryAdapterFactory={() => queryAdapter}
+        />
+      </StrictMode>,
     );
-    expect(boundary).toHaveTextContent(
-      'Until package publication is explicitly approved, the cross-repository canary verifies packed @opencoven/cave-client tarballs in a temporary install copy instead of adding a local path dependency.',
-    );
+
+    await waitFor(() => {
+      expect(harness.controller.start).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByText('Hello from Cave.');
+    expect(readInstallationId).toHaveBeenCalledTimes(1);
+    expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+
+    expect(harness.controller.dispose).not.toHaveBeenCalled();
+    expect(queryAdapter.dispose).not.toHaveBeenCalled();
+
+    unmount();
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+
+    expect(harness.controller.dispose).toHaveBeenCalledTimes(1);
+    expect(queryAdapter.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('announces scaffold-only status semantics', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
+  it('preserves the desktop host receiver while reading the installation ID', async () => {
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
+    });
+    const queryAdapter = makeQueryAdapter();
+    const desktopIdentityHost = {
+      installationId: INSTALLATION_ID,
+      canUseTauriCommands() {
+        return true;
+      },
+      readInstallationId() {
+        return Promise.resolve(this.installationId);
+      },
+    };
+    const controllerFactory = vi.fn(() => harness.controller);
 
-    expect(screen.getByText(APP_SCAFFOLD_STATUS)).toBeVisible();
-  });
-
-  it('keeps the connection badge decorative', () => {
-    // The badge carries a colour dot. Colour is reinforcement, so the state
-    // must stay readable from the output element alone and the dot must not
-    // reach the accessibility tree as a second, conflicting announcement.
-    const { container } = render(<App desktopIdentityHost={makeDesktopHost()} />);
-
-    const badge = container.querySelector('.state-badge');
-
-    expect(badge).toHaveAttribute('aria-hidden', 'true');
-    expect(badge?.querySelector('.state-dot')).not.toBeNull();
-    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
-      APP_CONNECTION_SUMMARY,
+    render(
+      <App
+        desktopIdentityHost={desktopIdentityHost}
+        controllerFactory={controllerFactory}
+        queryAdapterFactory={() => queryAdapter}
+      />,
     );
+
+    await waitFor(() => {
+      expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
+    });
   });
 
-  it('exposes a stable scaffold fingerprint for preview smoke checks', () => {
-    const { container } = render(<App desktopIdentityHost={makeDesktopHost()} />);
-
-    expect(container.firstElementChild).toHaveAttribute(
-      'data-scaffold-fingerprint',
-      APP_METADATA.fingerprint,
+  it('invalidates query reads when the connection leaves ready without disposing the adapter', async () => {
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
+    });
+    const queryAdapter = makeQueryAdapter();
+    const readInstallationId = vi
+      .fn<DesktopHost['readInstallationId']>()
+      .mockResolvedValue(INSTALLATION_ID);
+    const { unmount } = render(
+      <App
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+        controllerFactory={() => harness.controller}
+        queryAdapterFactory={() => queryAdapter}
+      />,
     );
-  });
 
-  it('renders the native app_identity result after a successful invoke', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockResolvedValue({
-        name: 'Native OpenCoven Chat',
-        identifier: 'ai.opencoven.chat.native',
-        phase: 'phase-0-native',
-      }),
+    await waitFor(() => {
+      expect(harness.controller.start).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByText('Hello from Cave.');
+
+    act(() => {
+      harness.setState({
+        state: 'offline',
+        lastHealthyAt: null,
+        diagnosticId: 'diag-1',
+      });
     });
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
+    await waitFor(() => {
+      expect(queryAdapter.invalidate).toHaveBeenCalledTimes(1);
+    });
+    expect(queryAdapter.dispose).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
+      'Cave offline. Retry the connection or start Cave.',
+    );
 
-    expect(await screen.findByRole('heading', { name: 'Native OpenCoven Chat' })).toBeVisible();
-    expect(screen.getByText('Native app_identity command')).toBeVisible();
-    expect(screen.queryByRole('status', { name: 'Desktop identity status' })).toBeNull();
-    expect(screen.queryByRole('alert')).toBeNull();
+    unmount();
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
   });
 
-  it('surfaces native app_identity invoke failures instead of silently defaulting', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue(new Error('invoke failed: missing handler')),
+  it('rejects malformed and failed installation bootstrap reads before retrying', async () => {
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
     });
+    const readInstallationId = vi
+      .fn<DesktopHost['readInstallationId']>()
+      .mockResolvedValueOnce('not-a-uuid')
+      .mockRejectedValueOnce(new Error('native keyring unavailable'))
+      .mockResolvedValueOnce(INSTALLATION_ID);
+    const controllerFactory = vi.fn(() => harness.controller);
+    const queryAdapterFactory = vi.fn(makeQueryAdapter);
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. invoke failed: missing handler',
+    render(
+      <App
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+        controllerFactory={controllerFactory}
+        queryAdapterFactory={queryAdapterFactory}
+      />,
     );
-    const identityPanel = screen
-      .getByRole('heading', { name: 'Desktop identity' })
-      .closest('aside');
 
-    expect(identityPanel).not.toBeNull();
-    expect(within(identityPanel as HTMLElement).getAllByText('Unavailable')).toHaveLength(3);
-    expect(screen.getByText('OpenCoven Chat')).toBeVisible();
-  });
+    expect(await screen.findByRole('alert', { name: 'Connection state' })).toHaveTextContent(
+      'Secure installation identity unavailable. Retry setup to continue.',
+    );
+    expect(controllerFactory).not.toHaveBeenCalled();
+    expect(queryAdapterFactory).not.toHaveBeenCalled();
 
-  it('shows a raw string rejection in the native app failure UI', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue('invoke failed: raw string'),
+    fireEvent.click(screen.getByRole('button', { name: 'Retry setup' }));
+
+    await waitFor(() => {
+      expect(readInstallationId).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
+        'Secure installation identity unavailable. Retry setup to continue.',
+      );
     });
+    expect(controllerFactory).not.toHaveBeenCalled();
+    expect(queryAdapterFactory).not.toHaveBeenCalled();
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry setup' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. invoke failed: raw string',
-    );
-  });
-
-  it('falls back to the generic native app failure copy for unknown rejection payloads', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue({ code: 'E_NATIVE', secret: 'hidden' }),
+    await waitFor(() => {
+      expect(readInstallationId).toHaveBeenCalledTimes(3);
+      expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
+      expect(queryAdapterFactory).toHaveBeenCalledTimes(1);
+      expect(harness.controller.start).toHaveBeenCalledTimes(1);
     });
-
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. The native app_identity command failed.',
-    );
-    expect(screen.getByRole('alert')).not.toHaveTextContent('E_NATIVE');
-    expect(screen.getByRole('alert')).not.toHaveTextContent('hidden');
   });
 });

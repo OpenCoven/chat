@@ -15,9 +15,9 @@ import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
 /**
  * Proof-of-concept chat surface.
  *
- * This is a demo of what Phases 1 through 3 will present, driven entirely by
- * local mock data. It connects to nothing. The Phase 0 scaffold remains the
- * app's real entry point; this renders only at `?demo=chat`.
+ * This is a demo of what later phases will present, driven entirely by local
+ * mock data. It connects to nothing. The Phase 1 read-only production app
+ * remains the real entry point; this renders only at `?demo=chat`.
  */
 
 /**
@@ -641,7 +641,36 @@ export function ChatDemo() {
         hidden={!conversationsOpen}
       >
         <header className="sidebar-header">
-          <h1>Chats</h1>
+          <label className="familiar-switcher">
+            <Avatar
+              label={activeFamiliar?.name ?? 'No familiar'}
+              seed={activeFamiliar?.id ?? 'none'}
+              size={34}
+            />
+            <span className="familiar-switcher-copy">
+              <span className="familiar-switcher-name">
+                {activeFamiliar?.name ?? 'Choose familiar'}
+              </span>
+              <span className="familiar-switcher-role">
+                <span className="familiar-switcher-status" aria-hidden="true" />
+                {activeFamiliar?.role ?? 'No familiar selected'}
+              </span>
+            </span>
+            <span className="familiar-switcher-chevron" aria-hidden="true">
+              ⌄
+            </span>
+            <select
+              aria-label="Active familiar"
+              value={activeFamiliar?.id ?? ''}
+              onChange={(event) => changeActiveFamiliar(event.target.value)}
+            >
+              {MOCK_FAMILIARS.map((familiar) => (
+                <option key={familiar.id} value={familiar.id}>
+                  {familiar.name} — {familiar.role}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="glass-control"
@@ -899,11 +928,7 @@ export function ChatDemo() {
       </main>
 
       <aside id="agent-inspector" aria-label="Agent inspector" hidden={!inspectorOpen}>
-        <ChatInspector
-          familiar={activeFamiliar}
-          onClose={() => setInspectorOpen(false)}
-          onFamiliarChange={changeActiveFamiliar}
-        />
+        <ChatInspector familiar={activeFamiliar} onClose={() => setInspectorOpen(false)} />
       </aside>
 
       {reader ? <DocumentReader document={reader} onClose={() => setReader(null)} /> : null}

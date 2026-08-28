@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:native-e2e": "cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --test phase1_native_rpc",
     "test:contract-canary": "node ./scripts/contract-canary.mjs",
     "cargo:check": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
     "cargo:test": "cargo test --manifest-path src-tauri/Cargo.toml",
@@ -29,9 +30,21 @@
     "app:build": "tauri build"
   },
   "dependencies": {
+    "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",
+    "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.1.0.tgz",
+    "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.1.0.tgz",
+    "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz",
     "@tauri-apps/api": "2.11.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",
+      "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.1.0.tgz",
+      "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.1.0.tgz",
+      "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz"
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.2",

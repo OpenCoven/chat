@@ -1,11 +1,41 @@
 {
-  "version": 1,
+  "version": 3,
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "6880e64b864864ee75de90f36d5c11d9d98f83f2"
+    "revision": "163961f4e59cfdef51d2271fa98e7c514977203f",
+    "artifacts": {
+      "core": {
+        "packageName": "@opencoven/sdk-core",
+        "sha256": "9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe"
+      },
+      "cave": {
+        "packageName": "@opencoven/cave-client",
+        "sha256": "79b3c276af384c3e380b5a259dec83870cef309c5284823fb6cf685c968b1e35"
+      },
+      "coven": {
+        "packageName": "@opencoven/coven-client",
+        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+      },
+      "sdk": {
+        "packageName": "@opencoven/sdk",
+        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+      }
+    }
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "2fe0abd05c88329c6b93660b986f40605c939ae1"
+    "revision": "2a0ff9237e94e652e477b22f60fd6d721b9e6451",
+    "artifacts": {
+      "contractFixture": {
+        "path": "src/lib/server/client-v1/contract-fixture.json",
+        "digestPath": "src/lib/server/client-v1/contract-fixture.sha256",
+        "sha256": "1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d"
+      },
+      "hpkeVectors": {
+        "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",
+        "digestPath": "src/lib/server/client-v1/hpke-bound-v1-vectors.sha256",
+        "sha256": "f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797"
+      }
+    }
   }
 }

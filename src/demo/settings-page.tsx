@@ -278,7 +278,7 @@ export function SettingsPage() {
         rows={[
           {
             label: 'OpenCoven Chat',
-            hint: 'Phase 0 scaffold with a proof-of-concept demo surface.',
+            hint: 'Phase 1 read-only production app plus proof-of-concept demo surfaces.',
             control: <code className="set-code">0.1.0</code>,
           },
         ]}

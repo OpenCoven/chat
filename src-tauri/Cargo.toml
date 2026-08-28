@@ -4,18 +4,57 @@ version = "0.1.0"
 description = "OpenCoven Chat desktop scaffold"
 edition = "2021"
 rust-version = "1.95.0"
+default-run = "opencoven-chat"
 
 [lib]
 name = "opencoven_chat_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+phase1-conformance = []
+
+[[bin]]
+name = "phase1-native-rpc"
+path = "src/bin/phase1-native-rpc.rs"
+required-features = ["phase1-conformance"]
+
 [build-dependencies]
-serde_json = "=1.0.145"
+serde_json = { version = "=1.0.145", features = ["preserve_order"] }
 tauri-build = { version = "=2.6.2", features = [] }
 
 [dependencies]
+async-trait = "=0.1.89"
+base64 = "=0.22.1"
+fs2 = "=0.4.3"
+getrandom = "=0.4.3"
+hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
+libc = "=0.2.189"
+rand_chacha = { version = "=0.10.0", default-features = false }
+rand_core = "=0.10.1"
+reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 serde = { version = "=1.0.228", features = ["derive"] }
-tauri = { version = "=2.11.2", features = [] }
-
-[dev-dependencies]
+serde_jcs = "=0.2.0"
 serde_json = "=1.0.145"
+sha2 = "=0.10.9"
+tauri = { version = "=2.11.2", features = [] }
+tokio = { version = "=1.53.1", features = ["macros", "sync", "time"] }
+url = "=2.5.8"
+uuid = { version = "=1.24.1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+windows-sys = { version = "=0.60.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }

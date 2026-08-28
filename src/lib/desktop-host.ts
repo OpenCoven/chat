@@ -6,10 +6,14 @@ export type InvokeCommand = (command: string, args?: Record<string, unknown>) =>
 export type DesktopHost = Readonly<{
   canUseTauriCommands: () => boolean;
   readAppIdentity: () => Promise<AppIdentity>;
+  readInstallationId: () => Promise<string>;
   previewAppIdentity: () => AppIdentity;
 }>;
 
 const APP_IDENTITY_COMMAND = 'app_identity';
+const APP_INSTALLATION_ID_COMMAND = 'app_installation_id';
+const INSTALLATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -24,6 +28,10 @@ export function isAppIdentity(value: unknown): value is AppIdentity {
   );
 }
 
+export function isInstallationId(value: unknown): value is string {
+  return typeof value === 'string' && value.length === 36 && INSTALLATION_ID_PATTERN.test(value);
+}
+
 export async function readAppIdentity(
   invokeCommand: InvokeCommand = invoke as InvokeCommand,
 ): Promise<AppIdentity> {
@@ -34,6 +42,18 @@ export async function readAppIdentity(
   }
 
   return identity;
+}
+
+export async function readInstallationId(
+  invokeCommand: InvokeCommand = invoke as InvokeCommand,
+): Promise<string> {
+  const installationId = await invokeCommand(APP_INSTALLATION_ID_COMMAND);
+
+  if (!isInstallationId(installationId)) {
+    throw new Error('The app_installation_id command returned an invalid result.');
+  }
+
+  return installationId;
 }
 
 export function canUseTauriCommands() {
@@ -52,5 +72,6 @@ export function previewAppIdentity(): AppIdentity {
 export const desktopHost: DesktopHost = Object.freeze({
   canUseTauriCommands,
   readAppIdentity,
+  readInstallationId,
   previewAppIdentity,
 });

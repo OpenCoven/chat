@@ -19,10 +19,25 @@ type ContractCanaryLock = {
   sdk: {
     repository: string;
     revision: string;
+    artifacts: Record<
+      string,
+      {
+        packageName: string;
+        sha256: string;
+      }
+    >;
   };
   cave: {
     repository: string;
     revision: string;
+    artifacts: Record<
+      string,
+      {
+        path: string;
+        digestPath: string;
+        sha256: string;
+      }
+    >;
   };
 };
 
@@ -65,7 +80,32 @@ function listRuntimeSourceFiles(relativePath: string): string[] {
   return files.sort();
 }
 
-describe('Phase 0 specification guards', () => {
+function registeredCommandNames(source: string): string[] {
+  const declaration = source.match(
+    /pub const REGISTERED_COMMANDS: &\[&str\] = &\[(?<commands>[\s\S]*?)\];/,
+  );
+
+  if (!declaration?.groups?.commands) {
+    throw new Error('REGISTERED_COMMANDS must remain an explicit command table.');
+  }
+
+  return [...declaration.groups.commands.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '');
+}
+
+function invokeHandlerCommandNames(source: string): string[] {
+  const invocation = source.match(/tauri::generate_handler!\[(?<commands>[\s\S]*?)\]/);
+
+  if (!invocation?.groups?.commands) {
+    throw new Error('Tauri commands must remain an explicit invoke handler list.');
+  }
+
+  return invocation.groups.commands
+    .split(',')
+    .map((command) => command.trim())
+    .filter((command) => command.length > 0);
+}
+
+describe('Phase 1 specification guards', () => {
   it('ignores sibling worktrees from the repository root', () => {
     const output = execFileSync(
       'git',
@@ -80,20 +120,68 @@ describe('Phase 0 specification guards', () => {
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
-    expect(lock.version).toBe(1);
+    expect(lock.version).toBe(3);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toMatch(/^[0-9a-f]{40}$/);
-    expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
+    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
+    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.sdk.artifacts).toEqual({
+      core: {
+        packageName: '@opencoven/sdk-core',
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+      cave: {
+        packageName: '@opencoven/cave-client',
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+      coven: {
+        packageName: '@opencoven/coven-client',
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+      sdk: {
+        packageName: '@opencoven/sdk',
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    expect(lock.cave.artifacts).toEqual({
+      contractFixture: {
+        path: 'src/lib/server/client-v1/contract-fixture.json',
+        digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+      },
+      hpkeVectors: {
+        path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+        digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+        sha256: 'f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797',
+      },
+    });
   });
 
-  it('keeps the default Tauri capability least-privileged for app_identity', () => {
+  it('keeps the default Tauri capability least-privileged for native connection commands', () => {
     const capability = JSON.parse(
       readText('src-tauri/capabilities/default.json'),
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
-    expect(capability.permissions).toEqual(['allow-app-identity']);
+    expect(capability.permissions).toEqual([
+      'allow-app-identity',
+      'allow-app-installation-id',
+      'allow-cave-read-discovery',
+      'allow-cave-cancel-operation',
+      'allow-cave-launch',
+      'allow-cave-health',
+      'allow-cave-pairing-create',
+      'allow-cave-pairing-poll',
+      'allow-cave-pairing-exchange',
+      'allow-cave-reset-pairing',
+      'allow-cave-credential-status',
+      'allow-cave-forget-credential',
+      'allow-cave-list-familiars',
+      'allow-cave-list-projects',
+      'allow-cave-list-conversations',
+      'allow-cave-get-conversation',
+      'allow-cave-list-conversation-messages',
+    ]);
 
     for (const permission of capability.permissions) {
       expect(typeof permission).toBe('string');
@@ -104,6 +192,29 @@ describe('Phase 0 specification guards', () => {
 
       expect(permission).not.toMatch(/:default$/);
       expect(permission).not.toMatch(/^(shell|fs|filesystem|opener|http|https|network):/);
+    }
+  });
+
+  it('feature-gates the headless Phase 1 conformance bridge outside Tauri', () => {
+    const manifest = readText('src-tauri/Cargo.toml');
+    const library = readText('src-tauri/src/lib.rs');
+    const commands = readText('src-tauri/src/commands.rs');
+    const capability = readText('src-tauri/capabilities/default.json');
+    const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
+
+    expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
+    const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
+    expect(features?.trim()).toBe('phase1-conformance = []');
+    expect(manifest).toMatch(/\[package\][\s\S]*?default-run = "opencoven-chat"/);
+    expect(manifest).toMatch(
+      /\[\[bin\]\]\s+name = "phase1-native-rpc"\s+path = "src\/bin\/phase1-native-rpc\.rs"\s+required-features = \["phase1-conformance"\]/,
+    );
+    expect(library).toContain('#[cfg(feature = "phase1-conformance")]\npub mod conformance;');
+
+    for (const control of controls) {
+      expect(commands).not.toContain(control);
+      expect(capability).not.toContain(control);
+      expect(readText('src-tauri/build.rs')).not.toContain(control);
     }
   });
 
@@ -132,10 +243,131 @@ describe('Phase 0 specification guards', () => {
     ).toContain('!src-tauri/gen/schemas/desktop-schema.json');
   });
 
-  it('autogenerates app command permissions only for app_identity', () => {
+  it('autogenerates permissions only for the reviewed native command boundary', () => {
     const buildScript = readText('src-tauri/build.rs');
 
-    expect(buildScript).toMatch(/AppManifest::new\(\)\s*\.commands\(&\["app_identity"\]\)/);
+    for (const command of [
+      'app_identity',
+      'app_installation_id',
+      'cave_read_discovery',
+      'cave_cancel_operation',
+      'cave_launch',
+      'cave_health',
+      'cave_pairing_create',
+      'cave_pairing_poll',
+      'cave_pairing_exchange',
+      'cave_reset_pairing',
+      'cave_credential_status',
+      'cave_forget_credential',
+      'cave_list_familiars',
+      'cave_list_projects',
+      'cave_list_conversations',
+      'cave_get_conversation',
+      'cave_list_conversation_messages',
+    ]) {
+      expect(buildScript).toContain(`"${command}"`);
+    }
+  });
+
+  it('keeps the generated desktop schema aligned with the reviewed command table', () => {
+    const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
+    const expectedCommands = [
+      'app_identity',
+      'app_installation_id',
+      'cave_read_discovery',
+      'cave_cancel_operation',
+      'cave_launch',
+      'cave_health',
+      'cave_pairing_create',
+      'cave_pairing_poll',
+      'cave_pairing_exchange',
+      'cave_reset_pairing',
+      'cave_credential_status',
+      'cave_forget_credential',
+      'cave_list_familiars',
+      'cave_list_projects',
+      'cave_list_conversations',
+      'cave_get_conversation',
+      'cave_list_conversation_messages',
+    ];
+    const schemaCommands = [...schema.matchAll(/"const": "(?:allow|deny)-([^"]+)"/g)]
+      .map((match) => match[1]?.replaceAll('-', '_') ?? '')
+      .filter((command) => !command.startsWith('core_'))
+      .sort();
+
+    expect(schemaCommands).toEqual([...expectedCommands, ...expectedCommands].sort());
+  });
+
+  it('points Tauri devUrl at the production route instead of a demo query', () => {
+    const config = readJson<{ build: { devUrl: string } }>('src-tauri/tauri.conf.json');
+
+    expect(config.build.devUrl).toBe('http://127.0.0.1:4173/');
+  });
+
+  it('registers only narrow non-secret native connection commands', () => {
+    const commands = readText('src-tauri/src/commands.rs');
+    const lib = readText('src-tauri/src/lib.rs');
+    const expected = [
+      'app_identity',
+      'app_installation_id',
+      'cave_read_discovery',
+      'cave_cancel_operation',
+      'cave_launch',
+      'cave_health',
+      'cave_pairing_create',
+      'cave_pairing_poll',
+      'cave_pairing_exchange',
+      'cave_reset_pairing',
+      'cave_credential_status',
+      'cave_forget_credential',
+      'cave_list_familiars',
+      'cave_list_projects',
+      'cave_list_conversations',
+      'cave_get_conversation',
+      'cave_list_conversation_messages',
+    ];
+
+    expect(registeredCommandNames(commands)).toEqual(expected);
+    expect(invokeHandlerCommandNames(lib)).toEqual(expected);
+
+    for (const command of expected) {
+      expect(lib).toContain(command);
+    }
+
+    expect(commands).not.toMatch(
+      /pub\s+(?:async\s+)?fn\s+(?:generic_request|request|fetch|network)/,
+    );
+    expect(commands).not.toMatch(/(?:token|bearer|authorization|header)/i);
+    for (const command of expected.filter(
+      (command) =>
+        command !== 'app_identity' &&
+        command !== 'app_installation_id' &&
+        command !== 'cave_read_discovery' &&
+        command !== 'cave_cancel_operation' &&
+        command !== 'cave_launch',
+    )) {
+      expect(commands).toMatch(
+        new RegExp(`pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(\\s*handle:\\s*String`),
+      );
+    }
+    expect(commands).toMatch(
+      /pub\s+fn\s+cave_cancel_operation\s*\(\s*attempt_id:\s*String,\s*reason:\s*NativeCancelReason/,
+    );
+    for (const command of expected.filter(
+      (command) =>
+        command !== 'app_identity' &&
+        command !== 'app_installation_id' &&
+        command !== 'cave_cancel_operation' &&
+        command !== 'cave_launch' &&
+        command !== 'cave_reset_pairing',
+    )) {
+      expect(commands).toMatch(
+        new RegExp(
+          `pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\([\\s\\S]{0,240}?operation:\\s*NativeOperationInput`,
+        ),
+      );
+    }
+    expect(commands).not.toMatch(/\b(?:origin|endpoint|url):\s*String/);
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {
@@ -187,17 +419,19 @@ describe('Phase 0 specification guards', () => {
     expect(violations).toEqual([]);
   });
 
-  it('documents the package boundary without a local cave-client dependency', () => {
+  it('uses only frozen packed SDK artifacts at the browser boundary', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
-    const readme = readText('README.md');
-    const boundary = readText('src/lib/cave-client-boundary.ts');
+    const boundary = readText('src/lib/sdk/native-boundary.ts');
 
-    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toBeUndefined();
-    expect(packageManifest.devDependencies?.['@opencoven/cave-client']).toBeUndefined();
-    expect(boundary).toContain('cross-repository canary verifies packed');
-    expect(boundary).toContain('instead of adding a local path dependency');
-    expect(readme).toContain('cross-repository canary');
-    expect(readme).toContain('packed `@opencoven/cave-client` tarballs');
+    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toMatch(
+      /^file:vendor\/opencoven-sdk\/cave-client-0\.1\.0\.tgz$/,
+    );
+    expect(packageManifest.dependencies?.['@opencoven/sdk-core']).toMatch(
+      /^file:vendor\/opencoven-sdk\/sdk-core-0\.1\.0\.tgz$/,
+    );
+    expect(boundary).toContain("from '@opencoven/cave-client/managed'");
+    expect(boundary).toContain("from '@opencoven/sdk-core/browser'");
+    expect(boundary).not.toMatch(/(?:workspace:|\.cross-repo|packages\/|src\/)/);
   });
 
   it('runs the desktop entrypoint in CI with Linux Tauri dependencies', () => {
@@ -458,6 +692,9 @@ describe('Phase 0 specification guards', () => {
     );
     expect(workflow).toContain('ref: $' + '{{ steps.reviewed-revisions.outputs.cave_revision }}');
     expect(workflow).toContain('path: .cross-repo/coven-cave');
+    expect(workflow).toMatch(
+      /repository: \$\{\{ steps\.reviewed-revisions\.outputs\.cave_repository \}\}[\s\S]*?path: \.cross-repo\/coven-cave[\s\S]*?fetch-depth: 0/,
+    );
     expect(workflow).not.toContain('OPENCOVEN_SDK_REVIEWED_REVISION');
     expect(workflow).not.toContain('OPENCOVEN_CAVE_REVIEWED_REVISION');
     expect(workflow).not.toContain('ref: main');

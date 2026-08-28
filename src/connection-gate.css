@@ -1,0 +1,131 @@
+.connection-gate {
+  --cg-violet: var(--accent-violet);
+  --cg-panel: rgba(20, 16, 32, 0.9);
+  --cg-panel-strong: rgba(12, 9, 18, 0.96);
+  --cg-line: rgba(147, 134, 208, 0.24);
+  --cg-line-strong: rgba(147, 134, 208, 0.42);
+  --cg-text: var(--text-primary);
+  --cg-muted: var(--text-secondary);
+  --cg-success: #82b38e;
+  --cg-warning: #d8b36b;
+  --cg-error: #eb8d9a;
+
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.connection-gate__panel {
+  width: min(100%, 36rem);
+  display: grid;
+  gap: 1rem;
+  padding: 2rem;
+  border: 1px solid var(--cg-line);
+  border-radius: 1.25rem;
+  background:
+    linear-gradient(160deg, rgba(147, 134, 208, 0.1), transparent 38%),
+    linear-gradient(180deg, var(--cg-panel) 0%, var(--cg-panel-strong) 100%);
+  box-shadow: var(--shadow-panel);
+}
+
+.connection-gate__eyebrow {
+  margin: 0;
+  color: var(--cg-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.connection-gate__title {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3rem);
+  letter-spacing: -0.02em;
+}
+
+.connection-gate__summary {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.connection-gate__spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.25rem;
+  border: 2px solid rgba(147, 134, 208, 0.18);
+  border-top-color: var(--cg-violet);
+  border-radius: 999px;
+  animation: connection-gate-spin 800ms linear infinite;
+}
+
+.connection-gate__status {
+  margin: 0;
+  color: var(--cg-text);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.connection-gate__status--info {
+  color: var(--cg-text);
+}
+
+.connection-gate__status--warn {
+  color: var(--cg-warning);
+}
+
+.connection-gate__status--error {
+  color: var(--cg-error);
+}
+
+.connection-gate__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.connection-gate__button {
+  min-width: 10rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--cg-line-strong);
+  border-radius: 999px;
+  background: rgba(147, 134, 208, 0.14);
+  color: var(--cg-text);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.connection-gate__button:hover {
+  transform: translateY(-1px);
+  border-color: var(--cg-violet);
+  background: rgba(147, 134, 208, 0.22);
+}
+
+.connection-gate__button--secondary {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@keyframes connection-gate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .connection-gate {
+    padding: 1rem;
+  }
+
+  .connection-gate__panel {
+    padding: 1.5rem;
+  }
+
+  .connection-gate__button {
+    width: 100%;
+  }
+}

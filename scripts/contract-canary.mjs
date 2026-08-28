@@ -1,6 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
@@ -10,6 +20,35 @@ const defaultSdkRoot = resolve(root, '.cross-repo', 'sdk');
 const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
 const defaultLockPath = resolve(root, 'contract-canary.lock.json');
 const reviewedRevisionPattern = /^[0-9a-f]{40}$/i;
+const sha256Pattern = /^[0-9a-f]{64}$/i;
+const SDK_ARTIFACTS = Object.freeze({
+  core: {
+    packageName: '@opencoven/sdk-core',
+    fileName: 'sdk-core-0.1.0.tgz',
+  },
+  cave: {
+    packageName: '@opencoven/cave-client',
+    fileName: 'cave-client-0.1.0.tgz',
+  },
+  coven: {
+    packageName: '@opencoven/coven-client',
+    fileName: 'coven-client-0.1.0.tgz',
+  },
+  sdk: {
+    packageName: '@opencoven/sdk',
+    fileName: 'sdk-0.1.0.tgz',
+  },
+});
+const CAVE_PRODUCER_ARTIFACTS = Object.freeze({
+  contractFixture: {
+    path: 'src/lib/server/client-v1/contract-fixture.json',
+    digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+  },
+  hpkeVectors: {
+    path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+    digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+  },
+});
 
 function printUsage() {
   process.stdout.write(
@@ -18,8 +57,8 @@ function printUsage() {
       '',
       'Packs the reviewed SDK packages, installs their tarballs into an isolated',
       'Chat canary harness, compiles Chat-owned code against the public',
-      '@opencoven/cave-client entry point, validates the reviewed Cave authority',
-      'fixture, and proves a stale-digest mutation is rejected.',
+      '@opencoven/cave-client entry point, validates reviewed Cave fixture',
+      'ancestry and HPKE vector bytes, and proves a stale-digest mutation is rejected.',
       '',
     ].join('\n'),
   );
@@ -41,11 +80,85 @@ function validateLockEntry(lockData, key, expectedRepository) {
       `contract-canary.lock.json ${key}.revision must be an immutable 40-character commit SHA.`,
     );
   }
+  const expectedKeys = ['repository', 'revision', 'artifacts'];
+  if (
+    Object.keys(entry).length !== expectedKeys.length ||
+    expectedKeys.some((expectedKey) => !Object.hasOwn(entry, expectedKey))
+  ) {
+    throw new Error(`contract-canary.lock.json ${key} entry contained unexpected fields.`);
+  }
 
   return {
     repository: entry.repository,
     revision: entry.revision,
+    ...(key === 'sdk'
+      ? { artifacts: validateSdkArtifacts(entry.artifacts) }
+      : { artifacts: validateCaveProducerArtifacts(entry.artifacts) }),
   };
+}
+
+function validateSdkArtifacts(artifacts) {
+  if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts)) {
+    throw new Error('contract-canary.lock.json sdk.artifacts must be an object.');
+  }
+  const expectedKeys = Object.keys(SDK_ARTIFACTS);
+  const artifactKeys = Object.keys(artifacts);
+  if (
+    artifactKeys.length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.hasOwn(artifacts, key))
+  ) {
+    throw new Error(
+      'contract-canary.lock.json sdk.artifacts must contain exactly core, cave, coven, and sdk.',
+    );
+  }
+  for (const [key, expected] of Object.entries(SDK_ARTIFACTS)) {
+    const artifact = artifacts[key];
+    if (
+      artifact === null ||
+      typeof artifact !== 'object' ||
+      Array.isArray(artifact) ||
+      Object.keys(artifact).length !== 2 ||
+      !Object.hasOwn(artifact, 'packageName') ||
+      !Object.hasOwn(artifact, 'sha256') ||
+      artifact.packageName !== expected.packageName ||
+      typeof artifact.sha256 !== 'string' ||
+      !sha256Pattern.test(artifact.sha256)
+    ) {
+      throw new Error(`contract-canary.lock.json sdk.artifacts.${key} is invalid.`);
+    }
+  }
+  return artifacts;
+}
+
+function validateCaveProducerArtifacts(artifacts) {
+  if (artifacts === null || typeof artifacts !== 'object' || Array.isArray(artifacts)) {
+    throw new Error('contract-canary.lock.json cave.artifacts must be an object.');
+  }
+  const expectedKeys = Object.keys(CAVE_PRODUCER_ARTIFACTS);
+  if (
+    Object.keys(artifacts).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.hasOwn(artifacts, key))
+  ) {
+    throw new Error(
+      'contract-canary.lock.json cave.artifacts must contain exactly contractFixture and hpkeVectors.',
+    );
+  }
+  for (const [key, expected] of Object.entries(CAVE_PRODUCER_ARTIFACTS)) {
+    const artifact = artifacts[key];
+    if (
+      artifact === null ||
+      typeof artifact !== 'object' ||
+      Array.isArray(artifact) ||
+      Object.keys(artifact).length !== 3 ||
+      artifact.path !== expected.path ||
+      artifact.digestPath !== expected.digestPath ||
+      typeof artifact.sha256 !== 'string' ||
+      !sha256Pattern.test(artifact.sha256)
+    ) {
+      throw new Error(`contract-canary.lock.json cave.artifacts.${key} is invalid.`);
+    }
+  }
+  return artifacts;
 }
 
 export function readContractCanaryLock(lockPath = defaultLockPath) {
@@ -53,8 +166,8 @@ export function readContractCanaryLock(lockPath = defaultLockPath) {
 
   const lockData = JSON.parse(readFileSync(lockPath, 'utf8'));
 
-  if (lockData.version !== 1) {
-    throw new Error('contract-canary.lock.json version must be 1.');
+  if (lockData.version !== 3) {
+    throw new Error('contract-canary.lock.json version must be 3.');
   }
 
   return {
@@ -271,6 +384,7 @@ function isolatedInstallArgs({ offline }) {
  */
 function installHarnessOfflineAfterWarming(harnessRoot) {
   runPnpm(isolatedInstallArgs({ offline: false }), harnessRoot);
+  rmSync(resolve(harnessRoot, 'node_modules'), { force: true, recursive: true });
   runPnpm(isolatedInstallArgs({ offline: true }), harnessRoot);
 }
 
@@ -280,8 +394,119 @@ function createPublicPackageOverrides(tarballs) {
     '@opencoven/cave-client': `file:${tarballs.cave}`,
     '@opencoven/coven-client': `file:${tarballs.coven}`,
     '@opencoven/sdk': `file:${tarballs.sdk}`,
-    '@opencoven/dev-cli': `file:${tarballs.cli}`,
   };
+}
+
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function assertFrozenArtifactDigests(lock, tarballs) {
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const locked = lock.sdk.artifacts[key];
+    const tarball = tarballs[key];
+    if (
+      locked?.packageName !== artifact.packageName ||
+      typeof locked.sha256 !== 'string' ||
+      !sha256Pattern.test(locked.sha256) ||
+      typeof tarball !== 'string' ||
+      sha256(tarball) !== locked.sha256
+    ) {
+      throw new Error(
+        `Packed SDK ${artifact.packageName} does not match its locked artifact digest.`,
+      );
+    }
+  }
+}
+
+function frozenTarballs(lock) {
+  const tarballs = {};
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const path = resolve(root, 'vendor', 'opencoven-sdk', artifact.fileName);
+    requirePath(path, `Frozen ${artifact.packageName} artifact`);
+    tarballs[key] = path;
+  }
+  assertFrozenArtifactDigests(lock, tarballs);
+  return tarballs;
+}
+
+function safeTarEntries(tarball) {
+  const output = run('tar', ['-tzf', tarball], root, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  const entries = output
+    .split(/\r?\n/u)
+    .filter((entry) => entry.length > 0)
+    .sort();
+  if (
+    entries.length === 0 ||
+    new Set(entries).size !== entries.length ||
+    entries.some((entry) => {
+      const segments = entry.split('/');
+      return (
+        !entry.startsWith('package/') ||
+        entry.includes('\\') ||
+        segments.some((segment) => segment === '.' || segment === '..')
+      );
+    })
+  ) {
+    throw new Error('Packed SDK archive contained an unsafe or duplicate path.');
+  }
+  return entries;
+}
+
+function packageTree(rootPath, currentPath = rootPath) {
+  const entries = [];
+  for (const entry of readdirSync(currentPath, { withFileTypes: true }).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const path = resolve(currentPath, entry.name);
+    const relativePath = relative(rootPath, path).split(sep).join('/');
+    const stats = lstatSync(path);
+    if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
+      throw new Error('Packed SDK archive contained an unsupported filesystem entry.');
+    }
+    if (stats.isDirectory()) {
+      entries.push(`directory:${relativePath}`);
+      entries.push(...packageTree(rootPath, path));
+      continue;
+    }
+    entries.push(
+      `file:${relativePath}:${stats.mode & 0o111}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`,
+    );
+  }
+  return entries;
+}
+
+export function assertPackedPackageContentsMatch(
+  reviewedTarballs,
+  frozenTarballsByPackage,
+  comparisonRoot,
+) {
+  mkdirSync(comparisonRoot, { recursive: true });
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const reviewed = reviewedTarballs[key];
+    const frozen = frozenTarballsByPackage[key];
+    if (typeof reviewed !== 'string' || typeof frozen !== 'string') {
+      throw new Error(`Packed SDK ${artifact.packageName} artifact was missing.`);
+    }
+    const reviewedEntries = safeTarEntries(reviewed);
+    const frozenEntries = safeTarEntries(frozen);
+    if (JSON.stringify(reviewedEntries) !== JSON.stringify(frozenEntries)) {
+      throw new Error(`Packed SDK ${artifact.packageName} file list did not match.`);
+    }
+    const packageRoot = resolve(comparisonRoot, key);
+    const reviewedRoot = resolve(packageRoot, 'reviewed');
+    const frozenRoot = resolve(packageRoot, 'frozen');
+    mkdirSync(reviewedRoot, { recursive: true });
+    mkdirSync(frozenRoot, { recursive: true });
+    run('tar', ['-xzf', reviewed, '-C', reviewedRoot], root);
+    run('tar', ['-xzf', frozen, '-C', frozenRoot], root);
+    if (JSON.stringify(packageTree(reviewedRoot)) !== JSON.stringify(packageTree(frozenRoot))) {
+      throw new Error(`Packed SDK ${artifact.packageName} contents did not match.`);
+    }
+  }
 }
 
 function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
@@ -305,7 +530,96 @@ function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
   return JSON.parse(readFileSync(manifestPath, 'utf8'));
 }
 
-function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
+export function createContractCanaryVerifier() {
+  return `import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { createMemorySecretStore } from '@opencoven/sdk-core/browser';
+import { parseVerifiedCaveContractFixture } from '@opencoven/cave-client';
+import { createManagedCaveClient } from '@opencoven/cave-client/managed';
+import { createCovenClient } from '@opencoven/coven-client';
+import { createOpenCovenSdk } from '@opencoven/sdk';
+
+const inertAdapter = async () => {
+  throw new Error('Contract canary verifier must not perform I/O.');
+};
+
+const memoryStore = createMemorySecretStore();
+await memoryStore.set('contract-canary', 'inert');
+
+if ((await memoryStore.get('contract-canary')) !== 'inert') {
+  throw new Error('SDK core browser memory store did not preserve its inert value.');
+}
+
+await memoryStore.delete('contract-canary');
+
+const managedCaveClient = createManagedCaveClient({
+  transport: {
+    health: inertAdapter,
+    managedPairingCreate: inertAdapter,
+    managedPairingPoll: inertAdapter,
+    managedPairingExchange: inertAdapter,
+    managedCredentialStatus: inertAdapter,
+    managedForgetCredential: inertAdapter,
+  },
+});
+const covenClient = createCovenClient({
+  transport: {
+    health: inertAdapter,
+  },
+});
+const sdk = createOpenCovenSdk({
+  cave: managedCaveClient,
+  coven: covenClient,
+});
+const availability = sdk.availability();
+
+if (!availability.cave || !availability.coven) {
+  throw new Error('OpenCoven SDK did not retain inert Cave and Coven clients.');
+}
+
+const fixtureDirectory = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  'node_modules',
+  '@opencoven',
+  'cave-client',
+  'fixtures',
+);
+const fixture = readFileSync(resolve(fixtureDirectory, 'contract-fixture.json'), 'utf8');
+const digest = readFileSync(resolve(fixtureDirectory, 'contract-fixture.sha256'), 'utf8');
+const parsed = parseVerifiedCaveContractFixture(fixture, digest);
+
+if (parsed.contract.apiVersion !== '1.0') {
+  throw new Error(\`Unexpected apiVersion: \${parsed.contract.apiVersion}\`);
+}
+
+if (parsed.examples.status.status !== 'ok') {
+  throw new Error(\`Unexpected status example: \${parsed.examples.status.status}\`);
+}
+
+const staleFixture = JSON.parse(fixture);
+delete staleFixture.contract.minimumClientVersion;
+
+let rejected = false;
+
+try {
+  parseVerifiedCaveContractFixture(\`\${JSON.stringify(staleFixture, null, 2)}\\n\`, digest);
+} catch (error) {
+  rejected = error instanceof Error && error.message.includes('digest mismatch');
+}
+
+if (!rejected) {
+  throw new Error(
+    'Chat contract canary accepted a required-field mutation without a digest update.',
+  );
+}
+
+process.stdout.write('Chat contract canary passed.\\n');
+`;
+}
+
+function createHarness(harnessRoot, tarballs) {
   mkdirSync(resolve(harnessRoot, 'src'), { recursive: true });
 
   writeFileSync(
@@ -319,9 +633,12 @@ function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
           build: 'tsc --pretty false --noEmit',
           verify: 'node verify.mjs',
         },
-        dependencies: {
-          '@opencoven/cave-client': `file:${tarballs.cave}`,
-        },
+        dependencies: Object.fromEntries(
+          Object.entries(SDK_ARTIFACTS).map(([key, artifact]) => [
+            artifact.packageName,
+            `file:${tarballs[key]}`,
+          ]),
+        ),
         devDependencies: {
           '@types/node': '24.13.3',
           typescript: '6.0.3',
@@ -363,6 +680,15 @@ function createHarness(harnessRoot, tarballs, fixturePath, digestPath) {
   type CaveFamiliar,
   type CaveFamiliarAnalytics,
 } from '@opencoven/cave-client';
+import { createManagedCaveClient } from '@opencoven/cave-client/managed';
+import type { OperationContext } from '@opencoven/sdk-core/browser';
+import { createCovenClient } from '@opencoven/coven-client';
+import { createOpenCovenSdk } from '@opencoven/sdk';
+
+void createManagedCaveClient;
+void (undefined as unknown as OperationContext);
+void createCovenClient;
+void createOpenCovenSdk;
 
 export function loadAuthorityFixture(
   fixtureContents: string,
@@ -413,74 +739,147 @@ export function readFamiliarSurface(
 `,
   );
 
-  writeFileSync(
-    resolve(harnessRoot, 'verify.mjs'),
-    `import { readFileSync } from 'node:fs';
-
-import { parseVerifiedCaveContractFixture } from '@opencoven/cave-client';
-
-const fixture = readFileSync(${JSON.stringify(fixturePath)}, 'utf8');
-const digest = readFileSync(${JSON.stringify(digestPath)}, 'utf8');
-const parsed = parseVerifiedCaveContractFixture(fixture, digest);
-
-if (parsed.contract.apiVersion !== '1.0') {
-  throw new Error(\`Unexpected apiVersion: \${parsed.contract.apiVersion}\`);
+  writeFileSync(resolve(harnessRoot, 'verify.mjs'), createContractCanaryVerifier());
 }
 
-if (parsed.examples.status.status !== 'ok') {
-  throw new Error(\`Unexpected status example: \${parsed.examples.status.status}\`);
+function assertIsolatedPackedInstall(harnessRoot) {
+  const installedRoot = realpathSync(resolve(harnessRoot, 'node_modules'));
+  for (const artifact of Object.values(SDK_ARTIFACTS)) {
+    const packageRoot = resolve(harnessRoot, 'node_modules', ...artifact.packageName.split('/'));
+    const realPackageRoot = realpathSync(packageRoot);
+    const relativePackageRoot = relative(installedRoot, realPackageRoot);
+    if (
+      relativePackageRoot === '..' ||
+      relativePackageRoot.startsWith(`..${sep}`) ||
+      isAbsolute(relativePackageRoot)
+    ) {
+      throw new Error(`Packed ${artifact.packageName} resolved outside the isolated harness.`);
+    }
+    if (existsSync(resolve(realPackageRoot, 'src'))) {
+      throw new Error(`Packed ${artifact.packageName} unexpectedly installed source files.`);
+    }
+    const manifest = JSON.parse(readFileSync(resolve(realPackageRoot, 'package.json'), 'utf8'));
+    for (const dependency of Object.values(manifest.dependencies ?? {})) {
+      if (
+        typeof dependency !== 'string' ||
+        /^(?:file|link|portal|workspace):/u.test(dependency) ||
+        dependency.startsWith('/') ||
+        /^[A-Za-z]:[\\/]/u.test(dependency)
+      ) {
+        throw new Error(
+          `Packed ${artifact.packageName} retained a workspace or source dependency.`,
+        );
+      }
+    }
+  }
 }
 
-const staleFixture = JSON.parse(fixture);
-delete staleFixture.contract.minimumClientVersion;
-
-let rejected = false;
-
-try {
-  parseVerifiedCaveContractFixture(\`\${JSON.stringify(staleFixture, null, 2)}\\n\`, digest);
-} catch (error) {
-  rejected = error instanceof Error && error.message.includes('digest mismatch');
-}
-
-if (!rejected) {
-  throw new Error(
-    'Chat contract canary accepted a required-field mutation without a digest update.',
+export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {
+  const fixtureDirectory = resolve(
+    harnessRoot,
+    'node_modules',
+    '@opencoven',
+    'cave-client',
+    'fixtures',
   );
-}
+  const installedFixturePath = resolve(fixtureDirectory, 'contract-fixture.json');
+  const installedDigestPath = resolve(fixtureDirectory, 'contract-fixture.sha256');
+  const installedProvenancePath = resolve(fixtureDirectory, 'contract-fixture.provenance.json');
+  const installedVectorPath = resolve(fixtureDirectory, 'hpke-bound-v1-vectors.json');
+  const installedVectorDigestPath = resolve(fixtureDirectory, 'hpke-bound-v1-vectors.sha256');
 
-process.stdout.write('Chat contract canary passed.\\n');
-`,
+  for (const [path, label] of [
+    [installedFixturePath, 'Packed Cave fixture'],
+    [installedDigestPath, 'Packed Cave fixture digest'],
+    [installedProvenancePath, 'Packed Cave fixture provenance'],
+    [installedVectorPath, 'Packed Cave HPKE vectors'],
+    [installedVectorDigestPath, 'Packed Cave HPKE vector digest'],
+  ]) {
+    requirePath(path, label);
+  }
+
+  const provenance = JSON.parse(readFileSync(installedProvenancePath, 'utf8'));
+  const installedFixture = readFileSync(installedFixturePath);
+  const installedDigest = readFileSync(installedDigestPath, 'utf8').trim().toLowerCase();
+  if (
+    provenance?.repository !== 'https://github.com/OpenCoven/coven-cave' ||
+    provenance?.fixturePath !== 'src/lib/server/client-v1/contract-fixture.json' ||
+    provenance?.digestPath !== 'src/lib/server/client-v1/contract-fixture.sha256' ||
+    !reviewedRevisionPattern.test(provenance?.commit ?? '') ||
+    provenance?.sha256 !== installedDigest ||
+    !/^[0-9a-f]{64}$/iu.test(installedDigest) ||
+    sha256(installedFixturePath) !== installedDigest
+  ) {
+    throw new Error('Packed Cave fixture provenance was invalid.');
+  }
+
+  try {
+    run(
+      'git',
+      ['-C', caveRoot, 'merge-base', '--is-ancestor', provenance.commit, lock.cave.revision],
+      root,
+      { stdio: 'pipe' },
+    );
+  } catch {
+    throw new Error(
+      'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
+    );
+  }
+
+  const historicalFixture = run(
+    'git',
+    ['-C', caveRoot, 'show', `${provenance.commit}:${provenance.fixturePath}`],
+    root,
+    { stdio: 'pipe' },
   );
+  const historicalDigest = run(
+    'git',
+    ['-C', caveRoot, 'show', `${provenance.commit}:${provenance.digestPath}`],
+    root,
+    { stdio: 'pipe', encoding: 'utf8' },
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    historicalDigest !== installedDigest ||
+    !Buffer.from(historicalFixture).equals(installedFixture)
+  ) {
+    throw new Error('Packed Cave fixture bytes did not match their pinned historical producer.');
+  }
+
+  for (const [key, artifact] of Object.entries(lock.cave.artifacts)) {
+    const checkoutPath = resolve(caveRoot, artifact.path);
+    const checkoutDigestPath = resolve(caveRoot, artifact.digestPath);
+    requirePath(checkoutPath, `Cave producer ${key}`);
+    requirePath(checkoutDigestPath, `Cave producer ${key} digest`);
+    const checkoutDigest = readFileSync(checkoutDigestPath, 'utf8').trim().toLowerCase();
+    if (checkoutDigest !== artifact.sha256 || sha256(checkoutPath) !== artifact.sha256) {
+      throw new Error(`Reviewed Cave producer ${key} did not match its locked digest.`);
+    }
+  }
+
+  const packedVectorDigest = readFileSync(installedVectorDigestPath, 'utf8').trim().toLowerCase();
+  const reviewedVector = lock.cave.artifacts.hpkeVectors;
+  if (
+    packedVectorDigest !== reviewedVector.sha256 ||
+    sha256(installedVectorPath) !== reviewedVector.sha256 ||
+    !readFileSync(installedVectorPath).equals(readFileSync(resolve(caveRoot, reviewedVector.path)))
+  ) {
+    throw new Error('Packed Cave HPKE vectors did not match the reviewed producer revision.');
+  }
 }
 
 export function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const lock = readContractCanaryLock();
-  const caveFixturePath = resolve(
-    options.caveRoot,
-    'src',
-    'lib',
-    'server',
-    'client-v1',
-    'contract-fixture.json',
-  );
-  const caveDigestPath = resolve(
-    options.caveRoot,
-    'src',
-    'lib',
-    'server',
-    'client-v1',
-    'contract-fixture.sha256',
-  );
   const sdkVerifyContracts = resolve(options.sdkRoot, 'scripts', 'verify-contracts.mjs');
 
   requirePath(options.sdkRoot, 'SDK root');
   requirePath(options.caveRoot, 'Cave root');
   assertCleanContractCanaryCheckouts(options);
   assertContractCanaryCheckoutHeads(lock, options);
-  requirePath(caveFixturePath, 'Cave authority fixture');
-  requirePath(caveDigestPath, 'Cave authority fixture digest');
   requirePath(sdkVerifyContracts, 'SDK verify-contracts script');
+  runPnpm(['install', '--frozen-lockfile'], options.sdkRoot);
 
   let artifactContext;
 
@@ -492,18 +891,19 @@ export function main(argv = process.argv.slice(2)) {
     const artifactRoot = artifactContext.rootPath;
     const tarballManifestPath = resolve(artifactRoot, 'sdk-tarballs.json');
     const tarballRoot = resolve(artifactRoot, 'sdk-tarballs');
+    const comparisonRoot = resolve(artifactRoot, 'sdk-package-comparison');
     const harnessRoot = resolve(artifactRoot, 'chat-harness');
 
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
     const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
+    const frozen = frozenTarballs(lock);
+    assertPackedPackageContentsMatch(tarballs, frozen, comparisonRoot);
 
-    createHarness(harnessRoot, tarballs, caveFixturePath, caveDigestPath);
+    createHarness(harnessRoot, frozen);
     installHarnessOfflineAfterWarming(harnessRoot);
-
-    if (existsSync(resolve(harnessRoot, 'node_modules', '@opencoven', 'cave-client', 'src'))) {
-      throw new Error('Packed @opencoven/cave-client unexpectedly installed source files.');
-    }
+    assertIsolatedPackedInstall(harnessRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot);
 
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);

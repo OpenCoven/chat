@@ -1,182 +1,252 @@
-import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { BROWSER_PREVIEW_STATE, ConnectionGate } from './connection-gate';
+import './connection-gate.css';
+import { ChatShell } from './chat-shell';
+import './chat-shell.css';
+import { APP_METADATA } from './lib/app-metadata';
+import { type DesktopHost, desktopHost, isInstallationId } from './lib/desktop-host';
 import {
-  APP_CONNECTION_STATE,
-  APP_CONNECTION_STATE_SLUG,
-  APP_CONNECTION_SUMMARY,
-  APP_DISPLAY_NAME,
-  APP_METADATA,
-  APP_SCAFFOLD_STATUS,
-} from './lib/app-metadata';
-import { CAVE_CLIENT_BOUNDARY } from './lib/cave-client-boundary';
-import { type DesktopHost, desktopHost } from './lib/desktop-host';
-import { normalizeRejectionMessage } from './lib/rejection-message';
+  type CaveConnectionController,
+  type CaveReadClient,
+  createCaveConnectionController,
+} from './lib/sdk/connection-controller';
+import { createCaveConnectionHost } from './lib/sdk/connection-host';
+import type { NativeSdkInvoke } from './lib/sdk/native-boundary';
+import { createQueryAdapter, type QueryAdapter } from './lib/sdk/query-adapter';
 
-const BROWSER_PREVIEW_SOURCE = 'Browser preview fallback';
-const DESKTOP_IDENTITY_SOURCE = 'Native app_identity command';
-const DESKTOP_IDENTITY_UNAVAILABLE = 'Unavailable';
-const BROWSER_PREVIEW_STATUS =
-  'Browser preview fallback active. Desktop identity is available only inside Tauri.';
-
-type DesktopIdentityView = Readonly<{
-  identity: {
-    name: string;
-    identifier: string;
-    phase: string;
-  } | null;
-  source: string;
-  statusTone: 'info' | 'error' | null;
-  statusMessage: string | null;
-}>;
-
-function previewIdentityView(host: DesktopHost): DesktopIdentityView {
-  return {
-    identity: host.previewAppIdentity(),
-    source: BROWSER_PREVIEW_SOURCE,
-    statusTone: 'info',
-    statusMessage: BROWSER_PREVIEW_STATUS,
-  };
-}
-
-function nativeIdentityLoadingView(): DesktopIdentityView {
-  return {
-    identity: null,
-    source: 'Loading native app_identity…',
-    statusTone: 'info',
-    statusMessage: 'Loading desktop identity from the native host…',
-  };
-}
-
-function nativeIdentityFailureView(error: unknown): DesktopIdentityView {
-  const detail = normalizeRejectionMessage(error, 'The native app_identity command failed.');
-
-  return {
-    identity: null,
-    source: DESKTOP_IDENTITY_UNAVAILABLE,
-    statusTone: 'error',
-    statusMessage: `Desktop identity unavailable. ${detail}`,
-  };
-}
-
-function nativeIdentityView(identity: DesktopIdentityView['identity']): DesktopIdentityView {
-  return {
-    identity,
-    source: DESKTOP_IDENTITY_SOURCE,
-    statusTone: null,
-    statusMessage: null,
-  };
-}
+type ControllerFactory = (installationId: string) => CaveConnectionController;
+type QueryAdapterFactory = (getClient: () => CaveReadClient | null) => QueryAdapter;
+type InstallationIdReader = DesktopHost['readInstallationId'];
+type InstallationBootstrapState =
+  | Readonly<{ state: 'installation_initializing' }>
+  | Readonly<{ state: 'installation_unavailable' }>
+  | Readonly<{ state: 'ready'; installationId: string }>;
 
 type AppProps = Readonly<{
-  desktopIdentityHost?: DesktopHost;
+  desktopIdentityHost?: Pick<DesktopHost, 'canUseTauriCommands' | 'readInstallationId'>;
+  controllerFactory?: ControllerFactory;
+  queryAdapterFactory?: QueryAdapterFactory;
 }>;
 
-export function App({ desktopIdentityHost = desktopHost }: AppProps) {
-  const usesTauriCommands = desktopIdentityHost.canUseTauriCommands();
-  const [desktopIdentity, setDesktopIdentity] = useState<DesktopIdentityView>(() =>
-    usesTauriCommands ? nativeIdentityLoadingView() : previewIdentityView(desktopIdentityHost),
+type InstallationRead = Readonly<{
+  attempt: number;
+  promise: Promise<string>;
+}>;
+
+const installationReads = new WeakMap<InstallationIdReader, InstallationRead>();
+const installationInitializingState = Object.freeze({
+  state: 'installation_initializing',
+} as const);
+const installationUnavailableState = Object.freeze({
+  state: 'installation_unavailable',
+} as const);
+
+function sleepWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(Object.freeze({ code: 'aborted' }));
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+
+    const abort = () => {
+      globalThis.clearTimeout(timeout);
+      signal.removeEventListener('abort', abort);
+      reject(Object.freeze({ code: 'aborted' }));
+    };
+
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
+function defaultControllerFactory(installationId: string): CaveConnectionController {
+  return createCaveConnectionController({
+    host: createCaveConnectionHost(invoke as NativeSdkInvoke),
+    pairingIdentity: {
+      appName: APP_METADATA.name,
+      installationId,
+    },
+    now: () => Date.now(),
+    sleep: sleepWithAbort,
+    pollIntervalMs: 2_000,
+  });
+}
+
+function readInstallationIdForAttempt(
+  readInstallationId: InstallationIdReader,
+  attempt: number,
+): Promise<string> {
+  const existing = installationReads.get(readInstallationId);
+  if (existing?.attempt === attempt) {
+    return existing.promise;
+  }
+
+  let pendingRead: Promise<string>;
+  pendingRead = Promise.resolve()
+    .then(() => readInstallationId())
+    .then((installationId) => {
+      if (!isInstallationId(installationId)) {
+        throw new Error('The app_installation_id command returned an invalid result.');
+      }
+      return installationId;
+    })
+    .catch((error: unknown) => {
+      if (installationReads.get(readInstallationId)?.promise === pendingRead) {
+        installationReads.delete(readInstallationId);
+      }
+      throw error;
+    });
+  installationReads.set(readInstallationId, Object.freeze({ attempt, promise: pendingRead }));
+  return pendingRead;
+}
+
+function useInstallationBootstrap(readInstallationId: InstallationIdReader) {
+  const [bootstrapState, setBootstrapState] = useState<InstallationBootstrapState>(
+    installationInitializingState,
   );
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setBootstrapState(installationInitializingState);
+    setAttempt((currentAttempt) => currentAttempt + 1);
+  }, []);
 
   useEffect(() => {
-    if (!usesTauriCommands) {
-      return;
-    }
-
-    let isCurrent = true;
-    setDesktopIdentity(nativeIdentityLoadingView());
-
-    void desktopIdentityHost
-      .readAppIdentity()
-      .then((identity) => {
-        if (isCurrent) {
-          setDesktopIdentity(nativeIdentityView(identity));
+    let mounted = true;
+    setBootstrapState(installationInitializingState);
+    void readInstallationIdForAttempt(readInstallationId, attempt).then(
+      (installationId) => {
+        if (mounted) {
+          setBootstrapState(Object.freeze({ state: 'ready', installationId }));
         }
-      })
-      .catch((error) => {
-        if (isCurrent) {
-          setDesktopIdentity(nativeIdentityFailureView(error));
+      },
+      () => {
+        if (mounted) {
+          setBootstrapState(installationUnavailableState);
         }
-      });
+      },
+    );
 
     return () => {
-      isCurrent = false;
+      mounted = false;
     };
-  }, [desktopIdentityHost, usesTauriCommands]);
+  }, [attempt, readInstallationId]);
+
+  return [bootstrapState, retry] as const;
+}
+
+function ConnectedProductionApp({
+  controllerFactory,
+  queryAdapterFactory,
+  installationId,
+}: Readonly<{
+  controllerFactory: ControllerFactory;
+  queryAdapterFactory: QueryAdapterFactory;
+  installationId: string;
+}>) {
+  const [controller] = useState(() => controllerFactory(installationId));
+  const [queryAdapter] = useState(() => queryAdapterFactory(() => controller.getReadyClient()));
+  const connectionState = useSyncExternalStore(controller.subscribe, controller.getState);
+  const startedRef = useRef(false);
+  const deferredDisposeRef = useRef<ReturnType<typeof globalThis.setTimeout> | undefined>(
+    undefined,
+  );
+  const wasReadyRef = useRef(connectionState.state === 'ready');
+
+  useEffect(() => {
+    if (deferredDisposeRef.current !== undefined) {
+      globalThis.clearTimeout(deferredDisposeRef.current);
+      deferredDisposeRef.current = undefined;
+    }
+
+    if (!startedRef.current) {
+      startedRef.current = true;
+      void controller.start();
+    }
+
+    return () => {
+      deferredDisposeRef.current = globalThis.setTimeout(() => {
+        deferredDisposeRef.current = undefined;
+        queryAdapter.dispose();
+        controller.dispose();
+      }, 0);
+    };
+  }, [controller, queryAdapter]);
+
+  useEffect(() => {
+    const isReady = connectionState.state === 'ready';
+
+    if (wasReadyRef.current && !isReady) {
+      queryAdapter.invalidate();
+    }
+
+    wasReadyRef.current = isReady;
+  }, [connectionState.state, queryAdapter]);
 
   return (
-    <div className="app-shell" data-scaffold-fingerprint={APP_METADATA.fingerprint}>
-      <header className="app-header">
-        <p className="eyebrow">Phase 0 desktop scaffold</p>
-        <h1>{desktopIdentity.identity?.name ?? APP_DISPLAY_NAME}</h1>
-        <p className="lede">Production scaffolding for the future OpenCoven desktop chat client.</p>
-      </header>
+    <ConnectionGate controller={controller} state={connectionState}>
+      <ChatShell
+        queryAdapter={queryAdapter}
+        onForgetCredential={() => {
+          void controller.forgetCredential();
+        }}
+        onReconcile={() => {
+          void controller.retry();
+        }}
+      />
+    </ConnectionGate>
+  );
+}
 
-      <main className="app-main">
-        <section className="panel" aria-labelledby="connection-state-heading">
-          <div className="panel-heading">
-            <h2 id="connection-state-heading">Connection state</h2>
-            {/*
-              Decorative. The accessible state is the output below, so the dot
-              reinforces a word that is already there rather than carrying the
-              meaning on colour alone.
-            */}
-            <span
-              className="state-badge"
-              data-connection-state={APP_CONNECTION_STATE_SLUG}
-              aria-hidden="true"
-            >
-              <span className="state-dot" />
-              {APP_CONNECTION_STATE}
-            </span>
-          </div>
-          <output className="connection-summary" aria-label="Connection state" aria-live="polite">
-            {APP_CONNECTION_SUMMARY}
-          </output>
-        </section>
+function ProductionApp({
+  controllerFactory,
+  queryAdapterFactory,
+  readInstallationId,
+}: Readonly<{
+  controllerFactory: ControllerFactory;
+  queryAdapterFactory: QueryAdapterFactory;
+  readInstallationId: InstallationIdReader;
+}>) {
+  const [bootstrapState, retryInstallationBootstrap] = useInstallationBootstrap(readInstallationId);
 
-        <section className="panel" aria-labelledby="scaffold-status-heading">
-          <h2 id="scaffold-status-heading">Scaffold status</h2>
-          <output aria-live="polite">{APP_SCAFFOLD_STATUS}</output>
-        </section>
+  if (bootstrapState.state !== 'ready') {
+    return (
+      <ConnectionGate state={bootstrapState} onInstallationRetry={retryInstallationBootstrap} />
+    );
+  }
 
-        <section className="panel" aria-labelledby="integration-boundary-heading">
-          <h2 id="integration-boundary-heading">Integration boundary</h2>
-          <p>
-            Future Cave integration must import only from{' '}
-            <code>{CAVE_CLIENT_BOUNDARY.packageName}</code>.
-          </p>
-          <p>{CAVE_CLIENT_BOUNDARY.note}</p>
-          <p>{CAVE_CLIENT_BOUNDARY.verification}</p>
-        </section>
+  return (
+    <ConnectedProductionApp
+      controllerFactory={controllerFactory}
+      installationId={bootstrapState.installationId}
+      queryAdapterFactory={queryAdapterFactory}
+    />
+  );
+}
 
-        <aside className="panel" aria-labelledby="desktop-identity-heading">
-          <h2 id="desktop-identity-heading">Desktop identity</h2>
-          {desktopIdentity.statusMessage !== null ? (
-            <output
-              className={`desktop-identity-status desktop-identity-status--${desktopIdentity.statusTone}`}
-              aria-label="Desktop identity status"
-              role={desktopIdentity.statusTone === 'error' ? 'alert' : 'status'}
-              aria-live={desktopIdentity.statusTone === 'error' ? 'assertive' : 'polite'}
-            >
-              {desktopIdentity.statusMessage}
-            </output>
-          ) : null}
-          <dl className="identity-list">
-            <div>
-              <dt>Source</dt>
-              <dd>{desktopIdentity.source}</dd>
-            </div>
-            <div>
-              <dt>Bundle identifier</dt>
-              <dd>{desktopIdentity.identity?.identifier ?? DESKTOP_IDENTITY_UNAVAILABLE}</dd>
-            </div>
-            <div>
-              <dt>Phase</dt>
-              <dd>{desktopIdentity.identity?.phase ?? DESKTOP_IDENTITY_UNAVAILABLE}</dd>
-            </div>
-          </dl>
-        </aside>
-      </main>
-    </div>
+export function App({
+  desktopIdentityHost = desktopHost,
+  controllerFactory = defaultControllerFactory,
+  queryAdapterFactory = createQueryAdapter,
+}: AppProps) {
+  const readInstallationId = useCallback(
+    () => desktopIdentityHost.readInstallationId(),
+    [desktopIdentityHost],
+  );
+
+  if (!desktopIdentityHost.canUseTauriCommands()) {
+    return <ConnectionGate state={BROWSER_PREVIEW_STATE} />;
+  }
+
+  return (
+    <ProductionApp
+      controllerFactory={controllerFactory}
+      queryAdapterFactory={queryAdapterFactory}
+      readInstallationId={readInstallationId}
+    />
   );
 }
