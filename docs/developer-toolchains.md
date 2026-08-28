@@ -60,10 +60,20 @@
 - Native authority, pairing, and credential command results carry opaque
   handles plus authority generation and request identity. Replacing an
   authority invalidates prior generations and transient pairing material.
+- Health and pairing responses are reduced through operation-specific exact
+  DTO schemas. Unknown fields, raw causes, private paths, serialized keychain
+  records, and prompt or message content are rejected or replaced with fixed
+  safe error text before serialization.
+- Credential commits retain a zeroized exact-value rollback token until the
+  SDK can no longer request discard. Timeout, late-write, and replacement
+  cleanup uses compare-and-delete and reports `absent`, `changed`, or `deleted`
+  without deleting a newer credential value.
 - macOS and Linux connected Unix peers are inspected from the live socket
-  descriptor. Windows pipe ownership and connected-identity validation is
-  represented by a fail-closed provider boundary and pure identity checks; the
-  reviewed Windows OS inspection backend remains to be implemented.
+  descriptor. Unix-only types and exports are target-gated so Windows builds do
+  not reference `std::os::unix`. Windows pipe ownership and connected-identity
+  validation is represented by a fail-closed provider boundary and pure
+  identity checks; the reviewed Windows OS inspection backend remains to be
+  implemented.
 - The protected Cave transport provider is intentionally fail-closed until the
   reviewed native `hpke-bound-v1` HTTP implementation is installed. Health and
   pairing dispatch report `platform_security_unavailable` rather than

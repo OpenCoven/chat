@@ -3,7 +3,7 @@ use std::{
     fmt::Write as _,
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::{
     cave_credentials::{
-        CredentialCustody, CredentialLookup, CredentialRecord, CredentialStoreAvailability,
-        KeyringCredentialCustody, SecretValue,
+        CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialRecord,
+        CredentialStoreAvailability, KeyringCredentialCustody, PreparedCredential, SecretValue,
     },
     metadata::{APP_IDENTIFIER, APP_NAME},
     sdk_diagnostics::{
@@ -624,6 +624,16 @@ pub enum PairingDiscardResult {
     Deleted,
 }
 
+impl From<CredentialDeleteResult> for PairingDiscardResult {
+    fn from(value: CredentialDeleteResult) -> Self {
+        match value {
+            CredentialDeleteResult::Absent => Self::Absent,
+            CredentialDeleteResult::Changed => Self::Changed,
+            CredentialDeleteResult::Deleted => Self::Deleted,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialState {
@@ -762,15 +772,203 @@ struct PendingPairing {
     status: PendingPairingStatus,
 }
 
+enum StagedCredentialState {
+    Pending,
+    Writing { discard_requested: bool },
+    Committed,
+    Discarding,
+    Finished(CredentialDeleteResult),
+    Failed(NativeError),
+}
+
 struct StagedCredential {
     authority: AuthorityReference,
-    credential: CredentialRecord,
+    credential: PreparedCredential,
+    state: Mutex<StagedCredentialState>,
+    completed: Condvar,
+}
+
+impl StagedCredential {
+    fn new(authority: AuthorityReference, credential: PreparedCredential) -> Self {
+        Self {
+            authority,
+            credential,
+            state: Mutex::new(StagedCredentialState::Pending),
+            completed: Condvar::new(),
+        }
+    }
+
+    fn begin_write(&self) -> Result<PreparedCredential, NativeError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        match *state {
+            StagedCredentialState::Pending => {
+                *state = StagedCredentialState::Writing {
+                    discard_requested: false,
+                };
+                Ok(self.credential.clone())
+            }
+            StagedCredentialState::Writing { .. } | StagedCredentialState::Discarding => {
+                Err(NativeError::new(DiagnosticCode::OperationInProgress, true))
+            }
+            StagedCredentialState::Committed
+            | StagedCredentialState::Finished(_)
+            | StagedCredentialState::Failed(_) => Err(NativeError::reconcile_required()),
+        }
+    }
+
+    fn finish_write(
+        &self,
+        custody: &dyn CredentialCustody,
+        write_result: Result<(), NativeError>,
+        lifecycle_error: Option<NativeError>,
+    ) -> Result<(), NativeError> {
+        if let Err(write_error) = write_result {
+            let rollback = custody
+                .compare_delete_credential(&self.credential)
+                .map_err(|_| NativeError::secret_store_rollback_failed());
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            match rollback {
+                Ok(result) => {
+                    *state = StagedCredentialState::Finished(result);
+                    self.completed.notify_all();
+                    return Err(write_error);
+                }
+                Err(error) => {
+                    *state = StagedCredentialState::Failed(error.clone());
+                    self.completed.notify_all();
+                    return Err(error);
+                }
+            }
+        }
+
+        let rollback_error = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            let discard_requested = match *state {
+                StagedCredentialState::Writing { discard_requested } => discard_requested,
+                _ => return Err(NativeError::reconcile_required()),
+            };
+            if lifecycle_error.is_some() || discard_requested {
+                *state = StagedCredentialState::Discarding;
+                Some(
+                    lifecycle_error
+                        .clone()
+                        .unwrap_or_else(NativeError::reconcile_required),
+                )
+            } else {
+                *state = StagedCredentialState::Committed;
+                self.completed.notify_all();
+                None
+            }
+        };
+
+        let Some(error) = rollback_error else {
+            return Ok(());
+        };
+        let rollback = custody
+            .compare_delete_credential(&self.credential)
+            .map_err(|_| NativeError::secret_store_rollback_failed());
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        match rollback {
+            Ok(result) => {
+                *state = StagedCredentialState::Finished(result);
+                self.completed.notify_all();
+                Err(error)
+            }
+            Err(ref rollback_error) => {
+                *state = StagedCredentialState::Failed(rollback_error.clone());
+                self.completed.notify_all();
+                Err(rollback_error.clone())
+            }
+        }
+    }
+
+    fn discard(
+        &self,
+        custody: &dyn CredentialCustody,
+    ) -> Result<CredentialDeleteResult, NativeError> {
+        loop {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            match &mut *state {
+                StagedCredentialState::Pending => {
+                    *state = StagedCredentialState::Finished(CredentialDeleteResult::Deleted);
+                    self.completed.notify_all();
+                    return Ok(CredentialDeleteResult::Deleted);
+                }
+                StagedCredentialState::Writing { discard_requested } => {
+                    *discard_requested = true;
+                    state = self
+                        .completed
+                        .wait(state)
+                        .map_err(|_| NativeError::service_unavailable())?;
+                    drop(state);
+                }
+                StagedCredentialState::Committed => {
+                    *state = StagedCredentialState::Discarding;
+                    drop(state);
+                    let result = custody.compare_delete_credential(&self.credential);
+                    let mut state = self
+                        .state
+                        .lock()
+                        .map_err(|_| NativeError::service_unavailable())?;
+                    match result {
+                        Ok(result) => {
+                            *state = StagedCredentialState::Finished(result);
+                            self.completed.notify_all();
+                            return Ok(result);
+                        }
+                        Err(error) => {
+                            *state = StagedCredentialState::Failed(error.clone());
+                            self.completed.notify_all();
+                            return Err(error);
+                        }
+                    }
+                }
+                StagedCredentialState::Discarding => {
+                    state = self
+                        .completed
+                        .wait(state)
+                        .map_err(|_| NativeError::service_unavailable())?;
+                    drop(state);
+                }
+                StagedCredentialState::Finished(result) => return Ok(*result),
+                StagedCredentialState::Failed(error) => return Err(error.clone()),
+            }
+        }
+    }
+
+    fn update_in_progress(&self) -> Result<bool, NativeError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        Ok(matches!(
+            *state,
+            StagedCredentialState::Pending
+                | StagedCredentialState::Writing { .. }
+                | StagedCredentialState::Discarding
+        ))
+    }
 }
 
 #[derive(Default)]
 struct TransientState {
     pairings: std::collections::HashMap<String, PendingPairing>,
-    credentials: std::collections::HashMap<String, StagedCredential>,
+    credentials: std::collections::HashMap<String, Arc<StagedCredential>>,
 }
 
 pub struct NativeSdkBoundary {
@@ -1018,16 +1216,14 @@ impl NativeSdkBoundary {
             authority_fingerprint: authority.fingerprint()?,
             bearer: exchanged.bearer,
         };
+        let credential = PreparedCredential::from_record(&credential)?;
         self.transient
             .lock()
             .map_err(|_| NativeError::service_unavailable())?
             .credentials
             .insert(
                 commit_handle.clone(),
-                StagedCredential {
-                    authority: input.authority.clone(),
-                    credential,
-                },
+                Arc::new(StagedCredential::new(input.authority.clone(), credential)),
             );
         if let Err(error) = self.lifecycle.descriptor(&input.authority) {
             if let Ok(mut transient) = self.transient.lock() {
@@ -1051,20 +1247,34 @@ impl NativeSdkBoundary {
         input: CommitHandleCommandInput,
     ) -> Result<OperationResult<()>, NativeError> {
         validate_opaque_handle(&input.commit_handle, "commit:")?;
-        self.lifecycle
-            .synchronous_request(&input.authority, &input.request_id, |_authority| {
-                let staged = self
-                    .transient
-                    .lock()
-                    .map_err(|_| NativeError::service_unavailable())?
-                    .credentials
-                    .remove(&input.commit_handle)
-                    .ok_or_else(NativeError::reconcile_required)?;
-                if staged.authority != input.authority {
-                    return Err(NativeError::reconcile_required());
-                }
-                self.custody.write_credential(&staged.credential)
-            })?;
+        let request = self
+            .lifecycle
+            .begin_request(&input.authority, &input.request_id)?;
+        let staged = match self.transient.lock() {
+            Ok(transient) => transient.credentials.get(&input.commit_handle).cloned(),
+            Err(_) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::service_unavailable());
+            }
+        };
+        let Some(staged) = staged else {
+            self.lifecycle.cancel_request(&request);
+            return Err(NativeError::reconcile_required());
+        };
+        if staged.authority != input.authority {
+            self.lifecycle.cancel_request(&request);
+            return Err(NativeError::reconcile_required());
+        }
+        let credential = match staged.begin_write() {
+            Ok(credential) => credential,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let write_result = self.custody.write_credential(&credential);
+        let lifecycle_error = self.lifecycle.finish_request(&request).err();
+        staged.finish_write(self.custody.as_ref(), write_result, lifecycle_error)?;
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -1077,27 +1287,40 @@ impl NativeSdkBoundary {
         input: CommitHandleCommandInput,
     ) -> Result<OperationResult<PairingDiscardResult>, NativeError> {
         validate_opaque_handle(&input.commit_handle, "commit:")?;
-        let result = self.lifecycle.synchronous_request(
-            &input.authority,
-            &input.request_id,
-            |_authority| {
-                Ok(
-                    match self
-                        .transient
-                        .lock()
-                        .map_err(|_| NativeError::service_unavailable())?
-                        .credentials
-                        .remove(&input.commit_handle)
-                    {
-                        None => PairingDiscardResult::Absent,
-                        Some(staged) if staged.authority == input.authority => {
-                            PairingDiscardResult::Deleted
-                        }
-                        Some(_) => PairingDiscardResult::Changed,
-                    },
-                )
-            },
-        )?;
+        let request = self
+            .lifecycle
+            .begin_request(&input.authority, &input.request_id)?;
+        let staged = match self.transient.lock() {
+            Ok(transient) => transient.credentials.get(&input.commit_handle).cloned(),
+            Err(_) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::service_unavailable());
+            }
+        };
+        let result = match staged {
+            None => PairingDiscardResult::Absent,
+            Some(staged) if staged.authority != input.authority => PairingDiscardResult::Changed,
+            Some(staged) => {
+                let result = match staged.discard(self.custody.as_ref()) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.lifecycle.cancel_request(&request);
+                        return Err(error);
+                    }
+                };
+                match self.transient.lock() {
+                    Ok(mut transient) => {
+                        transient.credentials.remove(&input.commit_handle);
+                    }
+                    Err(_) => {
+                        self.lifecycle.cancel_request(&request);
+                        return Err(NativeError::service_unavailable());
+                    }
+                }
+                result.into()
+            }
+        };
+        self.lifecycle.finish_request(&request)?;
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -1113,6 +1336,21 @@ impl NativeSdkBoundary {
             &input.authority,
             &input.request_id,
             |authority| {
+                let transient = self
+                    .transient
+                    .lock()
+                    .map_err(|_| NativeError::service_unavailable())?;
+                let update_in_progress = transient
+                    .credentials
+                    .values()
+                    .filter(|credential| credential.authority == input.authority)
+                    .try_fold(false, |in_progress, credential| {
+                        Ok::<_, NativeError>(in_progress || credential.update_in_progress()?)
+                    })?;
+                drop(transient);
+                if update_in_progress {
+                    return Ok(CredentialState::UpdateInProgress);
+                }
                 let installation_id = self.custody.installation_id()?;
                 Ok(match self.custody.read_credential(&installation_id)? {
                     CredentialLookup::Missing => CredentialState::Missing,
@@ -1234,12 +1472,14 @@ fn validate_opaque_handle(value: &str, prefix: &str) -> Result<(), NativeError> 
 }
 
 pub struct NativeSdkState {
-    boundary: NativeSdkBoundary,
+    boundary: Arc<NativeSdkBoundary>,
 }
 
 impl NativeSdkState {
     pub fn new(boundary: NativeSdkBoundary) -> Self {
-        Self { boundary }
+        Self {
+            boundary: Arc::new(boundary),
+        }
     }
 
     pub fn production() -> Self {
@@ -1304,19 +1544,25 @@ pub async fn cave_pairing_exchange(
 }
 
 #[tauri::command]
-pub fn cave_pairing_commit(
+pub async fn cave_pairing_commit(
     state: tauri::State<'_, NativeSdkState>,
     input: CommitHandleCommandInput,
 ) -> Result<OperationResult<()>, NativeError> {
-    state.boundary.pairing_commit(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.pairing_commit(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
-pub fn cave_pairing_discard(
+pub async fn cave_pairing_discard(
     state: tauri::State<'_, NativeSdkState>,
     input: CommitHandleCommandInput,
 ) -> Result<OperationResult<PairingDiscardResult>, NativeError> {
-    state.boundary.pairing_discard(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.pairing_discard(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
@@ -1344,8 +1590,9 @@ pub fn sdk_native_diagnostics(state: tauri::State<'_, NativeSdkState>) -> Native
 mod tests {
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Condvar, Mutex,
     };
+    use std::time::{Duration, Instant};
 
     use serde_json::json;
 
@@ -1356,8 +1603,8 @@ mod tests {
         ProviderPairingExchange,
     };
     use crate::cave_credentials::{
-        CredentialCustody, CredentialLookup, CredentialRecord, CredentialStoreAvailability,
-        SecretValue,
+        CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialStoreAvailability,
+        PreparedCredential, SecretValue,
     };
     use crate::sdk_diagnostics::DiagnosticCode;
 
@@ -1456,18 +1703,17 @@ mod tests {
 
         fn write_credential(
             &self,
-            credential: &CredentialRecord,
+            _credential: &PreparedCredential,
         ) -> Result<(), crate::NativeError> {
-            assert_eq!(
-                credential.installation_id,
-                "00000000-0000-4000-8000-000000000010"
-            );
-            assert_eq!(
-                credential.bearer.expose(),
-                b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-            );
             self.writes.fetch_add(1, Ordering::Relaxed);
             Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            _expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            Ok(CredentialDeleteResult::Absent)
         }
 
         fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
@@ -1484,7 +1730,7 @@ mod tests {
 
         fn health(&self, _authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
             Box::pin(async {
-                crate::NativeResponse::new(
+                crate::NativeResponse::health(
                     200,
                     json!({
                         "apiVersion": "1.0",
@@ -1513,7 +1759,7 @@ mod tests {
                     pairing_secret: SecretValue::pairing(
                         b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
                     )?,
-                    response: crate::NativeResponse::new(
+                    response: crate::NativeResponse::pairing_create(
                         201,
                         json!({
                             "apiVersion": "1.0",
@@ -1541,7 +1787,7 @@ mod tests {
                     pairing_secret.expose(),
                     b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 );
-                crate::NativeResponse::new(
+                crate::NativeResponse::pairing_poll(
                     200,
                     json!({
                         "apiVersion": "1.0",
@@ -1573,7 +1819,7 @@ mod tests {
                     bearer: SecretValue::bearer(
                         b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_vec(),
                     )?,
-                    response: crate::NativeResponse::new(
+                    response: crate::NativeResponse::pairing_exchange(
                         200,
                         json!({
                             "apiVersion": "1.0",
@@ -1597,6 +1843,432 @@ mod tests {
                 })
             })
         }
+    }
+
+    struct RaceCustody {
+        stored: Mutex<Option<Vec<u8>>>,
+        fail_after_write: bool,
+    }
+
+    impl RaceCustody {
+        fn new(fail_after_write: bool) -> Self {
+            Self {
+                stored: Mutex::new(None),
+                fail_after_write,
+            }
+        }
+
+        fn stored(&self) -> Option<Vec<u8>> {
+            self.stored.lock().expect("test store lock").clone()
+        }
+
+        fn replace(&self, value: &[u8]) {
+            *self.stored.lock().expect("test store lock") = Some(value.to_vec());
+        }
+    }
+
+    impl CredentialCustody for RaceCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            Ok(CredentialLookup::Missing)
+        }
+
+        fn write_credential(
+            &self,
+            credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            *self.stored.lock().expect("test store lock") = Some(credential.exact_value().to_vec());
+            if self.fail_after_write {
+                return Err(crate::NativeError::new(DiagnosticCode::Timeout, false));
+            }
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            let mut stored = self.stored.lock().expect("test store lock");
+            match stored.as_ref() {
+                None => Ok(CredentialDeleteResult::Absent),
+                Some(current) if current.as_slice() != expected.exact_value() => {
+                    Ok(CredentialDeleteResult::Changed)
+                }
+                Some(_) => {
+                    *stored = None;
+                    Ok(CredentialDeleteResult::Deleted)
+                }
+            }
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(self
+                .stored
+                .lock()
+                .expect("test store lock")
+                .take()
+                .is_some())
+        }
+    }
+
+    struct BlockingCustody {
+        stored: Mutex<Option<Vec<u8>>>,
+        gate: Mutex<(bool, bool)>,
+        changed: Condvar,
+    }
+
+    impl BlockingCustody {
+        fn new() -> Self {
+            Self {
+                stored: Mutex::new(None),
+                gate: Mutex::new((false, false)),
+                changed: Condvar::new(),
+            }
+        }
+
+        fn wait_until_write_starts(&self) {
+            let mut gate = self.gate.lock().expect("test gate lock");
+            while !gate.0 {
+                gate = self.changed.wait(gate).expect("test gate wait");
+            }
+        }
+
+        fn release_write(&self) {
+            let mut gate = self.gate.lock().expect("test gate lock");
+            gate.1 = true;
+            self.changed.notify_all();
+        }
+
+        fn stored(&self) -> Option<Vec<u8>> {
+            self.stored.lock().expect("test store lock").clone()
+        }
+    }
+
+    impl CredentialCustody for BlockingCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            Ok(CredentialLookup::Missing)
+        }
+
+        fn write_credential(
+            &self,
+            credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            let mut gate = self.gate.lock().expect("test gate lock");
+            gate.0 = true;
+            self.changed.notify_all();
+            while !gate.1 {
+                gate = self.changed.wait(gate).expect("test gate wait");
+            }
+            drop(gate);
+            *self.stored.lock().expect("test store lock") = Some(credential.exact_value().to_vec());
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            let mut stored = self.stored.lock().expect("test store lock");
+            match stored.as_ref() {
+                None => Ok(CredentialDeleteResult::Absent),
+                Some(current) if current.as_slice() != expected.exact_value() => {
+                    Ok(CredentialDeleteResult::Changed)
+                }
+                Some(_) => {
+                    *stored = None;
+                    Ok(CredentialDeleteResult::Deleted)
+                }
+            }
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(self
+                .stored
+                .lock()
+                .expect("test store lock")
+                .take()
+                .is_some())
+        }
+    }
+
+    async fn stage_test_credential(
+        boundary: &NativeSdkBoundary,
+    ) -> (super::AuthorityReference, String) {
+        let authority = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("authority should open");
+        let created = boundary
+            .pairing_create(PairingCreateCommandInput {
+                authority: authority.clone(),
+                request_id: "request-create".into(),
+                request: PairingRequest {
+                    app_name: "OpenCoven Chat".into(),
+                    installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                    scopes: vec!["chat:read".into()],
+                },
+            })
+            .await
+            .expect("pairing should be created");
+        let exchanged = boundary
+            .pairing_exchange(PairingHandleCommandInput {
+                authority: authority.clone(),
+                request_id: "request-exchange".into(),
+                pairing_handle: created.result.handle,
+            })
+            .await
+            .expect("pairing should exchange");
+        (authority, exchanged.result.commit_handle)
+    }
+
+    #[test]
+    fn late_timed_out_write_is_deleted_by_exact_discard() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(RaceCustody::new(true));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("the test store reports a timeout after writing")
+                    .code,
+                DiagnosticCode::Timeout
+            );
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("late exact discard should complete");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+            assert!(custody.stored().is_none());
+        });
+    }
+
+    #[test]
+    fn discard_deletes_the_exact_committed_value() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(RaceCustody::new(false));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-commit".into(),
+                    commit_handle: commit_handle.clone(),
+                })
+                .expect("credential should commit");
+
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("exact discard should complete");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+            assert!(custody.stored().is_none());
+        });
+    }
+
+    #[test]
+    fn discard_never_deletes_a_replacement_credential() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(RaceCustody::new(false));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-commit".into(),
+                    commit_handle: commit_handle.clone(),
+                })
+                .expect("credential should commit");
+            custody.replace(b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
+
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("replacement-aware discard should complete");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Changed
+            ));
+            assert_eq!(
+                custody.stored(),
+                Some(b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_vec())
+            );
+        });
+    }
+
+    #[test]
+    fn discard_reports_absent_for_an_unknown_exact_handle() {
+        let boundary =
+            NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+        let authority = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("authority should open");
+        let discarded = boundary
+            .pairing_discard(super::CommitHandleCommandInput {
+                authority,
+                request_id: "request-discard".into(),
+                commit_handle: format!("commit:{}", uuid::Uuid::new_v4()),
+            })
+            .expect("unknown exact handles should be reported");
+        assert!(matches!(
+            discarded.result,
+            super::PairingDiscardResult::Absent
+        ));
+    }
+
+    #[test]
+    fn timeout_discard_waits_for_a_late_write_and_rolls_it_back() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(BlockingCustody::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(FakeProvider),
+            ));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            let staged = boundary
+                .transient
+                .lock()
+                .expect("transient state lock")
+                .credentials
+                .get(&commit_handle)
+                .cloned()
+                .expect("staged mutation");
+
+            let commit_boundary = Arc::clone(&boundary);
+            let commit_authority = authority.clone();
+            let commit_handle_for_thread = commit_handle.clone();
+            let commit = std::thread::spawn(move || {
+                commit_boundary.pairing_commit(super::CommitHandleCommandInput {
+                    authority: commit_authority,
+                    request_id: "request-commit".into(),
+                    commit_handle: commit_handle_for_thread,
+                })
+            });
+            custody.wait_until_write_starts();
+
+            let discard_boundary = Arc::clone(&boundary);
+            let discard = std::thread::spawn(move || {
+                discard_boundary.pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let requested = staged.state.lock().is_ok_and(|state| {
+                    matches!(
+                        *state,
+                        super::StagedCredentialState::Writing {
+                            discard_requested: true
+                        }
+                    )
+                });
+                if requested {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "discard did not reach the mutation"
+                );
+                std::thread::yield_now();
+            }
+
+            custody.release_write();
+            assert_eq!(
+                commit
+                    .join()
+                    .expect("commit thread")
+                    .expect_err("discarded commit must not report success")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            let discarded = discard
+                .join()
+                .expect("discard thread")
+                .expect("discard should complete");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+            assert!(custody.stored().is_none());
+        });
+    }
+
+    #[test]
+    fn authority_replacement_rolls_back_a_late_write() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(BlockingCustody::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(FakeProvider),
+            ));
+            let (authority_reference, commit_handle) = stage_test_credential(&boundary).await;
+            let commit_boundary = Arc::clone(&boundary);
+            let commit = std::thread::spawn(move || {
+                commit_boundary.pairing_commit(super::CommitHandleCommandInput {
+                    authority: authority_reference,
+                    request_id: "request-commit".into(),
+                    commit_handle,
+                })
+            });
+            custody.wait_until_write_starts();
+
+            boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000002"))
+                .expect("replacement authority should open");
+            custody.release_write();
+
+            assert_eq!(
+                commit
+                    .join()
+                    .expect("commit thread")
+                    .expect_err("stale late commit must fail")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert!(custody.stored().is_none());
+        });
     }
 
     #[test]

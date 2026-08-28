@@ -73,13 +73,6 @@ pub fn inspect_connected_unix_peer(
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub fn inspect_connected_unix_peer(
-    _stream: &std::os::unix::net::UnixStream,
-) -> Result<UnixPeerIdentity, NativeError> {
-    Err(NativeError::platform_security_unavailable())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{validate_unix_peer_identity, UnixPeerIdentity};

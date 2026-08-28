@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use keyring_core::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,57 @@ pub struct CredentialRecord {
     pub bearer: SecretValue,
 }
 
+pub struct PreparedCredential {
+    installation_id: String,
+    encoded: Zeroizing<Vec<u8>>,
+}
+
+impl PreparedCredential {
+    pub fn from_record(credential: &CredentialRecord) -> Result<Self, NativeError> {
+        validate_installation_id(&credential.installation_id)?;
+        validate_authority_fingerprint(&credential.authority_fingerprint)?;
+        let bearer = std::str::from_utf8(credential.bearer.expose())
+            .map_err(|_| NativeError::invalid_response())?;
+        Ok(Self {
+            installation_id: credential.installation_id.clone(),
+            encoded: Zeroizing::new(
+                serde_json::to_vec(&CredentialWireRef {
+                    version: 1,
+                    installation_id: &credential.installation_id,
+                    authority_fingerprint: &credential.authority_fingerprint,
+                    bearer,
+                })
+                .map_err(|_| operation_error(StoreOperation::Write))?,
+            ),
+        })
+    }
+
+    fn encoded(&self) -> &[u8] {
+        self.encoded.as_slice()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn exact_value(&self) -> &[u8] {
+        self.encoded()
+    }
+}
+
+impl Clone for PreparedCredential {
+    fn clone(&self) -> Self {
+        Self {
+            installation_id: self.installation_id.clone(),
+            encoded: Zeroizing::new(self.encoded.to_vec()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialDeleteResult {
+    Absent,
+    Changed,
+    Deleted,
+}
+
 pub enum CredentialLookup {
     Missing,
     Present(CredentialRecord),
@@ -66,7 +117,11 @@ pub trait CredentialCustody: Send + Sync {
     fn availability(&self) -> CredentialStoreAvailability;
     fn installation_id(&self) -> Result<String, NativeError>;
     fn read_credential(&self, installation_id: &str) -> Result<CredentialLookup, NativeError>;
-    fn write_credential(&self, credential: &CredentialRecord) -> Result<(), NativeError>;
+    fn write_credential(&self, credential: &PreparedCredential) -> Result<(), NativeError>;
+    fn compare_delete_credential(
+        &self,
+        expected: &PreparedCredential,
+    ) -> Result<CredentialDeleteResult, NativeError>;
     fn delete_credential(&self, installation_id: &str) -> Result<bool, NativeError>;
 }
 
@@ -109,7 +164,14 @@ impl CredentialCustody for UnavailableCredentialCustody {
         Err(self.error.clone())
     }
 
-    fn write_credential(&self, _credential: &CredentialRecord) -> Result<(), NativeError> {
+    fn write_credential(&self, _credential: &PreparedCredential) -> Result<(), NativeError> {
+        Err(self.error.clone())
+    }
+
+    fn compare_delete_credential(
+        &self,
+        _expected: &PreparedCredential,
+    ) -> Result<CredentialDeleteResult, NativeError> {
         Err(self.error.clone())
     }
 
@@ -123,6 +185,7 @@ pub struct KeyringCredentialCustody {
 }
 
 static STORE_AVAILABILITY: OnceLock<CredentialStoreAvailability> = OnceLock::new();
+static CREDENTIAL_MUTATION_LOCK: Mutex<()> = Mutex::new(());
 
 impl KeyringCredentialCustody {
     pub const fn new(service: &'static str) -> Self {
@@ -325,27 +388,46 @@ impl CredentialCustody for KeyringCredentialCustody {
         }))
     }
 
-    fn write_credential(&self, credential: &CredentialRecord) -> Result<(), NativeError> {
-        validate_installation_id(&credential.installation_id)?;
-        validate_authority_fingerprint(&credential.authority_fingerprint)?;
-        let bearer = std::str::from_utf8(credential.bearer.expose())
-            .map_err(|_| NativeError::invalid_response())?;
-        let bytes = Zeroizing::new(
-            serde_json::to_vec(&CredentialWireRef {
-                version: 1,
-                installation_id: &credential.installation_id,
-                authority_fingerprint: &credential.authority_fingerprint,
-                bearer,
-            })
-            .map_err(|_| operation_error(StoreOperation::Write))?,
-        );
+    fn write_credential(&self, credential: &PreparedCredential) -> Result<(), NativeError> {
+        let _mutation = CREDENTIAL_MUTATION_LOCK
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
         let account = Self::credential_account(&credential.installation_id)?;
         self.entry(&account, StoreOperation::Write)?
-            .set_secret(&bytes)
+            .set_secret(credential.encoded())
             .map_err(|error| map_keyring_error(&error, StoreOperation::Write))
     }
 
+    fn compare_delete_credential(
+        &self,
+        expected: &PreparedCredential,
+    ) -> Result<CredentialDeleteResult, NativeError> {
+        let _mutation = CREDENTIAL_MUTATION_LOCK
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        let account = Self::credential_account(&expected.installation_id)?;
+        let entry = self.entry(&account, StoreOperation::Delete)?;
+        let current = match entry.get_secret() {
+            Ok(current) => Zeroizing::new(current),
+            Err(KeyringError::NoEntry) => return Ok(CredentialDeleteResult::Absent),
+            Err(error) => return Err(map_keyring_error(&error, StoreOperation::Read)),
+        };
+        if current.as_slice() != expected.encoded() {
+            return Ok(CredentialDeleteResult::Changed);
+        }
+        entry
+            .delete_credential()
+            .map(|()| CredentialDeleteResult::Deleted)
+            .or_else(|error| match error {
+                KeyringError::NoEntry => Ok(CredentialDeleteResult::Absent),
+                error => Err(map_keyring_error(&error, StoreOperation::Delete)),
+            })
+    }
+
     fn delete_credential(&self, installation_id: &str) -> Result<bool, NativeError> {
+        let _mutation = CREDENTIAL_MUTATION_LOCK
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
         let account = Self::credential_account(installation_id)?;
         let entry = self.entry(&account, StoreOperation::Delete)?;
         match entry.delete_credential() {

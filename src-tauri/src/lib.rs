@@ -8,9 +8,9 @@ mod sdk_diagnostics;
 
 pub use cave_credentials::{SecretValue, UnavailableCredentialCustody};
 pub use commands::app_identity;
-pub use coven_peer_identity::{
-    inspect_connected_unix_peer, validate_unix_peer_identity, UnixPeerIdentity,
-};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use coven_peer_identity::inspect_connected_unix_peer;
+pub use coven_peer_identity::{validate_unix_peer_identity, UnixPeerIdentity};
 pub use coven_pipe_identity::{
     validate_windows_pipe_identity, SystemWindowsPipeIdentityProvider, WindowsPipeIdentity,
     WindowsPipeIdentityProvider,

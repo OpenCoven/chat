@@ -16,6 +16,9 @@ webview in this phase.
 - Cave credential values are confined to native platform custody. No bearer,
   pairing secret, raw keychain value, or canonical data enters browser storage
   or command diagnostics.
+- Native health and pairing results use operation-specific exact schemas rather
+  than generic JSON filtering, and staged credential rollback uses exact-value
+  compare-and-delete so a late cleanup cannot delete a replacement credential.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

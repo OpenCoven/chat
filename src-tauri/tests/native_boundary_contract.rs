@@ -157,8 +157,84 @@ fn public_responses_reject_secret_and_message_content() {
         json!({"data": {"value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}),
     ] {
         assert_eq!(
-            NativeResponse::new(200, payload)
+            NativeResponse::health(200, payload)
                 .expect_err("sensitive command output must fail closed")
+                .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+}
+
+#[test]
+fn operation_responses_reject_causes_keychain_records_and_unknown_fields() {
+    let error_envelope = |error: serde_json::Value| {
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": ["health"],
+            "operations": ["health.read"],
+            "requestId": "request-1",
+            "error": error
+        })
+    };
+
+    assert_eq!(
+        NativeResponse::health(
+            500,
+            error_envelope(json!({
+                "code": "service_unavailable",
+                "message": "failed at /Users/private/.opencoven/cave.json",
+                "retryable": true,
+                "cause": "raw keychain failure"
+            }))
+        )
+        .expect_err("raw causes are not an allowlisted error field")
+        .code,
+        DiagnosticCode::InvalidResponse
+    );
+
+    let safe = NativeResponse::health(
+        500,
+        error_envelope(json!({
+            "code": "service_unavailable",
+            "message": "failed at /Users/private/.opencoven/cave.json",
+            "retryable": true
+        })),
+    )
+    .expect("known protocol errors should be reduced to a safe DTO");
+    let rendered = serde_json::to_string(&safe).expect("safe response should serialize");
+    assert!(!rendered.contains("/Users/private"));
+    assert!(!rendered.contains("keychain"));
+
+    for payload in [
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": ["health"],
+            "operations": ["health.read"],
+            "data": {
+                "instanceId": "00000000-0000-4000-8000-000000000001",
+                "pairingRequired": true,
+                "releaseVersion": "0.1.0",
+                "serializedKeychainRecord": "private"
+            }
+        }),
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": ["health"],
+            "operations": ["health.read"],
+            "data": {
+                "instanceId": "00000000-0000-4000-8000-000000000001",
+                "pairingRequired": true,
+                "releaseVersion": "0.1.0"
+            },
+            "unknown": true
+        }),
+    ] {
+        assert_eq!(
+            NativeResponse::health(200, payload)
+                .expect_err("unknown operation fields must fail closed")
                 .code,
             DiagnosticCode::InvalidResponse
         );

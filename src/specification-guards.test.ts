@@ -161,6 +161,10 @@ describe('Phase 0 specification guards', () => {
     );
   });
 
+  it('ships the Windows resource icon required by cross-target checks', () => {
+    expect(existsSync(resolve(projectRoot, 'src-tauri/icons/icon.ico'))).toBe(true);
+  });
+
   it('derives native identity name and identifier from tauri.conf.json', () => {
     const buildScript = readText('src-tauri/build.rs');
     const metadata = readText('src-tauri/src/metadata.rs');
