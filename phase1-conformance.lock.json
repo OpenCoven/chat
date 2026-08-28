@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "chat": {
+    "repository": "OpenCoven/chat",
+    "revision": "73bec85903646773db8267171c7c3eb1e23a1d46"
+  },
+  "sdk": {
+    "repository": "OpenCoven/sdk",
+    "revision": "163961f4e59cfdef51d2271fa98e7c514977203f"
+  },
+  "cave": {
+    "repository": "OpenCoven/coven-cave",
+    "revision": "061ddca45ab00028ecc0335face6239e5553f24a"
+  },
+  "coven": {
+    "repository": "OpenCoven/coven",
+    "revision": "721437b84026c042e431b0882dcd14fdb29ac07d"
+  }
+}
