@@ -183,10 +183,154 @@
           "markdownDescription": "Enables the app_identity command without any pre-configured scope."
         },
         {
+          "description": "Enables the cave_credential_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-credential-state",
+          "markdownDescription": "Enables the cave_credential_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_forget_credential command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-forget-credential",
+          "markdownDescription": "Enables the cave_forget_credential command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-health",
+          "markdownDescription": "Enables the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-commit",
+          "markdownDescription": "Enables the cave_pairing_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_create command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-create",
+          "markdownDescription": "Enables the cave_pairing_create command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_discard command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-discard",
+          "markdownDescription": "Enables the cave_pairing_discard command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_exchange command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-exchange",
+          "markdownDescription": "Enables the cave_pairing_exchange command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_pairing_poll command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-pairing-poll",
+          "markdownDescription": "Enables the cave_pairing_poll command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sdk_authority_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sdk-authority-close",
+          "markdownDescription": "Enables the sdk_authority_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sdk_authority_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sdk-authority-open",
+          "markdownDescription": "Enables the sdk_authority_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sdk_installation_identity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sdk-installation-identity",
+          "markdownDescription": "Enables the sdk_installation_identity command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sdk_native_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sdk-native-diagnostics",
+          "markdownDescription": "Enables the sdk_native_diagnostics command without any pre-configured scope."
+        },
+        {
           "description": "Denies the app_identity command without any pre-configured scope.",
           "type": "string",
           "const": "deny-app-identity",
           "markdownDescription": "Denies the app_identity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_credential_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-credential-state",
+          "markdownDescription": "Denies the cave_credential_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_forget_credential command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-forget-credential",
+          "markdownDescription": "Denies the cave_forget_credential command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-health",
+          "markdownDescription": "Denies the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-commit",
+          "markdownDescription": "Denies the cave_pairing_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_create command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-create",
+          "markdownDescription": "Denies the cave_pairing_create command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_discard command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-discard",
+          "markdownDescription": "Denies the cave_pairing_discard command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_exchange command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-exchange",
+          "markdownDescription": "Denies the cave_pairing_exchange command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_pairing_poll command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-pairing-poll",
+          "markdownDescription": "Denies the cave_pairing_poll command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sdk_authority_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sdk-authority-close",
+          "markdownDescription": "Denies the sdk_authority_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sdk_authority_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sdk-authority-open",
+          "markdownDescription": "Denies the sdk_authority_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sdk_installation_identity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sdk-installation-identity",
+          "markdownDescription": "Denies the sdk_installation_identity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sdk_native_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sdk-native-diagnostics",
+          "markdownDescription": "Denies the sdk_native_diagnostics command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

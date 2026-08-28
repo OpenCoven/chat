@@ -25,9 +25,22 @@ fn main() {
         tauri_config_value(&config, "identifier")
     );
 
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["app_identity"])),
-    )
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "app_identity",
+            "sdk_installation_identity",
+            "sdk_authority_open",
+            "sdk_authority_close",
+            "cave_health",
+            "cave_pairing_create",
+            "cave_pairing_poll",
+            "cave_pairing_exchange",
+            "cave_pairing_commit",
+            "cave_pairing_discard",
+            "cave_credential_state",
+            "cave_forget_credential",
+            "sdk_native_diagnostics",
+        ]),
+    ))
     .expect("failed to run tauri-build");
 }

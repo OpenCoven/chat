@@ -2,14 +2,23 @@
 
 Phase 0 of OpenCoven Chat is a production-oriented scaffold for the future
 desktop client. It intentionally stops at the shell, toolchains, tests, and
-least-privilege native host. Pairing, canonical Cave reads, and chat behavior
-are not implemented in this phase.
+least-privilege native host. The Tauri process now contains the fail-closed
+managed-native lifecycle and credential-custody boundary, but pairing
+transport, canonical Cave reads, and chat behavior are not wired into the
+webview in this phase.
 
 ## Security boundaries
 
-- The main window can invoke only the custom `app_identity` Tauri command.
+- The main window can invoke only the reviewed operation-specific native
+  command table; the current TypeScript bridge still invokes only
+  `app_identity`.
 - No direct arbitrary HTTP calls are implemented.
-- No credentials, localStorage canonical data, or secret handling ship in Phase 0.
+- Cave credential values are confined to native platform custody. No bearer,
+  pairing secret, raw keychain value, or canonical data enters browser storage
+  or command diagnostics.
+- The protected Cave authority provider fails closed with
+  `platform_security_unavailable` until the reviewed native
+  `hpke-bound-v1` transport is installed.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
 - Future Cave integration must use only the public `@opencoven/cave-client`
   package boundary.
@@ -63,6 +72,8 @@ The current application renders:
 - a visible unavailable Cave connection state
 - an accessible placeholder status region
 - a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
+- a dormant native managed-SDK command boundary with opaque authority,
+  generation, request, pairing, and commit handles
 - a documented future Cave client boundary
 - the desktop bundle identifier and scaffold phase
 
@@ -138,4 +149,5 @@ verifies that the checked-out HEADs match the tracked lock.
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
 intentionally kept outside the ignore rules so the capability `$schema` can ship
-with fresh checkouts without broadening permissions beyond `allow-app-identity`.
+with fresh checkouts without granting shell, filesystem, opener, or network
+plugin permissions.

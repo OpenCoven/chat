@@ -27,6 +27,23 @@ type ContractCanaryLock = {
 };
 
 const projectRoot = process.cwd();
+const nativeCommands = [
+  'app_identity',
+  'sdk_installation_identity',
+  'sdk_authority_open',
+  'sdk_authority_close',
+  'cave_health',
+  'cave_pairing_create',
+  'cave_pairing_poll',
+  'cave_pairing_exchange',
+  'cave_pairing_commit',
+  'cave_pairing_discard',
+  'cave_credential_state',
+  'cave_forget_credential',
+  'sdk_native_diagnostics',
+] as const;
+
+const nativePermissions = nativeCommands.map((command) => `allow-${command.replaceAll('_', '-')}`);
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -87,13 +104,13 @@ describe('Phase 0 specification guards', () => {
     expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
   });
 
-  it('keeps the default Tauri capability least-privileged for app_identity', () => {
+  it('keeps the default Tauri capability limited to reviewed native commands', () => {
     const capability = JSON.parse(
       readText('src-tauri/capabilities/default.json'),
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
-    expect(capability.permissions).toEqual(['allow-app-identity']);
+    expect(capability.permissions).toEqual(nativePermissions);
 
     for (const permission of capability.permissions) {
       expect(typeof permission).toBe('string');
@@ -132,10 +149,16 @@ describe('Phase 0 specification guards', () => {
     ).toContain('!src-tauri/gen/schemas/desktop-schema.json');
   });
 
-  it('autogenerates app command permissions only for app_identity', () => {
+  it('autogenerates permissions only for the reviewed native commands', () => {
     const buildScript = readText('src-tauri/build.rs');
 
-    expect(buildScript).toMatch(/AppManifest::new\(\)\s*\.commands\(&\["app_identity"\]\)/);
+    for (const command of nativeCommands) {
+      expect(buildScript).toContain(`"${command}"`);
+    }
+
+    expect(buildScript).not.toMatch(
+      /generic|arbitrary|shell|filesystem|keychain_(?:get|set)|fetch/i,
+    );
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {

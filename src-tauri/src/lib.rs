@@ -1,11 +1,69 @@
+mod cave_credentials;
 mod commands;
+mod coven_peer_identity;
+mod coven_pipe_identity;
 mod metadata;
+mod sdk_connection;
+mod sdk_diagnostics;
 
-pub use commands::{app_identity, registered_command_names};
+pub use cave_credentials::{SecretValue, UnavailableCredentialCustody};
+pub use commands::app_identity;
+pub use coven_peer_identity::{
+    inspect_connected_unix_peer, validate_unix_peer_identity, UnixPeerIdentity,
+};
+pub use coven_pipe_identity::{
+    validate_windows_pipe_identity, SystemWindowsPipeIdentityProvider, WindowsPipeIdentity,
+    WindowsPipeIdentityProvider,
+};
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
+pub use sdk_connection::{
+    cave_credential_state, cave_forget_credential, cave_health, cave_pairing_commit,
+    cave_pairing_create, cave_pairing_discard, cave_pairing_exchange, cave_pairing_poll,
+    sdk_authority_close, sdk_authority_open, sdk_installation_identity, sdk_native_diagnostics,
+    AuthorityDescriptor, AuthorityLifecycle, HealthCommandInput, ManagedNativeAuthorityProvider,
+    NativeSdkBoundary, NativeSdkState, PairingRequest, ProviderFuture, ProviderPairingCreated,
+    ProviderPairingExchange,
+};
+pub use sdk_diagnostics::{DiagnosticCode, NativeError, NativeResponse};
+
+const REGISTERED_COMMANDS: &[&str] = &[
+    "app_identity",
+    "sdk_installation_identity",
+    "sdk_authority_open",
+    "sdk_authority_close",
+    "cave_health",
+    "cave_pairing_create",
+    "cave_pairing_poll",
+    "cave_pairing_exchange",
+    "cave_pairing_commit",
+    "cave_pairing_discard",
+    "cave_credential_state",
+    "cave_forget_credential",
+    "sdk_native_diagnostics",
+];
+
+pub fn registered_command_names() -> &'static [&'static str] {
+    REGISTERED_COMMANDS
+}
 
 fn builder() -> tauri::Builder<tauri::Wry> {
-    tauri::Builder::default().invoke_handler(tauri::generate_handler![app_identity])
+    tauri::Builder::default()
+        .manage(NativeSdkState::production())
+        .invoke_handler(tauri::generate_handler![
+            app_identity,
+            sdk_installation_identity,
+            sdk_authority_open,
+            sdk_authority_close,
+            cave_health,
+            cave_pairing_create,
+            cave_pairing_poll,
+            cave_pairing_exchange,
+            cave_pairing_commit,
+            cave_pairing_discard,
+            cave_credential_state,
+            cave_forget_credential,
+            sdk_native_diagnostics,
+        ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,6 +99,23 @@ mod smoke_tests {
 
     #[test]
     fn registers_the_initial_command_table() {
-        assert_eq!(registered_command_names(), &["app_identity"]);
+        assert_eq!(
+            registered_command_names(),
+            &[
+                "app_identity",
+                "sdk_installation_identity",
+                "sdk_authority_open",
+                "sdk_authority_close",
+                "cave_health",
+                "cave_pairing_create",
+                "cave_pairing_poll",
+                "cave_pairing_exchange",
+                "cave_pairing_commit",
+                "cave_pairing_discard",
+                "cave_credential_state",
+                "cave_forget_credential",
+                "sdk_native_diagnostics",
+            ]
+        );
     }
 }

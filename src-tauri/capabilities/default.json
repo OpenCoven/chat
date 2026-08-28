@@ -3,5 +3,19 @@
   "identifier": "default",
   "description": "Capability for the OpenCoven Chat main window.",
   "windows": ["main"],
-  "permissions": ["allow-app-identity"]
+  "permissions": [
+    "allow-app-identity",
+    "allow-sdk-installation-identity",
+    "allow-sdk-authority-open",
+    "allow-sdk-authority-close",
+    "allow-cave-health",
+    "allow-cave-pairing-create",
+    "allow-cave-pairing-poll",
+    "allow-cave-pairing-exchange",
+    "allow-cave-pairing-commit",
+    "allow-cave-pairing-discard",
+    "allow-cave-credential-state",
+    "allow-cave-forget-credential",
+    "allow-sdk-native-diagnostics"
+  ]
 }
