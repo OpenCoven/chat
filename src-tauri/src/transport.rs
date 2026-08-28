@@ -5,10 +5,12 @@ use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::cave::{NativeDiagnostic, NativeResult, PinnedCaveAuthority};
+use crate::{
+    cave::{NativeDiagnostic, NativeResult, PinnedCaveAuthority},
+    hpke_bound::{canonical_route, create_bound_request, CaveHpkeAuthorization},
+};
 
 const MAX_JSON_BODY_BYTES: usize = 4 * 1024 * 1024;
-const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +88,120 @@ pub struct NativePage {
     pub cursor: Option<String>,
 }
 
+pub(crate) fn validate_pairing_request(value: &Value) -> NativeResult<()> {
+    let request = value
+        .as_object()
+        .filter(|request| {
+            request.len() == 3
+                && ["appName", "installationId", "scopes"]
+                    .iter()
+                    .all(|key| request.contains_key(*key))
+        })
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    let app_name = request
+        .get("appName")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && *value == value.trim()
+                && !value.chars().any(char::is_control)
+        })
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    let installation_id = request
+        .get("installationId")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.bytes().enumerate().all(|(index, byte)| {
+                    if index == 0 {
+                        byte.is_ascii_alphanumeric()
+                    } else {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+                    }
+                })
+        })
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    let scopes = request
+        .get("scopes")
+        .and_then(Value::as_array)
+        .filter(|scopes| scopes.len() == 1 && scopes[0].as_str() == Some("chat:read"))
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    let _ = (app_name, installation_id, scopes);
+    Ok(())
+}
+
+impl NativePage {
+    pub(crate) fn validate(&self) -> NativeResult<()> {
+        if !matches!(self.limit, Some(1..=100))
+            || self
+                .cursor
+                .as_deref()
+                .is_some_and(|cursor| !is_canonical_cursor(cursor))
+        {
+            return Err(NativeDiagnostic::new("invalid_page_input", false));
+        }
+        Ok(())
+    }
+}
+
+impl CaveReadPath {
+    pub(crate) fn validate(&self) -> NativeResult<()> {
+        match self {
+            Self::Familiars { page } | Self::Projects { page } | Self::Conversations { page } => {
+                page.validate()
+            }
+            Self::Conversation { conversation_id } => {
+                validate_canonical_conversation_id(conversation_id)
+            }
+            Self::ConversationMessages {
+                conversation_id,
+                page,
+            } => {
+                validate_canonical_conversation_id(conversation_id)?;
+                page.validate()
+            }
+        }
+    }
+}
+
+fn is_canonical_cursor(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return false;
+    }
+    let remainder = value.len() % 4;
+    if remainder == 1 {
+        return false;
+    }
+    if remainder == 0 {
+        return true;
+    }
+    let trailing = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        .iter()
+        .position(|candidate| *candidate == value.as_bytes()[value.len() - 1])
+        .unwrap_or(usize::MAX);
+    trailing != usize::MAX && trailing % (if remainder == 2 { 16 } else { 4 }) == 0
+}
+
+fn validate_canonical_conversation_id(value: &str) -> NativeResult<()> {
+    if value.trim().is_empty()
+        || matches!(value, "." | "..")
+        || value.len() > 2_048
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~'))
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
 impl ConstrainedTransport {
     fn client() -> NativeResult<Client> {
         Client::builder()
@@ -93,7 +209,7 @@ impl ConstrainedTransport {
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))
             .build()
-            .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))
     }
 
     async fn request(
@@ -105,28 +221,55 @@ impl ConstrainedTransport {
         body: Option<Value>,
     ) -> NativeResult<NativeHttpResponse> {
         let endpoint = authority.endpoint(path)?;
+        if bearer.is_some() && pairing_secret.is_some() {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        if let Some(authorization) = bearer
+            .map(CaveHpkeAuthorization::Bearer)
+            .or_else(|| pairing_secret.map(CaveHpkeAuthorization::PairingSecret))
+        {
+            let body = body
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()
+                .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?
+                .unwrap_or_default();
+            let route = canonical_route(&endpoint)?;
+            let bound =
+                create_bound_request(authority, method.as_str(), &route, &body, authorization)?;
+            let mut request = Self::client()?.request(method, endpoint);
+            for (name, value) in &bound.headers {
+                request = request.header(*name, value);
+            }
+            if !body.is_empty() {
+                request = request
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(body);
+            }
+            let response = request.send().await.map_err(request_error)?;
+            let opened = bound.open(response, MAX_JSON_BODY_BYTES).await?;
+            let payload = serde_json::from_slice(&opened.body)
+                .map_err(|_| NativeDiagnostic::new("invalid_response", false))?;
+            return Ok(NativeHttpResponse {
+                status_code: opened.status_code,
+                payload,
+            });
+        }
         let mut request = Self::client()?.request(method, endpoint);
-        if let Some(value) = bearer {
-            if value.is_empty() || value.len() > MAX_HEADER_VALUE_BYTES {
-                return Err(NativeDiagnostic::new("credential_unavailable", true));
-            }
-            request = request.header(reqwest::header::AUTHORIZATION, format!("Bearer {value}"));
-        }
-        if let Some(value) = pairing_secret {
-            if value.is_empty() || value.len() > MAX_HEADER_VALUE_BYTES {
-                return Err(NativeDiagnostic::new("pairing_unavailable", true));
-            }
-            request = request.header("X-Coven-Pairing-Secret", value);
-        }
         if let Some(value) = body {
             request = request.json(&value);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))?;
+        let response = request.send().await.map_err(request_error)?;
         read_response(response).await
+    }
+}
+
+fn request_error(error: reqwest::Error) -> NativeDiagnostic {
+    if error.is_timeout() {
+        NativeDiagnostic::new("timeout", true)
+    } else {
+        NativeDiagnostic::new("service_unavailable", true)
     }
 }
 
@@ -158,6 +301,9 @@ impl NativeCaveTransport for ConstrainedTransport {
             Some(request),
         )
         .await?;
+        if !(200..300).contains(&response.status_code) {
+            return Err(response_diagnostic(&response));
+        }
         let (secret, response) = managed_pairing_created(response.payload)?;
         Ok(NativePairingCreated { secret, response })
     }
@@ -178,7 +324,13 @@ impl NativeCaveTransport for ConstrainedTransport {
             None,
         )
         .await
-        .map(|response| response.payload)
+        .and_then(|response| {
+            if (200..300).contains(&response.status_code) {
+                response_data(response.payload).map(Value::Object)
+            } else {
+                Err(response_diagnostic(&response))
+            }
+        })
     }
 
     async fn pairing_exchange(
@@ -197,6 +349,9 @@ impl NativeCaveTransport for ConstrainedTransport {
             None,
         )
         .await?;
+        if !(200..300).contains(&response.status_code) {
+            return Err(response_diagnostic(&response));
+        }
         let (bearer, credential_id, response) = managed_pairing_exchange(response.payload)?;
         Ok(NativePairingExchange {
             bearer,
@@ -211,6 +366,7 @@ impl NativeCaveTransport for ConstrainedTransport {
         bearer: &str,
         path: CaveReadPath,
     ) -> NativeResult<NativeHttpResponse> {
+        path.validate()?;
         let (path, page) = match path {
             CaveReadPath::Familiars { page } => ("api/client/v1/familiars".to_owned(), Some(page)),
             CaveReadPath::Projects { page } => ("api/client/v1/projects".to_owned(), Some(page)),
@@ -242,6 +398,41 @@ impl NativeCaveTransport for ConstrainedTransport {
     }
 }
 
+pub(crate) fn response_diagnostic(response: &NativeHttpResponse) -> NativeDiagnostic {
+    let error = response.payload.get("error").and_then(Value::as_object);
+    let retryable = error
+        .and_then(|error| error.get("retryable"))
+        .and_then(Value::as_bool)
+        .unwrap_or(response.status_code >= 500 || response.status_code == 429);
+    match error
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+    {
+        Some("invalid_request") => NativeDiagnostic::new("invalid_request", retryable),
+        Some("unauthorized") => NativeDiagnostic::new("unauthorized", retryable),
+        Some("scope_denied") => NativeDiagnostic::new("scope_denied", retryable),
+        Some("not_found") => NativeDiagnostic::new("not_found", retryable),
+        Some("conflict") => NativeDiagnostic::new("conflict", retryable),
+        Some("rate_limited") => NativeDiagnostic::new("rate_limited", retryable),
+        Some("pairing_pending") => NativeDiagnostic::new("pairing_pending", retryable),
+        Some("pairing_denied") => NativeDiagnostic::new("pairing_denied", retryable),
+        Some("pairing_expired") => NativeDiagnostic::new("pairing_expired", retryable),
+        Some("incompatible_version") => NativeDiagnostic::new("incompatible_version", retryable),
+        Some("service_unavailable") => NativeDiagnostic::new("service_unavailable", retryable),
+        Some("reconcile_required") => NativeDiagnostic::new("reconcile_required", retryable),
+        Some("internal_error") => NativeDiagnostic::new("internal_error", retryable),
+        _ => match response.status_code {
+            401 => NativeDiagnostic::new("unauthorized", false),
+            403 => NativeDiagnostic::new("scope_denied", false),
+            404 => NativeDiagnostic::new("not_found", false),
+            409 => NativeDiagnostic::new("conflict", false),
+            429 => NativeDiagnostic::new("rate_limited", true),
+            500..=599 => NativeDiagnostic::new("service_unavailable", true),
+            _ => NativeDiagnostic::new("invalid_response", false),
+        },
+    }
+}
+
 fn validate_pairing_request_id(value: &str) -> NativeResult<()> {
     if value.is_empty()
         || value.len() > 128
@@ -258,7 +449,7 @@ pub(crate) fn encoded_cave_path_segment(value: &str) -> String {
     value
         .bytes()
         .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'~') {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
                 char::from(byte).to_string()
             } else {
                 format!("%{byte:02X}")
@@ -271,9 +462,7 @@ fn with_page(mut path: String, page: Option<NativePage>) -> NativeResult<String>
     let Some(page) = page else {
         return Ok(path);
     };
-    if page.limit.is_none() && page.cursor.is_none() {
-        return Ok(path);
-    }
+    page.validate()?;
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     if let Some(limit) = page.limit {
         serializer.append_pair("limit", &limit.to_string());
@@ -297,17 +486,13 @@ async fn read_response(mut response: reqwest::Response) -> NativeResult<NativeHt
         .content_length()
         .is_some_and(|length| length > MAX_JSON_BODY_BYTES as u64)
     {
-        return Err(NativeDiagnostic::new("body_limit_exceeded", false));
+        return Err(NativeDiagnostic::new("body_limit", false));
     }
     let status_code = response.status().as_u16();
     let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| NativeDiagnostic::new("transport_unavailable", true))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(request_error)? {
         if body.len().saturating_add(chunk.len()) > MAX_JSON_BODY_BYTES {
-            return Err(NativeDiagnostic::new("body_limit_exceeded", false));
+            return Err(NativeDiagnostic::new("body_limit", false));
         }
         body.extend_from_slice(&chunk);
     }
@@ -369,7 +554,7 @@ mod tests {
         net::TcpListener,
         sync::{
             atomic::{AtomicBool, Ordering},
-            Arc, Mutex, OnceLock,
+            mpsc, Arc, Mutex, OnceLock,
         },
         thread,
         time::{Duration, Instant},
@@ -378,8 +563,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        encoded_cave_path_segment, managed_pairing_created, CaveReadPath, ConstrainedTransport,
-        NativeCaveTransport, NativePage,
+        encoded_cave_path_segment, managed_pairing_created, response_data, response_diagnostic,
+        CaveReadPath, ConstrainedTransport, NativeCaveTransport, NativeHttpResponse, NativePage,
     };
     use crate::cave::{
         pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
@@ -395,6 +580,10 @@ mod tests {
     ];
     const PROXY_BYPASS_ENVIRONMENT_VARIABLES: [&str; 2] = ["NO_PROXY", "no_proxy"];
     static PROXY_ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    const INSTANCE_ID: &str = "00000000-0000-4000-8000-000000000000";
+    const HPKE_KEY_ID: &str = "Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g";
+    const HPKE_PUBLIC_KEY: &str = "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs";
+    const HPKE_RUNTIME_NONCE: &str = "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8";
 
     struct ScopedEnvironment {
         original: Vec<(&'static str, Option<OsString>)>,
@@ -438,6 +627,37 @@ mod tests {
         }
     }
 
+    fn owner_record(endpoint: String) -> OwnerDiscoveryRecord {
+        OwnerDiscoveryRecord {
+            handle: String::new(),
+            bytes: serde_json::to_vec(&json!({
+                "version": 2,
+                "endpoint": endpoint,
+                "pid": 1,
+                "nonce": HPKE_RUNTIME_NONCE,
+                "startedAt": "2026-01-01T00:00:00Z",
+                "authority": {
+                    "mechanism": "hpke-bound-v1",
+                    "mode": "enforce",
+                    "keyId": HPKE_KEY_ID,
+                    "publicKey": HPKE_PUBLIC_KEY,
+                    "suite": {
+                        "kemId": 32,
+                        "kdfId": 1,
+                        "aeadId": 2,
+                    },
+                },
+            }))
+            .unwrap(),
+            record: OwnerDiscoveryRecordMetadata {
+                identity: "owner-record".to_owned(),
+                device: 1,
+                inode: 2,
+                process_alive: true,
+            },
+        }
+    }
+
     #[test]
     fn managed_pairing_creation_removes_the_secret_before_crossing_ipc() {
         let (secret, created) = managed_pairing_created(json!({
@@ -459,68 +679,153 @@ mod tests {
     }
 
     #[test]
-    fn canonical_conversation_ids_are_encoded_as_one_path_segment() {
+    fn managed_pairing_status_unwraps_data_and_preserves_safe_protocol_errors() {
         assert_eq!(
-            encoded_cave_path_segment("a/b space/雪%.."),
-            "a%2Fb%20space%2F%E9%9B%AA%25%2E%2E"
+            response_data(json!({
+                "apiVersion": "1.0",
+                "data": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "status": "pending",
+                    "expiresAt": 42,
+                },
+            }))
+            .unwrap(),
+            json!({
+                "id": "11111111-1111-4111-8111-111111111111",
+                "status": "pending",
+                "expiresAt": 42,
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+        assert_eq!(
+            response_diagnostic(&NativeHttpResponse {
+                status_code: 410,
+                payload: json!({
+                    "error": {
+                        "code": "pairing_expired",
+                        "retryable": false,
+                        "message": "must not cross native IPC",
+                    },
+                }),
+            }),
+            crate::cave::NativeDiagnostic::new("pairing_expired", false),
         );
     }
 
     #[test]
-    fn authenticated_reads_send_the_native_bearer_without_exposing_it_in_the_result() {
+    fn canonical_conversation_ids_are_bounded_to_one_unescaped_path_segment() {
+        assert_eq!(
+            encoded_cave_path_segment("conversation-1.alpha_beta~gamma"),
+            "conversation-1.alpha_beta~gamma"
+        );
+        for conversation_id in ["", ".", "..", "a/b", "space id", "雪", "percent%"] {
+            assert!(CaveReadPath::Conversation {
+                conversation_id: conversation_id.to_owned(),
+            }
+            .validate()
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn endpoint_takeover_receives_ciphertext_only_and_cannot_forge_a_response() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let credential = ["test", "credential"].join("-");
+        let bearer = "bearer-canary-must-remain-native";
+        let (request_tx, request_rx) = mpsc::sync_channel(1);
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 4096];
+            let mut request = [0_u8; 16 * 1024];
             let length = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..length]);
-            let authorization = request
-                .lines()
-                .find(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+            request_tx
+                .send(String::from_utf8_lossy(&request[..length]).into_owned())
                 .unwrap();
-            let scheme = ['B', 'e', 'a', 'r', 'e', 'r'].iter().collect::<String>();
-            assert_eq!(
-                authorization.split_once(':').unwrap().1.trim(),
-                format!("{scheme} {credential}")
-            );
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":{}}",
                 )
                 .unwrap();
         });
-        let record = OwnerDiscoveryRecord {
-            handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": format!("http://{address}"),
-            }))
-            .unwrap(),
-            record: OwnerDiscoveryRecordMetadata {
-                identity: "owner-record".to_owned(),
-                device: 1,
-                inode: 2,
-                process_alive: true,
-            },
-        };
+        let record = owner_record(format!("http://{address}"));
         let authority = pin_owner_discovery_record(&record, 1).unwrap();
+        authority.bind_instance_id(INSTANCE_ID).unwrap();
 
         let result = tauri::async_runtime::block_on(ConstrainedTransport.authenticated_read(
             &authority,
-            &["test", "credential"].join("-"),
+            bearer,
             CaveReadPath::Familiars {
                 page: NativePage {
                     limit: Some(1),
                     cursor: None,
                 },
             },
-        ))
-        .unwrap();
+        ));
+        let request = request_rx.recv().unwrap();
 
-        assert!(!serde_json::to_string(&result)
-            .unwrap()
-            .contains(&["test", "credential"].join("-")));
+        assert_eq!(
+            result.err(),
+            Some(crate::cave::NativeDiagnostic::new(
+                "reconcile_required",
+                false,
+            )),
+        );
+        assert!(!request.contains(bearer));
+        assert!(!request.to_ascii_lowercase().contains("authorization:"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("x-coven-client-v1-authority-ciphertext:"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("x-coven-client-v1-authority-enc:"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn pairing_secret_takeover_receives_only_ciphertext() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let pairing_secret = "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8";
+        let (request_tx, request_rx) = mpsc::sync_channel(1);
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 16 * 1024];
+            let length = stream.read(&mut request).unwrap();
+            request_tx
+                .send(String::from_utf8_lossy(&request[..length]).into_owned())
+                .unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":{}}",
+                )
+                .unwrap();
+        });
+        let authority =
+            pin_owner_discovery_record(&owner_record(format!("http://{address}")), 1).unwrap();
+        authority.bind_instance_id(INSTANCE_ID).unwrap();
+
+        let result = tauri::async_runtime::block_on(ConstrainedTransport.pairing_poll(
+            &authority,
+            "11111111-1111-4111-8111-111111111111",
+            pairing_secret,
+        ));
+        let request = request_rx.recv().unwrap();
+
+        assert_eq!(
+            result.err(),
+            Some(crate::cave::NativeDiagnostic::new(
+                "reconcile_required",
+                false,
+            )),
+        );
+        assert!(!request.contains(pairing_secret));
+        assert!(!request
+            .to_ascii_lowercase()
+            .contains("x-coven-pairing-secret:"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("x-coven-client-v1-authority-ciphertext:"));
         server.join().unwrap();
     }
 
@@ -576,19 +881,7 @@ mod tests {
         });
 
         let environment = ScopedEnvironment::proxy(&format!("http://{proxy_address}"));
-        let record = OwnerDiscoveryRecord {
-            handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": format!("http://{target_address}"),
-            }))
-            .unwrap(),
-            record: OwnerDiscoveryRecordMetadata {
-                identity: "owner-record".to_owned(),
-                device: 1,
-                inode: 2,
-                process_alive: true,
-            },
-        };
+        let record = owner_record(format!("http://{target_address}"));
         let authority = pin_owner_discovery_record(&record, 1).unwrap();
 
         let response =

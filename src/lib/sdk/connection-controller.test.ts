@@ -93,11 +93,22 @@ function discoverySnapshot(endpoint = 'http://127.0.0.1:3020') {
     bytes: Array.from(
       new TextEncoder().encode(
         JSON.stringify({
-          version: 1,
+          version: 2,
           endpoint,
           pid: 4321,
-          nonce: '018f4f1a-77c2-7a31-8a15-55a25aaba003',
+          nonce: 'gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8',
           startedAt: '2026-08-20T20:20:12.617Z',
+          authority: {
+            mechanism: 'hpke-bound-v1',
+            mode: 'enforce',
+            keyId: 'Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g',
+            publicKey: 'sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs',
+            suite: {
+              kemId: 32,
+              kdfId: 1,
+              aeadId: 2,
+            },
+          },
         }),
       ),
     ),
@@ -594,6 +605,42 @@ describe('Cave connection controller', () => {
 
     expect(subject.getState().state).toBe('revoked');
     expect(credentialStatusCalls).toBe(1);
+  });
+
+  it('keeps authority-proof and temporary transport failures distinct from revocation', async () => {
+    const secret = 'proof-cause-secret-canary';
+    const proofFailure = controller(
+      nativeHost({
+        credentialStatus: async () =>
+          Promise.reject({
+            code: 'reconcile_required',
+            retryable: false,
+            cause: { secret },
+          }),
+      }),
+    );
+    const transportFailure = controller(
+      nativeHost({
+        credentialStatus: async () =>
+          Promise.reject({
+            code: 'timeout',
+            retryable: true,
+            cause: { secret },
+          }),
+      }),
+    );
+
+    await proofFailure.start();
+    await transportFailure.start();
+
+    expect(proofFailure.getState()).toMatchObject({
+      state: 'error',
+      code: 'reconcile_required',
+    });
+    expect(transportFailure.getState().state).toBe('offline');
+    expect(proofFailure.getState().state).not.toBe('revoked');
+    expect(transportFailure.getState().state).not.toBe('revoked');
+    expect(inspect([proofFailure.getState(), transportFailure.getState()])).not.toContain(secret);
   });
 
   it('forgets a confirmed revoked credential and returns to pairing required', async () => {

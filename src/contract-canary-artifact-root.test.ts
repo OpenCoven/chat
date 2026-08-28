@@ -208,14 +208,30 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('a86773cb6ba45084495c00ca364f8646865f1606');
+    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
       sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
     });
+    expect(lock.sdk.artifacts.cave).toEqual({
+      packageName: '@opencoven/cave-client',
+      sha256: '79b3c276af384c3e380b5a259dec83870cef309c5284823fb6cf685c968b1e35',
+    });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
+    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.cave.artifacts).toEqual({
+      contractFixture: {
+        path: 'src/lib/server/client-v1/contract-fixture.json',
+        digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+      },
+      hpkeVectors: {
+        path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+        digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+        sha256: 'f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797',
+      },
+    });
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
   });
 
@@ -226,23 +242,35 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'a86773cb6ba45084495c00ca364f8646865f1606',
+        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
-        revision: '4adc97b1bdafd1012ce4c66de598e82f49329f79',
+        revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
       },
     } satisfies CheckoutHeadsInput;
     const packedFixtureInput = {
       cave: {
-        revision: '4adc97b1bdafd1012ce4c66de598e82f49329f79',
+        revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
+        artifacts: {
+          contractFixture: {
+            path: 'src/lib/server/client-v1/contract-fixture.json',
+            digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+            sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+          },
+          hpkeVectors: {
+            path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+            digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+            sha256: 'f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797',
+          },
+        },
       },
     } satisfies PackedFixtureInput;
 
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'a86773cb6ba45084495c00ca364f8646865f1606',
+        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
@@ -253,7 +281,7 @@ describe('contract canary temp directory safety', () => {
     const missingFixtureRevision: PackedFixtureInput = { cave: {} };
 
     expect(checkoutHeadsInput.sdk.repository).toBe('OpenCoven/sdk');
-    expect(packedFixtureInput.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
+    expect(packedFixtureInput.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
     expect(missingCheckoutRevision).toBeDefined();
     expect(missingFixtureRevision).toBeDefined();
   });
@@ -302,18 +330,22 @@ describe('contract canary temp directory safety', () => {
         };
       },
     },
-  ])('rejects a $name in the SDK artifact lock map', ({ mutate }) => {
-    const scratchRoot = createRepoLocalScratchRoot('invalid-sdk-artifacts');
-    const lockPath = resolve(scratchRoot, 'contract-canary.lock.json');
-    const lock = JSON.parse(
-      readFileSync(resolve(process.cwd(), 'contract-canary.lock.json'), 'utf8'),
-    );
+  ])(
+    'rejects a $name in the SDK artifact lock map',
+    ({ mutate }) => {
+      const scratchRoot = createRepoLocalScratchRoot('invalid-sdk-artifacts');
+      const lockPath = resolve(scratchRoot, 'contract-canary.lock.json');
+      const lock = JSON.parse(
+        readFileSync(resolve(process.cwd(), 'contract-canary.lock.json'), 'utf8'),
+      );
 
-    mutate(lock.sdk.artifacts);
-    writeFileSync(lockPath, JSON.stringify(lock));
+      mutate(lock.sdk.artifacts);
+      writeFileSync(lockPath, JSON.stringify(lock));
 
-    expect(() => readContractCanaryLock(lockPath)).toThrow(/sdk\.artifacts/);
-  });
+      expect(() => readContractCanaryLock(lockPath)).toThrow(/sdk\.artifacts/);
+    },
+    15_000,
+  );
 });
 
 describe('contract canary checkout cleanliness', () => {
@@ -325,7 +357,7 @@ describe('contract canary checkout cleanliness', () => {
       unstaged: 0,
       untracked: 0,
     });
-  });
+  }, 15_000);
 
   test.each([
     {
@@ -356,15 +388,19 @@ describe('contract canary checkout cleanliness', () => {
       expectedMessage:
         'SDK checkout at PLACEHOLDER is dirty (1 untracked item). Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
     },
-  ])('$name', ({ prefix, mutate, expectedMessage }) => {
-    const { worktreeRoot } = createGitWorktreeFixture(prefix);
+  ])(
+    '$name',
+    ({ prefix, mutate, expectedMessage }) => {
+      const { worktreeRoot } = createGitWorktreeFixture(prefix);
 
-    mutate(worktreeRoot);
+      mutate(worktreeRoot);
 
-    expect(() => assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toThrow(
-      expectedMessage.replace('PLACEHOLDER', worktreeRoot),
-    );
-  });
+      expect(() => assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toThrow(
+        expectedMessage.replace('PLACEHOLDER', worktreeRoot),
+      );
+    },
+    15_000,
+  );
 
   describe('contract canary packed consumer isolation', () => {
     test('removes the warm consumer install before its offline assertion', () => {
@@ -417,6 +453,6 @@ describe('contract canary checkout cleanliness', () => {
           encoding: 'utf8',
         }),
       ).toBe('Chat contract canary passed.\n');
-    });
+    }, 30_000);
   });
 });

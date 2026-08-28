@@ -3,6 +3,7 @@ mod commands;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;
 mod connection;
+mod hpke_bound;
 mod keyring;
 mod metadata;
 mod transport;

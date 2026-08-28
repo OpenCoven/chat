@@ -1,9 +1,51 @@
+export type NativeSdkDiagnosticCode =
+  | 'aborted'
+  | 'body_limit'
+  | 'conflict'
+  | 'credential_update_in_progress'
+  | 'incompatible_version'
+  | 'internal_error'
+  | 'invalid_request'
+  | 'invalid_response'
+  | 'not_found'
+  | 'pairing_denied'
+  | 'pairing_expired'
+  | 'pairing_pending'
+  | 'rate_limited'
+  | 'reconcile_required'
+  | 'scope_denied'
+  | 'service_unavailable'
+  | 'timeout'
+  | 'unauthorized'
+  | 'unsupported_operation';
+
 export type NativeSdkDiagnostic = Readonly<{
-  code: 'service_unavailable' | 'invalid_response';
+  code: NativeSdkDiagnosticCode;
   retryable: boolean;
   message: string;
 }>;
 
+const SAFE_NATIVE_DIAGNOSTIC_CODES = new Set<NativeSdkDiagnosticCode>([
+  'aborted',
+  'body_limit',
+  'conflict',
+  'credential_update_in_progress',
+  'incompatible_version',
+  'internal_error',
+  'invalid_request',
+  'invalid_response',
+  'not_found',
+  'pairing_denied',
+  'pairing_expired',
+  'pairing_pending',
+  'rate_limited',
+  'reconcile_required',
+  'scope_denied',
+  'service_unavailable',
+  'timeout',
+  'unauthorized',
+  'unsupported_operation',
+]);
 const FORBIDDEN_NATIVE_FIELD = /(?:bearer|secret|authorization|cookie|token|header|cause|path)/iu;
 const MAX_NODES = 4_096;
 const MAX_STRING_LENGTH = 64 * 1024;
@@ -128,4 +170,59 @@ export function nativeUnavailable(): NativeSdkDiagnostic {
     retryable: true,
     message: 'Cave service was unavailable.',
   });
+}
+
+function diagnosticMessage(code: NativeSdkDiagnosticCode): string {
+  switch (code) {
+    case 'aborted':
+      return 'Cave request was aborted.';
+    case 'body_limit':
+      return 'Cave response exceeded its size limit.';
+    case 'reconcile_required':
+      return 'Cave authority proof failed.';
+    case 'timeout':
+      return 'Cave request timed out.';
+    case 'service_unavailable':
+      return 'Cave service was unavailable.';
+    default:
+      return 'Cave request failed.';
+  }
+}
+
+export function snapshotNativeDiagnostic(value: unknown): NativeSdkDiagnostic {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return nativeUnavailable();
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return nativeUnavailable();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const codeDescriptor = descriptors.code;
+    const retryableDescriptor = descriptors.retryable;
+    const rawCode =
+      codeDescriptor !== undefined && Object.hasOwn(codeDescriptor, 'value')
+        ? codeDescriptor.value
+        : undefined;
+    const rawRetryable =
+      retryableDescriptor !== undefined && Object.hasOwn(retryableDescriptor, 'value')
+        ? retryableDescriptor.value
+        : undefined;
+    const retryable = rawRetryable === true;
+    if (
+      typeof rawCode !== 'string' ||
+      !SAFE_NATIVE_DIAGNOSTIC_CODES.has(rawCode as NativeSdkDiagnosticCode)
+    ) {
+      return nativeUnavailable();
+    }
+    const code = rawCode as NativeSdkDiagnosticCode;
+    return Object.freeze({
+      code,
+      retryable,
+      message: diagnosticMessage(code),
+    });
+  } catch {
+    return nativeUnavailable();
+  }
 }

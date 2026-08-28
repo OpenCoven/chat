@@ -30,6 +30,14 @@ type ContractCanaryLock = {
   cave: {
     repository: string;
     revision: string;
+    artifacts: Record<
+      string,
+      {
+        path: string;
+        digestPath: string;
+        sha256: string;
+      }
+    >;
   };
 };
 
@@ -112,11 +120,11 @@ describe('Phase 1 specification guards', () => {
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
-    expect(lock.version).toBe(2);
+    expect(lock.version).toBe(3);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toBe('a86773cb6ba45084495c00ca364f8646865f1606');
-    expect(lock.cave.revision).toBe('4adc97b1bdafd1012ce4c66de598e82f49329f79');
+    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
+    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
     expect(lock.sdk.artifacts).toEqual({
       core: {
         packageName: '@opencoven/sdk-core',
@@ -133,6 +141,18 @@ describe('Phase 1 specification guards', () => {
       sdk: {
         packageName: '@opencoven/sdk',
         sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    expect(lock.cave.artifacts).toEqual({
+      contractFixture: {
+        path: 'src/lib/server/client-v1/contract-fixture.json',
+        digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+      },
+      hpkeVectors: {
+        path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+        digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+        sha256: 'f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797',
       },
     });
   });
@@ -649,6 +669,9 @@ describe('Phase 1 specification guards', () => {
     );
     expect(workflow).toContain('ref: $' + '{{ steps.reviewed-revisions.outputs.cave_revision }}');
     expect(workflow).toContain('path: .cross-repo/coven-cave');
+    expect(workflow).toMatch(
+      /repository: \$\{\{ steps\.reviewed-revisions\.outputs\.cave_repository \}\}[\s\S]*?path: \.cross-repo\/coven-cave[\s\S]*?fetch-depth: 0/,
+    );
     expect(workflow).not.toContain('OPENCOVEN_SDK_REVIEWED_REVISION');
     expect(workflow).not.toContain('OPENCOVEN_CAVE_REVIEWED_REVISION');
     expect(workflow).not.toContain('ref: main');

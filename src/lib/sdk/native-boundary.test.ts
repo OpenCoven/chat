@@ -13,6 +13,7 @@ const opaqueResponse = Object.freeze({
   statusCode: 200,
   payload: Object.freeze({ safe: true }),
 });
+const PAIRING_REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 
 describe('Cave managed native boundary', () => {
   it('maps each SDK-managed operation to its narrow native command', async () => {
@@ -25,8 +26,8 @@ describe('Cave managed native boundary', () => {
       installationId: '00000000-0000-4000-8000-000000000001',
       scopes: ['chat:read'],
     });
-    await transport.managedPairingPoll('request-1');
-    await transport.managedPairingExchange('request-1');
+    await transport.managedPairingPoll(PAIRING_REQUEST_ID);
+    await transport.managedPairingExchange(PAIRING_REQUEST_ID);
     await transport.managedCredentialStatus();
     await transport.managedForgetCredential();
     await transport.listFamiliars?.({ limit: 20 });
@@ -75,12 +76,12 @@ describe('Cave managed native boundary', () => {
     const transport = createCaveManagedCredentialTransport(invoke, 'native-discovery-handle');
 
     await transport.health();
-    await transport.managedPairingPoll('request-1');
+    await transport.managedPairingPoll(PAIRING_REQUEST_ID);
     await transport.listFamiliars?.({ limit: 20 });
 
     expect(invoke.mock.calls).toEqual([
       ['cave_health', { handle: 'native-discovery-handle' }],
-      ['cave_pairing_poll', { handle: 'native-discovery-handle', requestId: 'request-1' }],
+      ['cave_pairing_poll', { handle: 'native-discovery-handle', requestId: PAIRING_REQUEST_ID }],
       ['cave_list_familiars', { handle: 'native-discovery-handle', page: { limit: 20 } }],
     ]);
   });
@@ -109,11 +110,105 @@ describe('Cave managed native boundary', () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse);
     const transport = createCaveManagedCredentialTransport(invoke, 'native-discovery-handle');
 
-    await transport.managedPairingPoll('opaque-handle');
-    await transport.managedPairingExchange('opaque-handle');
+    await transport.managedPairingPoll(PAIRING_REQUEST_ID);
+    await transport.managedPairingExchange(PAIRING_REQUEST_ID);
 
     expect(JSON.stringify(invoke.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(await transport.managedCredentialStatus())).not.toContain(secret);
+  });
+
+  it('preserves bounded native timeout, abort, body-limit, and proof classifications only', async () => {
+    const canary = 'native-crypto-cause-secret-canary';
+
+    for (const expected of [
+      { code: 'timeout', retryable: true },
+      { code: 'aborted', retryable: false },
+      { code: 'body_limit', retryable: false },
+      { code: 'reconcile_required', retryable: false },
+    ]) {
+      const rejection = Object.assign(Object.create(null), expected, {
+        message: canary,
+        cause: { secret: canary },
+        headers: { authorization: canary },
+      });
+      const error = await invokeNative(
+        vi.fn<NativeSdkInvoke>().mockRejectedValue(rejection),
+        'cave_health',
+      ).catch((value) => value);
+
+      expect(error).toMatchObject(expected);
+      expect(Object.keys(error as object).sort()).toEqual(['code', 'message', 'retryable']);
+      expect(Object.isFrozen(error as object)).toBe(true);
+      expect(inspect(error)).not.toContain(canary);
+      expect(JSON.stringify(error)).not.toContain(canary);
+    }
+  });
+
+  it('rejects unbounded pages and non-canonical conversation IDs before native invocation', async () => {
+    const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse);
+    const transport = createCaveManagedCredentialTransport(invoke, 'native-discovery-handle');
+
+    await expect(transport.listFamiliars?.({ limit: 0 })).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(transport.listFamiliars?.({})).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(transport.listProjects?.({ limit: 101 })).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(transport.listConversations?.({ limit: 20, cursor: 'A' })).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(transport.getConversation?.('..')).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(
+      transport.listConversationMessages?.('conversation/escape', { limit: 20 }),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(
+      transport.managedPairingCreate({
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000001',
+        scopes: ['chat:write'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(
+      transport.managedPairingCreate({
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000001',
+        scopes: ['chat:read'],
+        headers: { authorization: 'forbidden' },
+      } as never),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    await expect(transport.managedPairingPoll('../request')).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed authority handles before constructing a native transport', () => {
+    expect(() =>
+      createCaveManagedCredentialTransport(
+        vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse),
+        '../authority',
+      ),
+    ).toThrow();
   });
 
   it('returns a fresh frozen native snapshot and rejects forbidden native fields', async () => {

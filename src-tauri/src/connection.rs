@@ -12,7 +12,10 @@ use crate::{
         NativeDiagnostic, NativeResult, OwnerDiscoveryRecord, PinnedCaveAuthority,
     },
     keyring::{Credential, CredentialSlot, KeyringError},
-    transport::{CaveReadPath, NativeHttpResponse, NativePage, NativePairingExchange},
+    transport::{
+        response_diagnostic, validate_pairing_request, CaveReadPath, NativeHttpResponse,
+        NativePage, NativePairingExchange,
+    },
     NativeConnectionState,
 };
 
@@ -680,9 +683,10 @@ impl NativeConnectionState {
         let (generation, authority) = self.capture_handle(&handle)?;
         let response = self.transport.health(&authority).await?;
         require_success(&response)?;
+        let instance_id = health_instance_id(&response.payload)?;
         let mut runtime = self.runtime()?;
         runtime.require_current(generation, &handle, &authority)?;
-        let instance_id = authority.credential_binding().to_owned();
+        authority.bind_instance_id(&instance_id)?;
         runtime.instance_id = Some(instance_id.clone());
         runtime
             .unauthorized
@@ -695,6 +699,7 @@ impl NativeConnectionState {
         handle: String,
         request: Value,
     ) -> NativeResult<Value> {
+        validate_pairing_request(&request)?;
         self.capture_handle(&handle)?;
         let (generation, authority, instance_id) = {
             let mut runtime = self.runtime()?;
@@ -1063,6 +1068,7 @@ impl NativeConnectionState {
         handle: String,
         path: CaveReadPath,
     ) -> NativeResult<Value> {
+        path.validate()?;
         let (generation, authority) = self.capture_handle(&handle)?;
         let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = self
@@ -1176,6 +1182,7 @@ impl NativeConnectionState {
                         .await;
                         if let Ok(Ok(response)) = health {
                             if require_success(&response).is_ok() {
+                                let instance_id = health_instance_id(&response.payload)?;
                                 let revalidated = run_blocking_until_deadline(
                                     &deadline,
                                     self.sleeper.as_ref(),
@@ -1201,9 +1208,9 @@ impl NativeConnectionState {
                                         && launch.child.is_some()
                                 }) && runtime.generation == generation
                                 {
+                                    authority.bind_instance_id(&instance_id)?;
                                     runtime.authority = Some(authority.clone());
-                                    runtime.instance_id =
-                                        Some(authority.credential_binding().to_owned());
+                                    runtime.instance_id = Some(instance_id);
                                     runtime.launch_in_flight = false;
                                     attempt.complete();
                                     return Ok(());
@@ -1232,15 +1239,23 @@ fn require_success(response: &NativeHttpResponse) -> NativeResult<()> {
     if (200..300).contains(&response.status_code) {
         Ok(())
     } else {
-        Err(NativeDiagnostic::new(
-            if response.status_code == 401 {
-                "unauthorized"
-            } else {
-                "cave_request_failed"
-            },
-            response.status_code >= 500,
-        ))
+        Err(response_diagnostic(response))
     }
+}
+
+fn health_instance_id(value: &Value) -> NativeResult<String> {
+    value
+        .get("data")
+        .and_then(Value::as_object)
+        .and_then(|data| data.get("instanceId"))
+        .and_then(Value::as_str)
+        .filter(|instance_id| {
+            !instance_id.is_empty()
+                && instance_id.len() <= 256
+                && !instance_id.chars().any(char::is_control)
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))
 }
 
 fn pairing_request_id(value: &Value) -> NativeResult<String> {
@@ -1268,8 +1283,8 @@ mod tests {
     use super::*;
     use crate::{
         cave::{
-            CaveClock, CaveDiscoveryReader, CaveLauncher, CaveSleeper, CaveTaskRunner,
-            NativeDiagnostic, OwnerDiscoveryRecordMetadata,
+            test_discovery_bytes, CaveClock, CaveDiscoveryReader, CaveLauncher, CaveSleeper,
+            CaveTaskRunner, NativeDiagnostic, OwnerDiscoveryRecordMetadata,
         },
         keyring::CredentialCustody,
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
@@ -1409,6 +1424,14 @@ mod tests {
                 "pairingRequired": true,
                 "releaseVersion": "0.0.0",
             },
+        })
+    }
+
+    fn pairing_request() -> Value {
+        json!({
+            "appName": "OpenCoven Chat",
+            "installationId": "00000000-0000-4000-8000-000000000001",
+            "scopes": ["chat:read"],
         })
     }
 
@@ -1905,7 +1928,7 @@ mod tests {
         ) -> NativeResult<NativeHttpResponse> {
             Ok(NativeHttpResponse {
                 status_code: 200,
-                payload: json!({}),
+                payload: client_v1_health_envelope(),
             })
         }
 
@@ -1948,10 +1971,7 @@ mod tests {
     fn deadline_record() -> OwnerDiscoveryRecord {
         OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2338,10 +2358,7 @@ mod tests {
         });
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2381,10 +2398,7 @@ mod tests {
         });
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2430,10 +2444,7 @@ mod tests {
     fn managed_credential_status_uses_only_sdk_discriminated_shapes() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2502,10 +2513,7 @@ mod tests {
     fn stale_status_health_cannot_publish_after_discovery_record_replacement() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2548,10 +2556,7 @@ mod tests {
         });
         final_health_started.wait();
         let mut replacement = discovery.record.lock().unwrap();
-        replacement.bytes = serde_json::to_vec(&json!({
-            "endpoint": "http://127.0.0.1:4311",
-        }))
-        .unwrap();
+        replacement.bytes = test_discovery_bytes("http://127.0.0.1:4311");
         replacement.record.inode = 3;
         drop(replacement);
         final_health_release.wait();
@@ -2566,10 +2571,7 @@ mod tests {
     fn stale_status_health_cannot_publish_after_credential_replacement() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -2657,10 +2659,7 @@ mod tests {
         old_exchange_started.wait();
 
         let mut replacement = discovery.record.lock().unwrap();
-        replacement.bytes = serde_json::to_vec(&json!({
-            "endpoint": "http://127.0.0.1:4311",
-        }))
-        .unwrap();
+        replacement.bytes = test_discovery_bytes("http://127.0.0.1:4311");
         replacement.record.inode = 3;
         drop(replacement);
         let new_handle = state.cave_read_discovery().unwrap().handle;
@@ -2757,7 +2756,7 @@ mod tests {
         let create_handle = handle.clone();
         let create = std::thread::spawn(move || {
             tauri::async_runtime::block_on(
-                create_state.cave_pairing_create(create_handle, json!({})),
+                create_state.cave_pairing_create(create_handle, pairing_request()),
             )
         });
         create_started.wait();
@@ -2775,8 +2774,10 @@ mod tests {
         let fresh_handle = state.cave_read_discovery().unwrap().handle;
         tauri::async_runtime::block_on(state.cave_health(fresh_handle.clone())).unwrap();
         assert_eq!(
-            tauri::async_runtime::block_on(state.cave_pairing_create(fresh_handle, json!({})))
-                .unwrap(),
+            tauri::async_runtime::block_on(
+                state.cave_pairing_create(fresh_handle, pairing_request()),
+            )
+            .unwrap(),
             json!({ "requestId": "request-2" })
         );
     }
@@ -2803,8 +2804,10 @@ mod tests {
         let handle = state.cave_read_discovery().unwrap().handle;
         tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
         assert_eq!(
-            tauri::async_runtime::block_on(state.cave_pairing_create(handle.clone(), json!({})))
-                .unwrap(),
+            tauri::async_runtime::block_on(
+                state.cave_pairing_create(handle.clone(), pairing_request()),
+            )
+            .unwrap(),
             json!({ "requestId": "request-1" })
         );
 
@@ -2824,8 +2827,10 @@ mod tests {
         let new_handle = state.cave_read_discovery().unwrap().handle;
         tauri::async_runtime::block_on(state.cave_health(new_handle.clone())).unwrap();
         assert_eq!(
-            tauri::async_runtime::block_on(state.cave_pairing_create(new_handle, json!({})))
-                .unwrap(),
+            tauri::async_runtime::block_on(
+                state.cave_pairing_create(new_handle, pairing_request()),
+            )
+            .unwrap(),
             json!({ "requestId": "request-2" })
         );
 
@@ -2901,10 +2906,7 @@ mod tests {
             deletes: AtomicUsize::new(0),
         });
         let mut record = deadline_record();
-        record.bytes = serde_json::to_vec(&json!({
-            "endpoint": "http://127.0.0.1:4311",
-        }))
-        .unwrap();
+        record.bytes = test_discovery_bytes("http://127.0.0.1:4311");
         record.record.inode = 3;
         let state = NativeConnectionState::with_test_collaborators(
             Arc::new(ExchangeRaceTransport {
@@ -2943,10 +2945,7 @@ mod tests {
             deletes: AtomicUsize::new(0),
         });
         let mut record = deadline_record();
-        record.bytes = serde_json::to_vec(&json!({
-            "endpoint": "http://127.0.0.1:4311",
-        }))
-        .unwrap();
+        record.bytes = test_discovery_bytes("http://127.0.0.1:4311");
         record.record.inode = 3;
         let exchange_started = Arc::new(Barrier::new(2));
         let exchange_release = Arc::new(Barrier::new(2));
@@ -3186,10 +3185,7 @@ mod tests {
     fn stale_revocation_read_cannot_delete_a_replacement_credential() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3223,7 +3219,7 @@ mod tests {
         let handle = state.cave_read_discovery().unwrap().handle;
         tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
         state.runtime().unwrap().unauthorized.identity = Some(UnauthorizedIdentity {
-            instance_id: "owner-local-discovery-record".to_owned(),
+            instance_id: "00000000-0000-4000-8000-000000000000".to_owned(),
             origin: "http://127.0.0.1:4310/".to_owned(),
             credential_id: "credential-a".to_owned(),
             first_unauthorized_at: Instant::now() - Duration::from_millis(500),
@@ -3266,10 +3262,7 @@ mod tests {
     fn launch_keeps_one_child_reservation_after_owner_checked_readiness() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3301,10 +3294,7 @@ mod tests {
     fn launch_invalidates_the_prelaunch_authority_handle() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3339,10 +3329,7 @@ mod tests {
     fn stale_health_completion_cannot_replace_a_new_discovery_generation() {
         let record_a = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3352,10 +3339,7 @@ mod tests {
         };
         let record_b = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4311",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4311"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3403,10 +3387,7 @@ mod tests {
     fn forged_or_replaced_discovery_handles_cannot_reach_the_transport() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,
@@ -3435,10 +3416,7 @@ mod tests {
             "invalid_discovery_handle"
         );
 
-        discovery.record.lock().unwrap().bytes = serde_json::to_vec(&json!({
-            "endpoint": "http://127.0.0.1:4311",
-        }))
-        .unwrap();
+        discovery.record.lock().unwrap().bytes = test_discovery_bytes("http://127.0.0.1:4311");
         assert_eq!(
             tauri::async_runtime::block_on(state.cave_health(handle))
                 .unwrap_err()
@@ -3451,10 +3429,7 @@ mod tests {
     fn discovery_ipc_snapshot_does_not_serialize_the_native_origin() {
         let record = OwnerDiscoveryRecord {
             handle: "opaque-native-handle".to_owned(),
-            bytes: serde_json::to_vec(&json!({
-                "endpoint": "http://127.0.0.1:4310",
-            }))
-            .unwrap(),
+            bytes: test_discovery_bytes("http://127.0.0.1:4310"),
             record: OwnerDiscoveryRecordMetadata {
                 identity: "owner-local-discovery-record".to_owned(),
                 device: 1,

@@ -116,6 +116,7 @@ type ConnectionEvent =
 
 type DiagnosticCode =
   | 'aborted'
+  | 'body_limit'
   | 'conflict'
   | 'credential_unavailable'
   | 'credential_update_in_progress'
@@ -126,6 +127,7 @@ type DiagnosticCode =
   | 'pairing_expired'
   | 'poll_limit'
   | 'rate_limited'
+  | 'reconcile_required'
   | 'scope_denied'
   | 'service_unavailable'
   | 'timeout'
@@ -220,6 +222,7 @@ function reduceConnection(machine: ConnectionMachine, event: ConnectionEvent): C
 function diagnosticCode(value: string): DiagnosticCode {
   switch (value) {
     case 'aborted':
+    case 'body_limit':
     case 'conflict':
     case 'credential_update_in_progress':
     case 'incompatible_version':
@@ -228,6 +231,7 @@ function diagnosticCode(value: string): DiagnosticCode {
     case 'pairing_denied':
     case 'pairing_expired':
     case 'rate_limited':
+    case 'reconcile_required':
     case 'scope_denied':
     case 'service_unavailable':
     case 'timeout':

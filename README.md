@@ -130,9 +130,11 @@ the transcript then records which answer it got.
 ## Reviewed counterpart lock
 
 `contract-canary.lock.json` pins reviewed SDK and Cave commits plus SHA-256
-digests for all four frozen public SDK tarballs. CI rejects dirty counterpart
-checkouts, verifies their immutable HEADs, rebuilds the SDK tarballs for digest
-comparison, and installs the frozen artifacts into an isolated consumer.
+digests for all four frozen public SDK tarballs and the Cave producer's current
+Client v1 contract fixture and `hpke-bound-v1` vectors. CI rejects dirty
+counterpart checkouts, verifies their immutable HEADs, rebuilds the SDK
+tarballs for digest comparison, checks packed fixture ancestry and vector byte
+identity, and installs the frozen artifacts into an isolated consumer.
 
 Local explicit-root canary runs still use
 `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,

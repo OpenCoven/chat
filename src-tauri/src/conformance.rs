@@ -18,7 +18,10 @@ use crate::{
     keyring::{
         validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
     },
-    transport::{CaveReadPath, ConstrainedTransport, NativeCaveTransport, NativePage},
+    transport::{
+        validate_pairing_request, CaveReadPath, ConstrainedTransport, NativeCaveTransport,
+        NativePage,
+    },
     NativeConnectionState,
 };
 
@@ -590,25 +593,28 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                 .filter(|value| value.is_object())
                 .cloned();
             match request {
-                Some(request) => Ok(RpcCommand::CavePairingCreate {
-                    handle: required_string(object, "handle")?,
-                    request,
-                }),
+                Some(request) if validate_pairing_request(&request).is_ok() => {
+                    Ok(RpcCommand::CavePairingCreate {
+                        handle: required_string(object, "handle")?,
+                        request,
+                    })
+                }
                 None => invalid(),
+                Some(_) => invalid(),
             }
         }
         "cave_pairing_poll" => {
             expect_exact_args(object, &["handle", "requestId"])?;
             Ok(RpcCommand::CavePairingPoll {
                 handle: required_string(object, "handle")?,
-                request_id: required_string(object, "requestId")?,
+                request_id: required_pairing_request_id(object, "requestId")?,
             })
         }
         "cave_pairing_exchange" => {
             expect_exact_args(object, &["handle", "requestId"])?;
             Ok(RpcCommand::CavePairingExchange {
                 handle: required_string(object, "handle")?,
-                request_id: required_string(object, "requestId")?,
+                request_id: required_pairing_request_id(object, "requestId")?,
             })
         }
         "cave_reset_pairing" => {
@@ -654,14 +660,14 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             expect_exact_args(object, &["handle", "conversationId"])?;
             Ok(RpcCommand::CaveGetConversation {
                 handle: required_string(object, "handle")?,
-                conversation_id: required_string(object, "conversationId")?,
+                conversation_id: required_conversation_id(object, "conversationId")?,
             })
         }
         "cave_list_conversation_messages" => {
             expect_exact_args(object, &["handle", "conversationId", "page"])?;
             Ok(RpcCommand::CaveListConversationMessages {
                 handle: required_string(object, "handle")?,
-                conversation_id: required_string(object, "conversationId")?,
+                conversation_id: required_conversation_id(object, "conversationId")?,
                 page: required_page(object)?,
             })
         }
@@ -699,6 +705,35 @@ fn required_string(object: &Map<String, Value>, key: &str) -> Result<String, (&'
         .ok_or(("invalid_native_input", false))
 }
 
+fn required_conversation_id(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<String, (&'static str, bool)> {
+    let value = required_string(object, key)?;
+    if value.trim().is_empty()
+        || matches!(value.as_str(), "." | "..")
+        || value.len() > 2_048
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~'))
+    {
+        return Err(("invalid_native_input", false));
+    }
+    Ok(value)
+}
+
+fn required_pairing_request_id(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<String, (&'static str, bool)> {
+    let value = required_string(object, key)?;
+    let parsed = uuid::Uuid::parse_str(&value).map_err(|_| ("invalid_native_input", false))?;
+    if parsed.to_string() != value || parsed.get_variant() != uuid::Variant::RFC4122 {
+        return Err(("invalid_native_input", false));
+    }
+    Ok(value)
+}
+
 fn required_page(object: &Map<String, Value>) -> Result<NativePage, (&'static str, bool)> {
     let page = object
         .get("page")
@@ -721,10 +756,13 @@ fn required_page(object: &Map<String, Value>) -> Result<NativePage, (&'static st
         ),
         None => None,
     };
-    Ok(NativePage {
+    let page = NativePage {
         limit: page.contains_key("limit").then_some(limit),
         cursor,
-    })
+    };
+    page.validate()
+        .map_err(|_| ("invalid_native_input", false))?;
+    Ok(page)
 }
 
 fn expect_allowed_args(
@@ -925,10 +963,30 @@ mod tests {
         let missing = runtime.process_line(
             br#"{"id":"three","command":"cave_list_familiars","args":{"handle":"x"}}"#,
         );
+        let zero_limit = runtime.process_line(
+            br#"{"id":"four","command":"cave_list_familiars","args":{"handle":"x","page":{"limit":0}}}"#,
+        );
+        let noncanonical_cursor = runtime.process_line(
+            br#"{"id":"five","command":"cave_list_projects","args":{"handle":"x","page":{"limit":20,"cursor":"A"}}}"#,
+        );
+        let unsafe_conversation = runtime.process_line(
+            br#"{"id":"six","command":"cave_get_conversation","args":{"handle":"x","conversationId":".."}}"#,
+        );
+        let widened_pairing = runtime.process_line(
+            br#"{"id":"seven","command":"cave_pairing_create","args":{"handle":"x","request":{"appName":"OpenCoven Chat","installationId":"00000000-0000-4000-8000-000000000001","scopes":["chat:write"],"headers":{"authorization":"forbidden"}}}}"#,
+        );
+        let unsafe_pairing_id = runtime.process_line(
+            br#"{"id":"eight","command":"cave_pairing_poll","args":{"handle":"x","requestId":"../request"}}"#,
+        );
 
         assert_eq!(unknown["error"]["code"], "invalid_rpc_command");
         assert_eq!(extra["error"]["code"], "invalid_native_input");
         assert_eq!(missing["error"]["code"], "invalid_native_input");
+        assert_eq!(zero_limit["error"]["code"], "invalid_native_input");
+        assert_eq!(noncanonical_cursor["error"]["code"], "invalid_native_input");
+        assert_eq!(unsafe_conversation["error"]["code"], "invalid_native_input");
+        assert_eq!(widened_pairing["error"]["code"], "invalid_native_input");
+        assert_eq!(unsafe_pairing_id["error"]["code"], "invalid_native_input");
     }
 
     #[test]

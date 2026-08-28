@@ -183,7 +183,17 @@ const root = process.env.COVEN_CAVE_HOME;
 const server = createServer((request, response) => {
   if (request.url === '/api/client/v1/health') {
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end('{"status":"ok"}');
+    response.end(JSON.stringify({
+      apiVersion: '1.0',
+      minimumClientVersion: '0.1.0',
+      capabilities: ['health', 'pairing', 'credentials', 'familiars', 'projects', 'conversations', 'conversation-messages', 'cursors'],
+      operations: ['health.read', 'pairing.create', 'pairing.poll', 'pairing.exchange', 'pairing.admin.list', 'pairing.admin.decide', 'credentials.admin.list', 'credentials.admin.revoke', 'familiars.list', 'projects.list', 'conversations.list', 'conversations.read', 'messages.list'],
+      data: {
+        instanceId: '00000000-0000-4000-8000-000000000000',
+        pairingRequired: true,
+        releaseVersion: '0.1.0',
+      },
+    }));
     return;
   }
   response.writeHead(404, { 'content-type': 'application/json' });
@@ -193,9 +203,22 @@ server.listen(0, '127.0.0.1', () => {
   const address = server.address();
   const discovery = join(root, 'client-v1-discovery.json');
   writeFileSync(discovery, JSON.stringify({
+    version: 2,
     endpoint: `http://127.0.0.1:${address.port}`,
     pid: process.pid,
+    nonce: 'gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8',
     startedAt: new Date().toISOString(),
+    authority: {
+      mechanism: 'hpke-bound-v1',
+      mode: 'enforce',
+      keyId: 'Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g',
+      publicKey: 'sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs',
+      suite: {
+        kemId: 32,
+        kdfId: 1,
+        aeadId: 2,
+      },
+    },
   }), { mode: 0o600 });
   chmodSync(discovery, 0o600);
   writeFileSync(join(root, 'fixture.pid'), String(process.pid), { mode: 0o600 });

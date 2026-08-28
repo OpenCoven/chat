@@ -16,6 +16,18 @@ export type ContractCanarySdkLockEntry = {
 export type ContractCanaryCaveLockEntry = {
   repository: string;
   revision: string;
+  artifacts: {
+    contractFixture: {
+      path: 'src/lib/server/client-v1/contract-fixture.json';
+      digestPath: 'src/lib/server/client-v1/contract-fixture.sha256';
+      sha256: string;
+    };
+    hpkeVectors: {
+      path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json';
+      digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256';
+      sha256: string;
+    };
+  };
 };
 export type ContractCanaryLock = {
   path: string;
@@ -27,7 +39,7 @@ export type ContractCanaryCheckoutHeadsLock = {
   cave: Pick<ContractCanaryCaveLockEntry, 'repository' | 'revision'>;
 };
 export type ContractCanaryPackedFixtureLock = {
-  cave: Pick<ContractCanaryCaveLockEntry, 'revision'>;
+  cave: Pick<ContractCanaryCaveLockEntry, 'revision' | 'artifacts'>;
 };
 export function readContractCanaryLock(lockPath?: string): ContractCanaryLock;
 export function assertContractCanaryCheckoutHeads(

@@ -3,21 +3,32 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCaveConnectionHost } from './connection-host';
 import type { NativeSdkInvoke } from './native-boundary';
 
+function discoveryRecord() {
+  return {
+    version: 2,
+    endpoint: 'http://127.0.0.1:3020',
+    pid: 4321,
+    nonce: 'gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8',
+    startedAt: '2026-08-20T20:20:12.617Z',
+    authority: {
+      mechanism: 'hpke-bound-v1',
+      mode: 'enforce',
+      keyId: 'Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g',
+      publicKey: 'sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs',
+      suite: {
+        kemId: 32,
+        kdfId: 1,
+        aeadId: 2,
+      },
+    },
+  };
+}
+
 describe('Cave connection host', () => {
   it('creates a handle-bound managed client only after SDK discovery validation', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue({
       handle: 'native-discovery-handle',
-      bytes: Array.from(
-        new TextEncoder().encode(
-          JSON.stringify({
-            version: 1,
-            endpoint: 'http://127.0.0.1:3020',
-            pid: 4321,
-            nonce: '018f4f1a-77c2-7a31-8a15-55a25aaba003',
-            startedAt: '2026-08-20T20:20:12.617Z',
-          }),
-        ),
-      ),
+      bytes: Array.from(new TextEncoder().encode(JSON.stringify(discoveryRecord()))),
       record: {
         identity: 'owner-record',
         device: 1,
@@ -42,17 +53,7 @@ describe('Cave connection host', () => {
       if (command === 'cave_read_discovery') {
         return {
           handle: 'native-discovery-handle',
-          bytes: Array.from(
-            new TextEncoder().encode(
-              JSON.stringify({
-                version: 1,
-                endpoint: 'http://127.0.0.1:3020',
-                pid: 4321,
-                nonce: '018f4f1a-77c2-7a31-8a15-55a25aaba003',
-                startedAt: '2026-08-20T20:20:12.617Z',
-              }),
-            ),
-          ),
+          bytes: Array.from(new TextEncoder().encode(JSON.stringify(discoveryRecord()))),
           record: {
             identity: 'owner-record',
             device: 1,

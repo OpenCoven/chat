@@ -1,6 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     process::{Child, Command},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -8,7 +9,8 @@ use std::{
 use std::{env, fs, io::Read};
 
 use async_trait::async_trait;
-use serde::Serialize;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::{Host, Url};
 
@@ -30,6 +32,10 @@ pub type NativeResult<T> = Result<T, NativeDiagnostic>;
 const DISCOVERY_FILE_NAME: &str = "client-v1-discovery.json";
 #[cfg(any(unix, windows))]
 const MAX_DISCOVERY_BYTES: u64 = 16 * 1024;
+const HPKE_KEY_ID_DOMAIN: &[u8] = b"OpenCoven/client-v1/hpke-bound-v1/key-id\0";
+const HPKE_ENCODED_KEY_CHARACTERS: usize = 43;
+const HPKE_RAW_KEY_BYTES: usize = 32;
+const MAX_INSTANCE_ID_BYTES: usize = 256;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,9 +58,25 @@ pub struct OwnerDiscoveryRecordMetadata {
 pub(crate) struct PinnedCaveAuthority {
     origin: Url,
     digest: [u8; 32],
-    credential_binding: String,
+    record_identity: String,
     device: u64,
     inode: u64,
+    freshness: CaveAuthorityFreshness,
+    hpke: CaveHpkeAuthority,
+    instance_id: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CaveAuthorityFreshness {
+    pub(crate) nonce: String,
+    pub(crate) nonce_bytes: [u8; HPKE_RAW_KEY_BYTES],
+}
+
+#[derive(Clone)]
+pub(crate) struct CaveHpkeAuthority {
+    pub(crate) key_id: String,
+    pub(crate) key_id_bytes: [u8; HPKE_RAW_KEY_BYTES],
+    pub(crate) public_key: [u8; HPKE_RAW_KEY_BYTES],
 }
 
 impl PinnedCaveAuthority {
@@ -62,14 +84,49 @@ impl PinnedCaveAuthority {
         &self.origin
     }
 
-    pub(crate) fn credential_binding(&self) -> &str {
-        &self.credential_binding
+    pub(crate) fn freshness(&self) -> &CaveAuthorityFreshness {
+        &self.freshness
+    }
+
+    pub(crate) fn hpke(&self) -> &CaveHpkeAuthority {
+        &self.hpke
+    }
+
+    pub(crate) fn bind_instance_id(&self, instance_id: &str) -> NativeResult<()> {
+        if instance_id.is_empty()
+            || instance_id.len() > MAX_INSTANCE_ID_BYTES
+            || instance_id.chars().any(char::is_control)
+        {
+            return Err(NativeDiagnostic::new("invalid_native_response", false));
+        }
+        let mut bound = self
+            .instance_id
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+        match bound.as_deref() {
+            Some(current) if current != instance_id => {
+                Err(NativeDiagnostic::new("reconcile_required", false))
+            }
+            Some(_) => Ok(()),
+            None => {
+                *bound = Some(instance_id.to_owned());
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn instance_id(&self) -> NativeResult<String> {
+        self.instance_id
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
+            .clone()
+            .ok_or_else(|| NativeDiagnostic::new("cave_health_required", true))
     }
 
     pub(crate) fn is_same_pin(&self, other: &Self) -> bool {
         self.origin == other.origin
             && self.digest == other.digest
-            && self.credential_binding == other.credential_binding
+            && self.record_identity == other.record_identity
             && self.device == other.device
             && self.inode == other.inode
     }
@@ -87,6 +144,41 @@ impl PinnedCaveAuthority {
     pub(crate) fn matches_owner_record(&self, record: &OwnerDiscoveryRecord) -> bool {
         pin_owner_discovery_record(record, 0).is_ok_and(|candidate| self.is_same_pin(&candidate))
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoveryV2 {
+    version: u8,
+    endpoint: String,
+    pid: u64,
+    nonce: String,
+    #[serde(rename = "startedAt")]
+    started_at: String,
+    authority: DiscoveryHpkeAuthority,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoveryHpkeAuthority {
+    mechanism: String,
+    mode: String,
+    #[serde(rename = "keyId")]
+    key_id: String,
+    #[serde(rename = "publicKey")]
+    public_key: String,
+    suite: DiscoveryHpkeSuite,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoveryHpkeSuite {
+    #[serde(rename = "kemId")]
+    kem_id: u16,
+    #[serde(rename = "kdfId")]
+    kdf_id: u16,
+    #[serde(rename = "aeadId")]
+    aead_id: u16,
 }
 
 pub(crate) trait CaveDiscoveryReader: Send + Sync {
@@ -247,7 +339,6 @@ enum WindowsProcessState {
     Running { creation_time: u64 },
 }
 
-#[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug)]
 struct WindowsDiscoveryStartedAt {
     filetime: u64,
@@ -292,7 +383,6 @@ fn windows_record_process_is_alive(
     }
 }
 
-#[cfg(any(windows, test))]
 fn parse_windows_discovery_started_at(value: &str) -> Option<WindowsDiscoveryStartedAt> {
     const WINDOWS_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
     const HUNDRED_NANOSECONDS_PER_SECOND: u64 = 10_000_000;
@@ -380,13 +470,11 @@ fn parse_windows_discovery_started_at(value: &str) -> Option<WindowsDiscoverySta
     Some(WindowsDiscoveryStartedAt { filetime })
 }
 
-#[cfg(any(windows, test))]
 fn decimal_u32(bytes: &[u8]) -> Option<u32> {
     (!bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit))
         .then(|| std::str::from_utf8(bytes).ok()?.parse().ok())?
 }
 
-#[cfg(any(windows, test))]
 fn days_in_month(year: i64, month: u32) -> u32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
@@ -397,7 +485,6 @@ fn days_in_month(year: i64, month: u32) -> u32 {
     }
 }
 
-#[cfg(any(windows, test))]
 fn civil_days_since_unix_epoch(year: i64, month: u32, day: u32) -> Option<i64> {
     let year = year.checked_sub((month <= 2) as i64)?;
     let era = if year >= 0 {
@@ -931,33 +1018,129 @@ fn record_process_is_alive(bytes: &[u8]) -> bool {
 }
 
 /*
- * This is native transport binding only. The packed SDK remains the sole
- * discovery-record and Client v1 protocol parser; native code reads only the
- * loopback origin needed to constrain its privileged HTTP client.
+ * Native code validates the strict discovery v2 subset needed to keep
+ * pairing secrets and bearers inside the bound HPKE transport. The packed SDK
+ * independently parses the same owner-checked bytes before orchestrating the
+ * managed client.
  */
 pub(crate) fn pin_owner_discovery_record(
     record: &OwnerDiscoveryRecord,
     generation: u64,
 ) -> NativeResult<PinnedCaveAuthority> {
-    let value: serde_json::Value = serde_json::from_slice(&record.bytes)
+    let discovery: DiscoveryV2 = serde_json::from_slice(&record.bytes)
         .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
-    let endpoint = value
-        .get("endpoint")
-        .and_then(serde_json::Value::as_str)
+    let started_at = parse_windows_discovery_started_at(&discovery.started_at)
         .ok_or_else(|| NativeDiagnostic::new("invalid_discovery_record", false))?;
-    let mut origin = Url::parse(endpoint)
+    let _ = started_at.filetime;
+    if discovery.version != 2
+        || discovery.pid == 0
+        || discovery.pid > u32::MAX as u64
+        || !record.record.process_alive
+        || discovery.authority.mechanism != "hpke-bound-v1"
+        || !matches!(discovery.authority.mode.as_str(), "advertise" | "enforce")
+        || discovery.authority.suite.kem_id != 32
+        || discovery.authority.suite.kdf_id != 1
+        || discovery.authority.suite.aead_id != 2
+        || record.record.identity.is_empty()
+        || record.record.identity.len() > 1_024
+        || record.record.identity.chars().any(char::is_control)
+    {
+        return Err(NativeDiagnostic::new("invalid_discovery_record", false));
+    }
+
+    let public_key = decode_canonical_hpke_value(&discovery.authority.public_key)?;
+    let key_id = decode_canonical_hpke_value(&discovery.authority.key_id)?;
+    let runtime_nonce = decode_canonical_hpke_value(&discovery.nonce)?;
+    let computed_key_id: [u8; HPKE_RAW_KEY_BYTES] = Sha256::new()
+        .chain_update(HPKE_KEY_ID_DOMAIN)
+        .chain_update(public_key)
+        .finalize()
+        .into();
+    if !constant_time_eq(&computed_key_id, &key_id) {
+        return Err(NativeDiagnostic::new("invalid_discovery_record", false));
+    }
+
+    let mut origin = Url::parse(&discovery.endpoint)
         .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
     validate_loopback_origin(&origin)?;
+    if origin.port().is_none() {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
     origin.set_path("/");
 
     let _ = generation;
     Ok(PinnedCaveAuthority {
         origin,
         digest: PinnedCaveAuthority::discovery_digest(&record.bytes),
-        credential_binding: record.record.identity.clone(),
+        record_identity: record.record.identity.clone(),
         device: record.record.device,
         inode: record.record.inode,
+        freshness: CaveAuthorityFreshness {
+            nonce: discovery.nonce,
+            nonce_bytes: runtime_nonce,
+        },
+        hpke: CaveHpkeAuthority {
+            key_id: discovery.authority.key_id,
+            key_id_bytes: key_id,
+            public_key,
+        },
+        instance_id: Arc::new(Mutex::new(None)),
     })
+}
+
+fn decode_canonical_hpke_value(value: &str) -> NativeResult<[u8; HPKE_RAW_KEY_BYTES]> {
+    if value.len() != HPKE_ENCODED_KEY_CHARACTERS
+        || value.contains('=')
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(NativeDiagnostic::new("invalid_discovery_record", false));
+    }
+    let decoded = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    let decoded: [u8; HPKE_RAW_KEY_BYTES] = decoded
+        .try_into()
+        .map_err(|_| NativeDiagnostic::new("invalid_discovery_record", false))?;
+    if URL_SAFE_NO_PAD.encode(decoded) != value {
+        return Err(NativeDiagnostic::new("invalid_discovery_record", false));
+    }
+    Ok(decoded)
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            })
+            == 0
+}
+
+#[cfg(test)]
+pub(crate) fn test_discovery_bytes(endpoint: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "version": 2,
+        "endpoint": endpoint,
+        "pid": 1,
+        "nonce": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "authority": {
+            "mechanism": "hpke-bound-v1",
+            "mode": "enforce",
+            "keyId": "Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g",
+            "publicKey": "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs",
+            "suite": {
+                "kemId": 32,
+                "kdfId": 1,
+                "aeadId": 2,
+            },
+        },
+    }))
+    .expect("test discovery record must serialize")
 }
 
 fn validate_loopback_origin(url: &Url) -> NativeResult<()> {
@@ -1139,6 +1322,10 @@ mod tests {
     use super::{approved_cave_paths, build_cave_command, resolve_installed_cave_binary_from};
     use super::{pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata};
 
+    const HPKE_KEY_ID: &str = "Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g";
+    const HPKE_PUBLIC_KEY: &str = "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs";
+    const HPKE_RUNTIME_NONCE: &str = "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8";
+
     #[cfg(not(windows))]
     use super::{
         parse_windows_discovery_liveness_metadata, read_windows_discovery_with,
@@ -1157,15 +1344,26 @@ mod tests {
     }
 
     #[test]
-    fn owner_checked_record_pins_only_a_loopback_origin() {
+    fn owner_checked_record_pins_a_valid_hpke_loopback_authority() {
         let record = OwnerDiscoveryRecord {
             handle: String::new(),
             bytes: serde_json::to_vec(&json!({
-                "version": 1,
+                "version": 2,
                 "endpoint": "http://127.0.0.1:4310",
                 "pid": 1,
-                "nonce": "not-validated-here",
+                "nonce": HPKE_RUNTIME_NONCE,
                 "startedAt": "2026-01-01T00:00:00Z",
+                "authority": {
+                    "mechanism": "hpke-bound-v1",
+                    "mode": "enforce",
+                    "keyId": HPKE_KEY_ID,
+                    "publicKey": HPKE_PUBLIC_KEY,
+                    "suite": {
+                        "kemId": 32,
+                        "kdfId": 1,
+                        "aeadId": 2,
+                    },
+                },
             }))
             .unwrap(),
             record: OwnerDiscoveryRecordMetadata {
@@ -1183,6 +1381,58 @@ mod tests {
                 .as_str(),
             "http://127.0.0.1:4310/",
         );
+    }
+
+    #[test]
+    fn owner_checked_record_rejects_legacy_or_mismatched_hpke_authorities() {
+        for bytes in [
+            serde_json::to_vec(&json!({
+                "version": 1,
+                "endpoint": "http://127.0.0.1:4310",
+                "pid": 1,
+                "nonce": "legacy",
+                "startedAt": "2026-01-01T00:00:00Z",
+            }))
+            .unwrap(),
+            serde_json::to_vec(&json!({
+                "version": 2,
+                "endpoint": "http://127.0.0.1:4310",
+                "pid": 1,
+                "nonce": HPKE_RUNTIME_NONCE,
+                "startedAt": "2026-01-01T00:00:00Z",
+                "authority": {
+                    "mechanism": "hpke-bound-v1",
+                    "mode": "enforce",
+                    "keyId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    "publicKey": HPKE_PUBLIC_KEY,
+                    "suite": {
+                        "kemId": 32,
+                        "kdfId": 1,
+                        "aeadId": 2,
+                    },
+                },
+            }))
+            .unwrap(),
+        ] {
+            let record = OwnerDiscoveryRecord {
+                handle: String::new(),
+                bytes,
+                record: OwnerDiscoveryRecordMetadata {
+                    identity: "record".to_owned(),
+                    device: 1,
+                    inode: 2,
+                    process_alive: true,
+                },
+            };
+
+            assert_eq!(
+                pin_owner_discovery_record(&record, 3).err(),
+                Some(super::NativeDiagnostic::new(
+                    "invalid_discovery_record",
+                    false,
+                )),
+            );
+        }
     }
 
     #[cfg(unix)]

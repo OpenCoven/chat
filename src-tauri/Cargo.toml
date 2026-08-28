@@ -23,10 +23,16 @@ tauri-build = { version = "=2.6.2", features = [] }
 
 [dependencies]
 async-trait = "=0.1.89"
+base64 = "=0.22.1"
 fs2 = "=0.4.3"
+getrandom = "=0.4.3"
+hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
 libc = "=0.2.189"
+rand_chacha = { version = "=0.10.0", default-features = false }
+rand_core = "=0.10.1"
 reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 serde = { version = "=1.0.228", features = ["derive"] }
+serde_jcs = "=0.2.0"
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"
 tauri = { version = "=2.11.2", features = [] }
