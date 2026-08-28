@@ -58,6 +58,11 @@ export function assertCleanContractCanaryCheckouts(options: {
   cave: { staged: number; unstaged: number; untracked: number };
 };
 export function createContractCanaryVerifier(): string;
+export function assertPackedPackageContentsMatch(
+  reviewedTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
+  frozenTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
+  comparisonRoot: string,
+): void;
 export function assertPackedFixtureMatchesCaveCheckout(
   lock: ContractCanaryPackedFixtureLock,
   harnessRoot: string,

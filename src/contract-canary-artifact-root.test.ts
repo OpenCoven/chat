@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   appendFileSync,
+  copyFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +20,7 @@ import {
   assertCleanGitCheckout,
   type assertContractCanaryCheckoutHeads,
   assertPackedFixtureMatchesCaveCheckout,
+  assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
   parseArgs,
   readContractCanaryLock,
@@ -214,6 +216,7 @@ describe('contract canary temp directory safety', () => {
       packageName: '@opencoven/sdk-core',
       sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
     });
+
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
       sha256: '79b3c276af384c3e380b5a259dec83870cef309c5284823fb6cf685c968b1e35',
@@ -233,6 +236,58 @@ describe('contract canary temp directory safety', () => {
       },
     });
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
+  });
+
+  test('compares packed package contents independently of gzip metadata', () => {
+    const scratchRoot = createRepoLocalScratchRoot('package-content-equivalence');
+    const sourceRoot = resolve(scratchRoot, 'source');
+    const packageRoot = resolve(sourceRoot, 'package');
+    const reviewed = resolve(scratchRoot, 'reviewed.tgz');
+    const frozen = resolve(scratchRoot, 'frozen.tgz');
+    const changed = resolve(scratchRoot, 'changed.tgz');
+
+    mkdirSync(packageRoot, { recursive: true });
+    writeFileSync(resolve(packageRoot, 'package.json'), '{"name":"fixture"}\n');
+    writeFileSync(resolve(packageRoot, 'index.js'), 'export const value = 1;\n');
+    execFileSync('tar', ['-czf', reviewed, '-C', sourceRoot, 'package']);
+    copyFileSync(reviewed, frozen);
+    const frozenBytes = readFileSync(frozen);
+    frozenBytes.writeUInt32LE(1, 4);
+    writeFileSync(frozen, frozenBytes);
+    expect(readFileSync(reviewed).equals(readFileSync(frozen))).toBe(false);
+
+    const reviewedTarballs = {
+      core: reviewed,
+      cave: reviewed,
+      coven: reviewed,
+      sdk: reviewed,
+    };
+    const frozenTarballs = {
+      core: frozen,
+      cave: frozen,
+      coven: frozen,
+      sdk: frozen,
+    };
+    expect(() =>
+      assertPackedPackageContentsMatch(
+        reviewedTarballs,
+        frozenTarballs,
+        resolve(scratchRoot, 'matching'),
+      ),
+    ).not.toThrow();
+
+    writeFileSync(resolve(packageRoot, 'index.js'), 'export const value = 2;\n');
+    execFileSync('tar', ['-czf', changed, '-C', sourceRoot, 'package']);
+    expect(() =>
+      assertPackedPackageContentsMatch(
+        reviewedTarballs,
+        {
+          ...frozenTarballs,
+          core: changed,
+        },
+        resolve(scratchRoot, 'changed'),
+      ),
+    ).toThrow(/contents did not match/);
   });
 
   test('declares canary helper inputs at their consumed shapes', () => {

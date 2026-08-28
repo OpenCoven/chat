@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -392,7 +401,7 @@ function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-function assertArtifactDigests(lock, tarballs) {
+function assertFrozenArtifactDigests(lock, tarballs) {
   for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
     const locked = lock.sdk.artifacts[key];
     const tarball = tarballs[key];
@@ -417,8 +426,87 @@ function frozenTarballs(lock) {
     requirePath(path, `Frozen ${artifact.packageName} artifact`);
     tarballs[key] = path;
   }
-  assertArtifactDigests(lock, tarballs);
+  assertFrozenArtifactDigests(lock, tarballs);
   return tarballs;
+}
+
+function safeTarEntries(tarball) {
+  const output = run('tar', ['-tzf', tarball], root, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  const entries = output
+    .split(/\r?\n/u)
+    .filter((entry) => entry.length > 0)
+    .sort();
+  if (
+    entries.length === 0 ||
+    new Set(entries).size !== entries.length ||
+    entries.some((entry) => {
+      const segments = entry.split('/');
+      return (
+        !entry.startsWith('package/') ||
+        entry.includes('\\') ||
+        segments.some((segment) => segment === '.' || segment === '..')
+      );
+    })
+  ) {
+    throw new Error('Packed SDK archive contained an unsafe or duplicate path.');
+  }
+  return entries;
+}
+
+function packageTree(rootPath, currentPath = rootPath) {
+  const entries = [];
+  for (const entry of readdirSync(currentPath, { withFileTypes: true }).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const path = resolve(currentPath, entry.name);
+    const relativePath = relative(rootPath, path).split(sep).join('/');
+    const stats = lstatSync(path);
+    if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
+      throw new Error('Packed SDK archive contained an unsupported filesystem entry.');
+    }
+    if (stats.isDirectory()) {
+      entries.push(`directory:${relativePath}`);
+      entries.push(...packageTree(rootPath, path));
+      continue;
+    }
+    entries.push(
+      `file:${relativePath}:${stats.mode & 0o111}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`,
+    );
+  }
+  return entries;
+}
+
+export function assertPackedPackageContentsMatch(
+  reviewedTarballs,
+  frozenTarballsByPackage,
+  comparisonRoot,
+) {
+  mkdirSync(comparisonRoot, { recursive: true });
+  for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
+    const reviewed = reviewedTarballs[key];
+    const frozen = frozenTarballsByPackage[key];
+    if (typeof reviewed !== 'string' || typeof frozen !== 'string') {
+      throw new Error(`Packed SDK ${artifact.packageName} artifact was missing.`);
+    }
+    const reviewedEntries = safeTarEntries(reviewed);
+    const frozenEntries = safeTarEntries(frozen);
+    if (JSON.stringify(reviewedEntries) !== JSON.stringify(frozenEntries)) {
+      throw new Error(`Packed SDK ${artifact.packageName} file list did not match.`);
+    }
+    const packageRoot = resolve(comparisonRoot, key);
+    const reviewedRoot = resolve(packageRoot, 'reviewed');
+    const frozenRoot = resolve(packageRoot, 'frozen');
+    mkdirSync(reviewedRoot, { recursive: true });
+    mkdirSync(frozenRoot, { recursive: true });
+    run('tar', ['-xzf', reviewed, '-C', reviewedRoot], root);
+    run('tar', ['-xzf', frozen, '-C', frozenRoot], root);
+    if (JSON.stringify(packageTree(reviewedRoot)) !== JSON.stringify(packageTree(frozenRoot))) {
+      throw new Error(`Packed SDK ${artifact.packageName} contents did not match.`);
+    }
+  }
 }
 
 function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
@@ -803,13 +891,14 @@ export function main(argv = process.argv.slice(2)) {
     const artifactRoot = artifactContext.rootPath;
     const tarballManifestPath = resolve(artifactRoot, 'sdk-tarballs.json');
     const tarballRoot = resolve(artifactRoot, 'sdk-tarballs');
+    const comparisonRoot = resolve(artifactRoot, 'sdk-package-comparison');
     const harnessRoot = resolve(artifactRoot, 'chat-harness');
 
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
     const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
-    assertArtifactDigests(lock, tarballs);
     const frozen = frozenTarballs(lock);
+    assertPackedPackageContentsMatch(tarballs, frozen, comparisonRoot);
 
     createHarness(harnessRoot, frozen);
     installHarnessOfflineAfterWarming(harnessRoot);
