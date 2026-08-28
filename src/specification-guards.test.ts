@@ -19,10 +19,19 @@ type ContractCanaryLock = {
   sdk: {
     repository: string;
     revision: string;
+    releaseManifest: {
+      file: string;
+      version: string;
+      sha256: string;
+    };
     artifacts: Record<
       string,
       {
         packageName: string;
+        version: string;
+        releaseFile: string;
+        vendorFile: string;
+        size: number;
         sha256: string;
       }
     >;
@@ -120,27 +129,48 @@ describe('Phase 1 specification guards', () => {
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
-    expect(lock.version).toBe(3);
+    expect(lock.version).toBe(4);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
+    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
     expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.sdk.releaseManifest).toEqual({
+      file: 'release-manifest.json',
+      version: '0.1.0',
+      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+    });
     expect(lock.sdk.artifacts).toEqual({
       core: {
         packageName: '@opencoven/sdk-core',
-        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        version: '0.1.0',
+        releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+        vendorFile: 'sdk-core-0.1.0.tgz',
+        size: 33284,
+        sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
       },
       cave: {
         packageName: '@opencoven/cave-client',
-        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        version: '0.1.0',
+        releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+        vendorFile: 'cave-client-0.1.0.tgz',
+        size: 81543,
+        sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
       },
       coven: {
         packageName: '@opencoven/coven-client',
-        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        version: '0.1.0',
+        releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
+        vendorFile: 'coven-client-0.1.0.tgz',
+        size: 33009,
+        sha256: 'cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1',
       },
       sdk: {
         packageName: '@opencoven/sdk',
-        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        version: '0.1.0',
+        releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
+        vendorFile: 'sdk-0.1.0.tgz',
+        size: 15833,
+        sha256: 'eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f',
       },
     });
     expect(lock.cave.artifacts).toEqual({
@@ -707,7 +737,8 @@ describe('Phase 1 specification guards', () => {
       'pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave',
     );
     expect(canaryScript).toContain('contract-canary.lock.json');
-    expect(canaryScript).toContain('package-artifacts.mjs');
+    expect(canaryScript).toContain('create-release-artifacts.mjs');
+    expect(canaryScript).toContain('Generated SDK release manifest');
     expect(canaryScript).toContain('verify-contracts.mjs');
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
     expect(canaryScript).toContain('minimumClientVersion');

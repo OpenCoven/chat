@@ -84,6 +84,7 @@ function createGitWorktreeFixture(prefix: string) {
   runGit(['init', '--initial-branch=main'], repoRoot);
   runGit(['config', 'user.name', 'OpenCoven Test'], repoRoot);
   runGit(['config', 'user.email', 'opencoven-test@example.com'], repoRoot);
+  runGit(['config', 'commit.gpgsign', 'false'], repoRoot);
   writeFileSync(resolve(repoRoot, 'tracked.txt'), 'baseline\n');
   runGit(['add', 'tracked.txt'], repoRoot);
   runGit(['commit', '-m', 'baseline'], repoRoot);
@@ -210,16 +211,29 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
+    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
+    expect(lock.sdk.releaseManifest).toEqual({
+      file: 'release-manifest.json',
+      version: '0.1.0',
+      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+    });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
+      version: '0.1.0',
+      releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+      vendorFile: 'sdk-core-0.1.0.tgz',
+      size: 33284,
       sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
     });
 
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
-      sha256: '79b3c276af384c3e380b5a259dec83870cef309c5284823fb6cf685c968b1e35',
+      version: '0.1.0',
+      releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+      vendorFile: 'cave-client-0.1.0.tgz',
+      size: 81543,
+      sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
@@ -297,7 +311,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
+        revision: 'acc38488f00860d246c3c553375634d64806eabb',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -325,7 +339,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
+        revision: 'acc38488f00860d246c3c553375634d64806eabb',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
