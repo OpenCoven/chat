@@ -67,6 +67,14 @@ function validReport() {
   };
 }
 
+function assertionAt(report: ReturnType<typeof validReport>, index: number) {
+  const assertion = report.assertions[index];
+  if (assertion === undefined) {
+    throw new Error(`missing test assertion at index ${index}`);
+  }
+  return assertion;
+}
+
 async function scanReport(report: unknown) {
   const root = createRoot();
   writeFileSync(resolve(root.rootPath, 'report.json'), `${JSON.stringify(report)}\n`);
@@ -105,15 +113,15 @@ describe('Phase 1 retained-artifact secret scan', () => {
   });
 
   test('rejects unknown fields even when their values do not look secret', async () => {
-    await expect(
-      scanReport({ ...validReport(), note: 'ordinary-looking text' }),
-    ).rejects.toThrow(/approved report schema/);
+    await expect(scanReport({ ...validReport(), note: 'ordinary-looking text' })).rejects.toThrow(
+      /approved report schema/,
+    );
   });
 
   test('rejects unknown assertion and diagnostic identifiers', async () => {
     const unknownAssertion = validReport();
     unknownAssertion.assertions[0] = {
-      ...unknownAssertion.assertions[0]!,
+      ...assertionAt(unknownAssertion, 0),
       id: 'phase1.unknown.assertion',
     };
     await expect(scanReport(unknownAssertion)).rejects.toThrow(/approved assertion ID/);
@@ -126,8 +134,8 @@ describe('Phase 1 retained-artifact secret scan', () => {
   test('rejects duplicate or missing assertion identifiers', async () => {
     const duplicate = validReport();
     duplicate.assertions[1] = {
-      ...duplicate.assertions[1]!,
-      id: duplicate.assertions[0]!.id,
+      ...assertionAt(duplicate, 1),
+      id: assertionAt(duplicate, 0).id,
     };
     await expect(scanReport(duplicate)).rejects.toThrow(/exact required assertion set/);
 
@@ -139,7 +147,7 @@ describe('Phase 1 retained-artifact secret scan', () => {
   test('rejects skipped assertions and inconsistent summary counts', async () => {
     const skipped = validReport();
     skipped.assertions[0] = {
-      ...skipped.assertions[0]!,
+      ...assertionAt(skipped, 0),
       status: 'skipped' as never,
     };
     await expect(scanReport(skipped)).rejects.toThrow(/approved pass-fail status/);
@@ -153,18 +161,18 @@ describe('Phase 1 retained-artifact secret scan', () => {
   test('rejects non-JSON artifacts and artifact symlinks without following them', async () => {
     const nonJsonRoot = createRoot();
     writeFileSync(resolve(nonJsonRoot.rootPath, 'debug.log'), 'secret-free but unapproved\n');
-    await expect(
-      scanPhase1Artifacts({ artifactRoot: nonJsonRoot.rootPath }),
-    ).rejects.toThrow(/only JSON artifacts/);
+    await expect(scanPhase1Artifacts({ artifactRoot: nonJsonRoot.rootPath })).rejects.toThrow(
+      /only JSON artifacts/,
+    );
 
     const symlinkRoot = createRoot();
     const outsideDirectory = resolve(symlinkRoot.rootPath, 'outside');
     mkdirSync(outsideDirectory);
     writeFileSync(resolve(outsideDirectory, 'report.json'), `${JSON.stringify(validReport())}\n`);
     symlinkSync(outsideDirectory, resolve(symlinkRoot.rootPath, 'report-link'));
-    await expect(
-      scanPhase1Artifacts({ artifactRoot: symlinkRoot.rootPath }),
-    ).rejects.toThrow(/must not contain symlinks/);
+    await expect(scanPhase1Artifacts({ artifactRoot: symlinkRoot.rootPath })).rejects.toThrow(
+      /must not contain symlinks/,
+    );
   });
 
   test('rejects oversized artifacts before parsing them', async () => {

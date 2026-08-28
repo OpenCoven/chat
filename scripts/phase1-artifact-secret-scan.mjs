@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { extname, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ownershipStampName = '.opencoven-owned-temp';
 const maxFileBytes = 1024 * 1024;
@@ -57,6 +58,9 @@ export const APPROVED_PHASE1_DIAGNOSTIC_IDS = Object.freeze([
   'phase1.assertion.passed',
   'phase1.assertion.failed',
   'phase1.assertion.blocked',
+  'phase1.integration.native-pairing-exchange-failed',
+  'phase1.integration.native-credential-unavailable',
+  'phase1.integration.coven-identity-failed',
   'phase1.producer.cave-launch-fixture-unavailable',
   'phase1.producer.pairing-control-unavailable',
   'phase1.producer.pairing-expiry-control-unavailable',
@@ -82,10 +86,7 @@ function requireRecord(value, label) {
 
 function requireExactKeys(record, keys, label) {
   const actualKeys = Object.keys(record);
-  if (
-    actualKeys.length !== keys.length ||
-    keys.some((key) => !Object.hasOwn(record, key))
-  ) {
+  if (actualKeys.length !== keys.length || keys.some((key) => !Object.hasOwn(record, key))) {
     throw new Error(`${label} must use the approved report schema.`);
   }
 }
@@ -139,7 +140,9 @@ function validateArtifactDigests(value) {
 
   for (const [name, digest] of Object.entries(digests)) {
     if (!identifierPattern.test(name) || !digestPattern.test(digest)) {
-      throw new Error('Phase 1 report artifact digests must use approved names and SHA-256 values.');
+      throw new Error(
+        'Phase 1 report artifact digests must use approved names and SHA-256 values.',
+      );
     }
   }
 }
@@ -158,11 +161,7 @@ function validateAssertions(value) {
 
   for (const rawAssertion of value) {
     const assertion = requireRecord(rawAssertion, 'Phase 1 report assertion');
-    requireExactKeys(
-      assertion,
-      ['id', 'status', 'diagnosticIds'],
-      'Phase 1 report assertion',
-    );
+    requireExactKeys(assertion, ['id', 'status', 'diagnosticIds'], 'Phase 1 report assertion');
 
     if (typeof assertion.id !== 'string' || !requiredAssertionSet.has(assertion.id)) {
       throw new Error('Phase 1 report contains an unapproved assertion ID.');
@@ -358,4 +357,21 @@ export async function scanPhase1Artifacts(options) {
   }
 
   return Object.freeze({ ...state });
+}
+
+async function main(argv = process.argv.slice(2)) {
+  if (argv.length !== 2 || argv[0] !== '--artifact-root') {
+    throw new Error('usage: phase1-artifact-secret-scan.mjs --artifact-root <directory>');
+  }
+  const result = await scanPhase1Artifacts({ artifactRoot: resolve(argv[1]) });
+  process.stdout.write(
+    `phase1-artifact-secret-scan: passed (${result.reportCount} report, ${result.filesScanned} JSON file)\n`,
+  );
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(() => {
+    process.stderr.write('phase1-artifact-secret-scan: failed\n');
+    process.exitCode = 1;
+  });
 }

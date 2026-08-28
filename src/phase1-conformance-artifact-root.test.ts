@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -140,7 +140,11 @@ describe('process-owned artifact root', () => {
       );
       activeChildren.add(child);
       await new Promise<void>((resolveReady, rejectReady) => {
-        child.stdout!.once('data', () => resolveReady());
+        if (child.stdout === null) {
+          rejectReady(new Error('tracked child stdout was not piped'));
+          return;
+        }
+        child.stdout.once('data', () => resolveReady());
         child.once('error', rejectReady);
       });
 
@@ -283,10 +287,7 @@ describe('process-owned artifact root', () => {
     symlinkSync(resolve(outsideRoot, 'existing.json'), destinationLink);
     symlinkSync(outsideRoot, parentLink);
 
-    for (const destinationPath of [
-      destinationLink,
-      resolve(parentLink, 'retained.json'),
-    ]) {
+    for (const destinationPath of [destinationLink, resolve(parentLink, 'retained.json')]) {
       await expect(
         root.retainSanitizedJsonReport({
           reportPath,

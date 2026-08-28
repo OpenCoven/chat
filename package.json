@@ -28,7 +28,7 @@
     "cargo:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
-    "test:phase1-conformance": "node ./scripts/phase1-conformance-lock.mjs"
+    "test:phase1-conformance": "node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all"
   },
   "dependencies": {
     "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",

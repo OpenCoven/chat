@@ -35,9 +35,7 @@ export type Phase1SanitizedReport = {
 };
 
 export function validatePhase1SanitizedReport(value: unknown): Phase1SanitizedReport;
-export function scanPhase1Artifacts(options: {
-  artifactRoot: string;
-}): Promise<{
+export function scanPhase1Artifacts(options: { artifactRoot: string }): Promise<{
   filesScanned: number;
   bytesScanned: number;
   reportCount: number;
