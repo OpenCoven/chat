@@ -100,6 +100,7 @@ impl NativeResponse {
         operation_response::<HealthData>(
             status_code,
             payload,
+            200,
             "health",
             "health.read",
             HealthData::validate,
@@ -110,6 +111,7 @@ impl NativeResponse {
         operation_response::<PairingCreatedData>(
             status_code,
             payload,
+            201,
             "pairing",
             "pairing.create",
             PairingCreatedData::validate,
@@ -120,6 +122,7 @@ impl NativeResponse {
         operation_response::<PairingStatusData>(
             status_code,
             payload,
+            200,
             "pairing",
             "pairing.poll",
             PairingStatusData::validate,
@@ -130,6 +133,7 @@ impl NativeResponse {
         operation_response::<PairingExchangeData>(
             status_code,
             payload,
+            200,
             "pairing",
             "pairing.exchange",
             PairingExchangeData::validate,
@@ -309,6 +313,7 @@ where
 fn operation_response<T>(
     status_code: u16,
     payload: Value,
+    success_status: u16,
     required_capability: &str,
     required_operation: &str,
     validate_data: impl FnOnce(&T) -> bool,
@@ -316,7 +321,7 @@ fn operation_response<T>(
 where
     T: DeserializeOwned + Serialize,
 {
-    if (200..=299).contains(&status_code) {
+    if status_code == success_status {
         let envelope = serde_json::from_value::<SuccessEnvelope<T>>(payload)
             .map_err(|_| NativeError::invalid_response())?;
         if !validate_envelope(
@@ -338,6 +343,9 @@ where
             return Err(NativeError::invalid_response());
         }
         return safe_response(status_code, &envelope);
+    }
+    if (200..=299).contains(&status_code) {
+        return Err(NativeError::invalid_response());
     }
     if !(400..=599).contains(&status_code) {
         return Err(NativeError::invalid_response());

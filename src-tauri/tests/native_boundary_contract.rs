@@ -268,6 +268,80 @@ fn public_request_identifiers_reject_secret_shapes_but_keep_contract_ids() {
 }
 
 #[test]
+fn operation_success_statuses_are_exact_per_public_route() {
+    let health = json!({
+        "apiVersion": "1.0",
+        "minimumClientVersion": "0.1.0",
+        "capabilities": ["health"],
+        "operations": ["health.read"],
+        "data": {
+            "instanceId": "00000000-0000-4000-8000-000000000001",
+            "pairingRequired": true,
+            "releaseVersion": "0.1.0"
+        }
+    });
+    let created = json!({
+        "apiVersion": "1.0",
+        "minimumClientVersion": "0.1.0",
+        "capabilities": ["pairing"],
+        "operations": ["pairing.create"],
+        "data": {
+            "requestId": "11111111-1111-4111-8111-111111111111",
+            "expiresAt": 1_787_672_578_109_u64
+        }
+    });
+    let polled = json!({
+        "apiVersion": "1.0",
+        "minimumClientVersion": "0.1.0",
+        "capabilities": ["pairing"],
+        "operations": ["pairing.poll"],
+        "data": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "status": "approved",
+            "expiresAt": 1_787_672_578_109_u64
+        }
+    });
+    let exchanged = json!({
+        "apiVersion": "1.0",
+        "minimumClientVersion": "0.1.0",
+        "capabilities": ["pairing", "credentials"],
+        "operations": ["pairing.exchange"],
+        "data": {
+            "credential": {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "appName": "OpenCoven Chat",
+                "installationId": "00000000-0000-4000-8000-000000000010",
+                "scopes": ["chat:read"],
+                "createdAt": 1_787_672_578_109_u64,
+                "lastUsedAt": null,
+                "revokedAt": null,
+                "revocationReason": null
+            }
+        }
+    });
+
+    assert!(NativeResponse::health(200, health.clone()).is_ok());
+    assert!(NativeResponse::pairing_create(201, created.clone()).is_ok());
+    assert!(NativeResponse::pairing_poll(200, polled.clone()).is_ok());
+    assert!(NativeResponse::pairing_exchange(200, exchanged.clone()).is_ok());
+
+    for response in [
+        NativeResponse::health(201, health),
+        NativeResponse::pairing_create(200, created.clone()),
+        NativeResponse::pairing_create(202, created),
+        NativeResponse::pairing_poll(201, polled),
+        NativeResponse::pairing_exchange(201, exchanged),
+    ] {
+        assert_eq!(
+            response
+                .expect_err("the success status is not canonical for this operation")
+                .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+}
+
+#[test]
 fn operation_error_codes_are_exact_per_public_route() {
     let error = |capability: &str, operation: &str, code: &str| {
         json!({

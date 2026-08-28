@@ -77,6 +77,8 @@
   grammar while rejecting 43-character base64url secret shapes. Native
   diagnostic identifiers are UUIDs, and error status/code pairs are
   allowlisted separately for health, pairing creation, polling, and exchange.
+- Success responses are equally exact: health, pairing poll, and pairing
+  exchange require HTTP 200, while pairing creation requires HTTP 201.
 - macOS and Linux connected Unix peers are inspected from the live socket
   descriptor. Unix-only types and exports are target-gated so Windows builds do
   not reference `std::os::unix`. Windows pipe ownership and connected-identity
