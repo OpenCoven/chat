@@ -26,12 +26,7 @@ export function assertCleanPhase1Checkouts(options: {
   coven: { staged: number; unstaged: number; untracked: number };
 };
 export function assertPhase1CheckoutHeads(
-  lock: {
-    chat: Phase1LockEntry;
-    sdk: Phase1LockEntry;
-    cave: Phase1LockEntry;
-    coven: Phase1LockEntry;
-  },
+  lock: unknown,
   options: {
     chatRoot: string;
     sdkRoot: string;
@@ -61,12 +56,7 @@ export const phase1ConformanceTestOnly: {
     coven: { staged: number; unstaged: number; untracked: number };
   };
   assertPhase1CheckoutHeads(
-    lock: {
-      chat: Phase1LockEntry;
-      sdk: Phase1LockEntry;
-      cave: Phase1LockEntry;
-      coven: Phase1LockEntry;
-    },
+    lock: unknown,
     options: {
       chatRoot: string;
       sdkRoot: string;

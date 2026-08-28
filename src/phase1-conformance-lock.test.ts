@@ -18,7 +18,6 @@ import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
-// @ts-expect-error The production verifier intentionally ships as native Node ESM.
 import * as phase1ConformanceLock from '../scripts/phase1-conformance-lock.mjs';
 
 const {
