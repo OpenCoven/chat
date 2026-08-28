@@ -88,7 +88,7 @@ function readInstallationIdForAttempt(
 
   let pendingRead: Promise<string>;
   pendingRead = Promise.resolve()
-    .then(readInstallationId)
+    .then(() => readInstallationId())
     .then((installationId) => {
       if (!isInstallationId(installationId)) {
         throw new Error('The app_installation_id command returned an invalid result.');
@@ -233,6 +233,11 @@ export function App({
   controllerFactory = defaultControllerFactory,
   queryAdapterFactory = createQueryAdapter,
 }: AppProps) {
+  const readInstallationId = useCallback(
+    () => desktopIdentityHost.readInstallationId(),
+    [desktopIdentityHost],
+  );
+
   if (!desktopIdentityHost.canUseTauriCommands()) {
     return <ConnectionGate state={BROWSER_PREVIEW_STATE} />;
   }
@@ -241,7 +246,7 @@ export function App({
     <ProductionApp
       controllerFactory={controllerFactory}
       queryAdapterFactory={queryAdapterFactory}
-      readInstallationId={desktopIdentityHost.readInstallationId}
+      readInstallationId={readInstallationId}
     />
   );
 }

@@ -11,6 +11,34 @@ const INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
 #[test]
+fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc must start");
+    drop(child.stdout.take().expect("child stdout must be piped"));
+    {
+        let mut stdin = child.stdin.take().expect("child stdin must be piped");
+        writeln!(
+            stdin,
+            r#"{{"id":"installation","command":"app_installation_id"}}"#
+        )
+        .expect("installation request must be written");
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("phase1-native-rpc must exit after its response stream closes");
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr must be UTF-8"),
+        "phase1-native-rpc failed\n"
+    );
+}
+
+#[test]
 fn subprocess_protocol_drains_oversized_input_redacts_it_and_shuts_down_cleanly() {
     let canary = "subprocess-input-canary-must-not-escape";
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))

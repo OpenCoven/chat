@@ -171,6 +171,37 @@ describe('App', () => {
     expect(queryAdapter.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves the desktop host receiver while reading the installation ID', async () => {
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
+    });
+    const queryAdapter = makeQueryAdapter();
+    const desktopIdentityHost = {
+      installationId: INSTALLATION_ID,
+      canUseTauriCommands() {
+        return true;
+      },
+      readInstallationId() {
+        return Promise.resolve(this.installationId);
+      },
+    };
+    const controllerFactory = vi.fn(() => harness.controller);
+
+    render(
+      <App
+        desktopIdentityHost={desktopIdentityHost}
+        controllerFactory={controllerFactory}
+        queryAdapterFactory={() => queryAdapter}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
+    });
+  });
+
   it('invalidates query reads when the connection leaves ready without disposing the adapter', async () => {
     const harness = createControllerHarness({
       state: 'ready',
