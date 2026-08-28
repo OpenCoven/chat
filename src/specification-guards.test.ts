@@ -19,6 +19,7 @@ type ContractCanaryLock = {
   sdk: {
     repository: string;
     revision: string;
+    packages: Array<{ name: string }>;
   };
   cave: {
     repository: string;
@@ -97,11 +98,17 @@ describe('Phase 0 specification guards', () => {
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
-    expect(lock.version).toBe(1);
+    expect(lock.version).toBe(2);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toMatch(/^[0-9a-f]{40}$/);
-    expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
+    expect(lock.sdk.revision).toBe('c237fdc08b56978f1c7220097cf0acb32e6852cb');
+    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.sdk.packages.map(({ name }) => name)).toEqual([
+      '@opencoven/sdk-core',
+      '@opencoven/cave-client',
+      '@opencoven/coven-client',
+      '@opencoven/sdk',
+    ]);
   });
 
   it('keeps the default Tauri capability limited to reviewed native commands', () => {
@@ -514,7 +521,9 @@ describe('Phase 0 specification guards', () => {
       'pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave',
     );
     expect(canaryScript).toContain('contract-canary.lock.json');
-    expect(canaryScript).toContain('package-artifacts.mjs');
+    expect(canaryScript).toContain('create-release-artifacts.mjs');
+    expect(canaryScript).toContain('release-manifest.json');
+    expect(canaryScript).not.toContain('@opencoven/dev-cli');
     expect(canaryScript).toContain('verify-contracts.mjs');
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
     expect(canaryScript).toContain('minimumClientVersion');

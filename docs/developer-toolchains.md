@@ -125,11 +125,34 @@
 - Until publication is explicitly approved, packed `@opencoven/cave-client`
   tarballs are verified by the cross-repository canary in a temporary install
   copy rather than by a source-relative or absolute path dependency.
-- Run the local canary with
-  `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
-- CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
-  Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
-  checked-out HEADs before the canary runs.
+- Run the local canary from this nested Chat checkout with:
+  ```bash
+  corepack pnpm@10.34.0 --ignore-workspace test:contract-canary -- \
+    --sdk-root /absolute/path/to/sdk-at-the-locked-commit \
+    --cave-root /absolute/path/to/coven-cave-at-the-locked-commit
+  ```
+- `contract-canary.lock.json` schema version 2 pins the exact SDK and Cave
+  commits, the generated release-manifest digest, and the ordered four-package
+  public release set (`@opencoven/sdk-core`, `@opencoven/cave-client`,
+  `@opencoven/coven-client`, and `@opencoven/sdk`) with versions, relative
+  tarball paths, stable byte sizes, and SHA-256 digests. `@opencoven/dev-cli`
+  remains excluded.
+- The lock separately pins the Cave contract fixture digest, digest-file byte
+  digest, provenance object and provenance-file byte digest. The provenance
+  names the historical Cave commit whose exact fixture and digest bytes must
+  appear in the packed Cave client. The HPKE vector and digest-file bytes must
+  match the locked Cave HEAD.
+- CI checks out the exact reviewed revisions with enough Cave history to read
+  the provenance commit, rejects dirty counterpart checkouts, verifies both
+  HEADs, runs SDK contract verification, and invokes the SDK release artifact
+  producer once.
+- The generated `release-manifest.json` and all four tarballs must match the
+  lock before installation. The canary warms pnpm once, removes the installed
+  tree, then performs a cold offline frozen-lockfile install with workspace
+  injection/linking disabled. Every OpenCoven package resolves from a locked
+  tarball, installed packages must stay inside the process-owned consumer and
+  contain no source tree, and cleanup never writes artifacts into tracked Chat
+  paths.
 - `src-tauri/gen/schemas/desktop-schema.json` is intentionally kept outside the
   ignore rules so the capability `$schema` can ship with fresh checkouts.
 - Tauri capabilities are limited to the reviewed native command permissions

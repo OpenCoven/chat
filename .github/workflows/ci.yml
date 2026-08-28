@@ -202,6 +202,9 @@ jobs:
           ref: ${{ steps.reviewed-revisions.outputs.cave_revision }}
           path: .cross-repo/coven-cave
           token: ${{ secrets.CANARY_TOKEN || github.token }}
+          # The packed fixture provenance points at its historical authority
+          # commit, while the HPKE vector is authoritative at the locked HEAD.
+          fetch-depth: 0
       - name: Assert checked-out reviewed revisions
         run: |
           node --input-type=module <<'EOF'

@@ -70,7 +70,7 @@ pnpm exec playwright install chromium
 | `pnpm lint` | Run Biome checks |
 | `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
-| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Pack reviewed SDK tarballs and verify the Cave authority fixture through the public `@opencoven/cave-client` entry point |
+| `corepack pnpm@10.34.0 --ignore-workspace test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Reproduce and verify the locked SDK release manifest, all four packed public packages, Cave contract provenance, and HPKE vector bytes |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
@@ -139,15 +139,39 @@ the transcript then records which answer it got.
 
 ## Reviewed counterpart lock
 
-`contract-canary.lock.json` pins the reviewed SDK and Cave counterparts with
-immutable 40-character commit SHAs. CI reads that tracked lock, checks out those
-exact revisions, rejects dirty SDK or Cave checkouts, and verifies the
-checked-out HEADs before running the canary.
+`contract-canary.lock.json` schema version 2 pins more than source revisions. It
+records:
 
-Local explicit-root canary runs still use
-`pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,
-and the script rejects staged, unstaged, or untracked changes before it
-verifies that the checked-out HEADs match the tracked lock.
+- the exact SDK and Cave commit SHAs;
+- the byte digest of the SDK `release-manifest.json`;
+- the exact ordered set of four public SDK packages, including each version,
+  artifact-relative tarball path, byte size, and SHA-256 digest;
+- the packed Cave contract fixture, digest-file bytes, and provenance-file
+  bytes, including the historical Cave commit named by that provenance; and
+- the packed `hpke-bound-v1` vector and digest-file bytes authoritative at the
+  locked Cave HEAD.
+
+`@opencoven/dev-cli` is intentionally outside this release canary. The canary
+rejects missing, extra, or reordered package entries, and it does not add any
+SDK package to Chat's runtime dependencies.
+
+Run it from this Chat checkout with clean exact counterpart checkouts:
+
+```bash
+corepack pnpm@10.34.0 --ignore-workspace test:contract-canary -- \
+  --sdk-root /absolute/path/to/sdk-at-the-locked-commit \
+  --cave-root /absolute/path/to/coven-cave-at-the-locked-commit
+```
+
+The script rejects staged, unstaged, or untracked counterpart changes and wrong
+HEADs. It runs SDK contract verification, invokes the SDK release artifact
+producer once, and compares the generated manifest and every tarball to the
+lock. It then creates a process-owned artifact root, warms the pnpm store,
+deletes the warm install, and performs a cold `--offline --frozen-lockfile`
+install using only the packed SDK tarballs for OpenCoven packages. Installed
+packages must remain inside that isolated consumer and contain no source tree.
+The artifact root is removed by its owning process; generated tarballs are never
+written into tracked Chat paths.
 
 ## CI coverage
 

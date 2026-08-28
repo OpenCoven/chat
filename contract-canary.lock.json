@@ -1,11 +1,69 @@
 {
-  "version": 1,
+  "version": 2,
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "6880e64b864864ee75de90f36d5c11d9d98f83f2"
+    "revision": "c237fdc08b56978f1c7220097cf0acb32e6852cb",
+    "releaseManifest": {
+      "file": "release-manifest.json",
+      "version": "0.1.0",
+      "sha256": "b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c"
+    },
+    "packages": [
+      {
+        "name": "@opencoven/sdk-core",
+        "version": "0.1.0",
+        "file": "tarballs/core/opencoven-sdk-core-0.1.0.tgz",
+        "size": 33284,
+        "sha256": "9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe"
+      },
+      {
+        "name": "@opencoven/cave-client",
+        "version": "0.1.0",
+        "file": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
+        "size": 81543,
+        "sha256": "c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0"
+      },
+      {
+        "name": "@opencoven/coven-client",
+        "version": "0.1.0",
+        "file": "tarballs/coven/opencoven-coven-client-0.1.0.tgz",
+        "size": 33009,
+        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+      },
+      {
+        "name": "@opencoven/sdk",
+        "version": "0.1.0",
+        "file": "tarballs/sdk/opencoven-sdk-0.1.0.tgz",
+        "size": 15833,
+        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+      }
+    ]
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "2fe0abd05c88329c6b93660b986f40605c939ae1"
+    "revision": "2a0ff9237e94e652e477b22f60fd6d721b9e6451",
+    "contractFixture": {
+      "packageFile": "fixtures/contract-fixture.json",
+      "digestPackageFile": "fixtures/contract-fixture.sha256",
+      "provenancePackageFile": "fixtures/contract-fixture.provenance.json",
+      "sha256": "b2694cd1a70a2ddd81b54ee43ade1ff5aa1ecd661fa6e41e5b7acedd8db400bd",
+      "digestFileSha256": "6e847024eae72a6fa31e911f54393948152edf17892200316b94950abfd9a4c6",
+      "provenanceFileSha256": "bbb6d3a1c75d75144ca44dfc2f3f84991d9db075cdb9a887eb419a1bfe737d4e",
+      "provenance": {
+        "repository": "https://github.com/OpenCoven/coven-cave",
+        "commit": "4adc97b1bdafd1012ce4c66de598e82f49329f79",
+        "fixturePath": "src/lib/server/client-v1/contract-fixture.json",
+        "digestPath": "src/lib/server/client-v1/contract-fixture.sha256",
+        "sha256": "b2694cd1a70a2ddd81b54ee43ade1ff5aa1ecd661fa6e41e5b7acedd8db400bd"
+      }
+    },
+    "hpkeVector": {
+      "packageFile": "fixtures/hpke-bound-v1-vectors.json",
+      "digestPackageFile": "fixtures/hpke-bound-v1-vectors.sha256",
+      "authorityFile": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",
+      "authorityDigestFile": "src/lib/server/client-v1/hpke-bound-v1-vectors.sha256",
+      "sha256": "f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797",
+      "digestFileSha256": "20a0e7737d940fd661cb95ba1d1b9fda01eac840fbdff667c64659966ca3d544"
+    }
   }
 }

@@ -205,9 +205,9 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toMatch(/^[0-9a-f]{40}$/);
+    expect(lock.sdk.revision).toBe('c237fdc08b56978f1c7220097cf0acb32e6852cb');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('2fe0abd05c88329c6b93660b986f40605c939ae1');
+    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
   });
 });
