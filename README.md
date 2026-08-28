@@ -25,6 +25,8 @@ webview in this phase.
   transitions remain responsive and invalidate transient state by generation.
 - Retryable storage contention preserves opaque pairing and commit handles,
   allowing the exact operation to resume without widening authority.
+- Partial writes retain an exact rollback-needed token until compare-and-delete
+  proves the stored value absent, changed, or deleted.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

@@ -755,8 +755,14 @@ struct PendingPairing {
 
 enum StagedCredentialState {
     Pending,
-    Writing { discard_requested: bool },
+    Writing {
+        discard_requested: bool,
+    },
     Committed,
+    RollbackNeeded {
+        expected: PreparedCredential,
+        completion_error: NativeError,
+    },
     Discarding,
     Finished(CredentialDeleteResult),
     Failed(NativeError),
@@ -795,8 +801,64 @@ impl StagedCredential {
                 Err(NativeError::new(DiagnosticCode::OperationInProgress, true))
             }
             StagedCredentialState::Committed
+            | StagedCredentialState::RollbackNeeded { .. }
             | StagedCredentialState::Finished(_)
             | StagedCredentialState::Failed(_) => Err(NativeError::reconcile_required()),
+        }
+    }
+
+    fn resolve_rollback_before_commit(
+        &self,
+        custody: &dyn CredentialCustody,
+    ) -> Result<Option<NativeError>, NativeError> {
+        let rollback = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            match &*state {
+                StagedCredentialState::RollbackNeeded {
+                    expected,
+                    completion_error,
+                } => {
+                    let rollback = (expected.clone(), completion_error.clone());
+                    *state = StagedCredentialState::Discarding;
+                    Some(rollback)
+                }
+                StagedCredentialState::Discarding | StagedCredentialState::Writing { .. } => {
+                    return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
+                }
+                _ => None,
+            }
+        };
+        let Some((expected, completion_error)) = rollback else {
+            return Ok(None);
+        };
+        let result = custody.compare_delete_credential(&expected);
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        match result {
+            Ok(result) => {
+                *state = StagedCredentialState::Finished(result);
+                self.completed.notify_all();
+                Ok(Some(completion_error))
+            }
+            Err(error) if error.code == DiagnosticCode::CredentialUpdateInProgress => {
+                *state = StagedCredentialState::RollbackNeeded {
+                    expected,
+                    completion_error,
+                };
+                self.completed.notify_all();
+                Err(error)
+            }
+            Err(_) => {
+                let error = NativeError::secret_store_rollback_failed();
+                *state = StagedCredentialState::Failed(error.clone());
+                self.completed.notify_all();
+                Err(error)
+            }
         }
     }
 
@@ -833,7 +895,10 @@ impl StagedCredential {
                 }
                 Err(error) => {
                     if error.code == DiagnosticCode::CredentialUpdateInProgress {
-                        *state = StagedCredentialState::Pending;
+                        *state = StagedCredentialState::RollbackNeeded {
+                            expected: self.credential.clone(),
+                            completion_error: write_error,
+                        };
                         self.completed.notify_all();
                         return Err(error);
                     }
@@ -885,7 +950,10 @@ impl StagedCredential {
             Err(rollback_error)
                 if rollback_error.code == DiagnosticCode::CredentialUpdateInProgress =>
             {
-                *state = StagedCredentialState::Committed;
+                *state = StagedCredentialState::RollbackNeeded {
+                    expected: self.credential.clone(),
+                    completion_error: error,
+                };
                 self.completed.notify_all();
                 Err(rollback_error)
             }
@@ -947,6 +1015,41 @@ impl StagedCredential {
                         }
                     }
                 }
+                StagedCredentialState::RollbackNeeded {
+                    expected,
+                    completion_error,
+                } => {
+                    let expected = expected.clone();
+                    let completion_error = completion_error.clone();
+                    *state = StagedCredentialState::Discarding;
+                    drop(state);
+                    let result = custody.compare_delete_credential(&expected);
+                    let mut state = self
+                        .state
+                        .lock()
+                        .map_err(|_| NativeError::service_unavailable())?;
+                    match result {
+                        Ok(result) => {
+                            *state = StagedCredentialState::Finished(result);
+                            self.completed.notify_all();
+                            return Ok(result);
+                        }
+                        Err(error) if error.code == DiagnosticCode::CredentialUpdateInProgress => {
+                            *state = StagedCredentialState::RollbackNeeded {
+                                expected,
+                                completion_error,
+                            };
+                            self.completed.notify_all();
+                            return Err(error);
+                        }
+                        Err(_) => {
+                            let error = NativeError::secret_store_rollback_failed();
+                            *state = StagedCredentialState::Failed(error.clone());
+                            self.completed.notify_all();
+                            return Err(error);
+                        }
+                    }
+                }
                 StagedCredentialState::Discarding => {
                     state = self
                         .completed
@@ -969,6 +1072,7 @@ impl StagedCredential {
             *state,
             StagedCredentialState::Pending
                 | StagedCredentialState::Writing { .. }
+                | StagedCredentialState::RollbackNeeded { .. }
                 | StagedCredentialState::Discarding
         ))
     }
@@ -1369,6 +1473,17 @@ impl NativeSdkBoundary {
         if staged.authority != input.authority {
             self.lifecycle.cancel_request(&request);
             return Err(NativeError::reconcile_required());
+        }
+        match staged.resolve_rollback_before_commit(self.custody.as_ref()) {
+            Ok(Some(completion_error)) => {
+                let lifecycle_error = self.lifecycle.finish_request(&request).err();
+                return Err(lifecycle_error.unwrap_or(completion_error));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
         }
         let credential = match staged.begin_write() {
             Ok(credential) => credential,
@@ -2173,6 +2288,87 @@ mod tests {
         delete_contentions: AtomicUsize,
     }
 
+    struct PartialWriteCustody {
+        stored: Mutex<Option<Vec<u8>>>,
+        rollback_contentions: AtomicUsize,
+        writes: AtomicUsize,
+    }
+
+    impl PartialWriteCustody {
+        fn new() -> Self {
+            Self {
+                stored: Mutex::new(None),
+                rollback_contentions: AtomicUsize::new(1),
+                writes: AtomicUsize::new(0),
+            }
+        }
+
+        fn stored(&self) -> Option<Vec<u8>> {
+            self.stored.lock().expect("partial store lock").clone()
+        }
+
+        fn replace(&self, value: &[u8]) {
+            *self.stored.lock().expect("partial store lock") = Some(value.to_vec());
+        }
+    }
+
+    impl CredentialCustody for PartialWriteCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            Ok(CredentialLookup::Missing)
+        }
+
+        fn write_credential(
+            &self,
+            credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            self.writes.fetch_add(1, Ordering::Relaxed);
+            *self.stored.lock().expect("partial store lock") =
+                Some(credential.exact_value().to_vec());
+            Err(crate::NativeError::new(DiagnosticCode::Timeout, false))
+        }
+
+        fn compare_delete_credential(
+            &self,
+            expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            if self
+                .rollback_contentions
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(crate::NativeError::credential_update_in_progress());
+            }
+            let mut stored = self.stored.lock().expect("partial store lock");
+            match stored.as_ref() {
+                None => Ok(CredentialDeleteResult::Absent),
+                Some(current) if current.as_slice() != expected.exact_value() => {
+                    Ok(CredentialDeleteResult::Changed)
+                }
+                Some(_) => {
+                    *stored = None;
+                    Ok(CredentialDeleteResult::Deleted)
+                }
+            }
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(false)
+        }
+    }
+
     impl ContentionCustody {
         fn new(write_contentions: usize, delete_contentions: usize) -> Self {
             Self {
@@ -2672,6 +2868,122 @@ mod tests {
                 discarded.result,
                 super::PairingDiscardResult::Deleted
             ));
+        });
+    }
+
+    #[test]
+    fn partial_write_rollback_contention_preserves_handle_for_discard() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::new());
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("rollback lock contention should remain retryable")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert!(custody.stored().is_some());
+
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("discard must retry exact rollback");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+            assert!(custody.stored().is_none());
+        });
+    }
+
+    #[test]
+    fn partial_write_rollback_contention_is_resolved_before_commit_retry() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::new());
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit-1".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("first rollback should contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit-2".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("retry must finish rollback before any new write")
+                    .code,
+                DiagnosticCode::Timeout
+            );
+            assert_eq!(custody.writes.load(Ordering::Relaxed), 1);
+            assert!(custody.stored().is_none());
+
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("resolved rollback result should remain observable");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+        });
+    }
+
+    #[test]
+    fn partial_write_rollback_never_deletes_a_replacement() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::new());
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("rollback should initially contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            custody.replace(b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
+
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("rollback retry should compare exact value");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Changed
+            ));
+            assert_eq!(
+                custody.stored(),
+                Some(b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_vec())
+            );
         });
     }
 

@@ -86,6 +86,10 @@
 - Retryable lock contention preserves pending commit and committed discard
   handles so the exact operation can be retried. It is never converted into a
   terminal rollback failure.
+- A potentially partial write whose rollback is contended enters an explicit
+  rollback-needed state retaining the zeroized exact expected credential.
+  Commit retry or discard must finish compare-and-delete before the handle can
+  be consumed, and a replacement credential is reported as `changed`.
 - Pairing exchange validates authority generation and Ready state while the
   pairing map is locked, and removes the handle only after those checks pass.
 - Authority replacement and close cleanup are generation-scoped. Interleaved
