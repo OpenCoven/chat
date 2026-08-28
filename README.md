@@ -29,6 +29,8 @@ webview in this phase.
   proves the stored value absent, changed, or deleted.
 - Authority replacement and close preserve that token until bounded cleanup
   succeeds, including when an in-flight write completes after close.
+- Open and close run as blocking-dispatched async Tauri commands, so cleanup
+  contention cannot stall unrelated IPC/runtime work.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

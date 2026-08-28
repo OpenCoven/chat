@@ -161,6 +161,23 @@ describe('Phase 0 specification guards', () => {
     );
   });
 
+  it('dispatches complete authority transitions through the blocking pool', () => {
+    const connection = readText('src-tauri/src/sdk_connection.rs');
+
+    for (const [command, transition] of [
+      ['sdk_authority_open', 'authority_open'],
+      ['sdk_authority_close', 'authority_close'],
+    ]) {
+      const start = connection.indexOf(`pub async fn ${command}(`);
+      const next = connection.indexOf('#[tauri::command]', start);
+      const implementation = connection.slice(start, next);
+
+      expect(start).toBeGreaterThan(-1);
+      expect(implementation).toContain('spawn_blocking');
+      expect(implementation).toContain(`boundary.${transition}`);
+    }
+  });
+
   it('ships the Windows resource icon required by cross-target checks', () => {
     expect(existsSync(resolve(projectRoot, 'src-tauri/icons/icon.ico'))).toBe(true);
   });

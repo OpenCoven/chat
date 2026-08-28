@@ -13,7 +13,7 @@ impl CredentialMutationLock {
         Self::acquire_with_timeout(service, account, CREDENTIAL_LOCK_TIMEOUT)
     }
 
-    fn acquire_with_timeout(
+    pub(crate) fn acquire_with_timeout(
         service: &str,
         account: &str,
         timeout: std::time::Duration,
@@ -36,6 +36,20 @@ fn credential_key(service: &str, account: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[cfg(all(test, unix))]
+pub(crate) fn remove_test_lock(service: &str, account: &str) {
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let path =
+        std::path::PathBuf::from(format!("/tmp/opencoven-chat-credential-locks-{uid}")).join(
+            format!("credential-{}.lock", credential_key(service, account)),
+        );
+    let _ = std::fs::remove_file(path);
+}
+
+#[cfg(all(test, not(unix)))]
+pub(crate) fn remove_test_lock(_service: &str, _account: &str) {}
 
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

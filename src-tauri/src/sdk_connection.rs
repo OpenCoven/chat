@@ -1911,6 +1911,18 @@ fn validate_opaque_handle(value: &str, prefix: &str) -> Result<(), NativeError> 
     Ok(())
 }
 
+#[cfg(test)]
+async fn run_blocking_native<T>(
+    operation: impl FnOnce() -> Result<T, NativeError> + Send + 'static,
+) -> Result<T, NativeError>
+where
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
+}
+
 pub struct NativeSdkState {
     boundary: Arc<NativeSdkBoundary>,
 }
@@ -1938,20 +1950,26 @@ pub async fn sdk_installation_identity(
 }
 
 #[tauri::command]
-pub fn sdk_authority_open(
+pub async fn sdk_authority_open(
     state: tauri::State<'_, NativeSdkState>,
     input: AuthorityDescriptor,
 ) -> Result<AuthorityReference, NativeError> {
     input.validate()?;
-    state.boundary.authority_open(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.authority_open(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
-pub fn sdk_authority_close(
+pub async fn sdk_authority_close(
     state: tauri::State<'_, NativeSdkState>,
     input: CloseAuthorityInput,
 ) -> Result<AuthorityCloseResult, NativeError> {
-    state.boundary.authority_close(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.authority_close(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
@@ -3609,6 +3627,40 @@ mod tests {
                 .code,
             DiagnosticCode::ReconcileRequired
         );
+    }
+
+    #[test]
+    fn contended_transition_cleanup_does_not_stall_unrelated_runtime_work() {
+        tauri::async_runtime::block_on(async {
+            let service = "ai.opencoven.chat.runtime-test";
+            let account = format!("test-{}", uuid::Uuid::new_v4());
+            let held = crate::credential_lock::CredentialMutationLock::acquire(service, &account)
+                .expect("hold test lock");
+            let blocked_account = account.clone();
+            let blocked = tauri::async_runtime::spawn(async move {
+                super::run_blocking_native(move || {
+                    crate::credential_lock::CredentialMutationLock::acquire_with_timeout(
+                        service,
+                        &blocked_account,
+                        Duration::from_millis(50),
+                    )
+                    .map(drop)
+                })
+                .await
+            });
+            let unrelated = tauri::async_runtime::spawn(async { 7_u8 });
+            assert_eq!(unrelated.await.expect("unrelated runtime task"), 7);
+            assert_eq!(
+                blocked
+                    .await
+                    .expect("blocked transition task")
+                    .expect_err("lock acquisition should time out")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            drop(held);
+            crate::credential_lock::remove_test_lock(service, &account);
+        });
     }
 
     #[test]

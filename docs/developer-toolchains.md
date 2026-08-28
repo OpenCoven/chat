@@ -103,6 +103,9 @@
 - All platform-store and cross-process-lock work runs on Tauri's blocking pool.
   Lifecycle mutexes are released before backend I/O so discovery and authority
   replacement remain responsive while storage is unavailable or contended.
+- The complete `sdk_authority_open` and `sdk_authority_close` transitions are
+  asynchronous Tauri commands dispatched to that blocking pool, including
+  rollback-token cleanup and bounded cross-process lock acquisition.
 - Public request identifiers use the Cave envelope's bounded safe identifier
   grammar while rejecting 43-character base64url secret shapes. Native
   diagnostic identifiers are UUIDs, and error status/code pairs are
