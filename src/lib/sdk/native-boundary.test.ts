@@ -16,7 +16,7 @@ const opaqueResponse = Object.freeze({
   payload: Object.freeze({ safe: true }),
 });
 const PAIRING_REQUEST_ID = '11111111-1111-4111-8111-111111111111';
-const ATTEMPT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const ATTEMPT_ID_PATTERN = /^op1-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{32}$/u;
 
 function expectNativeOperation(value: unknown, maximumTimeoutMs = 5_000): void {
   expect(value).toEqual({
@@ -116,6 +116,31 @@ describe('Cave managed native boundary', () => {
     }
   });
 
+  it('binds unpredictable attempt IDs to one monotonic bridge epoch and counter', async () => {
+    const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse);
+    const transport = createCaveManagedCredentialTransport(invoke, 'native-discovery-handle');
+
+    await transport.health();
+    await transport.health();
+
+    const attempts = invoke.mock.calls.map(([, args]) => {
+      const attemptId = (args?.operation as { attemptId: string }).attemptId;
+      const match = ATTEMPT_ID_PATTERN.exec(attemptId);
+      expect(match).not.toBeNull();
+      return {
+        attemptId,
+        epoch: Number(attemptId.split('-')[1]),
+        counter: Number(attemptId.split('-')[2]),
+        suffix: attemptId.split('-')[3],
+      };
+    });
+    expect(attempts[0]?.epoch).toBe(attempts[1]?.epoch);
+    expect(attempts[1]?.counter).toBe((attempts[0]?.counter ?? 0) + 1);
+    expect(attempts[0]?.suffix).toMatch(/^[0-9a-f]{32}$/u);
+    expect(attempts[1]?.suffix).toMatch(/^[0-9a-f]{32}$/u);
+    expect(attempts[0]?.attemptId).not.toBe(attempts[1]?.attemptId);
+  });
+
   it('retains a handle only until the SDK discovery source has consumed its matching bytes', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue({
       handle: 'native-discovery-handle',
@@ -155,6 +180,7 @@ describe('Cave managed native boundary', () => {
       { code: 'aborted', retryable: false },
       { code: 'body_limit', retryable: false },
       { code: 'reconcile_required', retryable: false },
+      { code: 'credential_update_in_progress', retryable: false },
     ]) {
       const rejection = Object.assign(Object.create(null), expected, {
         message: canary,

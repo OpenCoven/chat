@@ -585,6 +585,8 @@ mod tests {
     const HPKE_KEY_ID: &str = "Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g";
     const HPKE_PUBLIC_KEY: &str = "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs";
     const HPKE_RUNTIME_NONCE: &str = "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8";
+    const FIRST_OPERATION_ATTEMPT: &str = "op1-1787900000000-1-00000000000000000000000000000000";
+    const SECOND_OPERATION_ATTEMPT: &str = "op1-1787900000000-2-11111111111111111111111111111111";
 
     struct ScopedEnvironment {
         original: Vec<(&'static str, Option<OsString>)>,
@@ -870,44 +872,10 @@ mod tests {
         let abort_registry = Arc::clone(&registry);
         let abort_authority = authority.clone();
         let aborted = thread::spawn(move || {
-            tauri::async_runtime::block_on(
-                abort_registry.run(
-                    NativeOperationInput::new(
-                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                        1_000,
-                    )
-                    .unwrap(),
-                    ConstrainedTransport.authenticated_read(
-                        &abort_authority,
-                        "native-bearer",
-                        CaveReadPath::Familiars {
-                            page: NativePage {
-                                limit: Some(1),
-                                cursor: None,
-                            },
-                        },
-                    ),
-                ),
-            )
-        });
-        accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        registry
-            .cancel(
-                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                NativeCancelReason::Aborted,
-            )
-            .unwrap();
-        assert_eq!(
-            aborted.join().unwrap().err(),
-            Some(crate::cave::NativeDiagnostic::new("aborted", false))
-        );
-
-        let timed = tauri::async_runtime::block_on(
-            registry.run(
-                NativeOperationInput::new("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_owned(), 25)
-                    .unwrap(),
+            tauri::async_runtime::block_on(abort_registry.run(
+                NativeOperationInput::new(FIRST_OPERATION_ATTEMPT.to_owned(), 1_000).unwrap(),
                 ConstrainedTransport.authenticated_read(
-                    &authority,
+                    &abort_authority,
                     "native-bearer",
                     CaveReadPath::Familiars {
                         page: NativePage {
@@ -916,8 +884,33 @@ mod tests {
                         },
                     },
                 ),
-            ),
+            ))
+        });
+        accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        registry
+            .cancel(
+                FIRST_OPERATION_ATTEMPT.to_owned(),
+                NativeCancelReason::Aborted,
+            )
+            .unwrap();
+        assert_eq!(
+            aborted.join().unwrap().err(),
+            Some(crate::cave::NativeDiagnostic::new("aborted", false))
         );
+
+        let timed = tauri::async_runtime::block_on(registry.run(
+            NativeOperationInput::new(SECOND_OPERATION_ATTEMPT.to_owned(), 25).unwrap(),
+            ConstrainedTransport.authenticated_read(
+                &authority,
+                "native-bearer",
+                CaveReadPath::Familiars {
+                    page: NativePage {
+                        limit: Some(1),
+                        cursor: None,
+                    },
+                },
+            ),
+        ));
         accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(
             timed.err(),

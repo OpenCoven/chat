@@ -44,9 +44,14 @@
 - `src/lib/sdk/native-boundary.ts` is the narrow SDK-managed Cave bridge. It
   accepts only opaque authority handles, bounded page options, canonical
   conversation IDs, and SDK-safe result snapshots. SDK operation contexts are
-  reduced to an opaque UUID v4 attempt ID plus a timeout of at most five
-  seconds; aborts use the dedicated `cave_cancel_operation` command with only
-  the attempt ID and the canonical `aborted` or `timeout` reason.
+  reduced to an unpredictable, epoch/counter-bound single-use attempt ID plus
+  a timeout of at most five seconds; aborts use the dedicated
+  `cave_cancel_operation` command with only the attempt ID and the canonical
+  `aborted` or `timeout` reason.
+- Native credential mutations use one bounded worker reservation. Work
+  cancelled while queued never acquires the keyring lock; once an irreversible
+  mutation starts, concurrent retries fail with non-retryable
+  `credential_update_in_progress` until the authoritative result is coherent.
 - Packed tarballs are verified by the cross-repository canary in a temporary
   install copy rather than by a source-relative or absolute path dependency.
 - Run the local canary with

@@ -12,6 +12,7 @@ use crate::{
         NativeDiagnostic, NativeResult, OwnerDiscoveryRecord, PinnedCaveAuthority,
     },
     keyring::{Credential, CredentialSlot, KeyringError},
+    operation::NativeMutationContext,
     transport::{
         response_diagnostic, validate_pairing_request, CaveReadPath, NativeHttpResponse,
         NativePage, NativePairingExchange,
@@ -644,84 +645,39 @@ impl NativeConnectionState {
         Ok(state)
     }
 
-    fn commit_pairing_exchange(
+    async fn commit_pairing_exchange(
         &self,
         handle: &str,
         attempt: &PendingPairing,
         expected_credential: &CredentialSlot,
         exchanged: &NativePairingExchange,
+        mutation: Option<NativeMutationContext>,
     ) -> NativeResult<bool> {
-        let record = self.discovery.read()?;
-        let mut runtime = self.runtime()?;
-        runtime.require_current_authorized(
-            attempt.generation,
-            handle,
-            &attempt.authority,
-            &attempt.instance_id,
-        )?;
-        if !attempt.authority.matches_owner_record(&record) {
-            runtime.clear_authority_state();
-            runtime.new_generation();
-            return Err(NativeDiagnostic::new("stale_discovery_handle", true));
-        }
-        if runtime.pairing.as_ref().is_none_or(|current| {
-            current.request_id != attempt.request_id
-                || current.generation != attempt.generation
-                || !current.authority.is_same_pin(&attempt.authority)
-                || current.instance_id != attempt.instance_id
-                || !current.exchange_committed
-        }) {
-            return Err(NativeDiagnostic::new("stale_connection_attempt", true));
-        }
-        let persisted = match expected_credential {
-            CredentialSlot::Current(expected_credential) => self
-                .keyring
-                .store_if_current(
-                    &attempt.instance_id,
-                    attempt.authority.origin().as_str(),
-                    Some(expected_credential),
-                    &exchanged.bearer,
-                    &exchanged.credential_id,
-                )
-                .map_err(|error| error.diagnostic())?,
-            CredentialSlot::Missing => self
-                .keyring
-                .store_if_current(
-                    &attempt.instance_id,
-                    attempt.authority.origin().as_str(),
-                    None,
-                    &exchanged.bearer,
-                    &exchanged.credential_id,
-                )
-                .map_err(|error| error.diagnostic())?,
-            CredentialSlot::Stale(expected_stale_credential) => self
-                .keyring
-                .replace_stale_if_current(
-                    &attempt.instance_id,
-                    attempt.authority.origin().as_str(),
-                    expected_stale_credential,
-                    &exchanged.bearer,
-                    &exchanged.credential_id,
-                )
-                .map_err(|error| error.diagnostic())?,
+        let runtime = Arc::clone(&self.runtime);
+        let discovery = Arc::clone(&self.discovery);
+        let keyring = Arc::clone(&self.keyring);
+        let handle = handle.to_owned();
+        let attempt = attempt.clone();
+        let expected_credential = expected_credential.clone();
+        let bearer = exchanged.bearer.clone();
+        let credential_id = exchanged.credential_id.clone();
+        let commit = move || {
+            commit_pairing_exchange_now(
+                &runtime,
+                discovery.as_ref(),
+                keyring.as_ref(),
+                &handle,
+                &attempt,
+                &expected_credential,
+                &bearer,
+                &credential_id,
+            )
         };
-        if persisted {
-            runtime.pairing = None;
-            let post_commit_record = self.discovery.read()?;
-            runtime.require_current_authorized(
-                attempt.generation,
-                handle,
-                &attempt.authority,
-                &attempt.instance_id,
-            )?;
-            if !attempt.authority.matches_owner_record(&post_commit_record) {
-                runtime.clear_authority_state();
-                runtime.new_generation();
-                return Err(NativeDiagnostic::new("stale_discovery_handle", true));
-            }
-            runtime.unauthorized.reset();
+        if let Some(mutation) = mutation {
+            self.run_keyring_mutation(mutation, commit).await
+        } else {
+            commit()
         }
-        Ok(persisted)
     }
 
     fn revalidate_authenticated_read(
@@ -856,10 +812,31 @@ impl NativeConnectionState {
         result
     }
 
+    #[cfg(test)]
     pub(crate) async fn cave_pairing_exchange(
         &self,
         handle: String,
         request_id: String,
+    ) -> NativeResult<Value> {
+        self.cave_pairing_exchange_inner(handle, request_id, None)
+            .await
+    }
+
+    pub(crate) async fn cave_pairing_exchange_managed(
+        &self,
+        handle: String,
+        request_id: String,
+        mutation: NativeMutationContext,
+    ) -> NativeResult<Value> {
+        self.cave_pairing_exchange_inner(handle, request_id, Some(mutation))
+            .await
+    }
+
+    async fn cave_pairing_exchange_inner(
+        &self,
+        handle: String,
+        request_id: String,
+        mutation: Option<NativeMutationContext>,
     ) -> NativeResult<Value> {
         self.capture_handle(&handle)?;
         let pairing = {
@@ -899,8 +876,15 @@ impl NativeConnectionState {
             .transport
             .pairing_exchange(&pairing.authority, &request_id, &pairing.secret)
             .await?;
-        let persisted =
-            self.commit_pairing_exchange(&handle, &pairing, &expected_credential, &exchanged)?;
+        let persisted = self
+            .commit_pairing_exchange(
+                &handle,
+                &pairing,
+                &expected_credential,
+                &exchanged,
+                mutation,
+            )
+            .await?;
         if !persisted {
             return Err(NativeDiagnostic::new("credential_update_in_progress", true));
         }
@@ -917,7 +901,25 @@ impl NativeConnectionState {
         Ok(json!({ "status": "invalidated" }))
     }
 
+    #[cfg(test)]
     pub(crate) async fn cave_credential_status(&self, handle: String) -> NativeResult<Value> {
+        self.cave_credential_status_inner(handle, None).await
+    }
+
+    pub(crate) async fn cave_credential_status_managed(
+        &self,
+        handle: String,
+        mutation: NativeMutationContext,
+    ) -> NativeResult<Value> {
+        self.cave_credential_status_inner(handle, Some(mutation))
+            .await
+    }
+
+    async fn cave_credential_status_inner(
+        &self,
+        handle: String,
+        mutation: Option<NativeMutationContext>,
+    ) -> NativeResult<Value> {
         let (generation, authority) = self.capture_handle(&handle)?;
         let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
@@ -1009,10 +1011,26 @@ impl NativeConnectionState {
                 CredentialCurrentState::Current => {}
             }
 
-            let deleted = self
-                .keyring
-                .delete_if_matches(&instance_id, authority.origin().as_str(), &credential)
-                .map_err(|error| error.diagnostic())?;
+            let deleted = if let Some(mutation) = mutation {
+                let keyring = Arc::clone(&self.keyring);
+                let mutation_instance_id = instance_id.clone();
+                let mutation_origin = authority.origin().as_str().to_owned();
+                let mutation_credential = credential.clone();
+                self.run_keyring_mutation(mutation, move || {
+                    keyring
+                        .delete_if_matches(
+                            &mutation_instance_id,
+                            &mutation_origin,
+                            &mutation_credential,
+                        )
+                        .map_err(|error| error.diagnostic())
+                })
+                .await?
+            } else {
+                self.keyring
+                    .delete_if_matches(&instance_id, authority.origin().as_str(), &credential)
+                    .map_err(|error| error.diagnostic())?
+            };
             match self.credential_current_state(
                 generation,
                 &handle,
@@ -1096,7 +1114,19 @@ impl NativeConnectionState {
         }))
     }
 
-    pub(crate) fn cave_forget_credential(&self, handle: String) -> NativeResult<Value> {
+    pub(crate) async fn cave_forget_credential_managed(
+        &self,
+        handle: String,
+        mutation: NativeMutationContext,
+    ) -> NativeResult<Value> {
+        self.cave_forget_credential_inner(handle, mutation).await
+    }
+
+    async fn cave_forget_credential_inner(
+        &self,
+        handle: String,
+        mutation: NativeMutationContext,
+    ) -> NativeResult<Value> {
         let (generation, authority) = self.capture_handle(&handle)?;
         let (_, _, instance_id) = self.runtime()?.require_authorized(&handle)?;
         let credential = match self.keyring.read(&instance_id, authority.origin().as_str()) {
@@ -1122,10 +1152,21 @@ impl NativeConnectionState {
             }
             CredentialCurrentState::Current => {}
         }
+        let keyring = Arc::clone(&self.keyring);
+        let mutation_instance_id = instance_id.clone();
+        let mutation_origin = authority.origin().as_str().to_owned();
+        let mutation_credential = credential.clone();
         let deleted = self
-            .keyring
-            .delete_if_matches(&instance_id, authority.origin().as_str(), &credential)
-            .map_err(|error| error.diagnostic())?;
+            .run_keyring_mutation(mutation, move || {
+                keyring
+                    .delete_if_matches(
+                        &mutation_instance_id,
+                        &mutation_origin,
+                        &mutation_credential,
+                    )
+                    .map_err(|error| error.diagnostic())
+            })
+            .await?;
         match self.credential_current_state(
             generation,
             &handle,
@@ -1313,6 +1354,89 @@ impl NativeConnectionState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn commit_pairing_exchange_now(
+    runtime: &Arc<Mutex<ConnectionRuntime>>,
+    discovery: &dyn crate::cave::CaveDiscoveryReader,
+    keyring: &dyn crate::keyring::CredentialCustody,
+    handle: &str,
+    attempt: &PendingPairing,
+    expected_credential: &CredentialSlot,
+    bearer: &str,
+    credential_id: &str,
+) -> NativeResult<bool> {
+    let record = discovery.read()?;
+    let mut runtime = runtime
+        .lock()
+        .map_err(|_| NativeDiagnostic::new("connection_state_unavailable", true))?;
+    runtime.require_current_authorized(
+        attempt.generation,
+        handle,
+        &attempt.authority,
+        &attempt.instance_id,
+    )?;
+    if !attempt.authority.matches_owner_record(&record) {
+        runtime.clear_authority_state();
+        runtime.new_generation();
+        return Err(NativeDiagnostic::new("stale_discovery_handle", true));
+    }
+    if runtime.pairing.as_ref().is_none_or(|current| {
+        current.request_id != attempt.request_id
+            || current.generation != attempt.generation
+            || !current.authority.is_same_pin(&attempt.authority)
+            || current.instance_id != attempt.instance_id
+            || !current.exchange_committed
+    }) {
+        return Err(NativeDiagnostic::new("stale_connection_attempt", true));
+    }
+    let persisted = match expected_credential {
+        CredentialSlot::Current(expected_credential) => keyring
+            .store_if_current(
+                &attempt.instance_id,
+                attempt.authority.origin().as_str(),
+                Some(expected_credential),
+                bearer,
+                credential_id,
+            )
+            .map_err(|error| error.diagnostic())?,
+        CredentialSlot::Missing => keyring
+            .store_if_current(
+                &attempt.instance_id,
+                attempt.authority.origin().as_str(),
+                None,
+                bearer,
+                credential_id,
+            )
+            .map_err(|error| error.diagnostic())?,
+        CredentialSlot::Stale(expected_stale_credential) => keyring
+            .replace_stale_if_current(
+                &attempt.instance_id,
+                attempt.authority.origin().as_str(),
+                expected_stale_credential,
+                bearer,
+                credential_id,
+            )
+            .map_err(|error| error.diagnostic())?,
+    };
+    if persisted {
+        runtime.pairing = None;
+        let post_commit_record = discovery.read()?;
+        runtime.require_current_authorized(
+            attempt.generation,
+            handle,
+            &attempt.authority,
+            &attempt.instance_id,
+        )?;
+        if !attempt.authority.matches_owner_record(&post_commit_record) {
+            runtime.clear_authority_state();
+            runtime.new_generation();
+            return Err(NativeDiagnostic::new("stale_discovery_handle", true));
+        }
+        runtime.unauthorized.reset();
+    }
+    Ok(persisted)
+}
+
 fn require_success(response: &NativeHttpResponse) -> NativeResult<()> {
     if (200..300).contains(&response.status_code) {
         Ok(())
@@ -1369,6 +1493,8 @@ mod tests {
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
     };
     use tokio::sync::Notify;
+
+    const CANCELLATION_ATTEMPT: &str = "op1-1787900000000-1-00000000000000000000000000000000";
 
     struct FakeTransport {
         health_started: Option<Arc<std::sync::Barrier>>,
@@ -1964,6 +2090,14 @@ mod tests {
         deletes: AtomicUsize,
     }
 
+    struct BlockingDeleteKeyring {
+        credential: Mutex<Option<Credential>>,
+        deletes: AtomicUsize,
+        started: Arc<Barrier>,
+        release: Arc<Barrier>,
+        finished: Arc<Barrier>,
+    }
+
     impl CredentialCustody for FakeKeyring {
         fn read(&self, _instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
             self.credential
@@ -2052,6 +2186,73 @@ mod tests {
             if matches {
                 *stored = None;
             }
+            Ok(matches)
+        }
+    }
+
+    impl CredentialCustody for BlockingDeleteKeyring {
+        fn read(&self, _instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
+            self.credential
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|credential| credential.origin == origin)
+                .ok_or(KeyringError::NotFound)
+        }
+
+        fn read_for_pairing_update(
+            &self,
+            _instance_id: &str,
+            origin: &str,
+        ) -> Result<CredentialSlot, KeyringError> {
+            match self.credential.lock().unwrap().clone() {
+                None => Ok(CredentialSlot::Missing),
+                Some(credential) if credential.origin == origin => {
+                    Ok(CredentialSlot::Current(credential))
+                }
+                Some(credential) => Ok(CredentialSlot::Stale(credential)),
+            }
+        }
+
+        fn store_if_current(
+            &self,
+            _instance_id: &str,
+            _origin: &str,
+            _expected_credential: Option<&Credential>,
+            _bearer: &str,
+            _credential_id: &str,
+        ) -> Result<bool, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn replace_stale_if_current(
+            &self,
+            _instance_id: &str,
+            _origin: &str,
+            _expected_stale_credential: &Credential,
+            _bearer: &str,
+            _credential_id: &str,
+        ) -> Result<bool, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn delete_if_matches(
+            &self,
+            _instance_id: &str,
+            origin: &str,
+            expected_credential: &Credential,
+        ) -> Result<bool, KeyringError> {
+            self.started.wait();
+            self.release.wait();
+            self.deletes.fetch_add(1, Ordering::SeqCst);
+            let mut stored = self.credential.lock().unwrap();
+            let matches = stored.as_ref().is_some_and(|current| {
+                current.origin == origin && current.is_same_identity(expected_credential)
+            });
+            if matches {
+                *stored = None;
+            }
+            self.finished.wait();
             Ok(matches)
         }
     }
@@ -3022,29 +3223,20 @@ mod tests {
         let operation_state = runner.clone();
         let operation_handle = handle.clone();
         let operation = std::thread::spawn(move || {
-            tauri::async_runtime::block_on(
-                runner.run_operation(
-                    NativeOperationInput::new(
-                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                        1_000,
-                    )
-                    .unwrap(),
-                    async move {
-                        operation_state
-                            .cave_pairing_create(operation_handle, pairing_request())
-                            .await
-                    },
-                ),
-            )
+            tauri::async_runtime::block_on(runner.run_operation(
+                NativeOperationInput::new(CANCELLATION_ATTEMPT.to_owned(), 1_000).unwrap(),
+                async move {
+                    operation_state
+                        .cave_pairing_create(operation_handle, pairing_request())
+                        .await
+                },
+            ))
         });
         tauri::async_runtime::block_on(started.notified());
 
         assert_eq!(
             state
-                .cancel_operation(
-                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                    NativeCancelReason::Aborted,
-                )
+                .cancel_operation(CANCELLATION_ATTEMPT.to_owned(), NativeCancelReason::Aborted,)
                 .unwrap()
                 .status,
             "cancelled"
@@ -3084,28 +3276,19 @@ mod tests {
         let operation_state = runner.clone();
         let operation_handle = handle.clone();
         let operation = std::thread::spawn(move || {
-            tauri::async_runtime::block_on(
-                runner.run_operation(
-                    NativeOperationInput::new(
-                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                        1_000,
-                    )
-                    .unwrap(),
-                    async move {
-                        operation_state
-                            .cave_pairing_poll(operation_handle, request_id.to_owned())
-                            .await
-                    },
-                ),
-            )
+            tauri::async_runtime::block_on(runner.run_operation(
+                NativeOperationInput::new(CANCELLATION_ATTEMPT.to_owned(), 1_000).unwrap(),
+                async move {
+                    operation_state
+                        .cave_pairing_poll(operation_handle, request_id.to_owned())
+                        .await
+                },
+            ))
         });
         tauri::async_runtime::block_on(started.notified());
 
         state
-            .cancel_operation(
-                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                NativeCancelReason::Aborted,
-            )
+            .cancel_operation(CANCELLATION_ATTEMPT.to_owned(), NativeCancelReason::Aborted)
             .unwrap();
         assert_eq!(
             operation.join().unwrap(),
@@ -3144,28 +3327,19 @@ mod tests {
         let operation_state = runner.clone();
         let operation_handle = handle.clone();
         let operation = std::thread::spawn(move || {
-            tauri::async_runtime::block_on(
-                runner.run_operation(
-                    NativeOperationInput::new(
-                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                        1_000,
-                    )
-                    .unwrap(),
-                    async move {
-                        operation_state
-                            .cave_credential_status(operation_handle)
-                            .await
-                    },
-                ),
-            )
+            tauri::async_runtime::block_on(runner.run_operation(
+                NativeOperationInput::new(CANCELLATION_ATTEMPT.to_owned(), 1_000).unwrap(),
+                async move {
+                    operation_state
+                        .cave_credential_status(operation_handle)
+                        .await
+                },
+            ))
         });
         tauri::async_runtime::block_on(started.notified());
 
         state
-            .cancel_operation(
-                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
-                NativeCancelReason::Aborted,
-            )
+            .cancel_operation(CANCELLATION_ATTEMPT.to_owned(), NativeCancelReason::Aborted)
             .unwrap();
         assert_eq!(
             operation.join().unwrap(),
@@ -3175,6 +3349,248 @@ mod tests {
             tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap()["status"],
             "valid"
         );
+    }
+
+    #[test]
+    fn queued_cancelled_forget_never_starts_blocking_keyring_work() {
+        let keyring = Arc::new(BlockingDeleteKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "native-only-bearer".to_owned(),
+                credential_id: "credential-a".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+            started: Arc::new(Barrier::new(1)),
+            release: Arc::new(Barrier::new(1)),
+            finished: Arc::new(Barrier::new(1)),
+        });
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let worker = state.hold_mutation_worker();
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_mutating_operation(
+                    NativeOperationInput::new(
+                        "op1-1787900000000-1-00000000000000000000000000000000".to_owned(),
+                        1_000,
+                    )
+                    .unwrap(),
+                    move |mutation| async move {
+                        operation_state
+                            .cave_forget_credential_managed(handle, mutation)
+                            .await
+                    },
+                ),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !state.mutation_is_busy() {
+            assert!(Instant::now() < deadline, "mutation must enter the queue");
+            std::thread::yield_now();
+        }
+        state
+            .cancel_operation(
+                "op1-1787900000000-1-00000000000000000000000000000000".to_owned(),
+                NativeCancelReason::Aborted,
+            )
+            .unwrap();
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while state.mutation_is_busy() {
+            assert!(
+                Instant::now() < deadline,
+                "cancelled queued mutation must drain"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 0);
+        assert!(keyring.credential.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn queued_expired_forget_never_starts_blocking_keyring_work() {
+        let keyring = Arc::new(BlockingDeleteKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "native-only-bearer".to_owned(),
+                credential_id: "credential-a".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+            started: Arc::new(Barrier::new(1)),
+            release: Arc::new(Barrier::new(1)),
+            finished: Arc::new(Barrier::new(1)),
+        });
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let worker = state.hold_mutation_worker();
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_mutating_operation(
+                    NativeOperationInput::new(
+                        "op1-1787900000000-1-00000000000000000000000000000000".to_owned(),
+                        1,
+                    )
+                    .unwrap(),
+                    move |mutation| async move {
+                        operation_state
+                            .cave_forget_credential_managed(handle, mutation)
+                            .await
+                    },
+                ),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !state.mutation_is_busy() {
+            assert!(Instant::now() < deadline, "mutation must enter the queue");
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("timeout", true))
+        );
+        drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while state.mutation_is_busy() {
+            assert!(
+                Instant::now() < deadline,
+                "expired queued mutation must drain"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 0);
+        assert!(keyring.credential.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn blocking_forget_returns_nonretryable_ambiguity_after_deadline_without_duplicate_mutation() {
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let finished = Arc::new(Barrier::new(2));
+        let keyring = Arc::new(BlockingDeleteKeyring {
+            credential: Mutex::new(Some(Credential {
+                bearer: "native-only-bearer".to_owned(),
+                credential_id: "credential-a".to_owned(),
+                origin: "http://127.0.0.1:4310/".to_owned(),
+            })),
+            deletes: AtomicUsize::new(0),
+            started: Arc::clone(&started),
+            release: Arc::clone(&release),
+            finished: Arc::clone(&finished),
+        });
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport::default()),
+            keyring.clone(),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation_handle = handle.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_mutating_operation(
+                    NativeOperationInput::new(
+                        "op1-1787900000000-1-00000000000000000000000000000000".to_owned(),
+                        25,
+                    )
+                    .unwrap(),
+                    move |mutation| async move {
+                        operation_state
+                            .cave_forget_credential_managed(operation_handle, mutation)
+                            .await
+                    },
+                ),
+            )
+        });
+        started.wait();
+        std::thread::sleep(Duration::from_millis(50));
+
+        let ambiguous = operation.join().unwrap().err().unwrap();
+        assert_eq!(
+            ambiguous,
+            NativeDiagnostic::new("credential_update_in_progress", false)
+        );
+        let serialized = serde_json::to_string(&ambiguous).unwrap();
+        assert!(!serialized.contains("native-only-bearer"));
+        assert!(!serialized.contains("credential-a"));
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 0);
+        let duplicate_runner = state.clone();
+        let duplicate_state = duplicate_runner.clone();
+        let duplicate_handle = handle.clone();
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                duplicate_runner.run_mutating_operation(
+                    NativeOperationInput::new(
+                        "op1-1787900000000-2-11111111111111111111111111111111".to_owned(),
+                        100,
+                    )
+                    .unwrap(),
+                    move |mutation| async move {
+                        duplicate_state
+                            .cave_forget_credential_managed(duplicate_handle, mutation)
+                            .await
+                    },
+                )
+            )
+            .err(),
+            Some(NativeDiagnostic::new(
+                "credential_update_in_progress",
+                false,
+            ))
+        );
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 0);
+        release.wait();
+        finished.wait();
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 1);
+        let retry_runner = state.clone();
+        let retry_state = retry_runner.clone();
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                retry_runner.run_mutating_operation(
+                    NativeOperationInput::new(
+                        "op1-1787900000000-3-22222222222222222222222222222222".to_owned(),
+                        100,
+                    )
+                    .unwrap(),
+                    move |mutation| async move {
+                        retry_state
+                            .cave_forget_credential_managed(handle, mutation)
+                            .await
+                    },
+                )
+            )
+            .unwrap(),
+            json!({ "status": "missing" })
+        );
+        assert_eq!(keyring.deletes.load(Ordering::SeqCst), 1);
     }
 
     #[test]

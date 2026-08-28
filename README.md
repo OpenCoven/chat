@@ -14,6 +14,10 @@ write-oriented design exploration.
 - Managed aborts and deadlines cross the bridge only as single-use opaque
   attempt IDs, a timeout capped at five seconds, and a dedicated narrow cancel
   command; signals and error causes are never serialized.
+- Keyring mutations are serialized through a bounded native worker. Cancelled
+  or expired queued work is skipped; a mutation already in progress reports a
+  non-retryable `credential_update_in_progress` ambiguity until custody is
+  coherent.
 - Pairing secrets, bearer credentials, headers, and keychain values remain in
   Rust. A random canonical UUID v4 pairing identity is stored per installation
   in the native keyring; browser results are bounded non-secret DTOs and diagnostics.

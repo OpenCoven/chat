@@ -388,6 +388,22 @@ async function settle() {
 }
 
 describe('Cave connection controller', () => {
+  it('passes its bounded operation signal and timeout into managed discovery', async () => {
+    const native = nativeHost();
+    let observed: Parameters<CaveConnectionHost['discover']>[0];
+    const subject = controller(
+      hostPort(async (options) => {
+        observed = options;
+        return await native.discover(options);
+      }),
+    );
+
+    await subject.start();
+
+    expect(observed?.signal).toBeInstanceOf(AbortSignal);
+    expect(observed?.timeoutMs).toBe(30_000);
+  });
+
   it('classifies no authority as offline and never launches without an explicit call', async () => {
     let launchCalls = 0;
     const subject = controller(

@@ -18,7 +18,7 @@ use cave::{
 };
 use connection::ConnectionRuntime;
 use keyring::{validate_installation_id, CredentialCustody, NativeKeyring};
-use operation::NativeOperationRegistry;
+use operation::{NativeMutationContext, NativeMutationQueue, NativeOperationRegistry};
 use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
@@ -42,6 +42,7 @@ pub struct NativeConnectionState {
     sleeper: Arc<dyn CaveSleeper>,
     task_runner: Arc<dyn CaveTaskRunner>,
     operations: Arc<NativeOperationRegistry>,
+    mutations: Arc<NativeMutationQueue>,
 }
 
 impl Default for NativeConnectionState {
@@ -56,6 +57,7 @@ impl Default for NativeConnectionState {
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
             operations: Arc::new(NativeOperationRegistry::default()),
+            mutations: Arc::new(NativeMutationQueue::default()),
         }
     }
 }
@@ -84,6 +86,25 @@ impl NativeConnectionState {
         self.operations.run(operation, future).await
     }
 
+    async fn run_mutating_operation<T, Fut>(
+        &self,
+        operation: NativeOperationInput,
+        executor: impl FnOnce(NativeMutationContext) -> Fut,
+    ) -> Result<T, NativeDiagnostic>
+    where
+        Fut: std::future::Future<Output = Result<T, NativeDiagnostic>>,
+    {
+        self.operations.run_mutating(operation, executor).await
+    }
+
+    async fn run_keyring_mutation<T: Send + 'static>(
+        &self,
+        context: NativeMutationContext,
+        task: impl FnOnce() -> Result<T, NativeDiagnostic> + Send + 'static,
+    ) -> Result<T, NativeDiagnostic> {
+        self.mutations.execute(context, task).await
+    }
+
     fn cancel_operation(
         &self,
         attempt_id: String,
@@ -98,6 +119,20 @@ impl NativeConnectionState {
 
     fn operation_registry(&self) -> Arc<NativeOperationRegistry> {
         Arc::clone(&self.operations)
+    }
+
+    fn mutation_queue(&self) -> Arc<NativeMutationQueue> {
+        Arc::clone(&self.mutations)
+    }
+
+    #[cfg(test)]
+    fn hold_mutation_worker(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.mutations.hold_worker()
+    }
+
+    #[cfg(test)]
+    fn mutation_is_busy(&self) -> bool {
+        self.mutations.is_busy()
     }
 }
 
@@ -120,6 +155,7 @@ impl NativeConnectionState {
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
             operations: Arc::new(NativeOperationRegistry::default()),
+            mutations: Arc::new(NativeMutationQueue::default()),
         }
     }
 
@@ -150,15 +186,18 @@ impl NativeConnectionState {
             sleeper,
             task_runner,
             operations: Arc::new(NativeOperationRegistry::default()),
+            mutations: Arc::new(NativeMutationQueue::default()),
         }
     }
 
     #[cfg(feature = "phase1-conformance")]
-    pub(crate) fn using_operation_registry(
+    pub(crate) fn using_runtime_guards(
         mut self,
         operations: Arc<NativeOperationRegistry>,
+        mutations: Arc<NativeMutationQueue>,
     ) -> Self {
         self.operations = operations;
+        self.mutations = mutations;
         self
     }
 }

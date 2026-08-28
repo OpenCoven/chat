@@ -636,7 +636,11 @@ export function createCaveConnectionController(
   async function discover(generation: number, signal: AbortSignal): Promise<void> {
     let discovered: Readonly<{ client: CaveClient }>;
     try {
-      discovered = await deadlineBounded(options.host.discover(), operationTimeoutMs, signal);
+      discovered = await deadlineBounded(
+        options.host.discover(operationOptions(signal)),
+        operationTimeoutMs,
+        signal,
+      );
     } catch (error) {
       setFailure(generation, failureFrom(error), 'discovery');
       return;
@@ -855,7 +859,11 @@ export function createCaveConnectionController(
         }
       }
       try {
-        await deadlineBounded(options.host.discover(), operationTimeoutMs, signal);
+        await deadlineBounded(
+          options.host.discover(operationOptions(signal)),
+          operationTimeoutMs,
+          signal,
+        );
       } catch {
         // Disposal intentionally has no public failure state.
       }

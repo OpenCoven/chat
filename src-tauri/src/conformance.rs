@@ -19,7 +19,7 @@ use crate::{
         validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
     },
     operation::{
-        NativeCancelReason, NativeOperationInput, NativeOperationRegistry,
+        NativeCancelReason, NativeMutationQueue, NativeOperationInput, NativeOperationRegistry,
         MAX_NATIVE_OPERATION_TIMEOUT_MS,
     },
     transport::{
@@ -434,8 +434,9 @@ impl RpcRuntime {
     pub fn new() -> Self {
         let custody = SharedMemoryCredentialCustody::new();
         let operations = Arc::new(NativeOperationRegistry::default());
+        let mutations = Arc::new(NativeMutationQueue::default());
         Self {
-            state: state_with_custody(&custody, operations),
+            state: state_with_custody(&custody, operations, mutations),
             custody,
         }
     }
@@ -444,7 +445,8 @@ impl RpcRuntime {
         self.state
             .cancel_all_operations(NativeCancelReason::Aborted);
         let operations = self.state.operation_registry();
-        self.state = state_with_custody(&self.custody, operations);
+        let mutations = self.state.mutation_queue();
+        self.state = state_with_custody(&self.custody, operations, mutations);
     }
 
     pub fn process_line(&mut self, line: &[u8]) -> Value {
@@ -522,26 +524,39 @@ impl RpcRuntime {
             } => {
                 let runner = self.state.clone();
                 let operation_state = runner.clone();
-                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
-                    operation_state
-                        .cave_pairing_exchange(handle, request_id)
-                        .await
-                }))?
+                tauri::async_runtime::block_on(runner.run_mutating_operation(
+                    operation,
+                    move |mutation| async move {
+                        operation_state
+                            .cave_pairing_exchange_managed(handle, request_id, mutation)
+                            .await
+                    },
+                ))?
             }
             RpcCommand::CaveResetPairing { handle } => self.state.cave_reset_pairing(handle)?,
             RpcCommand::CaveCredentialStatus { handle, operation } => {
                 let runner = self.state.clone();
                 let operation_state = runner.clone();
-                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
-                    operation_state.cave_credential_status(handle).await
-                }))?
+                tauri::async_runtime::block_on(runner.run_mutating_operation(
+                    operation,
+                    move |mutation| async move {
+                        operation_state
+                            .cave_credential_status_managed(handle, mutation)
+                            .await
+                    },
+                ))?
             }
             RpcCommand::CaveForgetCredential { handle, operation } => {
                 let runner = self.state.clone();
                 let operation_state = runner.clone();
-                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
-                    operation_state.cave_forget_credential(handle)
-                }))?
+                tauri::async_runtime::block_on(runner.run_mutating_operation(
+                    operation,
+                    move |mutation| async move {
+                        operation_state
+                            .cave_forget_credential_managed(handle, mutation)
+                            .await
+                    },
+                ))?
             }
             RpcCommand::CaveListFamiliars {
                 handle,
@@ -634,6 +649,7 @@ impl Default for RpcRuntime {
 fn state_with_custody(
     custody: &SharedMemoryCredentialCustody,
     operations: Arc<NativeOperationRegistry>,
+    mutations: Arc<NativeMutationQueue>,
 ) -> NativeConnectionState {
     NativeConnectionState::with_test_launch_collaborators(
         Arc::new(ConstrainedTransport) as Arc<dyn NativeCaveTransport>,
@@ -644,7 +660,7 @@ fn state_with_custody(
         Arc::new(NativeCaveSleeper),
         Arc::new(NativeCaveTaskRunner),
     )
-    .using_operation_registry(operations)
+    .using_runtime_guards(operations, mutations)
 }
 
 fn value_from<T: serde::Serialize>(value: T) -> NativeResult<Value> {
@@ -1172,6 +1188,8 @@ mod tests {
     const INSTANCE_ID: &str = "instance-1";
     const FIRST_ORIGIN: &str = "http://127.0.0.1:4310/";
     const SECOND_ORIGIN: &str = "http://127.0.0.1:4320/";
+    const FIRST_OPERATION_ATTEMPT: &str = "op1-1787900000000-1-00000000000000000000000000000000";
+    const SECOND_OPERATION_ATTEMPT: &str = "op1-1787900000000-2-11111111111111111111111111111111";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct ScopedCaveHome(Option<std::ffi::OsString>);
@@ -1291,13 +1309,13 @@ mod tests {
             br#"{"id":"eight","command":"cave_pairing_poll","args":{"handle":"x","requestId":"../request"}}"#,
         );
         let bounded_operation = runtime.process_line(
-            br#"{"id":"nine","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","timeoutMs":25}}}"#,
+            br#"{"id":"nine","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":25}}}"#,
         );
         let cancellation = runtime.process_line(
-            br#"{"id":"ten","command":"cave_cancel_operation","args":{"attemptId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","reason":"aborted"}}"#,
+            br#"{"id":"ten","command":"cave_cancel_operation","args":{"attemptId":"op1-1787900000000-2-11111111111111111111111111111111","reason":"aborted"}}"#,
         );
         let oversized_timeout = runtime.process_line(
-            br#"{"id":"eleven","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","timeoutMs":5001}}}"#,
+            br#"{"id":"eleven","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"op1-1787900000000-3-22222222222222222222222222222222","timeoutMs":5001}}}"#,
         );
         let malformed_cancel = runtime.process_line(
             br#"{"id":"twelve","command":"cave_cancel_operation","args":{"attemptId":"not-an-attempt","reason":"secret-cause"}}"#,
@@ -1336,8 +1354,8 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _cave_home = ScopedCaveHome::missing();
         let mut runtime = RpcRuntime::new();
-        let cancelled_attempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-        let fresh_attempt = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let cancelled_attempt = FIRST_OPERATION_ATTEMPT;
+        let fresh_attempt = SECOND_OPERATION_ATTEMPT;
 
         assert_eq!(
             runtime.process_line(
@@ -1539,7 +1557,7 @@ mod tests {
 
         let before = runtime.process_line(br#"{"id":"one","command":"app_installation_id"}"#);
         let discovery = runtime.process_line(
-            br#"{"id":"two","command":"cave_read_discovery","args":{"operation":{"attemptId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","timeoutMs":100}}}"#,
+            br#"{"id":"two","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":100}}}"#,
         );
         let reset =
             runtime.process_line(br#"{"id":"three","command":"conformance_reset_native_state"}"#);

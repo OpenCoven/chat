@@ -180,6 +180,21 @@ describe('managed credential status native adapter end-to-end', () => {
       code: 'credential_update_in_progress',
       retryable: true,
     });
+
+    const secret = 'ambiguous-keyring-secret-canary';
+    const ambiguous = managedClient(async () =>
+      Promise.reject({
+        code: 'credential_update_in_progress',
+        retryable: false,
+        cause: { secret },
+      }),
+    );
+    const error = await publicError(ambiguous.forgetCredential());
+    expect(error).toMatchObject({
+      code: 'credential_update_in_progress',
+      retryable: false,
+    });
+    expect(inspect(error)).not.toContain(secret);
   });
 
   it('fails closed on forbidden fields and hostile native values without exposing native data', async () => {

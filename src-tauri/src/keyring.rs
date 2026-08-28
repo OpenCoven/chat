@@ -61,6 +61,7 @@ struct StoredCredential {
     origin: String,
 }
 
+#[derive(Clone)]
 pub(crate) enum CredentialSlot {
     Missing,
     Current(Credential),

@@ -4,6 +4,8 @@ import {
   createManagedCaveClient,
   discoverManagedCaveEndpoint,
 } from '@opencoven/cave-client/managed';
+import type { OperationOptions } from '@opencoven/sdk-core/browser';
+
 import { nativeUnavailable } from './diagnostics';
 import {
   createCaveManagedCredentialTransport,
@@ -13,7 +15,7 @@ import {
 } from './native-boundary';
 
 export type CaveConnectionHost = Readonly<{
-  discover: () => Promise<
+  discover: (options?: OperationOptions) => Promise<
     Readonly<{
       endpoint: CaveManagedDiscoveredEndpoint;
       client: CaveClient;
@@ -33,11 +35,18 @@ function isPairingResetResult(value: unknown): boolean {
 
 export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectionHost {
   let currentHandle: string | undefined;
+  let discoveryGeneration = 0;
 
   return Object.freeze({
-    discover: async () => {
+    discover: async (options = {}) => {
+      const generation = discoveryGeneration + 1;
+      discoveryGeneration = generation;
+      currentHandle = undefined;
       const binding = createCaveManagedDiscoveryBinding(invoke);
-      const endpoint = await discoverManagedCaveEndpoint(binding.source);
+      const endpoint = await discoverManagedCaveEndpoint(binding.source, options);
+      if (generation !== discoveryGeneration) {
+        throw nativeUnavailable();
+      }
       const handle = binding.takeHandle();
       currentHandle = handle;
 
@@ -49,6 +58,8 @@ export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectio
       });
     },
     launch: async () => {
+      discoveryGeneration += 1;
+      currentHandle = undefined;
       await invokeNative(invoke, 'cave_launch');
     },
     resetPairing: async () => {
@@ -56,12 +67,11 @@ export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectio
       if (handle === undefined) {
         throw nativeUnavailable();
       }
+      discoveryGeneration += 1;
+      currentHandle = undefined;
       const result = await invokeNative(invoke, 'cave_reset_pairing', { handle });
       if (!isPairingResetResult(result)) {
         throw nativeUnavailable();
-      }
-      if (currentHandle === handle) {
-        currentHandle = undefined;
       }
     },
   });

@@ -22,8 +22,11 @@ export type CaveManagedDiscoveryBinding = Readonly<{
 }>;
 
 const NATIVE_OPERATION_TIMEOUT_MS = 5_000;
+const NATIVE_DEADLINE_SAFETY_MS = 100;
 const NATIVE_CANCEL_COMMAND = 'cave_cancel_operation';
-const ATTEMPT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const ATTEMPT_ID_PATTERN = /^op1-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{32}$/u;
+let attemptEpoch: number | undefined;
+let attemptCounter = 0;
 
 export async function invokeNative(
   invoke: NativeSdkInvoke,
@@ -134,13 +137,31 @@ function signalIsAborted(signal: AbortSignal | undefined): boolean {
 }
 
 function createAttemptId(): string {
-  let attemptId: unknown;
+  let random: Uint8Array;
   try {
-    attemptId = globalThis.crypto.randomUUID();
+    random = globalThis.crypto.getRandomValues(new Uint8Array(16));
   } catch {
     return invalidNativeInput();
   }
-  if (typeof attemptId !== 'string' || !ATTEMPT_ID_PATTERN.test(attemptId)) {
+  if (attemptEpoch === undefined) {
+    const now = Date.now();
+    if (!Number.isSafeInteger(now) || now <= 0) {
+      return invalidNativeInput();
+    }
+    attemptEpoch = now;
+  }
+  attemptCounter += 1;
+  if (!Number.isSafeInteger(attemptCounter) || attemptCounter <= 0) {
+    return invalidNativeInput();
+  }
+  const alphabet = '0123456789abcdef';
+  let suffix = '';
+  for (let index = 0; index < random.length; index += 1) {
+    const byte = random[index] ?? 0;
+    suffix += `${alphabet[byte >>> 4]}${alphabet[byte & 0x0f]}`;
+  }
+  const attemptId = `op1-${attemptEpoch}-${attemptCounter}-${suffix}`;
+  if (!ATTEMPT_ID_PATTERN.test(attemptId)) {
     return invalidNativeInput();
   }
   return attemptId;
@@ -175,7 +196,10 @@ async function invokeNativeOperation(
     requestNativeCancellation(invoke, attemptId, 'timeout');
     return cancellationDiagnostic('timeout');
   }
-  const timeoutMs = Math.min(remaining, NATIVE_OPERATION_TIMEOUT_MS);
+  const timeoutMs = Math.min(
+    Math.max(1, remaining - NATIVE_DEADLINE_SAFETY_MS),
+    NATIVE_OPERATION_TIMEOUT_MS,
+  );
   let rejectCancellation: ((error: unknown) => void) | undefined;
   const cancellation = new Promise<never>((_resolve, reject) => {
     rejectCancellation = reject;

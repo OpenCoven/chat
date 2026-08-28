@@ -445,7 +445,7 @@ fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
             "command": "cave_read_discovery",
             "args": {
                 "operation": {
-                    "attemptId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "attemptId": "op1-1787900000000-1-00000000000000000000000000000000",
                     "timeoutMs": 1_000,
                 },
             },
@@ -465,7 +465,7 @@ fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
             "args": {
                 "handle": handle,
                 "operation": {
-                    "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "attemptId": "op1-1787900000000-2-11111111111111111111111111111111",
                     "timeoutMs": 2_000,
                 },
             },
@@ -480,7 +480,7 @@ fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
             "id": "cancel",
             "command": "cave_cancel_operation",
             "args": {
-                "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "attemptId": "op1-1787900000000-2-11111111111111111111111111111111",
                 "reason": "aborted",
             },
         }),
@@ -509,7 +509,7 @@ fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
             "id": "stale",
             "command": "cave_cancel_operation",
             "args": {
-                "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "attemptId": "op1-1787900000000-2-11111111111111111111111111111111",
                 "reason": "timeout",
             },
         }),
@@ -526,7 +526,7 @@ fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
             "args": {
                 "handle": discovery_response["result"]["handle"],
                 "operation": {
-                    "attemptId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "attemptId": "op1-1787900000000-3-22222222222222222222222222222222",
                     "timeoutMs": 25,
                 },
             },

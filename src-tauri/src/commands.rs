@@ -127,9 +127,9 @@ pub async fn cave_pairing_exchange(
     let runner = state.inner().clone();
     let operation_state = runner.clone();
     runner
-        .run_operation(operation, async move {
+        .run_mutating_operation(operation, move |mutation| async move {
             operation_state
-                .cave_pairing_exchange(handle, request_id)
+                .cave_pairing_exchange_managed(handle, request_id, mutation)
                 .await
         })
         .await
@@ -152,8 +152,10 @@ pub async fn cave_credential_status(
     let runner = state.inner().clone();
     let operation_state = runner.clone();
     runner
-        .run_operation(operation, async move {
-            operation_state.cave_credential_status(handle).await
+        .run_mutating_operation(operation, move |mutation| async move {
+            operation_state
+                .cave_credential_status_managed(handle, mutation)
+                .await
         })
         .await
 }
@@ -167,8 +169,10 @@ pub async fn cave_forget_credential(
     let runner = state.inner().clone();
     let operation_state = runner.clone();
     runner
-        .run_operation(operation, async move {
-            operation_state.cave_forget_credential(handle)
+        .run_mutating_operation(operation, move |mutation| async move {
+            operation_state
+                .cave_forget_credential_managed(handle, mutation)
+                .await
         })
         .await
 }

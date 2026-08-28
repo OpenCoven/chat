@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     future::Future,
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -10,14 +10,21 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use uuid::{Variant, Version};
 
 use crate::cave::{NativeDiagnostic, NativeResult};
 
 pub(crate) const MAX_NATIVE_OPERATION_TIMEOUT_MS: u32 = 5_000;
 const MAX_ACTIVE_OPERATIONS: usize = 256;
 const MAX_PENDING_CANCELLATIONS: usize = 4_096;
-const MAX_SEEN_ATTEMPTS: usize = 4_096;
+const MAX_ATTEMPT_EPOCHS: usize = 8;
+const ATTEMPT_COUNTER_WINDOW: u64 = 4_096;
+const MAX_NEW_COUNTER: u64 = ATTEMPT_COUNTER_WINDOW;
+const ATTEMPT_RANDOM_CHARACTERS: usize = 32;
+const MUTATION_IDLE: u8 = 0;
+const MUTATION_QUEUED: u8 = 1;
+const MUTATION_STARTED: u8 = 2;
+const MUTATION_CANCELLED: u8 = 3;
+const MUTATION_FINISHED: u8 = 4;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,7 +44,7 @@ impl NativeOperationInput {
     }
 
     pub(crate) fn validate(&self) -> NativeResult<()> {
-        validate_attempt_id(&self.attempt_id)?;
+        parse_attempt_id(&self.attempt_id)?;
         if self.timeout_ms == 0 || self.timeout_ms > MAX_NATIVE_OPERATION_TIMEOUT_MS {
             return Err(NativeDiagnostic::new("invalid_native_input", false));
         }
@@ -88,6 +95,12 @@ impl NativeCancelResult {
     fn unknown() -> Self {
         Self { status: "unknown" }
     }
+
+    fn in_progress() -> Self {
+        Self {
+            status: "in_progress",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -96,12 +109,58 @@ pub(crate) struct NativeOperationRegistry {
 }
 
 #[derive(Default)]
+pub(crate) struct NativeMutationQueue {
+    busy: Arc<AtomicBool>,
+    worker: Arc<Mutex<()>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeMutationContext {
+    phase: Arc<AtomicU8>,
+    signal: Arc<OperationSignal>,
+}
+
+enum MutationCancellation {
+    Cancelled,
+    Started,
+    Finished,
+}
+
+#[derive(Default)]
 struct RegistryState {
-    active: HashMap<String, Arc<OperationSignal>>,
-    pending: HashMap<String, NativeCancelReason>,
-    pending_order: VecDeque<String>,
-    seen: HashSet<String>,
-    seen_order: VecDeque<String>,
+    active: HashMap<AttemptKey, ActiveAttempt>,
+    pending: HashMap<AttemptKey, PendingCancellation>,
+    pending_order: VecDeque<AttemptKey>,
+    epochs: HashMap<u64, AttemptEpoch>,
+    highest_epoch: Option<u64>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct AttemptKey {
+    epoch: u64,
+    counter: u64,
+}
+
+struct AttemptIdentity {
+    raw: String,
+    key: AttemptKey,
+}
+
+struct ActiveAttempt {
+    raw: String,
+    signal: Arc<OperationSignal>,
+    mutation_phase: Option<Arc<AtomicU8>>,
+}
+
+struct PendingCancellation {
+    raw: String,
+    reason: NativeCancelReason,
+}
+
+#[derive(Default)]
+struct AttemptEpoch {
+    highest_counter: u64,
+    seen: HashSet<u64>,
 }
 
 struct OperationSignal {
@@ -150,9 +209,129 @@ impl OperationSignal {
     }
 }
 
+impl NativeMutationContext {
+    fn queue(&self) -> NativeResult<()> {
+        self.phase
+            .compare_exchange(
+                MUTATION_IDLE,
+                MUTATION_QUEUED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .map(|_| ())
+            .map_err(|_| {
+                self.signal.current().map_or_else(
+                    || NativeDiagnostic::new("credential_update_in_progress", false),
+                    NativeCancelReason::diagnostic,
+                )
+            })
+    }
+
+    fn cancel_before_start(&self) -> MutationCancellation {
+        loop {
+            let current = self.phase.load(Ordering::SeqCst);
+            match current {
+                MUTATION_IDLE | MUTATION_QUEUED => {
+                    if self
+                        .phase
+                        .compare_exchange(
+                            current,
+                            MUTATION_CANCELLED,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        )
+                        .is_ok()
+                    {
+                        return MutationCancellation::Cancelled;
+                    }
+                }
+                MUTATION_STARTED => return MutationCancellation::Started,
+                MUTATION_FINISHED => return MutationCancellation::Finished,
+                MUTATION_CANCELLED => return MutationCancellation::Cancelled,
+                _ => return MutationCancellation::Started,
+            }
+        }
+    }
+
+    fn ambiguous() -> NativeDiagnostic {
+        NativeDiagnostic::new("credential_update_in_progress", false)
+    }
+}
+
+impl NativeMutationQueue {
+    pub(crate) async fn execute<T: Send + 'static>(
+        self: &Arc<Self>,
+        context: NativeMutationContext,
+        task: impl FnOnce() -> NativeResult<T> + Send + 'static,
+    ) -> NativeResult<T> {
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(NativeMutationContext::ambiguous());
+        }
+        if let Err(error) = context.queue() {
+            self.busy.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+        let queue = Arc::clone(self);
+        let phase = Arc::clone(&context.phase);
+        let signal = Arc::clone(&context.signal);
+        let result = tokio::task::spawn_blocking(move || {
+            struct BusyReset(Arc<AtomicBool>);
+
+            impl Drop for BusyReset {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::SeqCst);
+                }
+            }
+
+            let _busy = BusyReset(Arc::clone(&queue.busy));
+            let _worker = queue
+                .worker
+                .lock()
+                .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+            if phase
+                .compare_exchange(
+                    MUTATION_QUEUED,
+                    MUTATION_STARTED,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_err()
+            {
+                return Err(signal.current().map_or_else(
+                    || NativeDiagnostic::new("credential_update_in_progress", false),
+                    NativeCancelReason::diagnostic,
+                ));
+            }
+            let result = task();
+            phase.store(MUTATION_FINISHED, Ordering::SeqCst);
+            result
+        })
+        .await;
+        if result.is_err() {
+            self.busy.store(false, Ordering::SeqCst);
+        }
+        result.map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
+    }
+}
+
+#[cfg(test)]
+impl NativeMutationQueue {
+    pub(crate) fn hold_worker(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.worker.lock().unwrap()
+    }
+
+    pub(crate) fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+}
+
 struct NativeOperationGuard {
     registry: Arc<NativeOperationRegistry>,
-    attempt_id: String,
+    key: AttemptKey,
     signal: Arc<OperationSignal>,
     timeout: Duration,
 }
@@ -160,7 +339,7 @@ struct NativeOperationGuard {
 impl Drop for NativeOperationGuard {
     fn drop(&mut self) {
         if let Ok(mut state) = self.registry.state.lock() {
-            state.active.remove(&self.attempt_id);
+            state.active.remove(&self.key);
         }
     }
 }
@@ -171,7 +350,7 @@ impl NativeOperationRegistry {
         input: NativeOperationInput,
         future: impl Future<Output = NativeResult<T>>,
     ) -> NativeResult<T> {
-        let guard = self.begin(input)?;
+        let guard = self.begin(input, None)?;
         tokio::pin!(future);
         tokio::select! {
             biased;
@@ -184,104 +363,277 @@ impl NativeOperationRegistry {
         }
     }
 
+    pub(crate) async fn run_mutating<T, Fut>(
+        self: &Arc<Self>,
+        input: NativeOperationInput,
+        executor: impl FnOnce(NativeMutationContext) -> Fut,
+    ) -> NativeResult<T>
+    where
+        Fut: Future<Output = NativeResult<T>>,
+    {
+        let phase = Arc::new(AtomicU8::new(MUTATION_IDLE));
+        let guard = self.begin(input, Some(Arc::clone(&phase)))?;
+        let mutation = NativeMutationContext {
+            phase,
+            signal: Arc::clone(&guard.signal),
+        };
+        let future = executor(mutation.clone());
+        tokio::pin!(future);
+        tokio::select! {
+            biased;
+            reason = guard.signal.cancelled() => {
+                match mutation.cancel_before_start() {
+                    MutationCancellation::Cancelled => Err(reason.diagnostic()),
+                    MutationCancellation::Started => Err(NativeMutationContext::ambiguous()),
+                    MutationCancellation::Finished => (&mut future).await,
+                }
+            }
+            _ = tokio::time::sleep(guard.timeout) => {
+                guard.signal.cancel(NativeCancelReason::Timeout);
+                match mutation.cancel_before_start() {
+                    MutationCancellation::Cancelled => Err(NativeCancelReason::Timeout.diagnostic()),
+                    MutationCancellation::Started => Err(NativeMutationContext::ambiguous()),
+                    MutationCancellation::Finished => (&mut future).await,
+                }
+            }
+            result = &mut future => result,
+        }
+    }
+
     pub(crate) fn cancel(
         &self,
         attempt_id: String,
         reason: NativeCancelReason,
     ) -> NativeResult<NativeCancelResult> {
-        validate_attempt_id(&attempt_id)?;
+        let identity = parse_attempt_id(&attempt_id)?;
         let mut state = self
             .state
             .lock()
             .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
-        if let Some(signal) = state.active.get(&attempt_id) {
-            signal.cancel(reason);
-            return Ok(NativeCancelResult::cancelled());
-        }
-        if state.seen.contains(&attempt_id) {
+        if let Some(active) = state.active.get(&identity.key) {
+            if active.raw == identity.raw {
+                active.signal.cancel(reason);
+                return Ok(
+                    if active.mutation_phase.as_ref().is_some_and(|phase| {
+                        matches!(
+                            phase.load(Ordering::SeqCst),
+                            MUTATION_STARTED | MUTATION_FINISHED
+                        )
+                    }) {
+                        NativeCancelResult::in_progress()
+                    } else {
+                        NativeCancelResult::cancelled()
+                    },
+                );
+            }
             return Ok(NativeCancelResult::unknown());
         }
-        if !state.pending.contains_key(&attempt_id) {
+        if sequence_was_consumed(&state, identity.key) {
+            return Ok(NativeCancelResult::unknown());
+        }
+        validate_pending_sequence(&state, identity.key)?;
+        if let Some(pending) = state.pending.get(&identity.key) {
+            return Ok(if pending.raw == identity.raw {
+                NativeCancelResult::queued()
+            } else {
+                NativeCancelResult::unknown()
+            });
+        }
+        if !state.pending.contains_key(&identity.key) {
             while state.pending.len() >= MAX_PENDING_CANCELLATIONS {
                 let Some(expired) = state.pending_order.pop_front() else {
                     break;
                 };
                 state.pending.remove(&expired);
             }
-            state.pending.insert(attempt_id.clone(), reason);
-            state.pending_order.push_back(attempt_id);
+            state.pending.insert(
+                identity.key,
+                PendingCancellation {
+                    raw: identity.raw,
+                    reason,
+                },
+            );
+            state.pending_order.push_back(identity.key);
         }
         Ok(NativeCancelResult::queued())
     }
 
     pub(crate) fn cancel_all(&self, reason: NativeCancelReason) {
         if let Ok(state) = self.state.lock() {
-            for signal in state.active.values() {
-                signal.cancel(reason);
+            for active in state.active.values() {
+                active.signal.cancel(reason);
             }
         }
     }
 
-    fn begin(self: &Arc<Self>, input: NativeOperationInput) -> NativeResult<NativeOperationGuard> {
+    fn begin(
+        self: &Arc<Self>,
+        input: NativeOperationInput,
+        mutation_phase: Option<Arc<AtomicU8>>,
+    ) -> NativeResult<NativeOperationGuard> {
         input.validate()?;
+        let identity = parse_attempt_id(input.attempt_id())?;
         let mut state = self
             .state
             .lock()
             .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
-        if state.active.len() >= MAX_ACTIVE_OPERATIONS
-            || state.active.contains_key(input.attempt_id())
-            || state.seen.contains(input.attempt_id())
-        {
+        if state.active.len() >= MAX_ACTIVE_OPERATIONS {
+            return Err(NativeDiagnostic::new("service_unavailable", true));
+        }
+        if state.active.contains_key(&identity.key) || sequence_was_consumed(&state, identity.key) {
             return Err(NativeDiagnostic::new("invalid_native_input", false));
         }
-        while state.seen.len() >= MAX_SEEN_ATTEMPTS {
-            let candidates = state.seen_order.len();
-            let mut removed = false;
-            for _ in 0..candidates {
-                let Some(expired) = state.seen_order.pop_front() else {
-                    break;
-                };
-                if state.active.contains_key(&expired) {
-                    state.seen_order.push_back(expired);
-                } else {
-                    state.seen.remove(&expired);
-                    removed = true;
-                    break;
-                }
-            }
-            if !removed {
-                return Err(NativeDiagnostic::new("service_unavailable", true));
-            }
-        }
+        validate_pending_sequence(&state, identity.key)?;
         let signal = Arc::new(OperationSignal::new());
-        if let Some(reason) = state.pending.remove(input.attempt_id()) {
+        let pending = state.pending.remove(&identity.key);
+        if pending.is_some() {
             state
                 .pending_order
-                .retain(|attempt_id| attempt_id != input.attempt_id());
-            signal.cancel(reason);
+                .retain(|attempt_key| *attempt_key != identity.key);
         }
-        state.seen.insert(input.attempt_id.clone());
-        state.seen_order.push_back(input.attempt_id.clone());
-        state
-            .active
-            .insert(input.attempt_id.clone(), Arc::clone(&signal));
+        mark_sequence_consumed(&mut state, identity.key)?;
+        if let Some(pending) = pending {
+            if pending.raw != identity.raw {
+                return Err(NativeDiagnostic::new("invalid_native_input", false));
+            }
+            signal.cancel(pending.reason);
+        }
+        state.active.insert(
+            identity.key,
+            ActiveAttempt {
+                raw: identity.raw,
+                signal: Arc::clone(&signal),
+                mutation_phase,
+            },
+        );
         let timeout = input.timeout();
         Ok(NativeOperationGuard {
             registry: Arc::clone(self),
-            attempt_id: input.attempt_id,
+            key: identity.key,
             signal,
             timeout,
         })
     }
 }
 
-fn validate_attempt_id(attempt_id: &str) -> NativeResult<()> {
-    let parsed = uuid::Uuid::parse_str(attempt_id)
-        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?;
-    if parsed.get_variant() != Variant::RFC4122
-        || parsed.get_version() != Some(Version::Random)
-        || parsed.to_string() != attempt_id
+fn parse_attempt_id(attempt_id: &str) -> NativeResult<AttemptIdentity> {
+    if attempt_id.len() > 64 {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    let Some(value) = attempt_id.strip_prefix("op1-") else {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    };
+    let mut parts = value.splitn(3, '-');
+    let epoch = parse_decimal(parts.next())?;
+    let counter = parse_decimal(parts.next())?;
+    let _random = parts
+        .next()
+        .filter(|value| {
+            value.len() == ATTEMPT_RANDOM_CHARACTERS
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    Ok(AttemptIdentity {
+        raw: attempt_id.to_owned(),
+        key: AttemptKey { epoch, counter },
+    })
+}
+
+fn parse_decimal(value: Option<&str>) -> NativeResult<u64> {
+    let value = value
+        .filter(|value| {
+            !value.is_empty()
+                && (value.len() == 1 || !value.starts_with('0'))
+                && value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    value
+        .parse()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))
+}
+
+fn sequence_was_consumed(state: &RegistryState, key: AttemptKey) -> bool {
+    let Some(epoch) = state.epochs.get(&key.epoch) else {
+        return state
+            .highest_epoch
+            .is_some_and(|highest| key.epoch < highest);
+    };
+    key.counter <= epoch.highest_counter.saturating_sub(ATTEMPT_COUNTER_WINDOW)
+        || epoch.seen.contains(&key.counter)
+}
+
+fn validate_pending_sequence(state: &RegistryState, key: AttemptKey) -> NativeResult<()> {
+    if let Some(epoch) = state.epochs.get(&key.epoch) {
+        if epoch.highest_counter == 0 {
+            return Ok(());
+        }
+        if key.counter > epoch.highest_counter.saturating_add(ATTEMPT_COUNTER_WINDOW) {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        return Ok(());
+    }
+    if state
+        .highest_epoch
+        .is_some_and(|highest| key.epoch < highest)
     {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    validate_new_epoch(key)
+}
+
+fn mark_sequence_consumed(state: &mut RegistryState, key: AttemptKey) -> NativeResult<()> {
+    let inserted = match state.epochs.entry(key.epoch) {
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            validate_new_epoch(key)?;
+            entry.insert(AttemptEpoch::default());
+            true
+        }
+        std::collections::hash_map::Entry::Occupied(_) => false,
+    };
+    if inserted {
+        state.highest_epoch = Some(
+            state
+                .highest_epoch
+                .map_or(key.epoch, |highest| highest.max(key.epoch)),
+        );
+        while state.epochs.len() > MAX_ATTEMPT_EPOCHS {
+            let Some(oldest) = state.epochs.keys().copied().min() else {
+                break;
+            };
+            state.epochs.remove(&oldest);
+        }
+    }
+    let epoch = state
+        .epochs
+        .get_mut(&key.epoch)
+        .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+    if epoch.highest_counter == 0 {
+        if key.counter > MAX_NEW_COUNTER {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        epoch.highest_counter = key.counter;
+    } else if key.counter > epoch.highest_counter {
+        if key.counter - epoch.highest_counter > ATTEMPT_COUNTER_WINDOW {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        epoch.highest_counter = key.counter;
+        let minimum = epoch.highest_counter.saturating_sub(ATTEMPT_COUNTER_WINDOW);
+        epoch.seen.retain(|counter| *counter > minimum);
+    } else if key.counter <= epoch.highest_counter.saturating_sub(ATTEMPT_COUNTER_WINDOW)
+        || epoch.seen.contains(&key.counter)
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    epoch.seen.insert(key.counter);
+    Ok(())
+}
+
+fn validate_new_epoch(key: AttemptKey) -> NativeResult<()> {
+    if key.counter > MAX_NEW_COUNTER {
         return Err(NativeDiagnostic::new("invalid_native_input", false));
     }
     Ok(())
@@ -289,27 +641,39 @@ fn validate_attempt_id(attempt_id: &str) -> NativeResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Barrier,
+        },
+        time::Duration,
+    };
 
     use super::*;
 
-    const FIRST_ATTEMPT: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const SECOND_ATTEMPT: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    fn test_epoch() -> u64 {
+        1_787_900_000_000
+    }
+
+    fn generated_attempt(epoch: u64, counter: u64) -> String {
+        format!("op1-{epoch}-{counter}-00000000000000000000000000000000")
+    }
 
     #[test]
     fn queued_abort_prevents_operation_start() {
         let registry = Arc::new(NativeOperationRegistry::default());
         let started = Arc::new(AtomicBool::new(false));
+        let attempt = generated_attempt(test_epoch(), 1);
         assert_eq!(
             registry
-                .cancel(FIRST_ATTEMPT.to_owned(), NativeCancelReason::Aborted)
+                .cancel(attempt.clone(), NativeCancelReason::Aborted)
                 .unwrap()
                 .status,
             "queued"
         );
         let started_by_future = Arc::clone(&started);
         let result = tauri::async_runtime::block_on(registry.run(
-            NativeOperationInput::new(FIRST_ATTEMPT.to_owned(), 100).unwrap(),
+            NativeOperationInput::new(attempt, 100).unwrap(),
             async move {
                 started_by_future.store(true, Ordering::SeqCst);
                 Ok(())
@@ -323,14 +687,18 @@ mod tests {
     #[test]
     fn in_flight_abort_and_timeout_return_canonical_diagnostics() {
         let registry = Arc::new(NativeOperationRegistry::default());
+        let epoch = test_epoch();
+        let first_attempt = generated_attempt(epoch, 1);
+        let second_attempt = generated_attempt(epoch, 2);
         let started = Arc::new(Notify::new());
         let release = Arc::new(Notify::new());
         let operation_registry = Arc::clone(&registry);
         let operation_started = Arc::clone(&started);
         let operation_release = Arc::clone(&release);
+        let operation_attempt = first_attempt.clone();
         let operation = std::thread::spawn(move || {
             tauri::async_runtime::block_on(operation_registry.run(
-                NativeOperationInput::new(FIRST_ATTEMPT.to_owned(), 1_000).unwrap(),
+                NativeOperationInput::new(operation_attempt, 1_000).unwrap(),
                 async move {
                     operation_started.notify_one();
                     operation_release.notified().await;
@@ -341,7 +709,7 @@ mod tests {
         tauri::async_runtime::block_on(started.notified());
         assert_eq!(
             registry
-                .cancel(FIRST_ATTEMPT.to_owned(), NativeCancelReason::Aborted)
+                .cancel(first_attempt, NativeCancelReason::Aborted)
                 .unwrap()
                 .status,
             "cancelled"
@@ -352,7 +720,7 @@ mod tests {
         );
 
         let timeout = tauri::async_runtime::block_on(registry.run(
-            NativeOperationInput::new(SECOND_ATTEMPT.to_owned(), 1).unwrap(),
+            NativeOperationInput::new(second_attempt, 1).unwrap(),
             std::future::pending::<NativeResult<()>>(),
         ));
         assert_eq!(timeout, Err(NativeDiagnostic::new("timeout", true)));
@@ -361,44 +729,261 @@ mod tests {
     #[test]
     fn stale_cancel_cannot_affect_a_new_attempt_and_inputs_are_bounded() {
         let registry = Arc::new(NativeOperationRegistry::default());
+        let epoch = test_epoch();
+        let first_attempt = generated_attempt(epoch, 1);
+        let second_attempt = generated_attempt(epoch, 2);
         assert_eq!(
             tauri::async_runtime::block_on(registry.run(
-                NativeOperationInput::new(FIRST_ATTEMPT.to_owned(), 100).unwrap(),
+                NativeOperationInput::new(first_attempt.clone(), 100).unwrap(),
                 async { Ok(()) },
             )),
             Ok(())
         );
         assert_eq!(
             registry
-                .cancel(FIRST_ATTEMPT.to_owned(), NativeCancelReason::Timeout)
+                .cancel(first_attempt.clone(), NativeCancelReason::Timeout)
                 .unwrap()
                 .status,
             "unknown"
         );
         assert_eq!(
             tauri::async_runtime::block_on(registry.run(
-                NativeOperationInput::new(SECOND_ATTEMPT.to_owned(), 100).unwrap(),
+                NativeOperationInput::new(second_attempt.clone(), 100).unwrap(),
                 async { Ok("new") },
             )),
             Ok("new")
         );
         assert_eq!(
             tauri::async_runtime::block_on(registry.run(
-                NativeOperationInput::new(FIRST_ATTEMPT.to_owned(), 100).unwrap(),
+                NativeOperationInput::new(first_attempt, 100).unwrap(),
                 async { Ok(()) },
             )),
             Err(NativeDiagnostic::new("invalid_native_input", false))
         );
-        assert!(NativeOperationInput::new(SECOND_ATTEMPT.to_owned(), 0).is_err());
+        assert!(NativeOperationInput::new(second_attempt, 0).is_err());
         assert!(NativeOperationInput::new(
             "not-an-attempt".to_owned(),
             MAX_NATIVE_OPERATION_TIMEOUT_MS
         )
         .is_err());
         assert!(NativeOperationInput::new(
-            "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_owned(),
+            generated_attempt(epoch, 3),
             MAX_NATIVE_OPERATION_TIMEOUT_MS + 1
         )
         .is_err());
+    }
+
+    #[test]
+    fn completed_attempts_remain_single_use_beyond_the_tracking_window() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let epoch = test_epoch();
+        let first = generated_attempt(epoch, 1);
+        for counter in 1..=(ATTEMPT_COUNTER_WINDOW + 32) {
+            assert_eq!(
+                tauri::async_runtime::block_on(registry.run(
+                    NativeOperationInput::new(generated_attempt(epoch, counter), 100).unwrap(),
+                    async { Ok(()) },
+                )),
+                Ok(())
+            );
+        }
+
+        assert_eq!(
+            registry
+                .cancel(first.clone(), NativeCancelReason::Aborted)
+                .unwrap()
+                .status,
+            "unknown"
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                registry.run(NativeOperationInput::new(first, 100).unwrap(), async {
+                    Ok(())
+                },)
+            ),
+            Err(NativeDiagnostic::new("invalid_native_input", false))
+        );
+    }
+
+    #[test]
+    fn evicted_epochs_remain_permanently_stale() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let first_epoch = test_epoch();
+        let first = generated_attempt(first_epoch, 1);
+        for offset in 0..=(MAX_ATTEMPT_EPOCHS as u64 + 2) {
+            assert_eq!(
+                tauri::async_runtime::block_on(
+                    registry.run(
+                        NativeOperationInput::new(generated_attempt(first_epoch + offset, 1), 100,)
+                            .unwrap(),
+                        async { Ok(()) },
+                    )
+                ),
+                Ok(())
+            );
+        }
+        assert!(registry.state.lock().unwrap().epochs.len() <= MAX_ATTEMPT_EPOCHS);
+        assert_eq!(
+            registry
+                .cancel(first.clone(), NativeCancelReason::Aborted)
+                .unwrap()
+                .status,
+            "unknown"
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                registry.run(NativeOperationInput::new(first, 100).unwrap(), async {
+                    Ok(())
+                },)
+            ),
+            Err(NativeDiagnostic::new("invalid_native_input", false))
+        );
+    }
+
+    #[test]
+    fn queued_cancelled_mutation_never_starts() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let queue = Arc::new(NativeMutationQueue::default());
+        let worker = queue.worker.lock().unwrap();
+        let started = Arc::new(AtomicBool::new(false));
+        let operation_registry = Arc::clone(&registry);
+        let operation_queue = Arc::clone(&queue);
+        let task_started = Arc::clone(&started);
+        let attempt = generated_attempt(test_epoch(), 1);
+        let operation_attempt = attempt.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(operation_registry.run_mutating(
+                NativeOperationInput::new(operation_attempt, 1_000).unwrap(),
+                move |mutation| async move {
+                    operation_queue
+                        .execute(mutation, move || {
+                            task_started.store(true, Ordering::SeqCst);
+                            Ok(())
+                        })
+                        .await
+                },
+            ))
+        });
+        while !queue.busy.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        registry
+            .cancel(attempt, NativeCancelReason::Aborted)
+            .unwrap();
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        drop(worker);
+        while queue.busy.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        assert!(!started.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn queued_expired_mutation_never_starts() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let queue = Arc::new(NativeMutationQueue::default());
+        let worker = queue.worker.lock().unwrap();
+        let started = Arc::new(AtomicBool::new(false));
+        let operation_queue = Arc::clone(&queue);
+        let task_started = Arc::clone(&started);
+        let operation = tauri::async_runtime::block_on(registry.run_mutating(
+            NativeOperationInput::new(generated_attempt(test_epoch(), 1), 1).unwrap(),
+            move |mutation| async move {
+                operation_queue
+                    .execute(mutation, move || {
+                        task_started.store(true, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .await
+            },
+        ));
+
+        assert_eq!(operation, Err(NativeDiagnostic::new("timeout", true)));
+        drop(worker);
+        while queue.busy.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        assert!(!started.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn started_mutation_returns_ambiguity_and_blocks_duplicate_work_until_coherent() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let queue = Arc::new(NativeMutationQueue::default());
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let mutated = Arc::new(AtomicBool::new(false));
+        let operation_registry = Arc::clone(&registry);
+        let operation_queue = Arc::clone(&queue);
+        let task_started = Arc::clone(&started);
+        let task_release = Arc::clone(&release);
+        let task_mutated = Arc::clone(&mutated);
+        let attempt = generated_attempt(test_epoch(), 1);
+        let operation_attempt = attempt.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(operation_registry.run_mutating(
+                NativeOperationInput::new(operation_attempt, 1_000).unwrap(),
+                move |mutation| async move {
+                    operation_queue
+                        .execute(mutation, move || {
+                            task_started.wait();
+                            task_release.wait();
+                            task_mutated.store(true, Ordering::SeqCst);
+                            Ok(())
+                        })
+                        .await
+                },
+            ))
+        });
+        started.wait();
+        assert_eq!(
+            registry
+                .cancel(attempt, NativeCancelReason::Aborted)
+                .unwrap()
+                .status,
+            "in_progress"
+        );
+
+        let duplicate = tauri::async_runtime::block_on(registry.run_mutating(
+            NativeOperationInput::new(generated_attempt(test_epoch(), 2), 100).unwrap(),
+            {
+                let queue = Arc::clone(&queue);
+                move |mutation| async move { queue.execute(mutation, || Ok(())).await }
+            },
+        ));
+        assert_eq!(
+            duplicate,
+            Err(NativeDiagnostic::new(
+                "credential_update_in_progress",
+                false,
+            ))
+        );
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new(
+                "credential_update_in_progress",
+                false,
+            ))
+        );
+        assert!(!mutated.load(Ordering::SeqCst));
+        release.wait();
+        while queue.busy.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(mutated.load(Ordering::SeqCst));
+
+        assert_eq!(
+            tauri::async_runtime::block_on(registry.run_mutating(
+                NativeOperationInput::new(generated_attempt(test_epoch(), 3), 100).unwrap(),
+                {
+                    let queue = Arc::clone(&queue);
+                    move |mutation| async move { queue.execute(mutation, || Ok("coherent")).await }
+                },
+            )),
+            Ok("coherent")
+        );
     }
 }
