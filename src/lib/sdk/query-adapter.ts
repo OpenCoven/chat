@@ -200,6 +200,9 @@ class DefaultQueryAdapter implements QueryAdapter {
     const options: PageOptions =
       cursor === undefined ? { limit: PAGE_LIMIT } : { limit: PAGE_LIMIT, cursor };
     const key = `list:${name}`;
+    if (!append) {
+      this.#seenCursors.delete(key);
+    }
     const requestGeneration = this.#nextRequestGeneration(key);
     const reconcileCount = append ? current.reconcileCount : current.reconcileCount;
     this.#setList(name, {
@@ -397,6 +400,9 @@ class DefaultQueryAdapter implements QueryAdapter {
     const cursor = append ? current.nextCursor : undefined;
     const options: PageOptions =
       cursor === undefined ? { limit: PAGE_LIMIT } : { limit: PAGE_LIMIT, cursor };
+    if (!append) {
+      this.#seenCursors.delete(key);
+    }
     const requestGeneration = this.#nextRequestGeneration(key);
     this.#messagePages.set(
       conversationId,

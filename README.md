@@ -19,21 +19,22 @@ does **not** claim real-authority completion.
 - Cave credential values are confined to native platform custody. No bearer,
   pairing secret, raw keychain value, or canonical data enters browser storage
   or command diagnostics.
-- Native health and pairing results use operation-specific exact schemas rather
-  than generic JSON filtering, and staged credential rollback uses exact-value
-  compare-and-delete so a late cleanup cannot delete a replacement credential.
+- Native health and read commands return bounded, secret-filtered snapshots.
+  The packed SDK managed client is the sole Client v1 envelope and DTO parser.
+  Staged credential rollback still uses exact-value compare-and-delete so a
+  late cleanup cannot delete a replacement credential.
 - Credential mutations are serialized across Chat processes with owner-private
   OS locks whose names contain only hashes of non-secret credential identity.
 - Storage work is bounded and dispatched to Tauri's blocking pool; lifecycle
   transitions remain responsive and invalidate transient state by generation.
-- Retryable storage contention preserves opaque pairing and commit handles,
-  allowing the exact operation to resume without widening authority.
+- Retryable storage contention preserves native-only pairing and commit state
+  without exposing those handles to JavaScript.
 - Partial writes retain an exact rollback-needed token until compare-and-delete
   proves the stored value absent, changed, or deleted.
 - Authority replacement and close preserve that token until bounded cleanup
   succeeds, including when an in-flight write completes after close.
-- Open and close run as blocking-dispatched async Tauri commands, so cleanup
-  contention cannot stall unrelated IPC/runtime work.
+- Authority establishment and close run as blocking-dispatched async Tauri
+  commands, so cleanup contention cannot stall unrelated IPC/runtime work.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.
@@ -45,11 +46,11 @@ does **not** claim real-authority completion.
   `pairing`, `ready`, `revoked`, `offline`, and `error`.
 - Authenticated responses live only in the in-memory query adapter. Runtime
   source does not use `localStorage`, `sessionStorage`, or IndexedDB.
-- Future Cave integration must use only the public `@opencoven/cave-client`
-  package boundary.
-- Until package publication is explicitly approved, the cross-repository canary
-  installs packed `@opencoven/cave-client` tarballs into a temporary copy
-  instead of adding a source-relative or absolute path dependency.
+- Runtime Cave integration imports only
+  `@opencoven/cave-client/managed`. `package.json` and `pnpm-lock.yaml` pin
+  checked-in `@opencoven/cave-client` and `@opencoven/sdk-core` tarballs whose
+  size and SHA-256 values match `contract-canary.lock.json`; no workspace link,
+  absolute path, or registry fallback can substitute for them.
 
 ## Prerequisites
 
@@ -73,7 +74,7 @@ pnpm exec playwright install chromium
 
 | Script | Purpose |
 | --- | --- |
-| `pnpm install:clean` | Install exactly from `pnpm-lock.yaml` |
+| `pnpm install:clean` | Install Chat only, exactly from its `pnpm-lock.yaml`, without ascending to the SDK workspace |
 | `pnpm dev` | Run the Vite web scaffold on `127.0.0.1:4173` |
 | `pnpm build` | Build the production web assets |
 | `pnpm typecheck` | Run TypeScript 6.0.3 with `--noEmit` |
@@ -109,15 +110,16 @@ the connection remains `ready`; credential, authority, and transport failures
 are handled separately by the connection controller.
 
 Pairing creation and exchange are never automatically replayed after ambiguous
-completion. A retryable credential commit resumes only the exact opaque commit
-handle. “Forget this device” deletes the local credential and is not described
+completion. Once native exchange and credential commit succeed, a failed
+confirmation retries health/status only; it never repeats exchange, commit, or
+discard. “Forget this device” deletes the local credential and is not described
 as server-side revocation.
 
-The TypeScript DTOs follow the exact public `@opencoven/cave-client` shapes
-locked by packed-canary schema v2 at SDK
-`c237fdc08b56978f1c7220097cf0acb32e6852cb`. Chat still has no unpublished
-runtime package dependency; the packed canary remains the installability and
-public-signature proof until package publication is approved.
+The browser-safe managed client from `@opencoven/cave-client` owns discovery,
+health, pairing, error-envelope, and canonical DTO validation. The checked-in
+runtime tarballs are the exact artifacts locked by packed-canary schema v2 at
+SDK `acc38488f00860d246c3c553375634d64806eabb`. The canary independently
+reproduces those artifacts and rejects byte drift.
 
 ## Proof-of-concept chat demo
 
@@ -174,8 +176,9 @@ records:
   locked Cave HEAD.
 
 `@opencoven/dev-cli` is intentionally outside this release canary. The canary
-rejects missing, extra, or reordered package entries, and it does not add any
-SDK package to Chat's runtime dependencies.
+rejects missing, extra, or reordered package entries. Chat's runtime package
+references remain the checked-in Cave/core tarballs rather than the canary's
+temporary install tree.
 
 Run it from this Chat checkout with clean exact counterpart checkouts:
 

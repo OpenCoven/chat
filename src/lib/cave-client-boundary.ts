@@ -1,7 +1,7 @@
 export const CAVE_CLIENT_BOUNDARY = Object.freeze({
   packageName: '@opencoven/cave-client',
-  status: 'documented-only',
-  note: 'Phase 0 documents the typed package boundary only; runtime code still avoids private Cave schemas and source-relative SDK links.',
+  status: 'installed-packed-candidate',
+  note: 'Runtime code imports only the public managed entrypoint from the checked-in packed candidate and avoids private Cave schemas and source-relative SDK links.',
   verification:
-    'Until package publication is explicitly approved, the cross-repository canary verifies packed @opencoven/cave-client tarballs in a temporary install copy instead of adding a local path dependency.',
+    'The dependency is pinned to reviewed tarball bytes from contract-canary.lock.json and never resolves through a workspace or registry fallback.',
 });

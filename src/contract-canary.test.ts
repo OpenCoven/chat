@@ -109,6 +109,7 @@ function createCaveAuthorityFixture() {
   runGit(['init', '--initial-branch=main'], caveRoot);
   runGit(['config', 'user.name', 'OpenCoven Test'], caveRoot);
   runGit(['config', 'user.email', 'opencoven-test@example.com'], caveRoot);
+  runGit(['config', 'commit.gpgsign', 'false'], caveRoot);
   writeFileSync(resolve(authorityDirectory, 'contract-fixture.json'), fixtureBytes);
   writeFileSync(resolve(authorityDirectory, 'contract-fixture.sha256'), fixtureDigestBytes);
   runGit(['add', '.'], caveRoot);
@@ -186,7 +187,7 @@ describe('contract canary lock', () => {
     expect(lock.version).toBe(2);
     expect(lock.sdk).toMatchObject({
       repository: 'OpenCoven/sdk',
-      revision: 'c237fdc08b56978f1c7220097cf0acb32e6852cb',
+      revision: 'acc38488f00860d246c3c553375634d64806eabb',
       releaseManifest: {
         file: 'release-manifest.json',
         sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',

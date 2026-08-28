@@ -31,6 +31,10 @@ const COMPONENT_LABELS = {
 const ERROR_COPY: Readonly<
   Record<NativeDiagnosticCode, Readonly<{ title: string; detail: string }>>
 > = {
+  aborted: {
+    title: 'Action cancelled',
+    detail: 'The OpenCoven action was cancelled before it completed.',
+  },
   body_limit: {
     title: 'Response too large',
     detail: 'OpenCoven returned more data than this view can safely accept.',
@@ -58,6 +62,10 @@ const ERROR_COPY: Readonly<
   invalid_response: {
     title: 'Invalid response',
     detail: 'Chat rejected an unexpected response from the native boundary.',
+  },
+  invalid_options: {
+    title: 'Action unavailable',
+    detail: 'Chat could not safely prepare that request.',
   },
   not_found: {
     title: 'Not found',

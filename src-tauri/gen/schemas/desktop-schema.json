@@ -231,34 +231,22 @@
           "markdownDescription": "Enables the cave_list_projects command without any pre-configured scope."
         },
         {
-          "description": "Enables the cave_pairing_commit command without any pre-configured scope.",
+          "description": "Enables the cave_managed_pairing_create command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-cave-pairing-commit",
-          "markdownDescription": "Enables the cave_pairing_commit command without any pre-configured scope."
+          "const": "allow-cave-managed-pairing-create",
+          "markdownDescription": "Enables the cave_managed_pairing_create command without any pre-configured scope."
         },
         {
-          "description": "Enables the cave_pairing_create command without any pre-configured scope.",
+          "description": "Enables the cave_managed_pairing_exchange command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-cave-pairing-create",
-          "markdownDescription": "Enables the cave_pairing_create command without any pre-configured scope."
+          "const": "allow-cave-managed-pairing-exchange",
+          "markdownDescription": "Enables the cave_managed_pairing_exchange command without any pre-configured scope."
         },
         {
-          "description": "Enables the cave_pairing_discard command without any pre-configured scope.",
+          "description": "Enables the cave_managed_pairing_poll command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-cave-pairing-discard",
-          "markdownDescription": "Enables the cave_pairing_discard command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the cave_pairing_exchange command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-cave-pairing-exchange",
-          "markdownDescription": "Enables the cave_pairing_exchange command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the cave_pairing_poll command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-cave-pairing-poll",
-          "markdownDescription": "Enables the cave_pairing_poll command without any pre-configured scope."
+          "const": "allow-cave-managed-pairing-poll",
+          "markdownDescription": "Enables the cave_managed_pairing_poll command without any pre-configured scope."
         },
         {
           "description": "Enables the sdk_authority_close command without any pre-configured scope.",
@@ -267,16 +255,16 @@
           "markdownDescription": "Enables the sdk_authority_close command without any pre-configured scope."
         },
         {
-          "description": "Enables the sdk_authority_discover command without any pre-configured scope.",
+          "description": "Enables the sdk_authority_establish command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-sdk-authority-discover",
-          "markdownDescription": "Enables the sdk_authority_discover command without any pre-configured scope."
+          "const": "allow-sdk-authority-establish",
+          "markdownDescription": "Enables the sdk_authority_establish command without any pre-configured scope."
         },
         {
-          "description": "Enables the sdk_authority_open command without any pre-configured scope.",
+          "description": "Enables the sdk_discovery_read command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-sdk-authority-open",
-          "markdownDescription": "Enables the sdk_authority_open command without any pre-configured scope."
+          "const": "allow-sdk-discovery-read",
+          "markdownDescription": "Enables the sdk_discovery_read command without any pre-configured scope."
         },
         {
           "description": "Enables the sdk_installation_identity command without any pre-configured scope.",
@@ -345,34 +333,22 @@
           "markdownDescription": "Denies the cave_list_projects command without any pre-configured scope."
         },
         {
-          "description": "Denies the cave_pairing_commit command without any pre-configured scope.",
+          "description": "Denies the cave_managed_pairing_create command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-cave-pairing-commit",
-          "markdownDescription": "Denies the cave_pairing_commit command without any pre-configured scope."
+          "const": "deny-cave-managed-pairing-create",
+          "markdownDescription": "Denies the cave_managed_pairing_create command without any pre-configured scope."
         },
         {
-          "description": "Denies the cave_pairing_create command without any pre-configured scope.",
+          "description": "Denies the cave_managed_pairing_exchange command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-cave-pairing-create",
-          "markdownDescription": "Denies the cave_pairing_create command without any pre-configured scope."
+          "const": "deny-cave-managed-pairing-exchange",
+          "markdownDescription": "Denies the cave_managed_pairing_exchange command without any pre-configured scope."
         },
         {
-          "description": "Denies the cave_pairing_discard command without any pre-configured scope.",
+          "description": "Denies the cave_managed_pairing_poll command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-cave-pairing-discard",
-          "markdownDescription": "Denies the cave_pairing_discard command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the cave_pairing_exchange command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-cave-pairing-exchange",
-          "markdownDescription": "Denies the cave_pairing_exchange command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the cave_pairing_poll command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-cave-pairing-poll",
-          "markdownDescription": "Denies the cave_pairing_poll command without any pre-configured scope."
+          "const": "deny-cave-managed-pairing-poll",
+          "markdownDescription": "Denies the cave_managed_pairing_poll command without any pre-configured scope."
         },
         {
           "description": "Denies the sdk_authority_close command without any pre-configured scope.",
@@ -381,16 +357,16 @@
           "markdownDescription": "Denies the sdk_authority_close command without any pre-configured scope."
         },
         {
-          "description": "Denies the sdk_authority_discover command without any pre-configured scope.",
+          "description": "Denies the sdk_authority_establish command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-sdk-authority-discover",
-          "markdownDescription": "Denies the sdk_authority_discover command without any pre-configured scope."
+          "const": "deny-sdk-authority-establish",
+          "markdownDescription": "Denies the sdk_authority_establish command without any pre-configured scope."
         },
         {
-          "description": "Denies the sdk_authority_open command without any pre-configured scope.",
+          "description": "Denies the sdk_discovery_read command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-sdk-authority-open",
-          "markdownDescription": "Denies the sdk_authority_open command without any pre-configured scope."
+          "const": "deny-sdk-discovery-read",
+          "markdownDescription": "Denies the sdk_discovery_read command without any pre-configured scope."
         },
         {
           "description": "Denies the sdk_installation_identity command without any pre-configured scope.",

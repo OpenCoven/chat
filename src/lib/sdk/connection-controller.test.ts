@@ -56,7 +56,6 @@ function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
       expiresAt: 10_000,
     }),
     pairingExchange: vi.fn().mockResolvedValue({
-      commitHandle: 'commit:00000000-0000-4000-8000-000000000032',
       credential: {
         id: '00000000-0000-4000-8000-000000000033',
         appName: 'OpenCoven Chat',
@@ -68,8 +67,6 @@ function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
         revocationReason: null,
       },
     }),
-    pairingCommit: vi.fn().mockResolvedValue(undefined),
-    pairingDiscard: vi.fn().mockResolvedValue('absent'),
     credentialState: vi.fn().mockResolvedValue('present'),
     forgetCredential: vi.fn().mockResolvedValue(true),
     listFamiliars: vi.fn(),
@@ -79,7 +76,7 @@ function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
     listConversationMessages: vi.fn(),
     diagnostics: vi.fn().mockResolvedValue({
       version: 1,
-      platform: 'macos',
+      platform: 'darwin',
       architecture: 'aarch64',
       checks: [],
     }),
@@ -180,7 +177,6 @@ describe('connection controller', () => {
       covenAvailable: false,
     });
     expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
-    expect(boundary.pairingCommit).toHaveBeenCalledTimes(1);
   });
 
   it('shares duplicate persistent pairing mutations', async () => {
@@ -356,13 +352,59 @@ describe('connection controller', () => {
     expect(controller.canRetry()).toBe(false);
   });
 
-  it('retries only the exact commit after a safe pre-send commit failure', async () => {
-    const commit = vi
+  it('retries confirmation only after commit succeeded', async () => {
+    const health = vi
       .fn()
-      .mockRejectedValueOnce(
-        new NativeBoundaryError('credential_update_in_progress', true, DIAGNOSTIC_ID),
-      )
-      .mockResolvedValue(undefined);
+      .mockResolvedValueOnce({
+        status: 'ok',
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        capabilities: ['health'],
+        operations: ['health.read'],
+        instanceId: INSTANCE_ID,
+        pairingRequired: true,
+        releaseVersion: '0.1.0',
+      })
+      .mockRejectedValueOnce(new NativeBoundaryError('service_unavailable', true, DIAGNOSTIC_ID))
+      .mockResolvedValue({
+        status: 'ok',
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        capabilities: ['health'],
+        operations: ['health.read'],
+        instanceId: INSTANCE_ID,
+        pairingRequired: false,
+        releaseVersion: '0.1.0',
+      });
+    const boundary = makeBoundary({
+      health,
+      credentialState: vi.fn().mockResolvedValueOnce('missing').mockResolvedValue('present'),
+      pairingPoll: vi.fn().mockResolvedValue({
+        id: '00000000-0000-4000-8000-000000000031',
+        status: 'approved',
+        expiresAt: 10_000,
+      }),
+    });
+    const controller = createConnectionController(boundary, {
+      now: () => 1_000,
+      requestId: () => 'request:1',
+    });
+
+    await controller.connect();
+    await controller.beginPairing();
+    await controller.pollApproval();
+    await controller.completePairing();
+
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(controller.canRetry()).toBe(true);
+    await controller.retry();
+
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(health).toHaveBeenCalledTimes(3);
+    expect(controller.getState().state).toBe('ready');
+  });
+
+  it('rejects a poll result for a different pairing request', async () => {
     const boundary = makeBoundary({
       health: vi.fn().mockResolvedValue({
         status: 'ok',
@@ -374,13 +416,12 @@ describe('connection controller', () => {
         pairingRequired: true,
         releaseVersion: '0.1.0',
       }),
-      credentialState: vi.fn().mockResolvedValueOnce('missing').mockResolvedValue('present'),
+      credentialState: vi.fn().mockResolvedValue('missing'),
       pairingPoll: vi.fn().mockResolvedValue({
-        id: '00000000-0000-4000-8000-000000000031',
+        id: '00000000-0000-4000-8000-000000000099',
         status: 'approved',
         expiresAt: 10_000,
       }),
-      pairingCommit: commit,
     });
     const controller = createConnectionController(boundary, {
       now: () => 1_000,
@@ -390,14 +431,69 @@ describe('connection controller', () => {
     await controller.connect();
     await controller.beginPairing();
     await controller.pollApproval();
-    await controller.completePairing();
-    expect(controller.canRetry()).toBe(true);
 
-    await controller.retry();
+    expect(controller.getState()).toEqual({
+      state: 'error',
+      code: 'reconcile_required',
+      diagnosticId: 'pairing-request-mismatch',
+    });
+    expect(controller.canCompletePairing()).toBe(false);
+  });
 
-    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledTimes(2);
-    expect(controller.getState().state).toBe('ready');
+  it('ignores a delayed poll after reconnect invalidates the pairing generation', async () => {
+    const polled = deferred<{
+      id: string;
+      status: 'approved';
+      expiresAt: number;
+    }>();
+    const boundary = makeBoundary({
+      health: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'ok',
+          apiVersion: '1.0',
+          minimumClientVersion: '0.1.0',
+          capabilities: ['health'],
+          operations: ['health.read'],
+          instanceId: INSTANCE_ID,
+          pairingRequired: true,
+          releaseVersion: '0.1.0',
+        })
+        .mockResolvedValue({
+          status: 'ok',
+          apiVersion: '1.0',
+          minimumClientVersion: '0.1.0',
+          capabilities: ['health'],
+          operations: ['health.read'],
+          instanceId: INSTANCE_ID,
+          pairingRequired: false,
+          releaseVersion: '0.1.0',
+        }),
+      credentialState: vi.fn().mockResolvedValueOnce('missing').mockResolvedValue('present'),
+      pairingPoll: vi.fn().mockReturnValue(polled.promise),
+    });
+    const controller = createConnectionController(boundary, {
+      now: () => 1_000,
+      requestId: () => 'request:1',
+    });
+
+    await controller.connect();
+    await controller.beginPairing();
+    const stalePoll = controller.pollApproval();
+    await controller.reconnect();
+    polled.resolve({
+      id: '00000000-0000-4000-8000-000000000031',
+      status: 'approved',
+      expiresAt: 10_000,
+    });
+    await stalePoll;
+
+    expect(controller.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: INSTANCE_ID,
+      covenAvailable: false,
+    });
+    expect(controller.canCompletePairing()).toBe(false);
   });
 
   it('handles revoke, offline, wrong-instance, and local forget without secrets', async () => {

@@ -31,15 +31,13 @@ const projectRoot = process.cwd();
 const nativeCommands = [
   'app_identity',
   'sdk_installation_identity',
-  'sdk_authority_discover',
-  'sdk_authority_open',
+  'sdk_discovery_read',
+  'sdk_authority_establish',
   'sdk_authority_close',
   'cave_health',
-  'cave_pairing_create',
-  'cave_pairing_poll',
-  'cave_pairing_exchange',
-  'cave_pairing_commit',
-  'cave_pairing_discard',
+  'cave_managed_pairing_create',
+  'cave_managed_pairing_poll',
+  'cave_managed_pairing_exchange',
   'cave_credential_state',
   'cave_forget_credential',
   'cave_list_familiars',
@@ -107,7 +105,7 @@ describe('Phase 0 specification guards', () => {
     expect(lock.version).toBe(2);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toBe('c237fdc08b56978f1c7220097cf0acb32e6852cb');
+    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
     expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
     expect(lock.sdk.packages.map(({ name }) => name)).toEqual([
       '@opencoven/sdk-core',
@@ -174,12 +172,43 @@ describe('Phase 0 specification guards', () => {
     );
   });
 
+  it('does not expose arbitrary authority establishment to the webview', () => {
+    const capability = readJson<CapabilityFile>('src-tauri/capabilities/default.json');
+    const nativeRegistration = readText('src-tauri/src/lib.rs');
+    const buildScript = readText('src-tauri/build.rs');
+
+    expect(capability.permissions).not.toContain('allow-sdk-authority-open');
+    expect(nativeRegistration).not.toMatch(/generate_handler!\[[\s\S]*\bsdk_authority_open\b/);
+    expect(buildScript).not.toContain('"sdk_authority_open"');
+  });
+
+  it('delegates Cave protocol parsing to the exact packed managed client', () => {
+    const packageManifest = readJson<
+      PackageManifest & { pnpm?: { overrides?: Record<string, string> } }
+    >('package.json');
+    const boundary = readText('src/lib/sdk/native-boundary.ts');
+    const nativeDiagnostics = readText('src-tauri/src/sdk_diagnostics.rs');
+    const caveTarball = 'file:vendor/sdk/opencoven-cave-client-0.1.0.tgz';
+    const coreTarball = 'file:vendor/sdk/opencoven-sdk-core-0.1.0.tgz';
+
+    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toBe(caveTarball);
+    expect(packageManifest.dependencies?.['@opencoven/sdk-core']).toBe(coreTarball);
+    expect(packageManifest.pnpm?.overrides?.['@opencoven/cave-client']).toBe(caveTarball);
+    expect(packageManifest.pnpm?.overrides?.['@opencoven/sdk-core']).toBe(coreTarball);
+    expect(boundary).toContain("from '@opencoven/cave-client/managed'");
+    expect(boundary).not.toMatch(
+      /function (parseEnvelope|canonicalPage|credentialMetadata|authorityBinding)|export type Cave(CanonicalFamiliar|Project|Conversation|ConversationMessage|Health)\s*=/,
+    );
+    expect(nativeDiagnostics).not.toMatch(
+      /struct (HealthData|PairingCreatedData|PairingStatusData|PairingExchangeData|CanonicalFamiliar|CanonicalProject|CanonicalConversation|CanonicalMessage)|fn (operation_response|canonical_operation_response)/,
+    );
+  });
+
   it('dispatches complete authority transitions through the blocking pool', () => {
     const connection = readText('src-tauri/src/sdk_connection.rs');
 
     for (const [command, transition] of [
-      ['sdk_authority_discover', 'authority_open'],
-      ['sdk_authority_open', 'authority_open'],
+      ['sdk_authority_establish', 'authority_establish'],
       ['sdk_authority_close', 'authority_close'],
     ]) {
       const start = connection.indexOf(`pub async fn ${command}(`);
@@ -215,7 +244,7 @@ describe('Phase 0 specification guards', () => {
     expect(playwrightConfig).toMatch(/reuseExistingServer:\s*false/);
     expect(playwrightConfig).toMatch(/command:\s*'corepack pnpm build && corepack pnpm preview'/);
     expect(packageManifest.scripts?.['install:clean']).toBe(
-      'corepack pnpm install --frozen-lockfile',
+      'corepack pnpm install --ignore-workspace --frozen-lockfile',
     );
     expect(packageManifest.scripts?.test).toBe('vitest run');
     expect(packageManifest.scripts?.preview).toContain('--port 4174');
@@ -268,17 +297,19 @@ describe('Phase 0 specification guards', () => {
     expect(violations).toEqual([]);
   });
 
-  it('documents the package boundary without a local cave-client dependency', () => {
+  it('documents the exact packed cave-client dependency without workspace resolution', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
     const readme = readText('README.md');
     const boundary = readText('src/lib/cave-client-boundary.ts');
 
-    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toBeUndefined();
+    expect(packageManifest.dependencies?.['@opencoven/cave-client']).toBe(
+      'file:vendor/sdk/opencoven-cave-client-0.1.0.tgz',
+    );
     expect(packageManifest.devDependencies?.['@opencoven/cave-client']).toBeUndefined();
-    expect(boundary).toContain('cross-repository canary verifies packed');
-    expect(boundary).toContain('instead of adding a local path dependency');
-    expect(readme).toContain('cross-repository canary');
-    expect(readme).toContain('packed `@opencoven/cave-client` tarballs');
+    expect(boundary).toContain('checked-in packed');
+    expect(boundary).toContain('never resolves through a workspace or registry fallback');
+    expect(readme).toContain('packed-canary schema v2');
+    expect(readme).toContain('checked-in `@opencoven/cave-client`');
   });
 
   it('runs the desktop entrypoint in CI with Linux Tauri dependencies', () => {

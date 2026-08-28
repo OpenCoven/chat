@@ -45,14 +45,18 @@
 
 ## Native boundary notes
 
-- The repository intentionally does **not** depend on unpublished
-  `@opencoven/cave-client` runtime artifacts yet.
+- The repository installs unpublished SDK code only from checked-in,
+  workspace-independent tarballs under `vendor/sdk/`. `package.json`,
+  `pnpm-lock.yaml`, and `contract-canary.lock.json` pin the same bytes; there is
+  no OpenCoven registry or workspace fallback.
 - Packed-canary schema v2 pins the exact public DTO and managed-native
   signatures used by the webview at SDK
-  `c237fdc08b56978f1c7220097cf0acb32e6852cb`.
-- `src/lib/sdk/native-boundary.ts` is the typed webview-to-host bridge. It
-  permits only the reviewed authority, pairing, credential, diagnostics, and
-  canonical-read commands and validates exact own-data invoke/event objects.
+  `acc38488f00860d246c3c553375634d64806eabb`.
+- `src/lib/sdk/native-boundary.ts` imports the browser-safe
+  `@opencoven/cave-client/managed` entrypoint. Managed discovery and the managed
+  client own Client v1 parsing, pairing orchestration, compatibility, error
+  normalization, and public DTO identity. The Chat wrapper validates only
+  native command envelopes, opaque references, events, and diagnostics.
 - `src/lib/sdk/connection-controller.ts` owns the explicit secret-free
   connection state machine. StrictMode bootstrap calls share one in-flight
   generation, and ambiguous pairing create/exchange completion is never
@@ -71,20 +75,16 @@
   Windows Credential Manager. Missing or inaccessible native storage fails
   closed; there is no plaintext, environment, browser-storage, or memory
   persistence fallback.
-- Native authority, pairing, and credential command results carry opaque
-  handles plus authority generation and request identity. Replacing an
-  authority invalidates prior generations and transient pairing material.
-- Native discovery returns only an opaque authority handle/generation to the
-  webview. The production discovery/protected-transport provider remains
-  fail-closed, while mocked-Tauri Playwright covers the complete UI journey.
-- Health and pairing responses are reduced through operation-specific exact
-  DTO schemas. Unknown fields, raw causes, private paths, serialized keychain
-  records, and prompt or message content are rejected or replaced with fixed
-  safe error text before serialization.
-- Canonical familiar, project, conversation, detail, and message responses use
-  operation-specific Rust schemas matching the public SDK DTOs. Error details
-  are bounded and validated, then removed before the command response reaches
-  JavaScript.
+- Native discovery returns an owner-checked byte snapshot plus an opaque
+  one-time handle. The SDK parses the bytes; the webview can establish an
+  authority only with that handle. `sdk_authority_open` is not registered or
+  granted to the webview.
+- Health and canonical reads return bounded, secret-filtered native snapshots.
+  Rust does not duplicate Client v1 envelope, status, error-code, cursor, or DTO
+  parsing.
+- Pairing commands return only the managed SDK's non-secret request, status,
+  and credential metadata shapes. Pairing secrets and staged credential
+  handles remain native.
 - Credential commits retain a zeroized exact-value rollback token until the
   SDK can no longer request discard. Timeout, late-write, and replacement
   cleanup uses compare-and-delete and reports `absent`, `changed`, or `deleted`
@@ -103,9 +103,9 @@
 - Credential bytes and parsed bearer strings enter zeroizing owners before
   validation. Invalid JSON, metadata, encoding, and oversized-record paths
   zero the owned allocations before returning.
-- Retryable lock contention preserves pending commit and committed discard
-  handles so the exact operation can be retried. It is never converted into a
-  terminal rollback failure.
+- Retryable lock contention preserves native staged state. The web controller
+  never replays a commit after an ambiguous result; after confirmed commit,
+  retries are limited to health/status confirmation.
 - A potentially partial write whose rollback is contended enters an explicit
   rollback-needed state retaining the zeroized exact expected credential.
   Commit retry or discard must finish compare-and-delete before the handle can
@@ -113,25 +113,29 @@
 - Authority replacement and close run exact rollback-needed cleanup before
   removing stale staged state. Contention leaves the cleanup token recoverable
   and returns `credential_update_in_progress`; in-flight writes retained across
-  close are reconciled later and their exact `absent`/`changed`/`deleted`
-  disposition is recorded.
+  close are reconciled later. Completed cleanup tokens are removed rather than
+  retained in an unreachable disposition cache.
 - Pairing exchange validates authority generation and Ready state while the
   pairing map is locked, and removes the handle only after those checks pass.
+- Expired and terminal pairing state is consumed eagerly. Active native and
+  managed pairing maps retain at most 64 oldest-first entries, and the webview
+  wrapper applies the same expiry and count bound without exposing secrets.
+- Managed exchange drops its committed in-memory credential copy immediately
+  after persistence. Staged rollback tokens needed for late exact discard are
+  retained for at most five minutes and 64 terminal entries.
 - Authority replacement and close cleanup are generation-scoped. Interleaved
   transitions cannot clear newer pairing or staged-credential state, and an
   open superseded before completion returns `reconcile_required`.
 - All platform-store and cross-process-lock work runs on Tauri's blocking pool.
   Lifecycle mutexes are released before backend I/O so discovery and authority
   replacement remain responsive while storage is unavailable or contended.
-- The complete `sdk_authority_open` and `sdk_authority_close` transitions are
-  asynchronous Tauri commands dispatched to that blocking pool, including
-  rollback-token cleanup and bounded cross-process lock acquisition.
-- Public request identifiers use the Cave envelope's bounded safe identifier
-  grammar while rejecting 43-character base64url secret shapes. Native
-  diagnostic identifiers are UUIDs, and error status/code pairs are
-  allowlisted separately for health, pairing creation, polling, and exchange.
-- Success responses are equally exact: health, pairing poll, and pairing
-  exchange require HTTP 200, while pairing creation requires HTTP 201.
+- `sdk_authority_establish` and `sdk_authority_close` dispatch blocking
+  lifecycle work through Tauri's blocking pool. Establishment accepts only a
+  native discovery handle, never an endpoint or authority descriptor from
+  JavaScript.
+- Public request identifiers remain bounded and reject credential-shaped
+  values. Protocol status, error-code, and DTO validation is performed by the
+  packed SDK managed client.
 - macOS and Linux connected Unix peers are inspected from the live socket
   descriptor. Unix-only types and exports are target-gated so Windows builds do
   not reference `std::os::unix`. Windows pipe ownership and connected-identity
@@ -146,9 +150,9 @@
   approval, native trust, or credentials.
 - Authenticated DTOs are kept in memory only; runtime source does not call
   `localStorage`, `sessionStorage`, or IndexedDB.
-- Until publication is explicitly approved, packed `@opencoven/cave-client`
-  tarballs are verified by the cross-repository canary in a temporary install
-  copy rather than by a source-relative or absolute path dependency.
+- Until publication is explicitly approved, Chat installs the exact reviewed
+  Cave and core tarballs from `vendor/sdk/`. The cross-repository canary
+  independently rebuilds and byte-verifies the same artifacts.
 - Run the local canary from this nested Chat checkout with:
   ```bash
   corepack pnpm@10.34.0 --ignore-workspace test:contract-canary -- \

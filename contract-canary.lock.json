@@ -2,7 +2,7 @@
   "version": 2,
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "c237fdc08b56978f1c7220097cf0acb32e6852cb",
+    "revision": "acc38488f00860d246c3c553375634d64806eabb",
     "releaseManifest": {
       "file": "release-manifest.json",
       "version": "0.1.0",

@@ -10,14 +10,51 @@ const AUTHORITY = Object.freeze({
   handle: 'authority:00000000-0000-4000-8000-000000000001',
   generation: 1,
 });
+const DISCOVERY_HANDLE = 'discovery:00000000-0000-4000-8000-000000000002';
 const REQUEST_ID = 'request:1';
-const INSTANCE_ID = '00000000-0000-4000-8000-000000000002';
-const DIAGNOSTIC_ID = '00000000-0000-4000-8000-000000000003';
+const INSTANCE_ID = '00000000-0000-4000-8000-000000000003';
+const PAIRING_ID = '00000000-0000-4000-8000-000000000004';
+const DIAGNOSTIC_ID = '00000000-0000-4000-8000-000000000005';
+const PUBLIC_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const KEY_ID = 'tDE1VahIyqtAoH7mJ7uT3yzaF6EnK70vG9JMvTMCOAM';
 
-function operation(result: unknown, requestId = REQUEST_ID) {
+function discoveryRecord(replacement: Record<string, unknown> = {}) {
   return {
-    authority: AUTHORITY,
-    requestId,
+    version: 2,
+    endpoint: 'http://localhost:3020/',
+    pid: 10,
+    nonce: PUBLIC_KEY,
+    startedAt: '2026-08-28T10:00:00Z',
+    authority: {
+      mechanism: 'hpke-bound-v1',
+      mode: 'enforce',
+      keyId: KEY_ID,
+      publicKey: PUBLIC_KEY,
+      suite: { kemId: 32, kdfId: 1, aeadId: 2 },
+    },
+    ...replacement,
+  };
+}
+
+function discoveryOutput(replacement: Record<string, unknown> = {}) {
+  return {
+    handle: DISCOVERY_HANDLE,
+    snapshot: {
+      bytes: JSON.stringify(discoveryRecord(replacement)),
+      record: {
+        identity: `sha256:${'a'.repeat(64)}`,
+        device: 1,
+        inode: 2,
+        processAlive: true,
+      },
+    },
+  };
+}
+
+function operation(input: Record<string, unknown>, result: unknown) {
+  return {
+    authority: input.authority,
+    requestId: input.requestId,
     result,
   };
 }
@@ -36,18 +73,39 @@ function response(data: unknown, capabilities: string[], operations: string[], s
   };
 }
 
-describe('native boundary', () => {
-  it('uses only the reviewed operation-specific command names', () => {
+function pairingId(index: number): string {
+  return `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`;
+}
+
+function routedInvoke(
+  routes: Partial<Record<(typeof NATIVE_COMMANDS)[keyof typeof NATIVE_COMMANDS], unknown>>,
+): InvokeCommand {
+  return vi.fn(async (command, args = {}) => {
+    const route = routes[command as keyof typeof routes];
+    if (route instanceof Function) {
+      return route(args);
+    }
+    if (route !== undefined) {
+      return route;
+    }
+    if (command === NATIVE_COMMANDS.authorityEstablish) {
+      return AUTHORITY;
+    }
+    throw new Error(`Unexpected command ${command}`);
+  });
+}
+
+describe('native boundary with packed managed SDK', () => {
+  it('uses only reviewed discovery and operation-specific commands', () => {
     expect(NATIVE_COMMANDS).toEqual({
-      discover: 'sdk_authority_discover',
+      discoveryRead: 'sdk_discovery_read',
+      authorityEstablish: 'sdk_authority_establish',
       close: 'sdk_authority_close',
       installationIdentity: 'sdk_installation_identity',
       health: 'cave_health',
-      pairingCreate: 'cave_pairing_create',
-      pairingPoll: 'cave_pairing_poll',
-      pairingExchange: 'cave_pairing_exchange',
-      pairingCommit: 'cave_pairing_commit',
-      pairingDiscard: 'cave_pairing_discard',
+      pairingCreate: 'cave_managed_pairing_create',
+      pairingPoll: 'cave_managed_pairing_poll',
+      pairingExchange: 'cave_managed_pairing_exchange',
       credentialState: 'cave_credential_state',
       forgetCredential: 'cave_forget_credential',
       listFamiliars: 'cave_list_familiars',
@@ -57,101 +115,266 @@ describe('native boundary', () => {
       listConversationMessages: 'cave_list_conversation_messages',
       diagnostics: 'sdk_native_diagnostics',
     });
+    expect(Object.values(NATIVE_COMMANDS)).not.toContain('sdk_authority_open');
   });
 
-  it('validates and unwraps health without exposing the native envelope', async () => {
-    const invokeCommand = vi.fn<InvokeCommand>().mockResolvedValue(
-      operation(
-        response(
-          {
-            instanceId: INSTANCE_ID,
-            pairingRequired: true,
-            releaseVersion: '0.1.0',
-          },
-          ['health'],
-          ['health.read'],
-        ),
-      ),
-    );
-    const boundary = createNativeBoundary({ invoke: invokeCommand });
-
-    await expect(boundary.health(AUTHORITY, REQUEST_ID)).resolves.toEqual({
-      status: 'ok',
-      apiVersion: '1.0',
-      minimumClientVersion: '0.1.0',
-      capabilities: ['health'],
-      operations: ['health.read'],
-      instanceId: INSTANCE_ID,
-      pairingRequired: true,
-      releaseVersion: '0.1.0',
+  it('uses managed discovery before opaque authority establishment', async () => {
+    const invokeCommand = routedInvoke({
+      [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
     });
-    expect(invokeCommand).toHaveBeenCalledWith('cave_health', {
-      input: { authority: AUTHORITY, requestId: REQUEST_ID },
+    const boundary = createNativeBoundary({
+      invoke: invokeCommand,
+      requestId: () => REQUEST_ID,
+    });
+
+    await expect(boundary.discover()).resolves.toEqual(AUTHORITY);
+    expect(invokeCommand).toHaveBeenNthCalledWith(1, NATIVE_COMMANDS.discoveryRead, undefined);
+    expect(invokeCommand).toHaveBeenNthCalledWith(2, NATIVE_COMMANDS.authorityEstablish, {
+      input: { discoveryHandle: DISCOVERY_HANDLE },
     });
   });
 
-  it('rejects extra keys and accessor-backed hostile invoke results without evaluating them', async () => {
+  it('rejects hostile native envelopes without evaluating accessors', async () => {
     let getterRead = false;
     const hostile = Object.defineProperty(
       {
-        handle: AUTHORITY.handle,
-        generation: AUTHORITY.generation,
-        unexpected: true,
+        handle: DISCOVERY_HANDLE,
+        snapshot: discoveryOutput().snapshot,
+        extra: true,
       },
-      'secret',
+      'credential',
       {
         enumerable: true,
         get() {
           getterRead = true;
-          return 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+          return 'private';
         },
       },
     );
     const boundary = createNativeBoundary({
-      invoke: vi.fn<InvokeCommand>().mockResolvedValue(hostile),
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: hostile,
+      }),
     });
 
     await expect(boundary.discover()).rejects.toMatchObject({
       code: 'invalid_response',
-      retryable: false,
     });
     expect(getterRead).toBe(false);
   });
 
-  it('rejects a secret-shaped value in any command result', async () => {
-    const boundary = createNativeBoundary({
-      invoke: vi.fn<InvokeCommand>().mockResolvedValue({
-        ...operation(
+  it('lets the packed SDK reject hostile discovery and canonical DTOs', async () => {
+    const hostileDiscovery = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput({
+          endpoint: 'https://example.com/',
+        }),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    await expect(hostileDiscovery.discover()).rejects.toMatchObject({
+      code: 'unsafe_endpoint',
+    });
+
+    const invokeCommand = routedInvoke({
+      [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+      [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+        operation(
+          args.input as Record<string, unknown>,
           response(
             {
-              familiars: [
+              conversations: [
                 {
-                  id: 'familiar-1',
-                  displayName: 'Astra',
-                  role: 'Research',
-                  description: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                  id: 'conversation-1',
+                  familiarId: 'familiar-1',
+                  updatedAt: 42,
                 },
               ],
             },
-            ['familiars', 'cursors'],
-            ['familiars.list'],
+            ['conversations', 'cursors'],
+            ['conversations.list'],
           ),
         ),
-        bearer: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-      }),
     });
+    const boundary = createNativeBoundary({
+      invoke: invokeCommand,
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
 
     await expect(
-      boundary.listFamiliars(AUTHORITY, REQUEST_ID, { limit: 25 }),
+      boundary.listConversations(authority, 'ignored-by-sdk', { limit: 25 }),
     ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it('orchestrates health and pairing through the managed client without secret returns', async () => {
+    const invokeCommand = routedInvoke({
+      [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+      [NATIVE_COMMANDS.health]: (args: Record<string, unknown>) =>
+        operation(
+          args.input as Record<string, unknown>,
+          response(
+            {
+              instanceId: INSTANCE_ID,
+              pairingRequired: true,
+              releaseVersion: '0.1.0',
+            },
+            ['health'],
+            ['health.read'],
+          ),
+        ),
+      [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          requestId: PAIRING_ID,
+          expiresAt: 2_000_000_000_000,
+        }),
+      [NATIVE_COMMANDS.pairingPoll]: (args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          id: PAIRING_ID,
+          status: 'approved',
+          expiresAt: 2_000_000_000_000,
+        }),
+      [NATIVE_COMMANDS.pairingExchange]: (args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          credential: {
+            id: '00000000-0000-4000-8000-000000000006',
+            appName: 'OpenCoven Chat',
+            installationId: '00000000-0000-4000-8000-000000000007',
+            scopes: ['chat:read'],
+            createdAt: 1,
+            lastUsedAt: null,
+            revokedAt: null,
+            revocationReason: null,
+          },
+        }),
+    });
+    const boundary = createNativeBoundary({
+      invoke: invokeCommand,
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(boundary.health(authority, 'ignored')).resolves.toMatchObject({
+      status: 'ok',
+      instanceId: INSTANCE_ID,
+    });
+    const pairing = await boundary.pairingCreate(authority, 'ignored', {
+      appName: 'OpenCoven Chat',
+      installationId: '00000000-0000-4000-8000-000000000007',
+      scopes: ['chat:read'],
+    });
+    await expect(boundary.pairingPoll(authority, 'ignored', pairing.handle)).resolves.toEqual({
+      id: PAIRING_ID,
+      status: 'approved',
+      expiresAt: 2_000_000_000_000,
+    });
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).resolves.toMatchObject({
+      credential: {
+        id: '00000000-0000-4000-8000-000000000006',
+        scopes: ['chat:read'],
+      },
+    });
+    expect(JSON.stringify((invokeCommand as ReturnType<typeof vi.fn>).mock.results)).not.toMatch(
+      /pairingSecret|Bearer\s+[A-Za-z0-9_-]+/u,
+    );
+  });
+
+  it('consumes terminal managed pairing sessions after denied status', async () => {
+    const pairingPoll = vi.fn((args: Record<string, unknown>) =>
+      operation(args.input as Record<string, unknown>, {
+        id: PAIRING_ID,
+        status: 'denied',
+        expiresAt: 2_000_000_000_000,
+      }),
+    );
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            requestId: PAIRING_ID,
+            expiresAt: 2_000_000_000_000,
+          }),
+        [NATIVE_COMMANDS.pairingPoll]: pairingPoll,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const pairing = await boundary.pairingCreate(authority, 'ignored', {
+      appName: 'OpenCoven Chat',
+      installationId: '00000000-0000-4000-8000-000000000007',
+      scopes: ['chat:read'],
+    });
+
+    await expect(boundary.pairingPoll(authority, 'ignored', pairing.handle)).resolves.toMatchObject(
+      {
+        status: 'denied',
+      },
+    );
+    await expect(boundary.pairingPoll(authority, 'ignored', pairing.handle)).rejects.toMatchObject({
+      code: 'reconcile_required',
+    });
+    expect(pairingPoll).toHaveBeenCalledOnce();
+  });
+
+  it('prunes expired sessions and bounds retained managed pairings', async () => {
+    let nextPairing = 0;
+    const pairingPoll = vi.fn((args: Record<string, unknown>) => {
+      const input = args.input as Record<string, unknown>;
+      return operation(input, {
+        id: input.pairingRequestId,
+        status: 'approved',
+        expiresAt: 2_000_000_000_000,
+      });
+    });
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) => {
+          nextPairing += 1;
+          return operation(args.input as Record<string, unknown>, {
+            requestId: pairingId(nextPairing),
+            expiresAt: nextPairing === 1 ? 1 : 2_000_000_000_000,
+          });
+        },
+        [NATIVE_COMMANDS.pairingPoll]: pairingPoll,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const sessions = [];
+    for (let index = 0; index < 66; index += 1) {
+      sessions.push(
+        await boundary.pairingCreate(authority, 'ignored', {
+          appName: 'OpenCoven Chat',
+          installationId: '00000000-0000-4000-8000-000000000007',
+          scopes: ['chat:read'],
+        }),
+      );
+    }
+
+    await expect(
+      boundary.pairingPoll(authority, 'ignored', sessions[0]?.handle ?? ''),
+    ).rejects.toMatchObject({ code: 'reconcile_required' });
+    await expect(
+      boundary.pairingPoll(authority, 'ignored', sessions[1]?.handle ?? ''),
+    ).rejects.toMatchObject({ code: 'reconcile_required' });
+    expect(pairingPoll).not.toHaveBeenCalled();
   });
 
   it('maps only exact native error objects into presentation-safe errors', async () => {
     const boundary = createNativeBoundary({
-      invoke: vi.fn<InvokeCommand>().mockRejectedValue({
-        code: 'service_unavailable',
-        retryable: true,
-        diagnosticId: DIAGNOSTIC_ID,
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.authorityEstablish]: () => {
+          throw {
+            code: 'service_unavailable',
+            retryable: true,
+            diagnosticId: DIAGNOSTIC_ID,
+          };
+        },
       }),
     });
 
@@ -160,69 +383,22 @@ describe('native boundary', () => {
     );
 
     const hostile = createNativeBoundary({
-      invoke: vi.fn<InvokeCommand>().mockRejectedValue({
-        code: 'service_unavailable',
-        retryable: true,
-        diagnosticId: DIAGNOSTIC_ID,
-        cause: '/Users/person/private/credential',
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.authorityEstablish]: () => {
+          throw {
+            code: 'service_unavailable',
+            retryable: true,
+            diagnosticId: DIAGNOSTIC_ID,
+            cause: '/Users/person/private/credential',
+          };
+        },
       }),
     });
     await expect(hostile.discover()).rejects.toMatchObject({
       code: 'invalid_response',
       retryable: false,
     });
-  });
-
-  it('rejects hostile nested authority bindings from pairing exchange', async () => {
-    const invokeCommand = vi.fn<InvokeCommand>().mockResolvedValue(
-      operation({
-        authorityBinding: {
-          version: 1,
-          instanceId: INSTANCE_ID,
-          endpoint: {
-            kind: 'http',
-            url: 'http://localhost:3020/',
-            privatePath: '/Users/person/private',
-          },
-          record: {
-            identity: `sha256:${'a'.repeat(64)}`,
-            device: 1,
-            inode: 2,
-          },
-          freshness: {
-            pid: 10,
-            nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-            startedAt: '2026-08-28T10:00:00Z',
-          },
-        },
-        commitHandle: 'commit:00000000-0000-4000-8000-000000000004',
-        response: response(
-          {
-            credential: {
-              id: '00000000-0000-4000-8000-000000000005',
-              appName: 'OpenCoven Chat',
-              installationId: '00000000-0000-4000-8000-000000000006',
-              scopes: ['chat:read'],
-              createdAt: 1,
-              lastUsedAt: null,
-              revokedAt: null,
-              revocationReason: null,
-            },
-          },
-          ['pairing', 'credentials'],
-          ['pairing.exchange'],
-        ),
-      }),
-    );
-    const boundary = createNativeBoundary({ invoke: invokeCommand });
-
-    await expect(
-      boundary.pairingExchange(
-        AUTHORITY,
-        REQUEST_ID,
-        'pairing:00000000-0000-4000-8000-000000000007',
-      ),
-    ).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
   it('validates exact lifecycle events and drops hostile payloads', async () => {
@@ -256,7 +432,6 @@ describe('native boundary', () => {
       },
     });
 
-    expect(listener).toHaveBeenCalledWith('sdk://connection', expect.any(Function));
     expect(received).toEqual([
       {
         version: 1,

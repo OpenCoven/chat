@@ -39,7 +39,6 @@ function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
       expiresAt: 2_000_000_000_000,
     }),
     pairingExchange: vi.fn().mockResolvedValue({
-      commitHandle: 'commit:00000000-0000-4000-8000-000000000006',
       credential: {
         id: '00000000-0000-4000-8000-000000000007',
         appName: 'OpenCoven Chat',
@@ -51,8 +50,6 @@ function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
         revocationReason: null,
       },
     }),
-    pairingCommit: vi.fn().mockResolvedValue(undefined),
-    pairingDiscard: vi.fn().mockResolvedValue('absent'),
     credentialState: vi.fn().mockResolvedValue('present'),
     forgetCredential: vi.fn().mockResolvedValue(true),
     listFamiliars: vi.fn().mockResolvedValue({
@@ -168,7 +165,6 @@ describe('App', () => {
       'Connected',
     );
     expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
-    expect(boundary.pairingCommit).toHaveBeenCalledTimes(1);
   });
 
   it('renders canonical reads and paginates only on explicit actions', async () => {

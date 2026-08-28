@@ -289,6 +289,15 @@ class DefaultConnectionController implements ConnectionController {
       ) {
         return;
       }
+      if (status.id !== pairing.requestId) {
+        this.#pairing = null;
+        this.#setState({
+          state: 'error',
+          code: 'reconcile_required',
+          diagnosticId: 'pairing-request-mismatch',
+        });
+        return;
+      }
       pairing.expiresAt = status.expiresAt;
       if (status.status === 'approved') {
         pairing.approved = true;
@@ -330,13 +339,8 @@ class DefaultConnectionController implements ConnectionController {
     }
     const generation = this.#generation;
     this.#retryOperation = null;
-    let commitHandle: string;
     try {
-      const exchange = await this.#boundary.pairingExchange(
-        authority,
-        this.#requestId(),
-        pairing.handle,
-      );
+      await this.#boundary.pairingExchange(authority, this.#requestId(), pairing.handle);
       if (
         !this.#isCurrent(generation) ||
         !this.#authorityIsCurrent(authority) ||
@@ -344,7 +348,6 @@ class DefaultConnectionController implements ConnectionController {
       ) {
         return;
       }
-      commitHandle = exchange.commitHandle;
     } catch (error) {
       if (this.#isCurrent(generation)) {
         this.#pairing = null;
@@ -354,31 +357,23 @@ class DefaultConnectionController implements ConnectionController {
       return;
     }
 
-    const commit = async () => {
+    const confirm = async () => {
       try {
-        await this.#boundary.pairingCommit(authority, this.#requestId(), commitHandle);
+        await this.#confirmReady(authority, generation);
         if (!this.#isCurrent(generation) || !this.#authorityIsCurrent(authority)) {
           return;
         }
         this.#retryOperation = null;
-        this.#pairing = null;
-        await this.#confirmReady(authority, generation);
       } catch (error) {
         if (!this.#isCurrent(generation)) {
           return;
         }
-        if (error instanceof NativeBoundaryError && error.retryable) {
-          this.#retryOperation = commit;
-        } else {
-          this.#retryOperation = null;
-          void this.#boundary
-            .pairingDiscard(authority, this.#requestId(), commitHandle)
-            .catch(() => undefined);
-        }
+        this.#retryOperation = confirm;
         this.#setFailure(error);
       }
     };
-    await commit();
+    this.#pairing = null;
+    await confirm();
   }
 
   canRetry(): boolean {

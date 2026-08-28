@@ -9,7 +9,7 @@
     "pnpm": "10.34.0"
   },
   "scripts": {
-    "install:clean": "corepack pnpm install --frozen-lockfile",
+    "install:clean": "corepack pnpm install --ignore-workspace --frozen-lockfile",
     "dev": "vite",
     "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
     "build": "vite build",
@@ -29,6 +29,8 @@
     "app:build": "tauri build"
   },
   "dependencies": {
+    "@opencoven/cave-client": "file:vendor/sdk/opencoven-cave-client-0.1.0.tgz",
+    "@opencoven/sdk-core": "file:vendor/sdk/opencoven-sdk-core-0.1.0.tgz",
     "@tauri-apps/api": "2.11.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
@@ -47,5 +49,11 @@
     "typescript": "6.0.3",
     "vite": "8.2.1",
     "vitest": "4.1.10"
+  },
+  "pnpm": {
+    "overrides": {
+      "@opencoven/cave-client": "file:vendor/sdk/opencoven-cave-client-0.1.0.tgz",
+      "@opencoven/sdk-core": "file:vendor/sdk/opencoven-sdk-core-0.1.0.tgz"
+    }
   }
 }

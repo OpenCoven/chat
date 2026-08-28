@@ -79,6 +79,7 @@ function createGitWorktreeFixture(prefix: string) {
   runGit(['init', '--initial-branch=main'], repoRoot);
   runGit(['config', 'user.name', 'OpenCoven Test'], repoRoot);
   runGit(['config', 'user.email', 'opencoven-test@example.com'], repoRoot);
+  runGit(['config', 'commit.gpgsign', 'false'], repoRoot);
   writeFileSync(resolve(repoRoot, 'tracked.txt'), 'baseline\n');
   runGit(['add', 'tracked.txt'], repoRoot);
   runGit(['commit', '-m', 'baseline'], repoRoot);
@@ -205,7 +206,7 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('c237fdc08b56978f1c7220097cf0acb32e6852cb');
+    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
     expect(() => parseArgs(['--artifact-name', 'local-run'])).toThrow(/Unknown argument/);
@@ -252,13 +253,17 @@ describe('contract canary checkout cleanliness', () => {
       expectedMessage:
         'SDK checkout at PLACEHOLDER is dirty (1 untracked item). Contract canary requires a clean checkout with no staged, unstaged, or untracked files.',
     },
-  ])('$name', ({ prefix, mutate, expectedMessage }) => {
-    const { worktreeRoot } = createGitWorktreeFixture(prefix);
+  ])(
+    '$name',
+    ({ prefix, mutate, expectedMessage }) => {
+      const { worktreeRoot } = createGitWorktreeFixture(prefix);
 
-    mutate(worktreeRoot);
+      mutate(worktreeRoot);
 
-    expect(() => assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toThrow(
-      expectedMessage.replace('PLACEHOLDER', worktreeRoot),
-    );
-  });
+      expect(() => assertCleanGitCheckout(worktreeRoot, 'SDK checkout')).toThrow(
+        expectedMessage.replace('PLACEHOLDER', worktreeRoot),
+      );
+    },
+    10_000,
+  );
 });

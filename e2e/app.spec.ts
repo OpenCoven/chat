@@ -64,7 +64,34 @@ async function installTauriMock(page: Page) {
             listeners.delete(String(args.event));
             return null;
           }
-          if (command === 'sdk_authority_discover') {
+          if (command === 'sdk_discovery_read') {
+            return {
+              handle: 'discovery:00000000-0000-4000-8000-000000000010',
+              snapshot: {
+                bytes: JSON.stringify({
+                  version: 2,
+                  endpoint: 'http://localhost:3020/',
+                  pid: 10,
+                  nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                  startedAt: '2026-08-28T10:00:00Z',
+                  authority: {
+                    mechanism: 'hpke-bound-v1',
+                    mode: 'enforce',
+                    keyId: 'tDE1VahIyqtAoH7mJ7uT3yzaF6EnK70vG9JMvTMCOAM',
+                    publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                    suite: { kemId: 32, kdfId: 1, aeadId: 2 },
+                  },
+                }),
+                record: {
+                  identity: `sha256:${'a'.repeat(64)}`,
+                  device: 1,
+                  inode: 2,
+                  processAlive: true,
+                },
+              },
+            };
+          }
+          if (command === 'sdk_authority_establish') {
             return authority;
           }
           if (command === 'sdk_authority_close') {
@@ -88,66 +115,33 @@ async function installTauriMock(page: Page) {
           if (command === 'cave_credential_state') {
             return operation(input, { status: credentialPresent ? 'present' : 'missing' });
           }
-          if (command === 'cave_pairing_create') {
+          if (command === 'cave_managed_pairing_create') {
             return operation(input, {
-              handle: 'pairing:00000000-0000-4000-8000-000000000004',
-              response: {
-                ...envelope(requestId, ['pairing'], ['pairing.create'], {
-                  requestId: '00000000-0000-4000-8000-000000000005',
-                  expiresAt: 2_000_000_000_000,
-                }),
-                statusCode: 201,
-              },
+              requestId: '00000000-0000-4000-8000-000000000005',
+              expiresAt: 2_000_000_000_000,
             });
           }
-          if (command === 'cave_pairing_poll') {
-            return operation(
-              input,
-              envelope(requestId, ['pairing'], ['pairing.poll'], {
-                id: '00000000-0000-4000-8000-000000000005',
-                status: 'approved',
-                expiresAt: 2_000_000_000_000,
-              }),
-            );
-          }
-          if (command === 'cave_pairing_exchange') {
+          if (command === 'cave_managed_pairing_poll') {
             return operation(input, {
-              authorityBinding: {
-                version: 1,
-                instanceId,
-                endpoint: { kind: 'http', url: 'http://localhost:3020/' },
-                record: {
-                  identity: `sha256:${'a'.repeat(64)}`,
-                  device: 1,
-                  inode: 2,
-                },
-                freshness: {
-                  pid: 10,
-                  nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-                  startedAt: '2026-08-28T10:00:00Z',
-                },
-              },
-              commitHandle: 'commit:00000000-0000-4000-8000-000000000006',
-              response: envelope(requestId, ['pairing', 'credentials'], ['pairing.exchange'], {
-                credential: {
-                  id: '00000000-0000-4000-8000-000000000007',
-                  appName: 'OpenCoven Chat',
-                  installationId: '00000000-0000-4000-8000-000000000003',
-                  scopes: ['chat:read'],
-                  createdAt: 1,
-                  lastUsedAt: null,
-                  revokedAt: null,
-                  revocationReason: null,
-                },
-              }),
+              id: '00000000-0000-4000-8000-000000000005',
+              status: 'approved',
+              expiresAt: 2_000_000_000_000,
             });
           }
-          if (command === 'cave_pairing_commit') {
+          if (command === 'cave_managed_pairing_exchange') {
             credentialPresent = true;
-            return operation(input, null);
-          }
-          if (command === 'cave_pairing_discard') {
-            return operation(input, 'absent');
+            return operation(input, {
+              credential: {
+                id: '00000000-0000-4000-8000-000000000007',
+                appName: 'OpenCoven Chat',
+                installationId: '00000000-0000-4000-8000-000000000003',
+                scopes: ['chat:read'],
+                createdAt: 1,
+                lastUsedAt: null,
+                revokedAt: null,
+                revocationReason: null,
+              },
+            });
           }
           if (command === 'cave_forget_credential') {
             credentialPresent = false;

@@ -33,8 +33,6 @@ function makeReads(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
     pairingCreate: vi.fn(),
     pairingPoll: vi.fn(),
     pairingExchange: vi.fn(),
-    pairingCommit: vi.fn(),
-    pairingDiscard: vi.fn(),
     credentialState: vi.fn(),
     forgetCredential: vi.fn(),
     listFamiliars: vi.fn().mockResolvedValue({ data: [] }),
@@ -127,6 +125,85 @@ describe('canonical query adapter', () => {
       hasMore: false,
     });
     expect(reads.listConversations).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a fresh cursor walk for manual non-append reloads', async () => {
+    const firstPage = {
+      data: [],
+      cursor: { current: 'YQ', next: 'Yg', hasMore: true },
+    };
+    const secondPage = {
+      data: [],
+      cursor: { current: 'Yg', hasMore: false },
+    };
+    const reads = makeReads({
+      listConversations: vi
+        .fn()
+        .mockResolvedValueOnce(firstPage)
+        .mockResolvedValueOnce(secondPage)
+        .mockResolvedValueOnce(firstPage),
+    });
+    const adapter = createQueryAdapter(reads, {
+      authority: () => AUTHORITY,
+      requestId: () => 'request:1',
+    });
+
+    await adapter.loadConversations();
+    await adapter.loadMoreConversations();
+    await adapter.loadConversations();
+
+    expect(adapter.getState().conversations).toMatchObject({
+      status: 'ready',
+      hasMore: true,
+      nextCursor: 'Yg',
+      pageCount: 1,
+    });
+  });
+
+  it('starts a fresh message cursor walk after reconcile reload', async () => {
+    const message = {
+      id: 'message-1',
+      conversationId: 'conversation-1',
+      parentId: null,
+      role: 'assistant',
+      text: 'Canonical body',
+      createdAt: '2026-08-28T11:01:00Z',
+      attachmentCount: 0,
+      toolCount: 0,
+    };
+    const reads = makeReads({
+      listConversationMessages: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [message],
+          cursor: { current: 'YQ', next: 'Yg', hasMore: true },
+        })
+        .mockResolvedValueOnce({
+          data: [],
+          cursor: { current: 'Yg', hasMore: false },
+        })
+        .mockRejectedValueOnce(new NativeBoundaryError('reconcile_required', false, DIAGNOSTIC_ID))
+        .mockResolvedValueOnce({
+          data: [message],
+          cursor: { current: 'YQ', next: 'Yg', hasMore: true },
+        }),
+    });
+    const adapter = createQueryAdapter(reads, {
+      authority: () => AUTHORITY,
+      requestId: () => 'request:1',
+    });
+
+    await adapter.loadMessages('conversation-1');
+    await adapter.loadMoreMessages('conversation-1');
+    await adapter.loadMessages('conversation-1');
+
+    expect(adapter.getMessageState('conversation-1')).toMatchObject({
+      status: 'ready',
+      hasMore: true,
+      nextCursor: 'Yg',
+      pageCount: 1,
+      reconcileCount: 1,
+    });
   });
 
   it('rejects delayed results after authority and request generations change', async () => {
