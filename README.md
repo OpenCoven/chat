@@ -27,6 +27,8 @@ webview in this phase.
   allowing the exact operation to resume without widening authority.
 - Partial writes retain an exact rollback-needed token until compare-and-delete
   proves the stored value absent, changed, or deleted.
+- Authority replacement and close preserve that token until bounded cleanup
+  succeeds, including when an in-flight write completes after close.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

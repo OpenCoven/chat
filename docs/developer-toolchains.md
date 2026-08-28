@@ -90,6 +90,11 @@
   rollback-needed state retaining the zeroized exact expected credential.
   Commit retry or discard must finish compare-and-delete before the handle can
   be consumed, and a replacement credential is reported as `changed`.
+- Authority replacement and close run exact rollback-needed cleanup before
+  removing stale staged state. Contention leaves the cleanup token recoverable
+  and returns `credential_update_in_progress`; in-flight writes retained across
+  close are reconciled later and their exact `absent`/`changed`/`deleted`
+  disposition is recorded.
 - Pairing exchange validates authority generation and Ready state while the
   pairing map is locked, and removes the handle only after those checks pass.
 - Authority replacement and close cleanup are generation-scoped. Interleaved
