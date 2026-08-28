@@ -601,7 +601,10 @@ describe('Phase 1 specification guards', () => {
 
     const gated = workflow.match(/if: needs\.changes\.outputs\.docs_only != 'true'/g) ?? [];
 
-    expect(gated, 'E2E, Desktop build and Rust are the jobs worth skipping').toHaveLength(3);
+    expect(
+      gated,
+      'E2E, Desktop build, Rust, and Phase 1 conformance are the jobs worth skipping',
+    ).toHaveLength(4);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
@@ -711,7 +714,7 @@ describe('Phase 1 specification guards', () => {
       /token: \$\{\{ secrets\.CANARY_TOKEN \|\| github\.token \}\}/g,
     );
 
-    expect(tokenLines, 'both cross-repository checkouts need the token').toHaveLength(2);
+    expect(tokenLines, 'all cross-repository checkouts need the token').toHaveLength(5);
   });
 
   it('proves the packed harness installs with no network access', () => {
@@ -800,5 +803,63 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toMatch(/pnpm\/action-setup@[0-9a-f]{40}\s+# v4\.4\.0/);
     expect(workflow).toMatch(/actions\/setup-node@[0-9a-f]{40}\s+# v4\.4\.0/);
     expect(workflow).toMatch(/dtolnay\/rust-toolchain@[0-9a-f]{40}\s+# stable/);
+  });
+
+  it('defines the packaged Phase 1 real-authority gate and sanitized evidence upload', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const packageManifest = readJson<PackageManifest>('package.json');
+
+    expect(packageManifest.scripts?.['test:phase1-conformance']).toBe(
+      'node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all',
+    );
+    expect(workflow).toMatch(/^ {2}phase1-conformance:$/m);
+    expect(workflow).toMatch(/name:\s*Phase 1 real-authority conformance/);
+    expect(workflow).toContain('runs-on: macos-15');
+    expect(workflow).toContain(
+      "import { readPhase1ConformanceLock } from './scripts/phase1-conformance-lock.mjs';",
+    );
+    for (const repository of ['sdk', 'cave', 'coven']) {
+      expect(workflow).toContain(
+        `repository: \${{ steps.phase1-revisions.outputs.${repository}_repository }}`,
+      );
+      expect(workflow).toContain(
+        `ref: \${{ steps.phase1-revisions.outputs.${repository}_revision }}`,
+      );
+      expect(workflow).toContain(
+        `path: .phase1-counterparts/${repository === 'cave' ? 'coven-cave' : repository}`,
+      );
+    }
+    expect(workflow).toContain('security create-keychain');
+    expect(workflow).toContain('security unlock-keychain');
+    expect(workflow).toMatch(/name:\s*Remove isolated Phase 1 keychain[\s\S]*?if:\s*always\(\)/);
+    expect(workflow).toContain('pnpm test:phase1-conformance');
+    expect(workflow).toContain(
+      'node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance',
+    );
+    expect(workflow).toContain(
+      'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    );
+    expect(workflow).toContain('path: test-results/phase1-conformance/report.json');
+  });
+
+  it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
+    const readme = readText('README.md');
+    const toolchains = readText('docs/developer-toolchains.md');
+    const guide = readText('docs/phase1-conformance.md');
+    const tracker = readText(
+      'docs/superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md',
+    );
+
+    for (const document of [readme, toolchains, guide]) {
+      expect(document).toContain('phase1-conformance.lock.json');
+      expect(document).toContain('test:phase1-conformance');
+    }
+    expect(guide).toContain('phase1.operator.homes-credentials-untouched');
+    expect(guide).toContain('secret scan');
+    expect(guide).toContain('completed');
+    expect(tracker).not.toContain(
+      '/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking',
+    );
+    expect(tracker).toContain('/Users/buns/Documents/GitHub/OpenCoven/coven-cave');
   });
 });
