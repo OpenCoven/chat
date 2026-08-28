@@ -85,6 +85,84 @@ describe('ConnectionGate', () => {
     expect(controller.forgetCredential).toHaveBeenCalledTimes(1);
   });
 
+  it('renders distinct initial, cancelled, expired, denied, and rate-limited recovery actions', () => {
+    const initial = makeController();
+    const cancelled = makeController();
+    const expired = makeController();
+    const denied = makeController();
+    const rateLimited = makeController();
+    const { rerender } = render(
+      <ConnectionGate
+        controller={initial}
+        state={{ state: 'pairing_required', caveInstanceId: 'cave-1' }}
+      />,
+    );
+
+    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Cave is ready to pair. Grant read-only chat access to continue.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Pair with Cave' }));
+    expect(initial.beginPairing).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ConnectionGate
+        controller={cancelled}
+        state={{
+          state: 'pairing_required',
+          caveInstanceId: 'cave-1',
+          reason: 'cancelled',
+        }}
+      />,
+    );
+    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Pairing cancelled. Pair again when you are ready.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Pair with Cave' }));
+    expect(cancelled.beginPairing).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ConnectionGate
+        controller={expired}
+        state={{
+          state: 'pairing_required',
+          caveInstanceId: 'cave-1',
+          reason: 'expired',
+        }}
+      />,
+    );
+    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Pairing request expired. Start a new pairing request.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Pair with Cave' }));
+    expect(expired.beginPairing).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ConnectionGate
+        controller={denied}
+        state={{ state: 'error', code: 'pairing_denied', diagnosticId: 'diag-denied' }}
+      />,
+    );
+    expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
+      'Unable to connect to Cave (pairing_denied).',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry connection' }));
+    expect(denied.retry).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ConnectionGate
+        controller={rateLimited}
+        state={{ state: 'error', code: 'rate_limited', diagnosticId: 'diag-rate' }}
+      />,
+    );
+    expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
+      'Cave is rate limited. Wait briefly, then retry.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(rateLimited.retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Start Cave' })).toBeNull();
+    expect(rateLimited.launch).not.toHaveBeenCalled();
+  });
+
   it('renders a browser fallback explanation without calling native actions', () => {
     const controller = makeController();
 

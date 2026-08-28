@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "OpenCoven Chat desktop scaffold"
 edition = "2021"
 rust-version = "1.95.0"
+default-run = "opencoven-chat"
 
 [lib]
 name = "opencoven_chat_lib"

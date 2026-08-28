@@ -540,7 +540,7 @@ describe('Cave connection controller', () => {
     expect(forgets).toBe(1);
   });
 
-  it('treats SDK-normalized rate limiting as transient offline after health', async () => {
+  it('keeps SDK-normalized rate limiting distinct from offline after health', async () => {
     const testClock = clock(100);
     const subject = controller(
       nativeHost({
@@ -552,12 +552,12 @@ describe('Cave connection controller', () => {
     await subject.start();
 
     expect(subject.getState()).toMatchObject({
-      state: 'offline',
-      lastHealthyAt: 100,
+      state: 'error',
+      code: 'rate_limited',
     });
   });
 
-  it('treats a packed rate-limited connection operation as offline', async () => {
+  it('keeps a packed rate-limited connection operation distinct from offline', async () => {
     const subject = controller(
       nativeHost({
         health: async () => errorEnvelope('rate_limited', true),
@@ -567,8 +567,8 @@ describe('Cave connection controller', () => {
     await subject.start();
 
     expect(subject.getState()).toMatchObject({
-      state: 'offline',
-      lastHealthyAt: null,
+      state: 'error',
+      code: 'rate_limited',
     });
   });
 
@@ -764,7 +764,7 @@ describe('Cave connection controller', () => {
     });
   });
 
-  it('publishes offline for packed rate limits at every pairing phase without retrying', async () => {
+  it('publishes a rate-limit error at every pairing phase without retrying', async () => {
     const canary = 'pairing-rate-limit-secret-canary';
 
     for (const phase of ['create', 'poll', 'exchange'] as const) {
@@ -800,8 +800,8 @@ describe('Cave connection controller', () => {
       await settle();
 
       expect(subject.getState()).toMatchObject({
-        state: 'offline',
-        lastHealthyAt: 100,
+        state: 'error',
+        code: 'rate_limited',
       });
       expect(calls.credentialStatuses).toBe(1);
       expect(calls.pairingRequests).toEqual([
@@ -903,7 +903,7 @@ describe('Cave connection controller', () => {
     }
   });
 
-  it('does not let stale packed pairing rate limits overwrite a retry', async () => {
+  it('does not let stale packed pairing rate limits overwrite cancellation recovery', async () => {
     const canary = 'stale-pairing-rate-limit-canary';
 
     for (const phase of ['create', 'poll', 'exchange'] as const) {
@@ -929,7 +929,7 @@ describe('Cave connection controller', () => {
       await subject.start();
       const pairing = subject.beginPairing();
       await enteredRateLimit.promise;
-      await subject.retry();
+      const cancellation = subject.cancelPairing();
       rateLimit.reject(
         Object.freeze({
           code: 'rate_limited',
@@ -941,7 +941,7 @@ describe('Cave connection controller', () => {
           },
         }),
       );
-      await pairing;
+      await Promise.all([pairing, cancellation]);
 
       expect(subject.getState()).toEqual({
         state: 'ready',
@@ -954,12 +954,11 @@ describe('Cave connection controller', () => {
     }
   });
 
-  it('aborts a never-resolving packed pairing poll on cancellation, retry, and dispose', async () => {
+  it('aborts a never-resolving packed pairing poll on cancellation and dispose', async () => {
     const pendingPoll = deferred<unknown>();
     const cancelPoll = deferred<void>();
-    const retryPoll = deferred<void>();
     const disposePoll = deferred<void>();
-    const pollEntries = [cancelPoll, retryPoll, disposePoll];
+    const pollEntries = [cancelPoll, disposePoll];
     let pollIndex = 0;
     const source = nativeHost({
       credentialStatus: async () => ({ status: 'missing' }),
@@ -970,21 +969,8 @@ describe('Cave connection controller', () => {
         return pendingPoll.promise;
       },
     });
-    const replacement = nativeHost({
-      health: async () => healthEnvelope(NEXT_CAVE_INSTANCE_ID),
-      credentialStatus: async () => validCredentialStatus('chat:read', NEXT_CAVE_INSTANCE_ID),
-    });
-    const discover = vi
-      .fn<CaveConnectionHost['discover']>()
-      .mockImplementationOnce(source.discover)
-      .mockImplementationOnce(source.discover)
-      .mockImplementationOnce(source.discover)
-      .mockImplementationOnce(replacement.discover)
-      .mockImplementationOnce(source.discover)
-      .mockImplementationOnce(source.discover);
-    const cancelSubject = controller(hostPort(discover));
-    const retrySubject = controller(hostPort(discover));
-    const disposeSubject = controller(hostPort(discover));
+    const cancelSubject = controller(source);
+    const disposeSubject = controller(source);
 
     await cancelSubject.start();
     const cancelled = cancelSubject.beginPairing();
@@ -996,22 +982,6 @@ describe('Cave connection controller', () => {
     cancelSubject.cancelPairing();
     await settle();
     expect(cancelSettled).toBe(true);
-
-    await retrySubject.start();
-    const retried = retrySubject.beginPairing();
-    let retrySettled = false;
-    void retried.then(() => {
-      retrySettled = true;
-    });
-    await retryPoll.promise;
-    await retrySubject.retry();
-    await settle();
-    expect(retrySettled).toBe(true);
-    expect(retrySubject.getState()).toEqual({
-      state: 'ready',
-      caveInstanceId: NEXT_CAVE_INSTANCE_ID,
-      covenAvailable: false,
-    });
 
     await disposeSubject.start();
     const disposed = disposeSubject.beginPairing();
@@ -1029,7 +999,55 @@ describe('Cave connection controller', () => {
       status: 'pending',
       expiresAt: 2_000,
     });
-    await Promise.all([cancelled, retried, disposed]);
+    await Promise.all([cancelled, disposed]);
+  });
+
+  it('leaves the active pairing attempt intact when retry is requested', async () => {
+    const pollEntered = deferred<void>();
+    const pendingPoll = deferred<unknown>();
+    let resets = 0;
+    const subject = controller(
+      nativeHost({
+        credentialStatus: async () => ({ status: 'missing' }),
+        pairingCreate: async () => ({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 }),
+        pairingPoll: async () => {
+          pollEntered.resolve();
+          return pendingPoll.promise;
+        },
+        resetPairing: async () => {
+          resets += 1;
+          return { status: 'invalidated' };
+        },
+      }),
+    );
+
+    await subject.start();
+    const pairing = subject.beginPairing();
+    await pollEntered.promise;
+    const retried = subject.retry();
+    let retrySettled = false;
+    void retried.then(() => {
+      retrySettled = true;
+    });
+    await settle();
+
+    expect(subject.getState().state).toBe('pairing');
+    expect(resets).toBe(0);
+    expect(retrySettled).toBe(false);
+
+    const cancellation = subject.cancelPairing();
+    pendingPoll.resolve({
+      id: PAIRING_REQUEST_ID,
+      status: 'pending',
+      expiresAt: 2_000,
+    });
+    await Promise.all([pairing, retried, cancellation]);
+    expect(resets).toBe(1);
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
+    });
   });
 
   it('resets a pending packed pairing creation before its late result and permits a fresh pairing', async () => {
@@ -1074,6 +1092,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
     });
 
     pairingCreate.resolve({ requestId: PAIRING_REQUEST_ID, expiresAt: 2_000 });
@@ -1135,6 +1154,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
     });
 
     await subject.beginPairing();
@@ -1178,6 +1198,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
     });
   });
 
@@ -1208,6 +1229,7 @@ describe('Cave connection controller', () => {
     expect(bounded.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
     });
 
     const resetRequests: Array<Record<string, unknown> | undefined> = [];
@@ -1404,6 +1426,7 @@ describe('Cave connection controller', () => {
           : {
               state: 'pairing_required',
               caveInstanceId: CAVE_INSTANCE_ID,
+              reason: 'cancelled',
             },
       );
     }
@@ -1572,6 +1595,7 @@ describe('Cave connection controller', () => {
     expect(expired.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'expired',
     });
 
     await cancelled.start();
@@ -1587,6 +1611,7 @@ describe('Cave connection controller', () => {
     expect(cancelled.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'cancelled',
     });
     expect(cancelledExchanges).toBe(0);
   });
@@ -1620,6 +1645,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'expired',
     });
     expect(exchanges).toBe(0);
   });
@@ -1657,6 +1683,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'pairing_required',
       caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'expired',
     });
     expect(exchanges).toBe(0);
     expect(resets).toBe(1);

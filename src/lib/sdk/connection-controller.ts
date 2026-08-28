@@ -9,11 +9,17 @@ import type { OperationOptions } from '@opencoven/sdk-core/browser';
 
 import type { CaveConnectionHost } from './connection-host';
 
+export type PairingRequiredReason = 'cancelled' | 'expired';
+
 export type SdkConnectionState =
   | Readonly<{ state: 'idle' }>
   | Readonly<{ state: 'discovering' }>
   | Readonly<{ state: 'incompatible'; diagnosticId: string }>
-  | Readonly<{ state: 'pairing_required'; caveInstanceId: string }>
+  | Readonly<{
+      state: 'pairing_required';
+      caveInstanceId: string;
+      reason?: PairingRequiredReason;
+    }>
   | Readonly<{ state: 'pairing'; requestId: string; expiresAt: number }>
   | Readonly<{ state: 'ready'; caveInstanceId: string; covenAvailable: boolean }>
   | Readonly<{ state: 'revoked'; diagnosticId: string }>
@@ -276,10 +282,12 @@ function isPairingTimeout(error: unknown): boolean {
 function isOfflineFailure(failure: SafeFailure): boolean {
   return (
     failure.code === 'not_found' ||
-    failure.code === 'rate_limited' ||
     failure.code === 'service_unavailable' ||
     failure.code === 'timeout' ||
-    (failure.retryable && failure.code !== 'pairing_denied' && failure.code !== 'pairing_expired')
+    (failure.retryable &&
+      failure.code !== 'pairing_denied' &&
+      failure.code !== 'pairing_expired' &&
+      failure.code !== 'rate_limited')
   );
 }
 
@@ -495,6 +503,7 @@ export function createCaveConnectionController(
     selectedClient: CaveConnectionClient,
     caveHealth: CaveHealth,
     credentialStatus: CaveCredentialStatus,
+    pairingRequiredReason?: PairingRequiredReason,
   ): void {
     if (!current(generation)) {
       return;
@@ -523,6 +532,7 @@ export function createCaveConnectionController(
           setState(generation, {
             state: 'pairing_required',
             caveInstanceId: caveHealth.instanceId,
+            ...(pairingRequiredReason === undefined ? {} : { reason: pairingRequiredReason }),
           });
         }
         return;
@@ -607,6 +617,7 @@ export function createCaveConnectionController(
     generation: number,
     selectedClient: CaveConnectionClient,
     signal: AbortSignal,
+    pairingRequiredReason?: PairingRequiredReason,
   ): Promise<void> {
     let caveHealth: CaveHealth;
     try {
@@ -630,10 +641,20 @@ export function createCaveConnectionController(
       setFailure(generation, failureFrom(error), 'credential');
       return;
     }
-    setCredentialStatus(generation, selectedClient, caveHealth, credentialStatus);
+    setCredentialStatus(
+      generation,
+      selectedClient,
+      caveHealth,
+      credentialStatus,
+      pairingRequiredReason,
+    );
   }
 
-  async function discover(generation: number, signal: AbortSignal): Promise<void> {
+  async function discover(
+    generation: number,
+    signal: AbortSignal,
+    pairingRequiredReason?: PairingRequiredReason,
+  ): Promise<void> {
     let discovered: Readonly<{ client: CaveClient }>;
     try {
       discovered = await deadlineBounded(
@@ -649,7 +670,7 @@ export function createCaveConnectionController(
       return;
     }
 
-    await confirmConnection(generation, discovered.client, signal);
+    await confirmConnection(generation, discovered.client, signal, pairingRequiredReason);
   }
 
   async function completePairing(
@@ -661,7 +682,7 @@ export function createCaveConnectionController(
     let polls = 0;
     while (current(generation)) {
       if (options.now() >= pairing.expiresAt) {
-        await resetPairingAndReconcile();
+        await resetPairingAndReconcile('expired');
         return;
       }
       if (polls >= maxPairingPolls) {
@@ -690,7 +711,9 @@ export function createCaveConnectionController(
           current(generation) &&
           (isPairingTimeout(error) || options.now() >= pairing.expiresAt)
         ) {
-          await resetPairingAndReconcile();
+          await resetPairingAndReconcile(
+            options.now() >= pairing.expiresAt ? 'expired' : undefined,
+          );
           return;
         }
         setFailure(generation, failureFrom(error), 'pairing');
@@ -704,7 +727,7 @@ export function createCaveConnectionController(
       switch (pairingStatus.status) {
         case 'approved': {
           if (options.now() >= pairing.expiresAt) {
-            await resetPairingAndReconcile();
+            await resetPairingAndReconcile('expired');
             return;
           }
           const exchangeTimeoutMs = Math.min(operationTimeoutMs, pairing.expiresAt - options.now());
@@ -719,7 +742,9 @@ export function createCaveConnectionController(
               current(generation) &&
               (isPairingTimeout(error) || options.now() >= pairing.expiresAt)
             ) {
-              await resetPairingAndReconcile();
+              await resetPairingAndReconcile(
+                options.now() >= pairing.expiresAt ? 'expired' : undefined,
+              );
               return;
             }
             setFailure(generation, failureFrom(error), 'pairing');
@@ -743,12 +768,12 @@ export function createCaveConnectionController(
           );
           return;
         case 'expired':
-          await resetPairingAndReconcile();
+          await resetPairingAndReconcile('expired');
           return;
         case 'pending': {
           const remaining = pairing.expiresAt - options.now();
           if (remaining <= 0) {
-            await resetPairingAndReconcile();
+            await resetPairingAndReconcile('expired');
             return;
           }
           try {
@@ -761,7 +786,7 @@ export function createCaveConnectionController(
             );
           } catch (error) {
             if (current(generation) && options.now() >= pairing.expiresAt) {
-              await resetPairingAndReconcile();
+              await resetPairingAndReconcile('expired');
               return;
             }
             setFailure(generation, failureFrom(error), 'pairing');
@@ -803,7 +828,7 @@ export function createCaveConnectionController(
     return activePromise;
   }
 
-  function resetPairingAndReconcile(): Promise<void> {
+  function resetPairingAndReconcile(reason?: PairingRequiredReason): Promise<void> {
     if (pairingResetPromise !== undefined) {
       return pairingResetPromise;
     }
@@ -823,7 +848,7 @@ export function createCaveConnectionController(
       if (!current(attempt.generation)) {
         return;
       }
-      await discover(attempt.generation, attempt.signal);
+      await discover(attempt.generation, attempt.signal, reason);
     })();
     const reset = holdActivePromise(attempt.generation, task);
     pairingResetPromise = reset;
@@ -900,7 +925,7 @@ export function createCaveConnectionController(
 
   function retry(): Promise<void> {
     if (machine.active === 'pairing') {
-      return cancelPairing();
+      return activePromise ?? Promise.resolve();
     }
     return startDiscovery(true);
   }
@@ -989,7 +1014,7 @@ export function createCaveConnectionController(
   }
 
   function cancelPairing(): Promise<void> {
-    return resetPairingAndReconcile();
+    return resetPairingAndReconcile('cancelled');
   }
 
   function forgetCredential(): Promise<void> {

@@ -66,6 +66,7 @@ pnpm exec playwright install chromium
 | `pnpm lint` | Run Biome checks |
 | `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
+| `pnpm test:native-e2e` | Run the feature-gated native RPC subprocess integration tests |
 | `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |

@@ -176,7 +176,12 @@ function gateView(
     case 'pairing_required':
       return {
         tone: 'warn',
-        message: 'Cave is ready to pair. Grant read-only chat access to continue.',
+        message:
+          state.reason === 'cancelled'
+            ? 'Pairing cancelled. Pair again when you are ready.'
+            : state.reason === 'expired'
+              ? 'Pairing request expired. Start a new pairing request.'
+              : 'Cave is ready to pair. Grant read-only chat access to continue.',
         role: 'status',
         ...(controller === undefined
           ? {}
@@ -259,6 +264,23 @@ function gateView(
                   label: 'Forget access',
                   onClick: () => {
                     void controller.forgetCredential();
+                  },
+                },
+              }),
+        };
+      }
+      if (state.code === 'rate_limited') {
+        return {
+          tone: 'warn',
+          message: 'Cave is rate limited. Wait briefly, then retry.',
+          role: 'alert',
+          ...(controller === undefined
+            ? {}
+            : {
+                action: {
+                  label: 'Retry',
+                  onClick: () => {
+                    void controller.retry();
                   },
                 },
               }),

@@ -74,3 +74,5 @@
   launch paths only through its two explicit
   `OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH` and
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
+- Run its subprocess integration gate with `pnpm test:native-e2e`; normal
+  `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.

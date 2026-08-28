@@ -6,7 +6,9 @@ declare global {
   }
 }
 
-test('renders the Phase 1 read-only happy path with mocked Tauri commands', async ({ page }) => {
+test('renders the Phase 1 read-only happy path through the mocked Tauri boundary', async ({
+  page,
+}) => {
   await page.addInitScript(() => {
     const capabilities = [
       'health',
@@ -50,11 +52,22 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
       bytes: Array.from(
         new TextEncoder().encode(
           JSON.stringify({
-            version: 1,
+            version: 2,
             endpoint: 'http://127.0.0.1:3020',
             pid: 4321,
-            nonce: '018f4f1a-77c2-7a31-8a15-55a25aaba003',
+            nonce: 'gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8',
             startedAt: '2026-08-20T20:20:12.617Z',
+            authority: {
+              mechanism: 'hpke-bound-v1',
+              mode: 'enforce',
+              keyId: 'Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g',
+              publicKey: 'sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs',
+              suite: {
+                kemId: 32,
+                kdfId: 1,
+                aeadId: 2,
+              },
+            },
           }),
         ),
       ),
@@ -66,20 +79,6 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
       },
     };
     const NATIVE_HANDLE = 'mock-native-handle';
-
-    // The Tauri JS wrapper (`@tauri-apps/api/core`) always forwards a concrete
-    // second argument to `window.__TAURI_INTERNALS__.invoke` -- it defaults to
-    // `{}` when the caller omits args entirely, it never forwards `undefined`.
-    // Both forms are treated as "no meaningful args" below.
-    function isEmptyArgs(args: unknown): boolean {
-      return (
-        args === undefined ||
-        (typeof args === 'object' &&
-          args !== null &&
-          !Array.isArray(args) &&
-          Object.keys(args as Record<string, unknown>).length === 0)
-      );
-    }
 
     function isPlainObject(value: unknown): value is Record<string, unknown> {
       return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -114,6 +113,39 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
       }
     }
 
+    function assertOperationArgs(
+      command: string,
+      actual: unknown,
+      expected: Record<string, unknown>,
+    ) {
+      if (!isPlainObject(actual) || !isPlainObject(actual.operation)) {
+        throw new Error(`Missing operation envelope for ${command}`);
+      }
+      const { operation, ...request } = actual;
+      if (!deepEqual(request, expected)) {
+        throw new Error(
+          `Unexpected args for ${command}: received ${JSON.stringify(request)}, expected ${JSON.stringify(expected)}`,
+        );
+      }
+      if (
+        Object.keys(operation).length !== 2 ||
+        typeof operation.attemptId !== 'string' ||
+        !/^op1-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{32}$/u.test(operation.attemptId) ||
+        typeof operation.timeoutMs !== 'number' ||
+        !Number.isSafeInteger(operation.timeoutMs) ||
+        operation.timeoutMs < 1 ||
+        operation.timeoutMs > 5_000
+      ) {
+        throw new Error(`Invalid operation envelope for ${command}`);
+      }
+      const serialized = JSON.stringify(actual).toLowerCase();
+      for (const forbidden of ['authorization', 'bearer', 'pairingsecret', '"url"', '"body"']) {
+        if (serialized.includes(forbidden)) {
+          throw new Error(`Forbidden native-boundary field for ${command}: ${forbidden}`);
+        }
+      }
+    }
+
     const callCounts: Record<string, number> = {};
     window.__mockInvokeCallCounts = callCounts;
 
@@ -128,24 +160,20 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
               assertExactArgs(command, args, {});
               return Promise.resolve('0b59fec4-5d8e-4d5c-894d-39fcb5f3eef7');
             case 'cave_read_discovery':
-              if (!isEmptyArgs(args)) {
-                throw new Error(
-                  `cave_read_discovery must not receive sensitive/native authority args, got ${JSON.stringify(args)}`,
-                );
-              }
+              assertOperationArgs(command, args, {});
               return Promise.resolve(discovery);
             case 'cave_health':
-              assertExactArgs(command, args, { handle: NATIVE_HANDLE });
+              assertOperationArgs(command, args, { handle: NATIVE_HANDLE });
               return Promise.resolve(health);
             case 'cave_credential_status':
-              assertExactArgs(command, args, { handle: NATIVE_HANDLE });
+              assertOperationArgs(command, args, { handle: NATIVE_HANDLE });
               return Promise.resolve({
                 status: 'valid',
                 access: 'chat:read',
                 health,
               });
             case 'cave_list_familiars':
-              assertExactArgs(command, args, {
+              assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
                 page: { limit: 50 },
               });
@@ -166,7 +194,7 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
                 },
               });
             case 'cave_list_projects':
-              assertExactArgs(command, args, {
+              assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
                 page: { limit: 50 },
               });
@@ -189,7 +217,7 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
                 },
               });
             case 'cave_list_conversations':
-              assertExactArgs(command, args, {
+              assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
                 page: { limit: 50 },
               });
@@ -211,7 +239,7 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
                 },
               });
             case 'cave_get_conversation':
-              assertExactArgs(command, args, {
+              assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
                 conversationId: 'conversation-1',
               });
@@ -227,7 +255,7 @@ test('renders the Phase 1 read-only happy path with mocked Tauri commands', asyn
                 },
               });
             case 'cave_list_conversation_messages':
-              assertExactArgs(command, args, {
+              assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
                 conversationId: 'conversation-1',
                 page: { limit: 50 },
