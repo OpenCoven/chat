@@ -279,6 +279,10 @@ function isPairingTimeout(error: unknown): boolean {
   );
 }
 
+function isPairingExpired(error: unknown): boolean {
+  return isCaveClientError(error) && error.code === 'pairing_expired';
+}
+
 function isOfflineFailure(failure: SafeFailure): boolean {
   return (
     failure.code === 'not_found' ||
@@ -707,6 +711,10 @@ export function createCaveConnectionController(
           signal,
         );
       } catch (error) {
+        if (current(generation) && isPairingExpired(error)) {
+          await resetPairingAndReconcile('expired');
+          return;
+        }
         if (
           current(generation) &&
           (isPairingTimeout(error) || options.now() >= pairing.expiresAt)
@@ -738,6 +746,10 @@ export function createCaveConnectionController(
               signal,
             );
           } catch (error) {
+            if (current(generation) && isPairingExpired(error)) {
+              await resetPairingAndReconcile('expired');
+              return;
+            }
             if (
               current(generation) &&
               (isPairingTimeout(error) || options.now() >= pairing.expiresAt)

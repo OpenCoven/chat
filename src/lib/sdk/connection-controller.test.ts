@@ -820,6 +820,50 @@ describe('Cave connection controller', () => {
     }
   });
 
+  it('reconciles a native pairing-expired rejection as an expired pairing outcome', async () => {
+    const calls = rateLimitedCalls();
+    const packedClient = rateLimitedClient(
+      'poll',
+      () =>
+        Promise.reject(
+          Object.freeze({
+            code: 'pairing_expired',
+            retryable: false,
+          }),
+        ),
+      calls,
+    );
+    const reconciliation = nativeHost({
+      credentialStatus: async () => ({ status: 'missing' }),
+    });
+    const discover = vi
+      .fn<CaveConnectionHost['discover']>()
+      .mockImplementationOnce(async () => discoveryWithClient(packedClient))
+      .mockImplementationOnce(reconciliation.discover);
+    let resets = 0;
+    const subject = controller(
+      hostPort(
+        discover,
+        async () => undefined,
+        async () => {
+          resets += 1;
+        },
+      ),
+    );
+
+    await subject.start();
+    await subject.beginPairing();
+
+    expect(resets).toBe(1);
+    expect(calls.polls).toBe(1);
+    expect(calls.exchanges).toBe(0);
+    expect(subject.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: CAVE_INSTANCE_ID,
+      reason: 'expired',
+    });
+  });
+
   it('resets packed SDK timeout errors at every pairing phase before reconciliation', async () => {
     for (const phase of ['create', 'poll', 'exchange'] as const) {
       for (const outcome of ['missing', 'ready'] as const) {

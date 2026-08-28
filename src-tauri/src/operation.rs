@@ -321,7 +321,25 @@ impl NativeMutationContext {
     }
 
     pub(crate) fn mark_exchange_dispatch(&self) -> NativeResult<()> {
-        self.checkpoint()?;
+        let _gate = self
+            .signal
+            .gate
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+        if let Some(reason) = self.signal.current() {
+            return Err(reason.diagnostic());
+        }
+        if Instant::now() >= self.deadline {
+            if self
+                .signal
+                .reason
+                .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                self.signal.notify.notify_waiters();
+            }
+            return Err(NativeCancelReason::Timeout.diagnostic());
+        }
         self.ambiguity
             .store(AMBIGUITY_EXCHANGE_RECONCILIATION, Ordering::SeqCst);
         self.phase
@@ -1034,6 +1052,40 @@ mod tests {
                 },)
             ),
             Err(NativeDiagnostic::new("invalid_native_input", false))
+        );
+    }
+
+    #[test]
+    fn exchange_dispatch_and_cancellation_have_one_authoritative_order() {
+        let cancelled_signal = Arc::new(OperationSignal::new());
+        let cancelled_phase = Arc::new(AtomicU8::new(MUTATION_IDLE));
+        let cancelled = NativeMutationContext {
+            phase: Arc::clone(&cancelled_phase),
+            signal: Arc::clone(&cancelled_signal),
+            ambiguity: Arc::new(AtomicU8::new(AMBIGUITY_CREDENTIAL_UPDATE)),
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        assert!(cancelled_signal.cancel(NativeCancelReason::Aborted));
+        assert_eq!(
+            cancelled.mark_exchange_dispatch(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        assert_eq!(cancelled_phase.load(Ordering::SeqCst), MUTATION_IDLE);
+
+        let dispatched_signal = Arc::new(OperationSignal::new());
+        let dispatched_phase = Arc::new(AtomicU8::new(MUTATION_IDLE));
+        let dispatched = NativeMutationContext {
+            phase: Arc::clone(&dispatched_phase),
+            signal: Arc::clone(&dispatched_signal),
+            ambiguity: Arc::new(AtomicU8::new(AMBIGUITY_CREDENTIAL_UPDATE)),
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        assert_eq!(dispatched.mark_exchange_dispatch(), Ok(()));
+        assert!(dispatched_signal.cancel(NativeCancelReason::Aborted));
+        assert_eq!(dispatched_phase.load(Ordering::SeqCst), MUTATION_DISPATCHED);
+        assert_eq!(
+            dispatched.ambiguous(),
+            NativeDiagnostic::new("reconcile_required", false)
         );
     }
 
