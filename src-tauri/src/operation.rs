@@ -357,17 +357,6 @@ impl NativeMutationContext {
             })
     }
 
-    pub(crate) fn checkpoint(&self) -> NativeResult<()> {
-        if let Some(reason) = self.signal.current() {
-            return Err(reason.diagnostic());
-        }
-        if Instant::now() >= self.deadline {
-            self.signal.cancel(NativeCancelReason::Timeout);
-            return Err(NativeCancelReason::Timeout.diagnostic());
-        }
-        Ok(())
-    }
-
     fn ambiguous(&self) -> NativeDiagnostic {
         if self.ambiguity.load(Ordering::SeqCst) == AMBIGUITY_EXCHANGE_RECONCILIATION {
             NativeDiagnostic::new("reconcile_required", false)
