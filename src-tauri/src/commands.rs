@@ -49,10 +49,9 @@ pub async fn cave_read_discovery(
     let runner = state.inner().clone();
     let operation_state = runner.clone();
     runner
-        .run_operation(
-            operation,
-            async move { operation_state.cave_read_discovery() },
-        )
+        .run_controlled_operation(operation, move |lease| async move {
+            operation_state.cave_read_discovery_managed(lease).await
+        })
         .await
 }
 

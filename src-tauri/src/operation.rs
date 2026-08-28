@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,10 @@ const MUTATION_QUEUED: u8 = 1;
 const MUTATION_STARTED: u8 = 2;
 const MUTATION_CANCELLED: u8 = 3;
 const MUTATION_FINISHED: u8 = 4;
+const MUTATION_DISPATCHED: u8 = 5;
+const MUTATION_QUEUED_IRREVERSIBLE: u8 = 6;
+const AMBIGUITY_CREDENTIAL_UPDATE: u8 = 0;
+const AMBIGUITY_EXCHANGE_RECONCILIATION: u8 = 1;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -118,6 +122,14 @@ pub(crate) struct NativeMutationQueue {
 pub(crate) struct NativeMutationContext {
     phase: Arc<AtomicU8>,
     signal: Arc<OperationSignal>,
+    ambiguity: Arc<AtomicU8>,
+    deadline: Instant,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeOperationLease {
+    signal: Arc<OperationSignal>,
+    deadline: Instant,
 }
 
 enum MutationCancellation {
@@ -166,6 +178,7 @@ struct AttemptEpoch {
 struct OperationSignal {
     reason: AtomicU8,
     notify: Notify,
+    gate: Mutex<()>,
 }
 
 impl OperationSignal {
@@ -173,10 +186,14 @@ impl OperationSignal {
         Self {
             reason: AtomicU8::new(0),
             notify: Notify::new(),
+            gate: Mutex::new(()),
         }
     }
 
-    fn cancel(&self, reason: NativeCancelReason) {
+    fn cancel(&self, reason: NativeCancelReason) -> bool {
+        let Ok(_gate) = self.gate.lock() else {
+            return false;
+        };
         let encoded = match reason {
             NativeCancelReason::Aborted => 1,
             NativeCancelReason::Timeout => 2,
@@ -187,6 +204,9 @@ impl OperationSignal {
             .is_ok()
         {
             self.notify.notify_waiters();
+            true
+        } else {
+            false
         }
     }
 
@@ -209,22 +229,67 @@ impl OperationSignal {
     }
 }
 
+pub(crate) struct NativeOperationCommitGuard<'a> {
+    signal: &'a OperationSignal,
+    _gate: std::sync::MutexGuard<'a, ()>,
+}
+
+impl Drop for NativeOperationCommitGuard<'_> {
+    fn drop(&mut self) {
+        self.signal
+            .reason
+            .compare_exchange(0, 3, Ordering::SeqCst, Ordering::SeqCst)
+            .ok();
+    }
+}
+
+impl NativeOperationLease {
+    pub(crate) fn commit_guard(&self) -> NativeResult<NativeOperationCommitGuard<'_>> {
+        let gate = self
+            .signal
+            .gate
+            .lock()
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+        if let Some(reason) = self.signal.current() {
+            return Err(reason.diagnostic());
+        }
+        if Instant::now() >= self.deadline {
+            self.signal
+                .reason
+                .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst)
+                .ok();
+            self.signal.notify.notify_waiters();
+            return Err(NativeCancelReason::Timeout.diagnostic());
+        }
+        Ok(NativeOperationCommitGuard {
+            signal: self.signal.as_ref(),
+            _gate: gate,
+        })
+    }
+}
+
 impl NativeMutationContext {
     fn queue(&self) -> NativeResult<()> {
-        self.phase
-            .compare_exchange(
-                MUTATION_IDLE,
-                MUTATION_QUEUED,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            )
-            .map(|_| ())
-            .map_err(|_| {
-                self.signal.current().map_or_else(
-                    || NativeDiagnostic::new("credential_update_in_progress", false),
-                    NativeCancelReason::diagnostic,
-                )
-            })
+        loop {
+            let current = self.phase.load(Ordering::SeqCst);
+            let queued = match current {
+                MUTATION_IDLE => MUTATION_QUEUED,
+                MUTATION_DISPATCHED => MUTATION_QUEUED_IRREVERSIBLE,
+                _ => {
+                    return Err(self
+                        .signal
+                        .current()
+                        .map_or_else(|| self.ambiguous(), NativeCancelReason::diagnostic));
+                }
+            };
+            if self
+                .phase
+                .compare_exchange(current, queued, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
     }
 
     fn cancel_before_start(&self) -> MutationCancellation {
@@ -245,7 +310,9 @@ impl NativeMutationContext {
                         return MutationCancellation::Cancelled;
                     }
                 }
-                MUTATION_STARTED => return MutationCancellation::Started,
+                MUTATION_DISPATCHED | MUTATION_QUEUED_IRREVERSIBLE | MUTATION_STARTED => {
+                    return MutationCancellation::Started;
+                }
                 MUTATION_FINISHED => return MutationCancellation::Finished,
                 MUTATION_CANCELLED => return MutationCancellation::Cancelled,
                 _ => return MutationCancellation::Started,
@@ -253,8 +320,42 @@ impl NativeMutationContext {
         }
     }
 
-    fn ambiguous() -> NativeDiagnostic {
-        NativeDiagnostic::new("credential_update_in_progress", false)
+    pub(crate) fn mark_exchange_dispatch(&self) -> NativeResult<()> {
+        self.checkpoint()?;
+        self.ambiguity
+            .store(AMBIGUITY_EXCHANGE_RECONCILIATION, Ordering::SeqCst);
+        self.phase
+            .compare_exchange(
+                MUTATION_IDLE,
+                MUTATION_DISPATCHED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .map(|_| ())
+            .map_err(|_| {
+                self.signal
+                    .current()
+                    .map_or_else(|| self.ambiguous(), NativeCancelReason::diagnostic)
+            })
+    }
+
+    pub(crate) fn checkpoint(&self) -> NativeResult<()> {
+        if let Some(reason) = self.signal.current() {
+            return Err(reason.diagnostic());
+        }
+        if Instant::now() >= self.deadline {
+            self.signal.cancel(NativeCancelReason::Timeout);
+            return Err(NativeCancelReason::Timeout.diagnostic());
+        }
+        Ok(())
+    }
+
+    fn ambiguous(&self) -> NativeDiagnostic {
+        if self.ambiguity.load(Ordering::SeqCst) == AMBIGUITY_EXCHANGE_RECONCILIATION {
+            NativeDiagnostic::new("reconcile_required", false)
+        } else {
+            NativeDiagnostic::new("credential_update_in_progress", false)
+        }
     }
 }
 
@@ -269,7 +370,7 @@ impl NativeMutationQueue {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(NativeMutationContext::ambiguous());
+            return Err(context.ambiguous());
         }
         if let Err(error) = context.queue() {
             self.busy.store(false, Ordering::SeqCst);
@@ -292,19 +393,20 @@ impl NativeMutationQueue {
                 .worker
                 .lock()
                 .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
-            if phase
-                .compare_exchange(
-                    MUTATION_QUEUED,
+            let current = phase.load(Ordering::SeqCst);
+            let started = match current {
+                MUTATION_QUEUED | MUTATION_QUEUED_IRREVERSIBLE => phase.compare_exchange(
+                    current,
                     MUTATION_STARTED,
                     Ordering::SeqCst,
                     Ordering::SeqCst,
-                )
-                .is_err()
-            {
-                return Err(signal.current().map_or_else(
-                    || NativeDiagnostic::new("credential_update_in_progress", false),
-                    NativeCancelReason::diagnostic,
-                ));
+                ),
+                _ => Err(current),
+            };
+            if started.is_err() {
+                return Err(signal
+                    .current()
+                    .map_or_else(|| context.ambiguous(), NativeCancelReason::diagnostic));
             }
             let result = task();
             phase.store(MUTATION_FINISHED, Ordering::SeqCst);
@@ -356,8 +458,40 @@ impl NativeOperationRegistry {
             biased;
             reason = guard.signal.cancelled() => Err(reason.diagnostic()),
             _ = tokio::time::sleep(guard.timeout) => {
-                guard.signal.cancel(NativeCancelReason::Timeout);
-                Err(NativeCancelReason::Timeout.diagnostic())
+                if guard.signal.cancel(NativeCancelReason::Timeout) {
+                    Err(NativeCancelReason::Timeout.diagnostic())
+                } else {
+                    (&mut future).await
+                }
+            }
+            result = &mut future => result,
+        }
+    }
+
+    pub(crate) async fn run_controlled<T, Fut>(
+        self: &Arc<Self>,
+        input: NativeOperationInput,
+        executor: impl FnOnce(NativeOperationLease) -> Fut,
+    ) -> NativeResult<T>
+    where
+        Fut: Future<Output = NativeResult<T>>,
+    {
+        let guard = self.begin(input, None)?;
+        let lease = NativeOperationLease {
+            signal: Arc::clone(&guard.signal),
+            deadline: Instant::now() + guard.timeout,
+        };
+        let future = executor(lease);
+        tokio::pin!(future);
+        tokio::select! {
+            biased;
+            reason = guard.signal.cancelled() => Err(reason.diagnostic()),
+            _ = tokio::time::sleep(guard.timeout) => {
+                if guard.signal.cancel(NativeCancelReason::Timeout) {
+                    Err(NativeCancelReason::Timeout.diagnostic())
+                } else {
+                    (&mut future).await
+                }
             }
             result = &mut future => result,
         }
@@ -376,6 +510,8 @@ impl NativeOperationRegistry {
         let mutation = NativeMutationContext {
             phase,
             signal: Arc::clone(&guard.signal),
+            ambiguity: Arc::new(AtomicU8::new(AMBIGUITY_CREDENTIAL_UPDATE)),
+            deadline: Instant::now() + guard.timeout,
         };
         let future = executor(mutation.clone());
         tokio::pin!(future);
@@ -384,7 +520,7 @@ impl NativeOperationRegistry {
             reason = guard.signal.cancelled() => {
                 match mutation.cancel_before_start() {
                     MutationCancellation::Cancelled => Err(reason.diagnostic()),
-                    MutationCancellation::Started => Err(NativeMutationContext::ambiguous()),
+                    MutationCancellation::Started => Err(mutation.ambiguous()),
                     MutationCancellation::Finished => (&mut future).await,
                 }
             }
@@ -392,7 +528,7 @@ impl NativeOperationRegistry {
                 guard.signal.cancel(NativeCancelReason::Timeout);
                 match mutation.cancel_before_start() {
                     MutationCancellation::Cancelled => Err(NativeCancelReason::Timeout.diagnostic()),
-                    MutationCancellation::Started => Err(NativeMutationContext::ambiguous()),
+                    MutationCancellation::Started => Err(mutation.ambiguous()),
                     MutationCancellation::Finished => (&mut future).await,
                 }
             }
@@ -412,12 +548,18 @@ impl NativeOperationRegistry {
             .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
         if let Some(active) = state.active.get(&identity.key) {
             if active.raw == identity.raw {
-                active.signal.cancel(reason);
+                let cancelled = active.signal.cancel(reason);
+                if !cancelled {
+                    return Ok(NativeCancelResult::in_progress());
+                }
                 return Ok(
                     if active.mutation_phase.as_ref().is_some_and(|phase| {
                         matches!(
                             phase.load(Ordering::SeqCst),
-                            MUTATION_STARTED | MUTATION_FINISHED
+                            MUTATION_DISPATCHED
+                                | MUTATION_QUEUED_IRREVERSIBLE
+                                | MUTATION_STARTED
+                                | MUTATION_FINISHED
                         )
                     }) {
                         NativeCancelResult::in_progress()
@@ -428,10 +570,6 @@ impl NativeOperationRegistry {
             }
             return Ok(NativeCancelResult::unknown());
         }
-        if sequence_was_consumed(&state, identity.key) {
-            return Ok(NativeCancelResult::unknown());
-        }
-        validate_pending_sequence(&state, identity.key)?;
         if let Some(pending) = state.pending.get(&identity.key) {
             return Ok(if pending.raw == identity.raw {
                 NativeCancelResult::queued()
@@ -439,6 +577,11 @@ impl NativeOperationRegistry {
                 NativeCancelResult::unknown()
             });
         }
+        if sequence_was_consumed(&state, identity.key) {
+            return Ok(NativeCancelResult::unknown());
+        }
+        validate_pending_sequence(&state, identity.key)?;
+        mark_sequence_consumed(&mut state, identity.key)?;
         if !state.pending.contains_key(&identity.key) {
             while state.pending.len() >= MAX_PENDING_CANCELLATIONS {
                 let Some(expired) = state.pending_order.pop_front() else {
@@ -480,10 +623,9 @@ impl NativeOperationRegistry {
         if state.active.len() >= MAX_ACTIVE_OPERATIONS {
             return Err(NativeDiagnostic::new("service_unavailable", true));
         }
-        if state.active.contains_key(&identity.key) || sequence_was_consumed(&state, identity.key) {
+        if state.active.contains_key(&identity.key) {
             return Err(NativeDiagnostic::new("invalid_native_input", false));
         }
-        validate_pending_sequence(&state, identity.key)?;
         let signal = Arc::new(OperationSignal::new());
         let pending = state.pending.remove(&identity.key);
         if pending.is_some() {
@@ -491,12 +633,17 @@ impl NativeOperationRegistry {
                 .pending_order
                 .retain(|attempt_key| *attempt_key != identity.key);
         }
-        mark_sequence_consumed(&mut state, identity.key)?;
         if let Some(pending) = pending {
             if pending.raw != identity.raw {
                 return Err(NativeDiagnostic::new("invalid_native_input", false));
             }
             signal.cancel(pending.reason);
+        } else {
+            if sequence_was_consumed(&state, identity.key) {
+                return Err(NativeDiagnostic::new("invalid_native_input", false));
+            }
+            validate_pending_sequence(&state, identity.key)?;
+            mark_sequence_consumed(&mut state, identity.key)?;
         }
         state.active.insert(
             identity.key,
@@ -803,6 +950,56 @@ mod tests {
             ),
             Err(NativeDiagnostic::new("invalid_native_input", false))
         );
+    }
+
+    #[test]
+    fn cancelled_attempts_remain_single_use_after_tombstone_eviction() {
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let epoch = test_epoch();
+        let first = generated_attempt(epoch, 1);
+        for counter in 1..=(MAX_PENDING_CANCELLATIONS as u64 + 32) {
+            assert_eq!(
+                registry
+                    .cancel(
+                        generated_attempt(epoch, counter),
+                        NativeCancelReason::Aborted,
+                    )
+                    .unwrap()
+                    .status,
+                "queued"
+            );
+        }
+
+        assert_eq!(
+            registry
+                .cancel(first.clone(), NativeCancelReason::Timeout)
+                .unwrap()
+                .status,
+            "unknown"
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(
+                registry.run(NativeOperationInput::new(first, 100).unwrap(), async {
+                    Ok(())
+                },)
+            ),
+            Err(NativeDiagnostic::new("invalid_native_input", false))
+        );
+    }
+
+    #[test]
+    fn random_unknown_uuid_cancellations_do_not_grow_registry_memory() {
+        let registry = NativeOperationRegistry::default();
+        for index in 0..5_000_u64 {
+            let attempt = format!("00000000-0000-4000-8000-{index:012x}");
+            assert!(registry
+                .cancel(attempt, NativeCancelReason::Aborted)
+                .is_err());
+        }
+        let state = registry.state.lock().unwrap();
+        assert!(state.active.is_empty());
+        assert!(state.pending.is_empty());
+        assert!(state.epochs.is_empty());
     }
 
     #[test]

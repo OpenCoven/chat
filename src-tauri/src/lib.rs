@@ -18,7 +18,9 @@ use cave::{
 };
 use connection::ConnectionRuntime;
 use keyring::{validate_installation_id, CredentialCustody, NativeKeyring};
-use operation::{NativeMutationContext, NativeMutationQueue, NativeOperationRegistry};
+use operation::{
+    NativeMutationContext, NativeMutationQueue, NativeOperationLease, NativeOperationRegistry,
+};
 use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
@@ -95,6 +97,17 @@ impl NativeConnectionState {
         Fut: std::future::Future<Output = Result<T, NativeDiagnostic>>,
     {
         self.operations.run_mutating(operation, executor).await
+    }
+
+    async fn run_controlled_operation<T, Fut>(
+        &self,
+        operation: NativeOperationInput,
+        executor: impl FnOnce(NativeOperationLease) -> Fut,
+    ) -> Result<T, NativeDiagnostic>
+    where
+        Fut: std::future::Future<Output = Result<T, NativeDiagnostic>>,
+    {
+        self.operations.run_controlled(operation, executor).await
     }
 
     async fn run_keyring_mutation<T: Send + 'static>(

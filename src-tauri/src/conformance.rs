@@ -476,8 +476,8 @@ impl RpcRuntime {
                 let runner = self.state.clone();
                 let operation_state = runner.clone();
                 value_from(tauri::async_runtime::block_on(
-                    runner.run_operation(operation, async move {
-                        operation_state.cave_read_discovery()
+                    runner.run_controlled_operation(operation, move |lease| async move {
+                        operation_state.cave_read_discovery_managed(lease).await
                     }),
                 )?)?
             }
