@@ -562,6 +562,54 @@ pub struct CredentialCommandInput {
     pub request_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanonicalPageOptions {
+    pub limit: u16,
+    #[serde(default, deserialize_with = "deserialize_optional_non_null_string")]
+    pub cursor: Option<String>,
+}
+
+impl CanonicalPageOptions {
+    fn validate(&self) -> Result<(), NativeError> {
+        if self.limit == 0
+            || self.limit > 100
+            || self
+                .cursor
+                .as_deref()
+                .is_some_and(|cursor| !valid_cursor(cursor))
+        {
+            return Err(NativeError::invalid_request());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanonicalPageCommandInput {
+    pub authority: AuthorityReference,
+    pub request_id: String,
+    pub options: CanonicalPageOptions,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConversationCommandInput {
+    pub authority: AuthorityReference,
+    pub request_id: String,
+    pub conversation_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConversationPageCommandInput {
+    pub authority: AuthorityReference,
+    pub request_id: String,
+    pub conversation_id: String,
+    pub options: CanonicalPageOptions,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallationIdentity {
@@ -677,6 +725,9 @@ pub struct ProviderPairingExchange {
 
 pub trait ManagedNativeAuthorityProvider: Send + Sync {
     fn available(&self) -> bool;
+    fn discover(&self) -> ProviderFuture<AuthorityDescriptor> {
+        unavailable_future()
+    }
     fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<NativeResponse>;
     fn pairing_create(
         &self,
@@ -695,6 +746,47 @@ pub trait ManagedNativeAuthorityProvider: Send + Sync {
         remote_request_id: String,
         pairing_secret: SecretValue,
     ) -> ProviderFuture<ProviderPairingExchange>;
+    fn list_familiars(
+        &self,
+        _authority: AuthorityDescriptor,
+        _bearer: SecretValue,
+        _options: CanonicalPageOptions,
+    ) -> ProviderFuture<NativeResponse> {
+        unavailable_future()
+    }
+    fn list_projects(
+        &self,
+        _authority: AuthorityDescriptor,
+        _bearer: SecretValue,
+        _options: CanonicalPageOptions,
+    ) -> ProviderFuture<NativeResponse> {
+        unavailable_future()
+    }
+    fn list_conversations(
+        &self,
+        _authority: AuthorityDescriptor,
+        _bearer: SecretValue,
+        _options: CanonicalPageOptions,
+    ) -> ProviderFuture<NativeResponse> {
+        unavailable_future()
+    }
+    fn get_conversation(
+        &self,
+        _authority: AuthorityDescriptor,
+        _bearer: SecretValue,
+        _conversation_id: String,
+    ) -> ProviderFuture<NativeResponse> {
+        unavailable_future()
+    }
+    fn list_conversation_messages(
+        &self,
+        _authority: AuthorityDescriptor,
+        _bearer: SecretValue,
+        _conversation_id: String,
+        _options: CanonicalPageOptions,
+    ) -> ProviderFuture<NativeResponse> {
+        unavailable_future()
+    }
 }
 
 pub struct UnavailableManagedNativeAuthorityProvider;
@@ -706,6 +798,10 @@ fn unavailable_future<T>() -> ProviderFuture<T> {
 impl ManagedNativeAuthorityProvider for UnavailableManagedNativeAuthorityProvider {
     fn available(&self) -> bool {
         false
+    }
+
+    fn discover(&self) -> ProviderFuture<AuthorityDescriptor> {
+        unavailable_future()
     }
 
     fn health(&self, _authority: AuthorityDescriptor) -> ProviderFuture<NativeResponse> {
@@ -1209,6 +1305,12 @@ impl NativeSdkBoundary {
         authority: AuthorityDescriptor,
     ) -> Result<AuthorityReference, NativeError> {
         self.authority_open_with_transition(authority, |_| {})
+    }
+
+    pub async fn discover_authority_descriptor(&self) -> Result<AuthorityDescriptor, NativeError> {
+        let descriptor = self.provider.discover().await?;
+        descriptor.validate()?;
+        Ok(descriptor)
     }
 
     fn authority_open_with_transition(
@@ -1817,6 +1919,187 @@ impl NativeSdkBoundary {
         })
     }
 
+    pub async fn list_familiars(
+        &self,
+        input: CanonicalPageCommandInput,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        input.options.validate()?;
+        let (request, authority, bearer) = self
+            .begin_authenticated_read(&input.authority, &input.request_id)
+            .await?;
+        let response = match self
+            .provider
+            .list_familiars(authority, bearer, input.options)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.finish_read(request, input.authority, input.request_id, response)
+    }
+
+    pub async fn list_projects(
+        &self,
+        input: CanonicalPageCommandInput,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        input.options.validate()?;
+        let (request, authority, bearer) = self
+            .begin_authenticated_read(&input.authority, &input.request_id)
+            .await?;
+        let response = match self
+            .provider
+            .list_projects(authority, bearer, input.options)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.finish_read(request, input.authority, input.request_id, response)
+    }
+
+    pub async fn list_conversations(
+        &self,
+        input: CanonicalPageCommandInput,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        input.options.validate()?;
+        let (request, authority, bearer) = self
+            .begin_authenticated_read(&input.authority, &input.request_id)
+            .await?;
+        let response = match self
+            .provider
+            .list_conversations(authority, bearer, input.options)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.finish_read(request, input.authority, input.request_id, response)
+    }
+
+    pub async fn get_conversation(
+        &self,
+        input: ConversationCommandInput,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        validate_conversation_id(&input.conversation_id)?;
+        let (request, authority, bearer) = self
+            .begin_authenticated_read(&input.authority, &input.request_id)
+            .await?;
+        let response = match self
+            .provider
+            .get_conversation(authority, bearer, input.conversation_id)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.finish_read(request, input.authority, input.request_id, response)
+    }
+
+    pub async fn list_conversation_messages(
+        &self,
+        input: ConversationPageCommandInput,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        input.options.validate()?;
+        validate_conversation_id(&input.conversation_id)?;
+        let (request, authority, bearer) = self
+            .begin_authenticated_read(&input.authority, &input.request_id)
+            .await?;
+        let response = match self
+            .provider
+            .list_conversation_messages(authority, bearer, input.conversation_id, input.options)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.finish_read(request, input.authority, input.request_id, response)
+    }
+
+    async fn begin_authenticated_read(
+        &self,
+        authority_reference: &AuthorityReference,
+        request_id: &str,
+    ) -> Result<(RequestLease, AuthorityDescriptor, SecretValue), NativeError> {
+        let request = self
+            .lifecycle
+            .begin_request(authority_reference, request_id)?;
+        let authority = match self.lifecycle.descriptor(authority_reference) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let authority_fingerprint = match authority.fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let custody = Arc::clone(&self.custody);
+        let credential = tauri::async_runtime::spawn_blocking(move || {
+            let installation_id = custody.installation_id()?;
+            custody.read_credential(&installation_id)
+        })
+        .await
+        .map_err(|_| NativeError::service_unavailable());
+        let credential = match credential {
+            Ok(Ok(CredentialLookup::Present(credential)))
+                if credential.authority_fingerprint == authority_fingerprint =>
+            {
+                credential
+            }
+            Ok(Ok(
+                CredentialLookup::Missing
+                | CredentialLookup::Invalid
+                | CredentialLookup::Present(_),
+            )) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::reconcile_required());
+            }
+            Ok(Err(error)) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        Ok((request, authority, credential.bearer))
+    }
+
+    fn finish_read(
+        &self,
+        request: RequestLease,
+        authority: AuthorityReference,
+        request_id: String,
+        response: NativeResponse,
+    ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        self.lifecycle.finish_request(&request)?;
+        Ok(OperationResult {
+            authority,
+            request_id,
+            result: response,
+        })
+    }
+
     pub fn diagnostics(&self) -> NativeDiagnostics {
         let cleanup = self.cleanup_recoverable_credentials();
         let custody = match cleanup {
@@ -1901,6 +2184,53 @@ fn validate_remote_request_id(value: &str) -> Result<(), NativeError> {
     Ok(())
 }
 
+fn deserialize_optional_non_null_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(Some)
+}
+
+fn validate_conversation_id(value: &str) -> Result<(), NativeError> {
+    if value.is_empty()
+        || value.len() > 512
+        || value == "."
+        || value == ".."
+        || value.chars().any(char::is_control)
+    {
+        return Err(NativeError::invalid_request());
+    }
+    Ok(())
+}
+
+fn valid_cursor(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || value
+            .bytes()
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'-'))
+    {
+        return false;
+    }
+    let Some(last) = value.bytes().last() else {
+        return false;
+    };
+    let trailing_value = match last {
+        b'A'..=b'Z' => last - b'A',
+        b'a'..=b'z' => last - b'a' + 26,
+        b'0'..=b'9' => last - b'0' + 52,
+        b'-' => 62,
+        b'_' => 63,
+        _ => return false,
+    };
+    match value.len() % 4 {
+        0 => true,
+        2 => trailing_value % 16 == 0,
+        3 => trailing_value % 4 == 0,
+        _ => false,
+    }
+}
+
 fn validate_opaque_handle(value: &str, prefix: &str) -> Result<(), NativeError> {
     let Some(uuid) = value.strip_prefix(prefix) else {
         return Err(NativeError::invalid_request());
@@ -1945,6 +2275,17 @@ pub async fn sdk_installation_identity(
 ) -> Result<InstallationIdentity, NativeError> {
     let boundary = Arc::clone(&state.boundary);
     tauri::async_runtime::spawn_blocking(move || boundary.installation_identity())
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
+}
+
+#[tauri::command]
+pub async fn sdk_authority_discover(
+    state: tauri::State<'_, NativeSdkState>,
+) -> Result<AuthorityReference, NativeError> {
+    let boundary = Arc::clone(&state.boundary);
+    let descriptor = boundary.discover_authority_descriptor().await?;
+    tauri::async_runtime::spawn_blocking(move || boundary.authority_open(descriptor))
         .await
         .map_err(|_| NativeError::service_unavailable())?
 }
@@ -2049,6 +2390,46 @@ pub async fn cave_forget_credential(
 }
 
 #[tauri::command]
+pub async fn cave_list_familiars(
+    state: tauri::State<'_, NativeSdkState>,
+    input: CanonicalPageCommandInput,
+) -> Result<OperationResult<NativeResponse>, NativeError> {
+    state.boundary.list_familiars(input).await
+}
+
+#[tauri::command]
+pub async fn cave_list_projects(
+    state: tauri::State<'_, NativeSdkState>,
+    input: CanonicalPageCommandInput,
+) -> Result<OperationResult<NativeResponse>, NativeError> {
+    state.boundary.list_projects(input).await
+}
+
+#[tauri::command]
+pub async fn cave_list_conversations(
+    state: tauri::State<'_, NativeSdkState>,
+    input: CanonicalPageCommandInput,
+) -> Result<OperationResult<NativeResponse>, NativeError> {
+    state.boundary.list_conversations(input).await
+}
+
+#[tauri::command]
+pub async fn cave_get_conversation(
+    state: tauri::State<'_, NativeSdkState>,
+    input: ConversationCommandInput,
+) -> Result<OperationResult<NativeResponse>, NativeError> {
+    state.boundary.get_conversation(input).await
+}
+
+#[tauri::command]
+pub async fn cave_list_conversation_messages(
+    state: tauri::State<'_, NativeSdkState>,
+    input: ConversationPageCommandInput,
+) -> Result<OperationResult<NativeResponse>, NativeError> {
+    state.boundary.list_conversation_messages(input).await
+}
+
+#[tauri::command]
 pub async fn sdk_native_diagnostics(
     state: tauri::State<'_, NativeSdkState>,
 ) -> Result<NativeDiagnostics, NativeError> {
@@ -2061,7 +2442,7 @@ pub async fn sdk_native_diagnostics(
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Condvar, Mutex,
     };
     use std::time::{Duration, Instant};
@@ -2069,10 +2450,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AuthorityDescriptor, AuthorityLifecycle, CredentialCommandInput,
-        ManagedNativeAuthorityProvider, NativeSdkBoundary, PairingCreateCommandInput,
-        PairingHandleCommandInput, PairingRequest, ProviderFuture, ProviderPairingCreated,
-        ProviderPairingExchange,
+        AuthorityDescriptor, AuthorityLifecycle, CanonicalPageCommandInput, CanonicalPageOptions,
+        CredentialCommandInput, ManagedNativeAuthorityProvider, NativeSdkBoundary,
+        PairingCreateCommandInput, PairingHandleCommandInput, PairingRequest, ProviderFuture,
+        ProviderPairingCreated, ProviderPairingExchange,
     };
     use crate::cave_credentials::{
         CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialStoreAvailability,
@@ -2231,6 +2612,59 @@ mod tests {
         writes: AtomicUsize,
     }
 
+    struct ReadableCustody {
+        present: AtomicBool,
+        authority_fingerprint: String,
+    }
+
+    impl CredentialCustody for ReadableCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            if !self.present.load(Ordering::Relaxed) {
+                return Ok(CredentialLookup::Missing);
+            }
+            Ok(CredentialLookup::Present(
+                crate::cave_credentials::CredentialRecord {
+                    installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                    authority_fingerprint: self.authority_fingerprint.clone(),
+                    bearer: SecretValue::bearer(
+                        b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_vec(),
+                    )?,
+                },
+            ))
+        }
+
+        fn write_credential(
+            &self,
+            _credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            self.present.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            _expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            self.present.store(false, Ordering::Relaxed);
+            Ok(CredentialDeleteResult::Deleted)
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(self.present.swap(false, Ordering::Relaxed))
+        }
+    }
+
     impl CredentialCustody for FakeCustody {
         fn availability(&self) -> CredentialStoreAvailability {
             CredentialStoreAvailability::Available
@@ -2272,6 +2706,10 @@ mod tests {
     impl ManagedNativeAuthorityProvider for FakeProvider {
         fn available(&self) -> bool {
             true
+        }
+
+        fn discover(&self) -> ProviderFuture<AuthorityDescriptor> {
+            Box::pin(async { Ok(authority("00000000-0000-4000-8000-000000000001")) })
         }
 
         fn health(&self, _authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
@@ -2387,6 +2825,66 @@ mod tests {
                         }),
                     )?,
                 })
+            })
+        }
+
+        fn list_familiars(
+            &self,
+            _authority: AuthorityDescriptor,
+            bearer: SecretValue,
+            _options: CanonicalPageOptions,
+        ) -> ProviderFuture<crate::NativeResponse> {
+            Box::pin(async move {
+                assert_eq!(
+                    bearer.expose(),
+                    b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+                );
+                crate::NativeResponse::list_familiars(
+                    200,
+                    json!({
+                        "apiVersion": "1.0",
+                        "minimumClientVersion": "0.1.0",
+                        "capabilities": ["familiars", "cursors"],
+                        "operations": ["familiars.list"],
+                        "data": {
+                            "familiars": [{
+                                "id": "familiar-1",
+                                "displayName": "Astra",
+                                "role": "Research"
+                            }]
+                        }
+                    }),
+                )
+            })
+        }
+
+        fn list_conversations(
+            &self,
+            _authority: AuthorityDescriptor,
+            bearer: SecretValue,
+            _options: CanonicalPageOptions,
+        ) -> ProviderFuture<crate::NativeResponse> {
+            Box::pin(async move {
+                assert_eq!(
+                    bearer.expose(),
+                    b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+                );
+                crate::NativeResponse::list_conversations(
+                    200,
+                    json!({
+                        "apiVersion": "1.0",
+                        "minimumClientVersion": "0.1.0",
+                        "capabilities": ["conversations", "cursors"],
+                        "operations": ["conversations.list"],
+                        "data": {
+                            "conversations": [{
+                                "id": "conversation-1",
+                                "familiarId": "familiar-1",
+                                "updatedAt": "2026-08-28T11:00:00Z"
+                            }]
+                        }
+                    }),
+                )
             })
         }
     }
@@ -3741,6 +4239,69 @@ mod tests {
             assert!(!serde_json::to_string(&state)
                 .expect("state should serialize")
                 .contains("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));
+        });
+    }
+
+    #[test]
+    fn discovery_and_authenticated_reads_keep_authority_and_secrets_native() {
+        tauri::async_runtime::block_on(async {
+            let descriptor = authority("00000000-0000-4000-8000-000000000001");
+            let custody = Arc::new(ReadableCustody {
+                present: AtomicBool::new(false),
+                authority_fingerprint: descriptor.fingerprint().expect("fixture fingerprint"),
+            });
+            let boundary = NativeSdkBoundary::new(custody, Arc::new(FakeProvider));
+            let discovered = boundary
+                .discover_authority_descriptor()
+                .await
+                .expect("native discovery should return a trusted descriptor");
+            let authority = boundary
+                .authority_open(discovered)
+                .expect("trusted discovery should open an opaque authority");
+            let created = boundary
+                .pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-read".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("pairing should be created");
+            let exchanged = boundary
+                .pairing_exchange(PairingHandleCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-exchange-read".into(),
+                    pairing_handle: created.result.handle,
+                })
+                .await
+                .expect("pairing should exchange");
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-commit-read".into(),
+                    commit_handle: exchanged.result.commit_handle,
+                })
+                .expect("credential should commit");
+
+            let response = boundary
+                .list_conversations(CanonicalPageCommandInput {
+                    authority,
+                    request_id: "request-read".into(),
+                    options: CanonicalPageOptions {
+                        limit: 25,
+                        cursor: None,
+                    },
+                })
+                .await
+                .expect("canonical read should succeed");
+            let rendered = serde_json::to_string(&response).expect("response should serialize");
+
+            assert!(rendered.contains("conversation-1"));
+            assert!(!rendered.contains("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));
+            assert!(!rendered.contains("bearer"));
         });
     }
 }

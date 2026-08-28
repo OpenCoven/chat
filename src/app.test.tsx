@@ -1,160 +1,246 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 
 import { App } from './app';
-import { APP_CONNECTION_SUMMARY, APP_METADATA, APP_SCAFFOLD_STATUS } from './lib/app-metadata';
-import type { DesktopHost } from './lib/desktop-host';
+import type { NativeBoundary } from './lib/sdk/native-boundary';
 
-const PREVIEW_IDENTITY = Object.freeze({
-  name: 'OpenCoven Chat (preview)',
-  identifier: 'preview-only',
-  phase: 'phase-0-scaffold-preview',
-});
+const AUTHORITY = {
+  handle: 'authority:00000000-0000-4000-8000-000000000001',
+  generation: 1,
+};
+const INSTANCE_ID = '00000000-0000-4000-8000-000000000002';
 
-function makeDesktopHost(overrides: Partial<DesktopHost> = {}): DesktopHost {
+function makeBoundary(overrides: Partial<NativeBoundary> = {}): NativeBoundary {
   return {
-    canUseTauriCommands: () => false,
-    readAppIdentity: vi.fn().mockResolvedValue({
-      name: 'OpenCoven Chat',
-      identifier: 'ai.opencoven.chat',
-      phase: 'phase-0-scaffold',
+    isAvailable: () => true,
+    discover: vi.fn().mockResolvedValue(AUTHORITY),
+    close: vi.fn().mockResolvedValue(true),
+    installationIdentity: vi.fn().mockResolvedValue({
+      installationId: '00000000-0000-4000-8000-000000000003',
     }),
-    previewAppIdentity: () => PREVIEW_IDENTITY,
+    health: vi.fn().mockResolvedValue({
+      status: 'ok',
+      apiVersion: '1.0',
+      minimumClientVersion: '0.1.0',
+      capabilities: ['health'],
+      operations: ['health.read'],
+      instanceId: INSTANCE_ID,
+      pairingRequired: false,
+      releaseVersion: '0.1.0',
+    }),
+    pairingCreate: vi.fn().mockResolvedValue({
+      handle: 'pairing:00000000-0000-4000-8000-000000000004',
+      requestId: '00000000-0000-4000-8000-000000000005',
+      expiresAt: 2_000_000_000_000,
+    }),
+    pairingPoll: vi.fn().mockResolvedValue({
+      id: '00000000-0000-4000-8000-000000000005',
+      status: 'approved',
+      expiresAt: 2_000_000_000_000,
+    }),
+    pairingExchange: vi.fn().mockResolvedValue({
+      commitHandle: 'commit:00000000-0000-4000-8000-000000000006',
+      credential: {
+        id: '00000000-0000-4000-8000-000000000007',
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000003',
+        scopes: ['chat:read'],
+        createdAt: 1,
+        lastUsedAt: null,
+        revokedAt: null,
+        revocationReason: null,
+      },
+    }),
+    pairingCommit: vi.fn().mockResolvedValue(undefined),
+    pairingDiscard: vi.fn().mockResolvedValue('absent'),
+    credentialState: vi.fn().mockResolvedValue('present'),
+    forgetCredential: vi.fn().mockResolvedValue(true),
+    listFamiliars: vi.fn().mockResolvedValue({
+      data: [{ id: 'familiar-1', displayName: 'Astra', role: 'Research' }],
+    }),
+    listProjects: vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'project-1',
+          name: 'OpenCoven',
+          root: 'OpenCoven',
+          createdAt: '2026-08-28T09:00:00Z',
+          updatedAt: '2026-08-28T10:00:00Z',
+        },
+      ],
+    }),
+    listConversations: vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'conversation-1',
+          familiarId: 'familiar-1',
+          title: 'Native integration',
+          updatedAt: '2026-08-28T11:00:00Z',
+        },
+      ],
+    }),
+    getConversation: vi.fn().mockResolvedValue({
+      id: 'conversation-1',
+      familiarId: 'familiar-1',
+      title: 'Native integration',
+      updatedAt: '2026-08-28T11:00:00Z',
+    }),
+    listConversationMessages: vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'message-1',
+          conversationId: 'conversation-1',
+          parentId: null,
+          role: 'assistant',
+          text: 'Canonical message',
+          createdAt: '2026-08-28T11:01:00Z',
+          attachmentCount: 0,
+          toolCount: 0,
+        },
+      ],
+    }),
+    diagnostics: vi.fn().mockResolvedValue({
+      version: 1,
+      platform: 'darwin',
+      architecture: 'aarch64',
+      checks: [],
+    }),
+    listenConnectionEvents: vi.fn().mockResolvedValue(() => undefined),
     ...overrides,
   };
 }
 
 describe('App', () => {
-  it('renders an explicitly labeled browser preview fallback when Tauri is unavailable', () => {
-    const desktopIdentityHost = makeDesktopHost();
+  it('shows an explicit unavailable browser fallback without fabricating trust', () => {
+    const boundary = makeBoundary({ isAvailable: () => false });
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
+    render(<App nativeHost={boundary} />);
 
-    expect(screen.getByRole('heading', { name: 'OpenCoven Chat (preview)' })).toBeVisible();
-    expect(screen.getByRole('status', { name: 'Desktop identity status' })).toHaveTextContent(
-      'Browser preview fallback active. Desktop identity is available only inside Tauri.',
-    );
-    expect(screen.getByText('Browser preview fallback')).toBeVisible();
-    expect(desktopIdentityHost.readAppIdentity).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'OpenCoven Chat' })).toBeVisible();
+    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent('Offline');
+    expect(screen.getByText(/desktop app is required to connect securely/i)).toBeVisible();
+    expect(boundary.discover).not.toHaveBeenCalled();
   });
 
-  it('shows an unavailable Cave connection state for Phase 0', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
+  it('suppresses duplicate StrictMode bootstrap mutations', async () => {
+    const boundary = makeBoundary();
 
-    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
-      APP_CONNECTION_SUMMARY,
+    render(
+      <StrictMode>
+        <App nativeHost={boundary} />
+      </StrictMode>,
     );
+
+    expect(await screen.findByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Connected',
+    );
+    expect(boundary.discover).toHaveBeenCalledTimes(1);
+    expect(boundary.listenConnectionEvents).toHaveBeenCalledTimes(1);
   });
 
-  it('documents the future public Cave client boundary without integrating it', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
+  it('guides pairing through explicit approval and completion actions', async () => {
+    const boundary = makeBoundary({
+      health: vi.fn().mockResolvedValue({
+        status: 'ok',
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        capabilities: ['health'],
+        operations: ['health.read'],
+        instanceId: INSTANCE_ID,
+        pairingRequired: true,
+        releaseVersion: '0.1.0',
+      }),
+      credentialState: vi.fn().mockResolvedValueOnce('missing').mockResolvedValue('present'),
+    });
 
-    const boundary = screen
-      .getByRole('heading', { name: 'Integration boundary' })
-      .closest('section');
+    render(<App nativeHost={boundary} />);
 
-    expect(boundary).toHaveTextContent('Future Cave integration must import only from');
-    expect(boundary).toHaveTextContent('@opencoven/cave-client');
-    expect(boundary).toHaveTextContent(
-      'Phase 0 documents the typed package boundary only; runtime code still avoids private Cave schemas and source-relative SDK links.',
+    fireEvent.click(await screen.findByRole('button', { name: 'Request approval' }));
+    expect(await screen.findByText(/approve this device in Cave/i)).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check approval' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Complete connection' })).toBeEnabled(),
     );
-    expect(boundary).toHaveTextContent(
-      'Until package publication is explicitly approved, the cross-repository canary verifies packed @opencoven/cave-client tarballs in a temporary install copy instead of adding a local path dependency.',
+    fireEvent.click(screen.getByRole('button', { name: 'Complete connection' }));
+
+    expect(await screen.findByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Connected',
     );
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(boundary.pairingCommit).toHaveBeenCalledTimes(1);
   });
 
-  it('announces scaffold-only status semantics', () => {
-    render(<App desktopIdentityHost={makeDesktopHost()} />);
+  it('renders canonical reads and paginates only on explicit actions', async () => {
+    const secondConversation = {
+      id: 'conversation-2',
+      familiarId: 'familiar-1',
+      title: 'Second page',
+      updatedAt: '2026-08-28T12:00:00Z',
+    };
+    const boundary = makeBoundary({
+      listConversations: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            {
+              id: 'conversation-1',
+              familiarId: 'familiar-1',
+              title: 'Native integration',
+              updatedAt: '2026-08-28T11:00:00Z',
+            },
+          ],
+          cursor: { current: 'YQ', next: 'Yg', hasMore: true },
+        })
+        .mockResolvedValueOnce({
+          data: [secondConversation],
+          cursor: { current: 'Yg', hasMore: false },
+        }),
+    });
 
-    expect(screen.getByText(APP_SCAFFOLD_STATUS)).toBeVisible();
+    render(<App nativeHost={boundary} />);
+
+    const conversations = await screen.findByRole('navigation', { name: 'Conversations' });
+    expect(within(conversations).getByText('Native integration')).toBeVisible();
+    expect(boundary.listConversations).toHaveBeenCalledTimes(1);
+    expect(boundary.getConversation).not.toHaveBeenCalled();
+
+    fireEvent.click(within(conversations).getByRole('button', { name: /Native integration/i }));
+    expect(await screen.findByText('Canonical message')).toBeVisible();
+
+    fireEvent.click(within(conversations).getByRole('button', { name: 'Load more conversations' }));
+    expect(await within(conversations).findByText('Second page')).toBeVisible();
+    expect(boundary.listConversations).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the connection badge decorative', () => {
-    // The badge carries a colour dot. Colour is reinforcement, so the state
-    // must stay readable from the output element alone and the dot must not
-    // reach the accessibility tree as a second, conflicting announcement.
-    const { container } = render(<App desktopIdentityHost={makeDesktopHost()} />);
+  it('forgets only the local credential and returns to the approval gate', async () => {
+    const boundary = makeBoundary();
 
-    const badge = container.querySelector('.state-badge');
+    render(<App nativeHost={boundary} />);
 
-    expect(badge).toHaveAttribute('aria-hidden', 'true');
-    expect(badge?.querySelector('.state-dot')).not.toBeNull();
-    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
-      APP_CONNECTION_SUMMARY,
+    fireEvent.click(await screen.findByRole('button', { name: 'Forget this device' }));
+
+    expect(await screen.findByRole('status', { name: 'Connection state' })).toHaveTextContent(
+      'Approval required',
     );
+    expect(boundary.forgetCredential).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/does not revoke it on the service/i)).toBeVisible();
   });
 
-  it('exposes a stable scaffold fingerprint for preview smoke checks', () => {
-    const { container } = render(<App desktopIdentityHost={makeDesktopHost()} />);
-
-    expect(container.firstElementChild).toHaveAttribute(
-      'data-scaffold-fingerprint',
-      APP_METADATA.fingerprint,
-    );
-  });
-
-  it('renders the native app_identity result after a successful invoke', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockResolvedValue({
-        name: 'Native OpenCoven Chat',
-        identifier: 'ai.opencoven.chat.native',
-        phase: 'phase-0-native',
+  it('never renders secret-shaped values from rejected native data', async () => {
+    const boundary = makeBoundary({
+      discover: vi.fn().mockRejectedValue({
+        code: 'service_unavailable',
+        diagnosticId: '00000000-0000-4000-8000-000000000099',
+        retryable: true,
+        bearer: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       }),
     });
+    const { container } = render(<App nativeHost={boundary} />);
 
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('heading', { name: 'Native OpenCoven Chat' })).toBeVisible();
-    expect(screen.getByText('Native app_identity command')).toBeVisible();
-    expect(screen.queryByRole('status', { name: 'Desktop identity status' })).toBeNull();
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  it('surfaces native app_identity invoke failures instead of silently defaulting', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue(new Error('invoke failed: missing handler')),
-    });
-
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. invoke failed: missing handler',
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection unavailable');
+    expect(container.textContent).not.toMatch(
+      /Bearer|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/u,
     );
-    const identityPanel = screen
-      .getByRole('heading', { name: 'Desktop identity' })
-      .closest('aside');
-
-    expect(identityPanel).not.toBeNull();
-    expect(within(identityPanel as HTMLElement).getAllByText('Unavailable')).toHaveLength(3);
-    expect(screen.getByText('OpenCoven Chat')).toBeVisible();
-  });
-
-  it('shows a raw string rejection in the native app failure UI', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue('invoke failed: raw string'),
-    });
-
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. invoke failed: raw string',
-    );
-  });
-
-  it('falls back to the generic native app failure copy for unknown rejection payloads', async () => {
-    const desktopIdentityHost = makeDesktopHost({
-      canUseTauriCommands: () => true,
-      readAppIdentity: vi.fn().mockRejectedValue({ code: 'E_NATIVE', secret: 'hidden' }),
-    });
-
-    render(<App desktopIdentityHost={desktopIdentityHost} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Desktop identity unavailable. The native app_identity command failed.',
-    );
-    expect(screen.getByRole('alert')).not.toHaveTextContent('E_NATIVE');
-    expect(screen.getByRole('alert')).not.toHaveTextContent('hidden');
   });
 });

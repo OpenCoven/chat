@@ -6,6 +6,7 @@
   "permissions": [
     "allow-app-identity",
     "allow-sdk-installation-identity",
+    "allow-sdk-authority-discover",
     "allow-sdk-authority-open",
     "allow-sdk-authority-close",
     "allow-cave-health",
@@ -16,6 +17,11 @@
     "allow-cave-pairing-discard",
     "allow-cave-credential-state",
     "allow-cave-forget-credential",
+    "allow-cave-list-familiars",
+    "allow-cave-list-projects",
+    "allow-cave-list-conversations",
+    "allow-cave-get-conversation",
+    "allow-cave-list-conversation-messages",
     "allow-sdk-native-diagnostics"
   ]
 }

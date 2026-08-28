@@ -29,6 +29,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "app_identity",
             "sdk_installation_identity",
+            "sdk_authority_discover",
             "sdk_authority_open",
             "sdk_authority_close",
             "cave_health",
@@ -39,6 +40,11 @@ fn main() {
             "cave_pairing_discard",
             "cave_credential_state",
             "cave_forget_credential",
+            "cave_list_familiars",
+            "cave_list_projects",
+            "cave_list_conversations",
+            "cave_get_conversation",
+            "cave_list_conversation_messages",
             "sdk_native_diagnostics",
         ]),
     ))

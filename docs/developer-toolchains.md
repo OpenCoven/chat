@@ -47,9 +47,22 @@
 
 - The repository intentionally does **not** depend on unpublished
   `@opencoven/cave-client` runtime artifacts yet.
-- The placeholder boundary lives in `src/lib/cave-client-boundary.ts`.
-- `src/lib/desktop-host.ts` is the only typed webview-to-host bridge and is
-  limited to the non-secret `app_identity` command.
+- Packed-canary schema v2 pins the exact public DTO and managed-native
+  signatures used by the webview at SDK
+  `c237fdc08b56978f1c7220097cf0acb32e6852cb`.
+- `src/lib/sdk/native-boundary.ts` is the typed webview-to-host bridge. It
+  permits only the reviewed authority, pairing, credential, diagnostics, and
+  canonical-read commands and validates exact own-data invoke/event objects.
+- `src/lib/sdk/connection-controller.ts` owns the explicit secret-free
+  connection state machine. StrictMode bootstrap calls share one in-flight
+  generation, and ambiguous pairing create/exchange completion is never
+  replayed automatically.
+- `src/lib/sdk/query-adapter.ts` owns authenticated in-memory read state. It
+  requests 25 records per page, caps each walk at eight pages, rejects cursor
+  cycles and stale authority/request generations, and reloads only the affected
+  query for `reconcile_required`.
+- `src/lib/sdk/diagnostics.ts` maps only allowlisted codes and native checks to
+  fixed presentation copy.
 - The Tauri host registers only operation-specific native SDK commands. It does
   not expose generic fetch, shell, filesystem, credential-store, or arbitrary
   invoke commands.
@@ -61,10 +74,17 @@
 - Native authority, pairing, and credential command results carry opaque
   handles plus authority generation and request identity. Replacing an
   authority invalidates prior generations and transient pairing material.
+- Native discovery returns only an opaque authority handle/generation to the
+  webview. The production discovery/protected-transport provider remains
+  fail-closed, while mocked-Tauri Playwright covers the complete UI journey.
 - Health and pairing responses are reduced through operation-specific exact
   DTO schemas. Unknown fields, raw causes, private paths, serialized keychain
   records, and prompt or message content are rejected or replaced with fixed
   safe error text before serialization.
+- Canonical familiar, project, conversation, detail, and message responses use
+  operation-specific Rust schemas matching the public SDK DTOs. Error details
+  are bounded and validated, then removed before the command response reaches
+  JavaScript.
 - Credential commits retain a zeroized exact-value rollback token until the
   SDK can no longer request discard. Timeout, late-write, and replacement
   cleanup uses compare-and-delete and reports `absent`, `changed`, or `deleted`
@@ -120,8 +140,12 @@
   implemented.
 - The protected Cave transport provider is intentionally fail-closed until the
   reviewed native `hpke-bound-v1` HTTP implementation is installed. Health and
-  pairing dispatch report `platform_security_unavailable` rather than
+  pairing/read dispatch reports `platform_security_unavailable` rather than
   downgrading to plaintext authorization headers.
+- Browser preview is explicitly offline. It never fabricates discovery,
+  approval, native trust, or credentials.
+- Authenticated DTOs are kept in memory only; runtime source does not call
+  `localStorage`, `sessionStorage`, or IndexedDB.
 - Until publication is explicitly approved, packed `@opencoven/cave-client`
   tarballs are verified by the cross-repository canary in a temporary install
   copy rather than by a source-relative or absolute path dependency.
@@ -158,3 +182,24 @@
 - Tauri capabilities are limited to the reviewed native command permissions
   for the `main` window.
 - No shell, filesystem, opener, or network plugin permissions are configured.
+
+## Connection/read validation
+
+From this nested Chat checkout, run:
+
+```bash
+corepack pnpm@10.34.0 --ignore-workspace typecheck
+corepack pnpm@10.34.0 --ignore-workspace test
+corepack pnpm@10.34.0 --ignore-workspace test:e2e
+corepack pnpm@10.34.0 --ignore-workspace lint
+corepack pnpm@10.34.0 --ignore-workspace cargo:fmt
+corepack pnpm@10.34.0 --ignore-workspace cargo:check
+corepack pnpm@10.34.0 --ignore-workspace cargo:test
+corepack pnpm@10.34.0 --ignore-workspace cargo:clippy
+corepack pnpm@10.34.0 --ignore-workspace build
+corepack pnpm@10.34.0 --ignore-workspace app:build
+git diff --check
+```
+
+These commands validate the operation-specific boundary and mocked native
+journey. They are not real-authority or platform conformance evidence.

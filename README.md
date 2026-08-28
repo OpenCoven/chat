@@ -1,17 +1,20 @@
 # OpenCoven Chat
 
-Phase 0 of OpenCoven Chat is a production-oriented scaffold for the future
-desktop client. It intentionally stops at the shell, toolchains, tests, and
-least-privilege native host. The Tauri process now contains the fail-closed
-managed-native lifecycle and credential-custody boundary, but pairing
-transport, canonical Cave reads, and chat behavior are not wired into the
-webview in this phase.
+OpenCoven Chat now contains the read-only desktop connection surface for the
+reviewed native SDK boundary. The webview can discover an opaque native
+authority, guide explicit pairing, reuse or forget the native credential, and
+load bounded canonical familiar, project, conversation, and message pages.
+
+The production protected HTTP/HPKE provider is still intentionally fail-closed.
+This branch proves the Tauri command boundary, controller, query behavior, and
+product journey with focused unit tests and mocked-Tauri Playwright coverage; it
+does **not** claim real-authority completion.
 
 ## Security boundaries
 
 - The main window can invoke only the reviewed operation-specific native
-  command table; the current TypeScript bridge still invokes only
-  `app_identity`.
+  command table. `src/lib/sdk/native-boundary.ts` validates exact own-data
+  command and event objects before exposing typed non-secret values.
 - No direct arbitrary HTTP calls are implemented.
 - Cave credential values are confined to native platform custody. No bearer,
   pairing secret, raw keychain value, or canonical data enters browser storage
@@ -35,6 +38,13 @@ webview in this phase.
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
+- Canonical read commands are operation-specific. There is no generic request,
+  route, URL, header, or credential-returning command.
+- The connection controller stores only opaque authority references and the
+  public states `idle`, `discovering`, `incompatible`, `pairing_required`,
+  `pairing`, `ready`, `revoked`, `offline`, and `error`.
+- Authenticated responses live only in the in-memory query adapter. Runtime
+  source does not use `localStorage`, `sessionStorage`, or IndexedDB.
 - Future Cave integration must use only the public `@opencoven/cave-client`
   package boundary.
 - Until package publication is explicitly approved, the cross-repository canary
@@ -78,27 +88,42 @@ pnpm exec playwright install chromium
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |
 | `pnpm app:build` | Build the Tauri desktop scaffold |
 
-## Scaffold scope
+## Connection and canonical read behavior
 
-The current application renders:
+The default application surface renders:
 
-- the OpenCoven Chat product identity
-- an explicitly labeled browser preview fallback identity when Tauri is absent
-- a visible unavailable Cave connection state
-- an accessible placeholder status region
-- a typed, non-secret desktop identity seam through the `app_identity` Tauri command, with visible failure reporting if the native invoke breaks
-- a dormant native managed-SDK command boundary with opaque authority,
-  generation, request, pairing, and commit handles
-- a documented future Cave client boundary
-- the desktop bundle identifier and scaffold phase
+- an explicit desktop-only connection gate and browser-unavailable fallback;
+- pairing request, approval polling, completion, retry, reconnect, and
+  local-forget actions;
+- familiar and project summaries after `ready`;
+- one bounded conversation page at a time;
+- one selected conversation and one bounded message page at a time; and
+- accessible loading, empty, error, pagination, focus, mobile, and
+  reduced-motion behavior.
 
-Anything beyond that is intentionally deferred to later beads.
+The query adapter requests 25 records per page and caps a single query walk at
+eight pages. It never prefetches the next page or implicitly walks the corpus.
+Authority-generation and request-generation checks discard stale delayed
+results. `reconcile_required` resets and reloads only the affected query while
+the connection remains `ready`; credential, authority, and transport failures
+are handled separately by the connection controller.
+
+Pairing creation and exchange are never automatically replayed after ambiguous
+completion. A retryable credential commit resumes only the exact opaque commit
+handle. “Forget this device” deletes the local credential and is not described
+as server-side revocation.
+
+The TypeScript DTOs follow the exact public `@opencoven/cave-client` shapes
+locked by packed-canary schema v2 at SDK
+`c237fdc08b56978f1c7220097cf0acb32e6852cb`. Chat still has no unpublished
+runtime package dependency; the packed canary remains the installability and
+public-signature proof until package publication is approved.
 
 ## Proof-of-concept chat demo
 
-`pnpm app:dev` opens the desktop window straight into a mock chat surface, and
-`pnpm dev` serves it at <127.0.0.1:4173/?demo=chat>. It previews what Phases 1
-through 3 will present: conversations, a transcript, generated images, link
+`pnpm app:dev` opens the real connection/read surface. The old visual demo
+remains available only at <127.0.0.1:4173/?demo=chat>. It previews what later
+write-rich phases may present: conversations, a transcript, generated images, link
 unfurls, `/spec` and `/handoff` artifacts, and a composer.
 
 **It connects to nothing.** No Cave, no network, no persistence. Replies come
@@ -108,17 +133,14 @@ placeholder whose palette varies by prompt. A refresh resets everything.
 
 Two consequences worth knowing:
 
-- **Dev and production differ deliberately.** `devUrl` carries `?demo=chat`, so
-  only `tauri dev` opens the demo. A production build loads `dist/index.html`
-  with no query string and still shows the Phase 0 scaffold, which is what the
-  app actually is.
-- **The scaffold is still the default view.** Without the query flag the app
-  renders the scaffold, which is what every unit test and both end-to-end specs
-  assert.
+- **The real surface is the default.** Tauri development, production builds,
+  unit tests, and Playwright all enter the connection/read application without
+  a query flag.
+- **The demo is opt-in.** It remains isolated behind `?demo=chat` and connects
+  to nothing.
 
-`src/demo/` is meant to be deleted when the real read and send paths land. Its
-mock types are shaped close to the canonical ones so that lands as a change of
-data source rather than a rewrite of the view.
+`src/demo/` is not used by the connection/read application and can be removed
+when the later write-rich surface is decided.
 
 ### Minimal (macOS) surface
 
@@ -190,3 +212,26 @@ The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
 intentionally kept outside the ignore rules so the capability `$schema` can ship
 with fresh checkouts without granting shell, filesystem, opener, or network
 plugin permissions.
+
+## Validation
+
+Because this Chat checkout is nested under the SDK repository, use the pinned
+package manager with workspace discovery disabled:
+
+```bash
+corepack pnpm@10.34.0 --ignore-workspace typecheck
+corepack pnpm@10.34.0 --ignore-workspace test
+corepack pnpm@10.34.0 --ignore-workspace test:e2e
+corepack pnpm@10.34.0 --ignore-workspace lint
+corepack pnpm@10.34.0 --ignore-workspace cargo:fmt
+corepack pnpm@10.34.0 --ignore-workspace cargo:check
+corepack pnpm@10.34.0 --ignore-workspace cargo:test
+corepack pnpm@10.34.0 --ignore-workspace cargo:clippy
+corepack pnpm@10.34.0 --ignore-workspace build
+corepack pnpm@10.34.0 --ignore-workspace app:build
+git diff --check
+```
+
+Real Cave/Coven discovery, protected transport, live peer/pipe validation,
+restart reuse, and release-mode conformance remain later provider/evidence
+lanes.

@@ -31,6 +31,7 @@ const projectRoot = process.cwd();
 const nativeCommands = [
   'app_identity',
   'sdk_installation_identity',
+  'sdk_authority_discover',
   'sdk_authority_open',
   'sdk_authority_close',
   'cave_health',
@@ -41,6 +42,11 @@ const nativeCommands = [
   'cave_pairing_discard',
   'cave_credential_state',
   'cave_forget_credential',
+  'cave_list_familiars',
+  'cave_list_projects',
+  'cave_list_conversations',
+  'cave_get_conversation',
+  'cave_list_conversation_messages',
   'sdk_native_diagnostics',
 ] as const;
 
@@ -172,6 +178,7 @@ describe('Phase 0 specification guards', () => {
     const connection = readText('src-tauri/src/sdk_connection.rs');
 
     for (const [command, transition] of [
+      ['sdk_authority_discover', 'authority_open'],
       ['sdk_authority_open', 'authority_open'],
       ['sdk_authority_close', 'authority_close'],
     ]) {
@@ -214,6 +221,12 @@ describe('Phase 0 specification guards', () => {
     expect(packageManifest.scripts?.preview).toContain('--port 4174');
   });
 
+  it('opens Tauri development on the real connection surface', () => {
+    const tauriConfig = readJson<{ build?: { devUrl?: string } }>('src-tauri/tauri.conf.json');
+
+    expect(tauriConfig.build?.devUrl).toBe('http://127.0.0.1:4173/');
+  });
+
   it('keeps runtime source free from ad hoc Cave networking primitives', () => {
     const disallowedPatterns = [
       /\bfetch\s*\(/,
@@ -223,6 +236,23 @@ describe('Phase 0 specification guards', () => {
       /https?:\/\//,
     ];
 
+    const violations: string[] = [];
+
+    for (const file of listRuntimeSourceFiles('src')) {
+      const source = readText(file);
+
+      for (const pattern of disallowedPatterns) {
+        if (pattern.test(source)) {
+          violations.push(`${file}: ${pattern}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps authenticated responses out of browser persistence APIs', () => {
+    const disallowedPatterns = [/\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/];
     const violations: string[] = [];
 
     for (const file of listRuntimeSourceFiles('src')) {

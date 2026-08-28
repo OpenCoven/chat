@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use uuid::{Uuid, Version};
@@ -144,6 +146,59 @@ impl NativeResponse {
         )
     }
 
+    pub fn list_familiars(status_code: u16, payload: Value) -> Result<Self, NativeError> {
+        canonical_operation_response::<CanonicalFamiliarsData>(
+            status_code,
+            payload,
+            "familiars",
+            "familiars.list",
+            CanonicalFamiliarsData::validate,
+        )
+    }
+
+    pub fn list_projects(status_code: u16, payload: Value) -> Result<Self, NativeError> {
+        canonical_operation_response::<CanonicalProjectsData>(
+            status_code,
+            payload,
+            "projects",
+            "projects.list",
+            CanonicalProjectsData::validate,
+        )
+    }
+
+    pub fn list_conversations(status_code: u16, payload: Value) -> Result<Self, NativeError> {
+        canonical_operation_response::<CanonicalConversationsData>(
+            status_code,
+            payload,
+            "conversations",
+            "conversations.list",
+            CanonicalConversationsData::validate,
+        )
+    }
+
+    pub fn get_conversation(status_code: u16, payload: Value) -> Result<Self, NativeError> {
+        canonical_operation_response::<CanonicalConversationData>(
+            status_code,
+            payload,
+            "conversations",
+            "conversations.read",
+            CanonicalConversationData::validate,
+        )
+    }
+
+    pub fn list_conversation_messages(
+        status_code: u16,
+        payload: Value,
+    ) -> Result<Self, NativeError> {
+        canonical_operation_response::<CanonicalMessagesData>(
+            status_code,
+            payload,
+            "conversation-messages",
+            "messages.list",
+            CanonicalMessagesData::validate,
+        )
+    }
+
     pub const fn status_code(&self) -> u16 {
         self.status_code
     }
@@ -183,6 +238,8 @@ struct RawError {
     code: String,
     message: String,
     retryable: bool,
+    #[serde(default, deserialize_with = "deserialize_optional_non_null")]
+    details: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Serialize)]
@@ -275,6 +332,358 @@ struct CredentialMetadata {
     revocation_reason: RequiredNullable<String>,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalCursor {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    current: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    next: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    previous: Option<String>,
+    has_more: bool,
+}
+
+impl CanonicalCursor {
+    fn validate(&self) -> bool {
+        self.current.as_deref().is_none_or(valid_cursor)
+            && self.next.as_deref().is_none_or(valid_cursor)
+            && self.previous.as_deref().is_none_or(valid_cursor)
+            && (!self.has_more || self.next.is_some())
+            && (self.current.is_none() || self.current != self.next)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalSuccessEnvelope<T> {
+    api_version: String,
+    minimum_client_version: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    request_id: Option<String>,
+    capabilities: Vec<String>,
+    operations: Vec<String>,
+    data: T,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    cursor: Option<CanonicalCursor>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalFamiliar {
+    id: String,
+    display_name: String,
+    role: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    description: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pronouns: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    status: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    last_seen_at: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    active_sessions: Option<u64>,
+}
+
+impl CanonicalFamiliar {
+    fn validate(&self) -> bool {
+        valid_content(&self.id, 512)
+            && valid_content(&self.display_name, 4_096)
+            && valid_content(&self.role, 4_096)
+            && self
+                .description
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 4_096))
+            && self
+                .pronouns
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 4_096))
+            && self
+                .status
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 4_096))
+            && self
+                .last_seen_at
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 128))
+            && self
+                .active_sessions
+                .is_none_or(|value| value <= MAX_SAFE_INTEGER)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalProject {
+    id: String,
+    name: String,
+    root: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    color: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    repo_url: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+impl CanonicalProject {
+    fn validate(&self) -> bool {
+        valid_content(&self.id, 512)
+            && valid_content(&self.name, 4_096)
+            && valid_content(&self.root, 4_096)
+            && self
+                .color
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 128))
+            && self
+                .repo_url
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 4_096))
+            && valid_content(&self.created_at, 128)
+            && valid_content(&self.updated_at, 128)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalConversation {
+    id: String,
+    familiar_id: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    harness: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    model: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    runtime: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    title: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    origin: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    status: Option<String>,
+    #[serde(default, skip_serializing_if = "OptionalNullable::is_absent")]
+    exit_code: OptionalNullable<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pending: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    created_at: Option<String>,
+    updated_at: String,
+}
+
+impl CanonicalConversation {
+    fn validate(&self) -> bool {
+        valid_content(&self.id, 512)
+            && valid_content(&self.familiar_id, 512)
+            && [
+                self.harness.as_deref(),
+                self.model.as_deref(),
+                self.runtime.as_deref(),
+                self.title.as_deref(),
+                self.origin.as_deref(),
+                self.status.as_deref(),
+            ]
+            .into_iter()
+            .all(|value| value.is_none_or(|value| valid_content(value, 4_096)))
+            && self
+                .exit_code
+                .value
+                .is_none_or(|value| value.unsigned_abs() <= MAX_SAFE_INTEGER)
+            && self
+                .created_at
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 128))
+            && valid_content(&self.updated_at, 128)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalMessage {
+    id: String,
+    conversation_id: String,
+    parent_id: RequiredNullable<String>,
+    role: String,
+    text: String,
+    created_at: String,
+    attachment_count: u64,
+    tool_count: u64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    is_error: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    cancelled: Option<bool>,
+}
+
+impl CanonicalMessage {
+    fn validate(&self) -> bool {
+        valid_content(&self.id, 512)
+            && valid_content(&self.conversation_id, 512)
+            && self
+                .parent_id
+                .0
+                .as_deref()
+                .is_none_or(|value| valid_content(value, 512))
+            && valid_content(&self.role, 128)
+            && !self.text.contains('\0')
+            && self.text.chars().count() <= 64 * 1024
+            && valid_content(&self.created_at, 128)
+            && self.attachment_count <= MAX_SAFE_INTEGER
+            && self.tool_count <= MAX_SAFE_INTEGER
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalFamiliarsData {
+    familiars: Vec<CanonicalFamiliar>,
+}
+
+impl CanonicalFamiliarsData {
+    fn validate(&self) -> bool {
+        self.familiars.len() <= 100 && self.familiars.iter().all(CanonicalFamiliar::validate)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalProjectsData {
+    projects: Vec<CanonicalProject>,
+}
+
+impl CanonicalProjectsData {
+    fn validate(&self) -> bool {
+        self.projects.len() <= 100 && self.projects.iter().all(CanonicalProject::validate)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalConversationsData {
+    conversations: Vec<CanonicalConversation>,
+}
+
+impl CanonicalConversationsData {
+    fn validate(&self) -> bool {
+        self.conversations.len() <= 100
+            && self
+                .conversations
+                .iter()
+                .all(CanonicalConversation::validate)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalConversationData {
+    conversation: CanonicalConversation,
+}
+
+impl CanonicalConversationData {
+    fn validate(&self) -> bool {
+        self.conversation.validate()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalMessagesData {
+    messages: Vec<CanonicalMessage>,
+}
+
+impl CanonicalMessagesData {
+    fn validate(&self) -> bool {
+        self.messages.len() <= 100 && self.messages.iter().all(CanonicalMessage::validate)
+    }
+}
+
 impl CredentialMetadata {
     fn validate(&self) -> bool {
         valid_uuid(&self.id)
@@ -305,6 +714,61 @@ where
     {
         Option::<T>::deserialize(deserializer).map(Self)
     }
+}
+
+struct OptionalNullable<T> {
+    present: bool,
+    value: Option<T>,
+}
+
+impl<T> OptionalNullable<T> {
+    fn is_absent(&self) -> bool {
+        !self.present
+    }
+}
+
+impl<T> Default for OptionalNullable<T> {
+    fn default() -> Self {
+        Self {
+            present: false,
+            value: None,
+        }
+    }
+}
+
+impl<T> Serialize for OptionalNullable<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for OptionalNullable<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self {
+            present: true,
+            value: Option::<T>::deserialize(deserializer)?,
+        })
+    }
+}
+
+fn deserialize_optional_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_optional_non_null_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -373,10 +837,91 @@ where
         || !valid_error_code(required_operation, status_code, &envelope.error.code)
         || envelope.error.message.is_empty()
         || envelope.error.message.chars().count() > 256
+        || !valid_error_details(envelope.error.details.as_ref())
     {
         return Err(NativeError::invalid_response());
     }
 
+    safe_response(
+        status_code,
+        &SafeErrorEnvelope {
+            api_version: envelope.api_version,
+            minimum_client_version: envelope.minimum_client_version,
+            request_id: envelope.request_id,
+            capabilities: envelope.capabilities,
+            operations: envelope.operations,
+            error: SafeError {
+                code: envelope.error.code,
+                message: SAFE_ERROR_MESSAGE,
+                retryable: envelope.error.retryable,
+            },
+        },
+    )
+}
+
+fn canonical_operation_response<T>(
+    status_code: u16,
+    payload: Value,
+    required_capability: &str,
+    required_operation: &str,
+    validate_data: impl FnOnce(&T) -> bool,
+) -> Result<NativeResponse, NativeError>
+where
+    T: DeserializeOwned + Serialize,
+{
+    if status_code == 200 {
+        let envelope = serde_json::from_value::<CanonicalSuccessEnvelope<T>>(payload)
+            .map_err(|_| NativeError::invalid_response())?;
+        if !validate_envelope(
+            &envelope.api_version,
+            &envelope.minimum_client_version,
+            envelope.request_id.as_deref(),
+            &envelope.capabilities,
+            &envelope.operations,
+        ) || !envelope
+            .capabilities
+            .iter()
+            .any(|capability| capability == required_capability)
+            || !envelope
+                .operations
+                .iter()
+                .any(|operation| operation == required_operation)
+            || !validate_data(&envelope.data)
+            || !envelope
+                .cursor
+                .as_ref()
+                .is_none_or(CanonicalCursor::validate)
+        {
+            return Err(NativeError::invalid_response());
+        }
+        return safe_response(status_code, &envelope);
+    }
+    if (200..=299).contains(&status_code) || !(400..=599).contains(&status_code) {
+        return Err(NativeError::invalid_response());
+    }
+    let envelope = serde_json::from_value::<RawErrorEnvelope>(payload)
+        .map_err(|_| NativeError::invalid_response())?;
+    if !validate_envelope(
+        &envelope.api_version,
+        &envelope.minimum_client_version,
+        envelope.request_id.as_deref(),
+        &envelope.capabilities,
+        &envelope.operations,
+    ) || !envelope
+        .capabilities
+        .iter()
+        .any(|capability| capability == required_capability)
+        || !envelope
+            .operations
+            .iter()
+            .any(|operation| operation == required_operation)
+        || !valid_error_code(required_operation, status_code, &envelope.error.code)
+        || envelope.error.message.is_empty()
+        || envelope.error.message.chars().count() > 256
+        || !valid_error_details(envelope.error.details.as_ref())
+    {
+        return Err(NativeError::invalid_response());
+    }
     safe_response(
         status_code,
         &SafeErrorEnvelope {
@@ -457,6 +1002,58 @@ fn valid_request_id(value: &str) -> bool {
             .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'-'))
 }
 
+fn valid_cursor(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || value
+            .bytes()
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'-'))
+    {
+        return false;
+    }
+    match value.len() % 4 {
+        0 => true,
+        2 => value
+            .bytes()
+            .last()
+            .and_then(base64url_value)
+            .is_some_and(|value| value % 16 == 0),
+        3 => value
+            .bytes()
+            .last()
+            .and_then(base64url_value)
+            .is_some_and(|value| value % 4 == 0),
+        _ => false,
+    }
+}
+
+fn base64url_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'-' => Some(62),
+        b'_' => Some(63),
+        _ => None,
+    }
+}
+
+fn valid_content(value: &str, maximum_characters: usize) -> bool {
+    !value.is_empty() && !value.contains('\0') && value.chars().count() <= maximum_characters
+}
+
+fn valid_error_details(details: Option<&BTreeMap<String, String>>) -> bool {
+    details.is_none_or(|details| {
+        details.len() <= 16
+            && details.iter().all(|(key, value)| {
+                valid_content(key, 64)
+                    && !key.chars().any(char::is_control)
+                    && value.chars().count() <= 256
+                    && !value.chars().any(char::is_control)
+            })
+    })
+}
+
 fn valid_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|uuid| uuid.to_string() == value)
 }
@@ -516,6 +1113,42 @@ fn valid_error_code(operation: &str, status_code: u16, code: &str) -> bool {
         ("pairing.exchange", "pairing_expired") => status_code == 410,
         ("pairing.exchange", "rate_limited") => status_code == 429,
         ("pairing.exchange", "internal_error") => status_code == 500,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "invalid_request",
+        ) => status_code == 400,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "unauthorized",
+        ) => status_code == 401,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "scope_denied",
+        ) => status_code == 403,
+        ("conversations.read" | "messages.list", "not_found") => status_code == 404,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "conflict" | "reconcile_required",
+        ) => status_code == 409,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "rate_limited",
+        ) => status_code == 429,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "internal_error",
+        ) => status_code == 500,
+        (
+            "familiars.list" | "projects.list" | "conversations.list" | "conversations.read"
+            | "messages.list",
+            "service_unavailable",
+        ) => status_code == 503,
         _ => false,
     }
 }
@@ -592,7 +1225,9 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse};
+    use super::{
+        DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse, SAFE_ERROR_MESSAGE,
+    };
 
     #[test]
     fn serialized_errors_have_no_message_details_or_cause() {
@@ -630,6 +1265,199 @@ mod tests {
         let error = NativeResponse::health(200, payload)
             .expect_err("oversized operation inventories must fail closed");
         assert_eq!(error.code, DiagnosticCode::InvalidResponse);
+    }
+
+    #[test]
+    fn canonical_read_responses_preserve_exact_public_dtos() {
+        let response = NativeResponse::list_conversations(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversations", "cursors"],
+                "operations": ["conversations.list"],
+                "data": {
+                    "conversations": [{
+                        "id": "conversation-1",
+                        "familiarId": "familiar-1",
+                        "title": "Canonical title",
+                        "updatedAt": "2026-08-28T11:00:00Z"
+                    }]
+                },
+                "cursor": {
+                    "current": "YQ",
+                    "next": "Yg",
+                    "hasMore": true
+                }
+            }),
+        )
+        .expect("canonical response should validate");
+        let rendered = serde_json::to_value(response).expect("response should serialize");
+
+        assert_eq!(
+            rendered["payload"]["data"]["conversations"][0]["id"],
+            "conversation-1"
+        );
+        assert_eq!(rendered["payload"]["cursor"]["next"], "Yg");
+        assert!(!rendered.to_string().contains("bearer"));
+        assert!(!rendered.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn canonical_read_responses_reject_unknown_fields_and_cursor_cycles() {
+        let unknown = NativeResponse::list_projects(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["projects", "cursors"],
+                "operations": ["projects.list"],
+                "data": {
+                    "projects": [{
+                        "id": "project-1",
+                        "name": "OpenCoven",
+                        "root": "OpenCoven",
+                        "createdAt": "2026-08-28T10:00:00Z",
+                        "updatedAt": "2026-08-28T11:00:00Z",
+                        "privatePath": "/Users/person/private"
+                    }]
+                }
+            }),
+        )
+        .expect_err("unknown project fields must fail closed");
+        assert_eq!(unknown.code, DiagnosticCode::InvalidResponse);
+
+        let cycle = NativeResponse::list_familiars(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["familiars", "cursors"],
+                "operations": ["familiars.list"],
+                "data": {"familiars": []},
+                "cursor": {"current": "YQ", "next": "YQ", "hasMore": true}
+            }),
+        )
+        .expect_err("a response-local cursor cycle must fail closed");
+        assert_eq!(cycle.code, DiagnosticCode::InvalidResponse);
+    }
+
+    #[test]
+    fn all_canonical_read_shapes_are_operation_specific() {
+        NativeResponse::get_conversation(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversations"],
+                "operations": ["conversations.read"],
+                "data": {
+                    "conversation": {
+                        "id": "conversation-1",
+                        "familiarId": "familiar-1",
+                        "updatedAt": "2026-08-28T11:00:00Z"
+                    }
+                }
+            }),
+        )
+        .expect("conversation detail should validate");
+        NativeResponse::list_conversation_messages(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversation-messages", "cursors"],
+                "operations": ["messages.list"],
+                "data": {
+                    "messages": [{
+                        "id": "message-1",
+                        "conversationId": "conversation-1",
+                        "parentId": null,
+                        "role": "assistant",
+                        "text": "Safe message body",
+                        "createdAt": "2026-08-28T11:01:00Z",
+                        "attachmentCount": 0,
+                        "toolCount": 0
+                    }]
+                }
+            }),
+        )
+        .expect("message page should validate");
+    }
+
+    #[test]
+    fn canonical_optional_fields_reject_null_but_preserve_nullable_exit_codes() {
+        let null_title = NativeResponse::list_conversations(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversations", "cursors"],
+                "operations": ["conversations.list"],
+                "data": {
+                    "conversations": [{
+                        "id": "conversation-1",
+                        "familiarId": "familiar-1",
+                        "title": null,
+                        "updatedAt": "2026-08-28T11:00:00Z"
+                    }]
+                }
+            }),
+        )
+        .expect_err("optional strings must reject explicit null");
+        assert_eq!(null_title.code, DiagnosticCode::InvalidResponse);
+
+        let nullable_exit = NativeResponse::get_conversation(
+            200,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversations"],
+                "operations": ["conversations.read"],
+                "data": {
+                    "conversation": {
+                        "id": "conversation-1",
+                        "familiarId": "familiar-1",
+                        "exitCode": null,
+                        "updatedAt": "2026-08-28T11:00:00Z"
+                    }
+                }
+            }),
+        )
+        .expect("nullable exit code should validate");
+        let rendered = serde_json::to_value(nullable_exit).expect("response should serialize");
+        assert!(rendered["payload"]["data"]["conversation"]
+            .as_object()
+            .expect("conversation object")
+            .contains_key("exitCode"));
+        assert!(rendered["payload"]["data"]["conversation"]["exitCode"].is_null());
+    }
+
+    #[test]
+    fn reconcile_details_are_validated_then_removed_from_command_output() {
+        let response = NativeResponse::list_conversation_messages(
+            409,
+            json!({
+                "apiVersion": "1.0",
+                "minimumClientVersion": "0.1.0",
+                "capabilities": ["conversation-messages", "cursors"],
+                "operations": ["messages.list"],
+                "error": {
+                    "code": "reconcile_required",
+                    "message": "Reload canonical state.",
+                    "retryable": false,
+                    "details": {
+                        "reason": "resume_from_canonical_state"
+                    }
+                }
+            }),
+        )
+        .expect("bounded reconcile details should validate");
+        let rendered = serde_json::to_value(response).expect("response should serialize");
+
+        assert_eq!(rendered["payload"]["error"]["code"], "reconcile_required");
+        assert!(rendered["payload"]["error"].get("details").is_none());
+        assert_eq!(rendered["payload"]["error"]["message"], SAFE_ERROR_MESSAGE);
     }
 
     #[test]

@@ -18,18 +18,21 @@ pub use coven_pipe_identity::{
 };
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 pub use sdk_connection::{
-    cave_credential_state, cave_forget_credential, cave_health, cave_pairing_commit,
-    cave_pairing_create, cave_pairing_discard, cave_pairing_exchange, cave_pairing_poll,
-    sdk_authority_close, sdk_authority_open, sdk_installation_identity, sdk_native_diagnostics,
-    AuthorityDescriptor, AuthorityLifecycle, HealthCommandInput, ManagedNativeAuthorityProvider,
-    NativeSdkBoundary, NativeSdkState, PairingRequest, ProviderFuture, ProviderPairingCreated,
-    ProviderPairingExchange,
+    cave_credential_state, cave_forget_credential, cave_get_conversation, cave_health,
+    cave_list_conversation_messages, cave_list_conversations, cave_list_familiars,
+    cave_list_projects, cave_pairing_commit, cave_pairing_create, cave_pairing_discard,
+    cave_pairing_exchange, cave_pairing_poll, sdk_authority_close, sdk_authority_discover,
+    sdk_authority_open, sdk_installation_identity, sdk_native_diagnostics, AuthorityDescriptor,
+    AuthorityLifecycle, CanonicalPageCommandInput, CanonicalPageOptions, HealthCommandInput,
+    ManagedNativeAuthorityProvider, NativeSdkBoundary, NativeSdkState, PairingRequest,
+    ProviderFuture, ProviderPairingCreated, ProviderPairingExchange,
 };
 pub use sdk_diagnostics::{DiagnosticCode, NativeError, NativeResponse};
 
 const REGISTERED_COMMANDS: &[&str] = &[
     "app_identity",
     "sdk_installation_identity",
+    "sdk_authority_discover",
     "sdk_authority_open",
     "sdk_authority_close",
     "cave_health",
@@ -40,6 +43,11 @@ const REGISTERED_COMMANDS: &[&str] = &[
     "cave_pairing_discard",
     "cave_credential_state",
     "cave_forget_credential",
+    "cave_list_familiars",
+    "cave_list_projects",
+    "cave_list_conversations",
+    "cave_get_conversation",
+    "cave_list_conversation_messages",
     "sdk_native_diagnostics",
 ];
 
@@ -53,6 +61,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
         .invoke_handler(tauri::generate_handler![
             app_identity,
             sdk_installation_identity,
+            sdk_authority_discover,
             sdk_authority_open,
             sdk_authority_close,
             cave_health,
@@ -63,6 +72,11 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             cave_pairing_discard,
             cave_credential_state,
             cave_forget_credential,
+            cave_list_familiars,
+            cave_list_projects,
+            cave_list_conversations,
+            cave_get_conversation,
+            cave_list_conversation_messages,
             sdk_native_diagnostics,
         ])
 }
@@ -105,6 +119,7 @@ mod smoke_tests {
             &[
                 "app_identity",
                 "sdk_installation_identity",
+                "sdk_authority_discover",
                 "sdk_authority_open",
                 "sdk_authority_close",
                 "cave_health",
@@ -115,6 +130,11 @@ mod smoke_tests {
                 "cave_pairing_discard",
                 "cave_credential_state",
                 "cave_forget_credential",
+                "cave_list_familiars",
+                "cave_list_projects",
+                "cave_list_conversations",
+                "cave_get_conversation",
+                "cave_list_conversation_messages",
                 "sdk_native_diagnostics",
             ]
         );

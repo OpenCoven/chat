@@ -195,10 +195,40 @@
           "markdownDescription": "Enables the cave_forget_credential command without any pre-configured scope."
         },
         {
+          "description": "Enables the cave_get_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-get-conversation",
+          "markdownDescription": "Enables the cave_get_conversation command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cave_health command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cave-health",
           "markdownDescription": "Enables the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_conversation_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-conversation-messages",
+          "markdownDescription": "Enables the cave_list_conversation_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-conversations",
+          "markdownDescription": "Enables the cave_list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_familiars command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-familiars",
+          "markdownDescription": "Enables the cave_list_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_list_projects command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-list-projects",
+          "markdownDescription": "Enables the cave_list_projects command without any pre-configured scope."
         },
         {
           "description": "Enables the cave_pairing_commit command without any pre-configured scope.",
@@ -237,6 +267,12 @@
           "markdownDescription": "Enables the sdk_authority_close command without any pre-configured scope."
         },
         {
+          "description": "Enables the sdk_authority_discover command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sdk-authority-discover",
+          "markdownDescription": "Enables the sdk_authority_discover command without any pre-configured scope."
+        },
+        {
           "description": "Enables the sdk_authority_open command without any pre-configured scope.",
           "type": "string",
           "const": "allow-sdk-authority-open",
@@ -273,10 +309,40 @@
           "markdownDescription": "Denies the cave_forget_credential command without any pre-configured scope."
         },
         {
+          "description": "Denies the cave_get_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-get-conversation",
+          "markdownDescription": "Denies the cave_get_conversation command without any pre-configured scope."
+        },
+        {
           "description": "Denies the cave_health command without any pre-configured scope.",
           "type": "string",
           "const": "deny-cave-health",
           "markdownDescription": "Denies the cave_health command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_conversation_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-conversation-messages",
+          "markdownDescription": "Denies the cave_list_conversation_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-conversations",
+          "markdownDescription": "Denies the cave_list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_familiars command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-familiars",
+          "markdownDescription": "Denies the cave_list_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_list_projects command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-list-projects",
+          "markdownDescription": "Denies the cave_list_projects command without any pre-configured scope."
         },
         {
           "description": "Denies the cave_pairing_commit command without any pre-configured scope.",
@@ -313,6 +379,12 @@
           "type": "string",
           "const": "deny-sdk-authority-close",
           "markdownDescription": "Denies the sdk_authority_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sdk_authority_discover command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sdk-authority-discover",
+          "markdownDescription": "Denies the sdk_authority_discover command without any pre-configured scope."
         },
         {
           "description": "Denies the sdk_authority_open command without any pre-configured scope.",

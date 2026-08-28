@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "corepack pnpm dev -- --host 127.0.0.1 --port 4173 --strictPort",
     "beforeBuildCommand": "corepack pnpm build",
-    "devUrl": "http://127.0.0.1:4173/?demo=chat",
+    "devUrl": "http://127.0.0.1:4173/",
     "frontendDist": "../dist"
   },
   "app": {
