@@ -18,6 +18,10 @@ use crate::{
     keyring::{
         validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
     },
+    operation::{
+        NativeCancelReason, NativeOperationInput, NativeOperationRegistry,
+        MAX_NATIVE_OPERATION_TIMEOUT_MS,
+    },
     transport::{
         validate_pairing_request, CaveReadPath, ConstrainedTransport, NativeCaveTransport,
         NativePage,
@@ -27,6 +31,7 @@ use crate::{
 
 const MAX_LINE_BYTES: usize = 64 * 1024;
 const MAX_REQUEST_ID_BYTES: usize = 128;
+const MAX_RPC_WORKERS: usize = 256;
 const INVALID_REQUEST_ID: &str = "invalid-request";
 pub const CONFORMANCE_INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH";
@@ -48,55 +53,102 @@ struct RpcRequest {
 
 enum RpcCommand {
     AppInstallationId,
-    CaveReadDiscovery,
+    CaveReadDiscovery {
+        operation: NativeOperationInput,
+    },
+    CaveCancelOperation {
+        attempt_id: String,
+        reason: NativeCancelReason,
+    },
     CaveLaunch,
     CaveHealth {
         handle: String,
+        operation: NativeOperationInput,
     },
     CavePairingCreate {
         handle: String,
         request: Value,
+        operation: NativeOperationInput,
     },
     CavePairingPoll {
         handle: String,
         request_id: String,
+        operation: NativeOperationInput,
     },
     CavePairingExchange {
         handle: String,
         request_id: String,
+        operation: NativeOperationInput,
     },
     CaveResetPairing {
         handle: String,
     },
     CaveCredentialStatus {
         handle: String,
+        operation: NativeOperationInput,
     },
     CaveForgetCredential {
         handle: String,
+        operation: NativeOperationInput,
     },
     CaveListFamiliars {
         handle: String,
         page: NativePage,
+        operation: NativeOperationInput,
     },
     CaveListProjects {
         handle: String,
         page: NativePage,
+        operation: NativeOperationInput,
     },
     CaveListConversations {
         handle: String,
         page: NativePage,
+        operation: NativeOperationInput,
     },
     CaveGetConversation {
         handle: String,
         conversation_id: String,
+        operation: NativeOperationInput,
     },
     CaveListConversationMessages {
         handle: String,
         conversation_id: String,
         page: NativePage,
+        operation: NativeOperationInput,
     },
     ResetNativeState,
     Shutdown,
+}
+
+impl RpcCommand {
+    fn runs_concurrently(&self) -> bool {
+        matches!(
+            self,
+            Self::CaveReadDiscovery { .. }
+                | Self::CaveHealth { .. }
+                | Self::CavePairingCreate { .. }
+                | Self::CavePairingPoll { .. }
+                | Self::CavePairingExchange { .. }
+                | Self::CaveCredentialStatus { .. }
+                | Self::CaveForgetCredential { .. }
+                | Self::CaveListFamiliars { .. }
+                | Self::CaveListProjects { .. }
+                | Self::CaveListConversations { .. }
+                | Self::CaveGetConversation { .. }
+                | Self::CaveListConversationMessages { .. }
+        )
+    }
+
+    fn is_barrier(&self) -> bool {
+        matches!(
+            self,
+            Self::CaveLaunch
+                | Self::CaveResetPairing { .. }
+                | Self::ResetNativeState
+                | Self::Shutdown
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -372,6 +424,7 @@ impl CaveLauncher for ConformanceCaveLauncher {
     }
 }
 
+#[derive(Clone)]
 pub struct RpcRuntime {
     custody: SharedMemoryCredentialCustody,
     state: NativeConnectionState,
@@ -380,14 +433,18 @@ pub struct RpcRuntime {
 impl RpcRuntime {
     pub fn new() -> Self {
         let custody = SharedMemoryCredentialCustody::new();
+        let operations = Arc::new(NativeOperationRegistry::default());
         Self {
-            state: state_with_custody(&custody),
+            state: state_with_custody(&custody, operations),
             custody,
         }
     }
 
     fn reset_native_state(&mut self) {
-        self.state = state_with_custody(&self.custody);
+        self.state
+            .cancel_all_operations(NativeCancelReason::Aborted);
+        let operations = self.state.operation_registry();
+        self.state = state_with_custody(&self.custody, operations);
     }
 
     pub fn process_line(&mut self, line: &[u8]) -> Value {
@@ -399,6 +456,10 @@ impl RpcRuntime {
             Ok(request) => request,
             Err(response) => return (response, false),
         };
+        self.process_request(request)
+    }
+
+    fn process_request(&mut self, request: RpcRequest) -> (Value, bool) {
         let id = request.id;
         match self.dispatch(request.command) {
             Ok((result, shutdown)) => (success_response(id, result), shutdown),
@@ -409,62 +470,151 @@ impl RpcRuntime {
     fn dispatch(&mut self, command: RpcCommand) -> Result<(Value, bool), NativeDiagnostic> {
         let result = match command {
             RpcCommand::AppInstallationId => json!(self.state.installation_id()?),
-            RpcCommand::CaveReadDiscovery => value_from(self.state.cave_read_discovery()?)?,
+            RpcCommand::CaveReadDiscovery { operation } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                value_from(tauri::async_runtime::block_on(
+                    runner.run_operation(operation, async move {
+                        operation_state.cave_read_discovery()
+                    }),
+                )?)?
+            }
+            RpcCommand::CaveCancelOperation { attempt_id, reason } => {
+                value_from(self.state.cancel_operation(attempt_id, reason)?)?
+            }
             RpcCommand::CaveLaunch => {
                 tauri::async_runtime::block_on(self.state.cave_launch())?;
                 Value::Null
             }
-            RpcCommand::CaveHealth { handle } => {
-                tauri::async_runtime::block_on(self.state.cave_health(handle))?
+            RpcCommand::CaveHealth { handle, operation } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state.cave_health(handle).await
+                }))?
             }
-            RpcCommand::CavePairingCreate { handle, request } => {
-                tauri::async_runtime::block_on(self.state.cave_pairing_create(handle, request))?
+            RpcCommand::CavePairingCreate {
+                handle,
+                request,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state.cave_pairing_create(handle, request).await
+                }))?
             }
-            RpcCommand::CavePairingPoll { handle, request_id } => {
-                tauri::async_runtime::block_on(self.state.cave_pairing_poll(handle, request_id))?
+            RpcCommand::CavePairingPoll {
+                handle,
+                request_id,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state.cave_pairing_poll(handle, request_id).await
+                }))?
             }
-            RpcCommand::CavePairingExchange { handle, request_id } => {
-                tauri::async_runtime::block_on(
-                    self.state.cave_pairing_exchange(handle, request_id),
-                )?
+            RpcCommand::CavePairingExchange {
+                handle,
+                request_id,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_pairing_exchange(handle, request_id)
+                        .await
+                }))?
             }
             RpcCommand::CaveResetPairing { handle } => self.state.cave_reset_pairing(handle)?,
-            RpcCommand::CaveCredentialStatus { handle } => {
-                tauri::async_runtime::block_on(self.state.cave_credential_status(handle))?
+            RpcCommand::CaveCredentialStatus { handle, operation } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state.cave_credential_status(handle).await
+                }))?
             }
-            RpcCommand::CaveForgetCredential { handle } => {
-                self.state.cave_forget_credential(handle)?
+            RpcCommand::CaveForgetCredential { handle, operation } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state.cave_forget_credential(handle)
+                }))?
             }
-            RpcCommand::CaveListFamiliars { handle, page } => tauri::async_runtime::block_on(
-                self.state
-                    .cave_read(handle, CaveReadPath::Familiars { page }),
-            )?,
-            RpcCommand::CaveListProjects { handle, page } => tauri::async_runtime::block_on(
-                self.state
-                    .cave_read(handle, CaveReadPath::Projects { page }),
-            )?,
-            RpcCommand::CaveListConversations { handle, page } => tauri::async_runtime::block_on(
-                self.state
-                    .cave_read(handle, CaveReadPath::Conversations { page }),
-            )?,
+            RpcCommand::CaveListFamiliars {
+                handle,
+                page,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_read(handle, CaveReadPath::Familiars { page })
+                        .await
+                }))?
+            }
+            RpcCommand::CaveListProjects {
+                handle,
+                page,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_read(handle, CaveReadPath::Projects { page })
+                        .await
+                }))?
+            }
+            RpcCommand::CaveListConversations {
+                handle,
+                page,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_read(handle, CaveReadPath::Conversations { page })
+                        .await
+                }))?
+            }
             RpcCommand::CaveGetConversation {
                 handle,
                 conversation_id,
-            } => tauri::async_runtime::block_on(
-                self.state
-                    .cave_read(handle, CaveReadPath::Conversation { conversation_id }),
-            )?,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_read(handle, CaveReadPath::Conversation { conversation_id })
+                        .await
+                }))?
+            }
             RpcCommand::CaveListConversationMessages {
                 handle,
                 conversation_id,
                 page,
-            } => tauri::async_runtime::block_on(self.state.cave_read(
-                handle,
-                CaveReadPath::ConversationMessages {
-                    conversation_id,
-                    page,
-                },
-            ))?,
+                operation,
+            } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                    operation_state
+                        .cave_read(
+                            handle,
+                            CaveReadPath::ConversationMessages {
+                                conversation_id,
+                                page,
+                            },
+                        )
+                        .await
+                }))?
+            }
             RpcCommand::ResetNativeState => {
                 self.reset_native_state();
                 json!({ "status": "reset" })
@@ -481,7 +631,10 @@ impl Default for RpcRuntime {
     }
 }
 
-fn state_with_custody(custody: &SharedMemoryCredentialCustody) -> NativeConnectionState {
+fn state_with_custody(
+    custody: &SharedMemoryCredentialCustody,
+    operations: Arc<NativeOperationRegistry>,
+) -> NativeConnectionState {
     NativeConnectionState::with_test_launch_collaborators(
         Arc::new(ConstrainedTransport) as Arc<dyn NativeCaveTransport>,
         Arc::new(custody.clone()) as Arc<dyn CredentialCustody>,
@@ -491,6 +644,7 @@ fn state_with_custody(custody: &SharedMemoryCredentialCustody) -> NativeConnecti
         Arc::new(NativeCaveSleeper),
         Arc::new(NativeCaveTaskRunner),
     )
+    .using_operation_registry(operations)
 }
 
 fn value_from<T: serde::Serialize>(value: T) -> NativeResult<Value> {
@@ -573,21 +727,31 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             Ok(RpcCommand::AppInstallationId)
         }
         "cave_read_discovery" => {
-            expect_exact_args(object, &[])?;
-            Ok(RpcCommand::CaveReadDiscovery)
+            expect_exact_args(object, &["operation"])?;
+            Ok(RpcCommand::CaveReadDiscovery {
+                operation: required_operation(object)?,
+            })
+        }
+        "cave_cancel_operation" => {
+            expect_exact_args(object, &["attemptId", "reason"])?;
+            Ok(RpcCommand::CaveCancelOperation {
+                attempt_id: required_attempt_id(object, "attemptId")?,
+                reason: required_cancel_reason(object, "reason")?,
+            })
         }
         "cave_launch" => {
             expect_exact_args(object, &[])?;
             Ok(RpcCommand::CaveLaunch)
         }
         "cave_health" => {
-            expect_exact_args(object, &["handle"])?;
+            expect_exact_args(object, &["handle", "operation"])?;
             Ok(RpcCommand::CaveHealth {
                 handle: required_string(object, "handle")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_pairing_create" => {
-            expect_exact_args(object, &["handle", "request"])?;
+            expect_exact_args(object, &["handle", "operation", "request"])?;
             let request = object
                 .get("request")
                 .filter(|value| value.is_object())
@@ -597,6 +761,7 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                     Ok(RpcCommand::CavePairingCreate {
                         handle: required_string(object, "handle")?,
                         request,
+                        operation: required_operation(object)?,
                     })
                 }
                 None => invalid(),
@@ -604,17 +769,19 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             }
         }
         "cave_pairing_poll" => {
-            expect_exact_args(object, &["handle", "requestId"])?;
+            expect_exact_args(object, &["handle", "operation", "requestId"])?;
             Ok(RpcCommand::CavePairingPoll {
                 handle: required_string(object, "handle")?,
                 request_id: required_pairing_request_id(object, "requestId")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_pairing_exchange" => {
-            expect_exact_args(object, &["handle", "requestId"])?;
+            expect_exact_args(object, &["handle", "operation", "requestId"])?;
             Ok(RpcCommand::CavePairingExchange {
                 handle: required_string(object, "handle")?,
                 request_id: required_pairing_request_id(object, "requestId")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_reset_pairing" => {
@@ -624,51 +791,58 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             })
         }
         "cave_credential_status" => {
-            expect_exact_args(object, &["handle"])?;
+            expect_exact_args(object, &["handle", "operation"])?;
             Ok(RpcCommand::CaveCredentialStatus {
                 handle: required_string(object, "handle")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_forget_credential" => {
-            expect_exact_args(object, &["handle"])?;
+            expect_exact_args(object, &["handle", "operation"])?;
             Ok(RpcCommand::CaveForgetCredential {
                 handle: required_string(object, "handle")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_list_familiars" => {
-            expect_exact_args(object, &["handle", "page"])?;
+            expect_exact_args(object, &["handle", "operation", "page"])?;
             Ok(RpcCommand::CaveListFamiliars {
                 handle: required_string(object, "handle")?,
                 page: required_page(object)?,
+                operation: required_operation(object)?,
             })
         }
         "cave_list_projects" => {
-            expect_exact_args(object, &["handle", "page"])?;
+            expect_exact_args(object, &["handle", "operation", "page"])?;
             Ok(RpcCommand::CaveListProjects {
                 handle: required_string(object, "handle")?,
                 page: required_page(object)?,
+                operation: required_operation(object)?,
             })
         }
         "cave_list_conversations" => {
-            expect_exact_args(object, &["handle", "page"])?;
+            expect_exact_args(object, &["handle", "operation", "page"])?;
             Ok(RpcCommand::CaveListConversations {
                 handle: required_string(object, "handle")?,
                 page: required_page(object)?,
+                operation: required_operation(object)?,
             })
         }
         "cave_get_conversation" => {
-            expect_exact_args(object, &["handle", "conversationId"])?;
+            expect_exact_args(object, &["conversationId", "handle", "operation"])?;
             Ok(RpcCommand::CaveGetConversation {
                 handle: required_string(object, "handle")?,
                 conversation_id: required_conversation_id(object, "conversationId")?,
+                operation: required_operation(object)?,
             })
         }
         "cave_list_conversation_messages" => {
-            expect_exact_args(object, &["handle", "conversationId", "page"])?;
+            expect_exact_args(object, &["conversationId", "handle", "operation", "page"])?;
             Ok(RpcCommand::CaveListConversationMessages {
                 handle: required_string(object, "handle")?,
                 conversation_id: required_conversation_id(object, "conversationId")?,
                 page: required_page(object)?,
+                operation: required_operation(object)?,
             })
         }
         "conformance_reset_native_state" => {
@@ -703,6 +877,45 @@ fn required_string(object: &Map<String, Value>, key: &str) -> Result<String, (&'
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or(("invalid_native_input", false))
+}
+
+fn required_attempt_id(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<String, (&'static str, bool)> {
+    let attempt_id = required_string(object, key)?;
+    NativeOperationInput::new(attempt_id.clone(), 1)
+        .map_err(|_| ("invalid_native_input", false))?;
+    Ok(attempt_id)
+}
+
+fn required_operation(
+    object: &Map<String, Value>,
+) -> Result<NativeOperationInput, (&'static str, bool)> {
+    let operation = object
+        .get("operation")
+        .and_then(Value::as_object)
+        .ok_or(("invalid_native_input", false))?;
+    expect_exact_args(operation, &["attemptId", "timeoutMs"])?;
+    let attempt_id = required_string(operation, "attemptId")?;
+    let timeout_ms = operation
+        .get("timeoutMs")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value <= MAX_NATIVE_OPERATION_TIMEOUT_MS)
+        .ok_or(("invalid_native_input", false))?;
+    NativeOperationInput::new(attempt_id, timeout_ms).map_err(|_| ("invalid_native_input", false))
+}
+
+fn required_cancel_reason(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<NativeCancelReason, (&'static str, bool)> {
+    match object.get(key).and_then(Value::as_str) {
+        Some("aborted") => Ok(NativeCancelReason::Aborted),
+        Some("timeout") => Ok(NativeCancelReason::Timeout),
+        _ => Err(("invalid_native_input", false)),
+    }
 }
 
 fn required_conversation_id(
@@ -847,20 +1060,92 @@ pub fn run_stdio() -> io::Result<()> {
     let mut runtime = RpcRuntime::new();
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
-    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    let stdout = Arc::new(Mutex::new(io::BufWriter::new(io::stdout())));
+    let mut workers = Vec::new();
     while let Some(line) = read_bounded_line(&mut stdin)? {
-        let (response, shutdown) = match line {
-            BoundedLine::Line(line) => runtime.process_line_with_action(&line),
-            BoundedLine::Oversized => (
-                failure_response(INVALID_REQUEST_ID, "invalid_request", false),
-                false,
-            ),
+        reap_rpc_workers(&mut workers)?;
+        let request = match line {
+            BoundedLine::Line(line) => match parse_request_line(&line) {
+                Ok(request) => request,
+                Err(response) => {
+                    write_rpc_response(&stdout, &response)?;
+                    continue;
+                }
+            },
+            BoundedLine::Oversized => {
+                write_rpc_response(
+                    &stdout,
+                    &failure_response(INVALID_REQUEST_ID, "invalid_request", false),
+                )?;
+                continue;
+            }
         };
-        serde_json::to_writer(&mut stdout, &response)?;
-        stdout.write_all(b"\n")?;
-        stdout.flush()?;
+        if request.command.runs_concurrently() {
+            if workers.len() >= MAX_RPC_WORKERS {
+                write_rpc_response(
+                    &stdout,
+                    &failure_response(request.id, "service_unavailable", true),
+                )?;
+                continue;
+            }
+            let mut worker_runtime = runtime.clone();
+            let worker_stdout = Arc::clone(&stdout);
+            workers.push(std::thread::spawn(move || {
+                let (response, _) = worker_runtime.process_request(request);
+                write_rpc_response(&worker_stdout, &response)
+            }));
+            continue;
+        }
+        if request.command.is_barrier() {
+            runtime
+                .state
+                .cancel_all_operations(NativeCancelReason::Aborted);
+            join_rpc_workers(&mut workers)?;
+        }
+        let (response, shutdown) = runtime.process_request(request);
+        write_rpc_response(&stdout, &response)?;
         if shutdown {
             break;
+        }
+    }
+    runtime
+        .state
+        .cancel_all_operations(NativeCancelReason::Aborted);
+    join_rpc_workers(&mut workers)?;
+    Ok(())
+}
+
+fn write_rpc_response(
+    stdout: &Arc<Mutex<io::BufWriter<io::Stdout>>>,
+    response: &Value,
+) -> io::Result<()> {
+    let mut stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("RPC stdout lock was poisoned"))?;
+    serde_json::to_writer(&mut *stdout, response)?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()
+}
+
+fn join_rpc_workers(workers: &mut Vec<std::thread::JoinHandle<io::Result<()>>>) -> io::Result<()> {
+    for worker in workers.drain(..) {
+        worker
+            .join()
+            .map_err(|_| io::Error::other("RPC worker panicked"))??;
+    }
+    Ok(())
+}
+
+fn reap_rpc_workers(workers: &mut Vec<std::thread::JoinHandle<io::Result<()>>>) -> io::Result<()> {
+    let mut index = 0;
+    while index < workers.len() {
+        if workers[index].is_finished() {
+            let worker = workers.swap_remove(index);
+            worker
+                .join()
+                .map_err(|_| io::Error::other("RPC worker panicked"))??;
+        } else {
+            index += 1;
         }
     }
     Ok(())
@@ -888,6 +1173,28 @@ mod tests {
     const FIRST_ORIGIN: &str = "http://127.0.0.1:4310/";
     const SECOND_ORIGIN: &str = "http://127.0.0.1:4320/";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct ScopedCaveHome(Option<std::ffi::OsString>);
+
+    impl ScopedCaveHome {
+        fn missing() -> Self {
+            let original = env::var_os("COVEN_CAVE_HOME");
+            env::set_var(
+                "COVEN_CAVE_HOME",
+                env::current_dir().unwrap().join("no-cave"),
+            );
+            Self(original)
+        }
+    }
+
+    impl Drop for ScopedCaveHome {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => env::set_var("COVEN_CAVE_HOME", value),
+                None => env::remove_var("COVEN_CAVE_HOME"),
+            }
+        }
+    }
 
     fn credential(origin: &str, bearer: &str, credential_id: &str) -> Credential {
         Credential {
@@ -955,6 +1262,11 @@ mod tests {
 
     #[test]
     fn rejects_unknown_commands_and_malformed_exact_args() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _cave_home = ScopedCaveHome::missing();
         let mut runtime = RpcRuntime::new();
         let unknown = runtime.process_line(br#"{"id":"one","command":"not-a-command"}"#);
         let extra = runtime.process_line(
@@ -978,6 +1290,18 @@ mod tests {
         let unsafe_pairing_id = runtime.process_line(
             br#"{"id":"eight","command":"cave_pairing_poll","args":{"handle":"x","requestId":"../request"}}"#,
         );
+        let bounded_operation = runtime.process_line(
+            br#"{"id":"nine","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","timeoutMs":25}}}"#,
+        );
+        let cancellation = runtime.process_line(
+            br#"{"id":"ten","command":"cave_cancel_operation","args":{"attemptId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","reason":"aborted"}}"#,
+        );
+        let oversized_timeout = runtime.process_line(
+            br#"{"id":"eleven","command":"cave_health","args":{"handle":"x","operation":{"attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","timeoutMs":5001}}}"#,
+        );
+        let malformed_cancel = runtime.process_line(
+            br#"{"id":"twelve","command":"cave_cancel_operation","args":{"attemptId":"not-an-attempt","reason":"secret-cause"}}"#,
+        );
 
         assert_eq!(unknown["error"]["code"], "invalid_rpc_command");
         assert_eq!(extra["error"]["code"], "invalid_native_input");
@@ -987,6 +1311,82 @@ mod tests {
         assert_eq!(unsafe_conversation["error"]["code"], "invalid_native_input");
         assert_eq!(widened_pairing["error"]["code"], "invalid_native_input");
         assert_eq!(unsafe_pairing_id["error"]["code"], "invalid_native_input");
+        assert_eq!(
+            bounded_operation["error"]["code"],
+            "cave_discovery_not_found"
+        );
+        assert_eq!(
+            cancellation,
+            json!({
+                "id": "ten",
+                "ok": true,
+                "result": { "status": "queued" },
+            })
+        );
+        assert_eq!(oversized_timeout["error"]["code"], "invalid_native_input");
+        assert_eq!(malformed_cancel["error"]["code"], "invalid_native_input");
+        assert!(!malformed_cancel.to_string().contains("secret-cause"));
+    }
+
+    #[test]
+    fn rpc_cancellation_is_single_use_and_cannot_affect_a_new_attempt() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _cave_home = ScopedCaveHome::missing();
+        let mut runtime = RpcRuntime::new();
+        let cancelled_attempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let fresh_attempt = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+        assert_eq!(
+            runtime.process_line(
+                format!(
+                    r#"{{"id":"cancel","command":"cave_cancel_operation","args":{{"attemptId":"{cancelled_attempt}","reason":"aborted"}}}}"#
+                )
+                .as_bytes(),
+            ),
+            json!({
+                "id": "cancel",
+                "ok": true,
+                "result": { "status": "queued" },
+            })
+        );
+        assert_eq!(
+            runtime.process_line(
+                format!(
+                    r#"{{"id":"aborted","command":"cave_health","args":{{"handle":"x","operation":{{"attemptId":"{cancelled_attempt}","timeoutMs":100}}}}}}"#
+                )
+                .as_bytes(),
+            ),
+            json!({
+                "id": "aborted",
+                "ok": false,
+                "error": { "code": "aborted", "retryable": false },
+            })
+        );
+        assert_eq!(
+            runtime.process_line(
+                format!(
+                    r#"{{"id":"stale","command":"cave_cancel_operation","args":{{"attemptId":"{cancelled_attempt}","reason":"timeout"}}}}"#
+                )
+                .as_bytes(),
+            ),
+            json!({
+                "id": "stale",
+                "ok": true,
+                "result": { "status": "unknown" },
+            })
+        );
+        assert_eq!(
+            runtime.process_line(
+                format!(
+                    r#"{{"id":"fresh","command":"cave_health","args":{{"handle":"x","operation":{{"attemptId":"{fresh_attempt}","timeoutMs":100}}}}}}"#
+                )
+                .as_bytes(),
+            )["error"]["code"],
+            "cave_discovery_not_found"
+        );
     }
 
     #[test]
@@ -1138,7 +1538,9 @@ mod tests {
         let mut runtime = RpcRuntime::new();
 
         let before = runtime.process_line(br#"{"id":"one","command":"app_installation_id"}"#);
-        let discovery = runtime.process_line(br#"{"id":"two","command":"cave_read_discovery"}"#);
+        let discovery = runtime.process_line(
+            br#"{"id":"two","command":"cave_read_discovery","args":{"operation":{"attemptId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","timeoutMs":100}}}"#,
+        );
         let reset =
             runtime.process_line(br#"{"id":"three","command":"conformance_reset_native_state"}"#);
         let after = runtime.process_line(br#"{"id":"four","command":"app_installation_id"}"#);

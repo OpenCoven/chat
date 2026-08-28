@@ -121,7 +121,18 @@ describe('managed credential status native adapter end-to-end', () => {
       });
 
       await expect(client.credentialStatus()).resolves.toEqual(testCase.expected);
-      expect(calls).toEqual([['cave_credential_status', { handle: 'native-authority-handle' }]]);
+      expect(calls).toEqual([
+        [
+          'cave_credential_status',
+          {
+            handle: 'native-authority-handle',
+            operation: {
+              attemptId: expect.any(String),
+              timeoutMs: expect.any(Number),
+            },
+          },
+        ],
+      ]);
     }
   });
 

@@ -569,6 +569,7 @@ mod tests {
     use crate::cave::{
         pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
     };
+    use crate::operation::{NativeCancelReason, NativeOperationInput, NativeOperationRegistry};
 
     const PROXY_ENVIRONMENT_VARIABLES: [&str; 6] = [
         "HTTP_PROXY",
@@ -826,6 +827,102 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("x-coven-client-v1-authority-ciphertext:"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn operation_abort_and_timeout_preempt_hpke_proof_classification() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = mpsc::sync_channel(2);
+        let server = thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = [0_u8; 16 * 1024];
+                let length = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..length])
+                    .contains("x-coven-client-v1-authority-ciphertext:"));
+                accepted_tx.send(()).unwrap();
+                loop {
+                    match stream.read(&mut request) {
+                        Ok(0) => break,
+                        Ok(_) => continue,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                ErrorKind::WouldBlock | ErrorKind::TimedOut
+                            ) =>
+                        {
+                            panic!("bounded HPKE request did not close");
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+        let authority =
+            pin_owner_discovery_record(&owner_record(format!("http://{address}")), 1).unwrap();
+        authority.bind_instance_id(INSTANCE_ID).unwrap();
+        let registry = Arc::new(NativeOperationRegistry::default());
+        let abort_registry = Arc::clone(&registry);
+        let abort_authority = authority.clone();
+        let aborted = thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                abort_registry.run(
+                    NativeOperationInput::new(
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                        1_000,
+                    )
+                    .unwrap(),
+                    ConstrainedTransport.authenticated_read(
+                        &abort_authority,
+                        "native-bearer",
+                        CaveReadPath::Familiars {
+                            page: NativePage {
+                                limit: Some(1),
+                                cursor: None,
+                            },
+                        },
+                    ),
+                ),
+            )
+        });
+        accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        registry
+            .cancel(
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                NativeCancelReason::Aborted,
+            )
+            .unwrap();
+        assert_eq!(
+            aborted.join().unwrap().err(),
+            Some(crate::cave::NativeDiagnostic::new("aborted", false))
+        );
+
+        let timed = tauri::async_runtime::block_on(
+            registry.run(
+                NativeOperationInput::new("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_owned(), 25)
+                    .unwrap(),
+                ConstrainedTransport.authenticated_read(
+                    &authority,
+                    "native-bearer",
+                    CaveReadPath::Familiars {
+                        page: NativePage {
+                            limit: Some(1),
+                            cursor: None,
+                        },
+                    },
+                ),
+            ),
+        );
+        accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            timed.err(),
+            Some(crate::cave::NativeDiagnostic::new("timeout", true))
+        );
         server.join().unwrap();
     }
 

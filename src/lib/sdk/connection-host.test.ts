@@ -44,7 +44,13 @@ describe('Cave connection host', () => {
     await discovered.client.health().catch(() => undefined);
     expect(invoke.mock.calls.at(-1)).toEqual([
       'cave_health',
-      { handle: 'native-discovery-handle' },
+      {
+        handle: 'native-discovery-handle',
+        operation: {
+          attemptId: expect.any(String),
+          timeoutMs: expect.any(Number),
+        },
+      },
     ]);
   });
 

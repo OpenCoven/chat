@@ -95,6 +95,81 @@ enum CredentialCurrentState {
     Changed,
 }
 
+struct PairingCreateReservation {
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    generation: u64,
+    handle: String,
+    authority: PinnedCaveAuthority,
+}
+
+impl Drop for PairingCreateReservation {
+    fn drop(&mut self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.generation == self.generation
+                && runtime.authority_handle.as_deref() == Some(&self.handle)
+                && runtime
+                    .authority
+                    .as_ref()
+                    .is_some_and(|current| current.is_same_pin(&self.authority))
+            {
+                runtime.pairing_in_flight = false;
+            }
+        }
+    }
+}
+
+struct PairingPollReservation {
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    generation: u64,
+    handle: String,
+    authority: PinnedCaveAuthority,
+    request_id: String,
+}
+
+impl Drop for PairingPollReservation {
+    fn drop(&mut self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.generation == self.generation
+                && runtime.authority_handle.as_deref() == Some(&self.handle)
+                && runtime.pairing.as_ref().is_some_and(|pairing| {
+                    pairing.request_id == self.request_id
+                        && pairing.generation == self.generation
+                        && pairing.authority.is_same_pin(&self.authority)
+                })
+            {
+                if let Some(pairing) = runtime.pairing.as_mut() {
+                    pairing.poll_in_flight = false;
+                }
+            }
+        }
+    }
+}
+
+struct RevocationReservation {
+    runtime: Arc<Mutex<ConnectionRuntime>>,
+    generation: u64,
+    handle: String,
+    authority: PinnedCaveAuthority,
+    instance_id: String,
+}
+
+impl Drop for RevocationReservation {
+    fn drop(&mut self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.generation == self.generation
+                && runtime.authority_handle.as_deref() == Some(&self.handle)
+                && runtime.instance_id.as_deref() == Some(&self.instance_id)
+                && runtime
+                    .authority
+                    .as_ref()
+                    .is_some_and(|current| current.is_same_pin(&self.authority))
+            {
+                runtime.revocation_in_flight = false;
+            }
+        }
+    }
+}
+
 impl UnauthorizedTracker {
     fn reset(&mut self) {
         self.identity = None;
@@ -710,17 +785,14 @@ impl NativeConnectionState {
             runtime.pairing_in_flight = true;
             captured
         };
+        let _reservation = PairingCreateReservation {
+            runtime: Arc::clone(&self.runtime),
+            generation,
+            handle: handle.clone(),
+            authority: authority.clone(),
+        };
         let result = self.transport.pairing_create(&authority, request).await;
         let mut runtime = self.runtime()?;
-        if runtime.generation == generation
-            && runtime.authority_handle.as_deref() == Some(&handle)
-            && runtime
-                .authority
-                .as_ref()
-                .is_some_and(|current| current.is_same_pin(&authority))
-        {
-            runtime.pairing_in_flight = false;
-        }
         let created = result?;
         runtime.require_current(generation, &handle, &authority)?;
         runtime.pairing = Some(PendingPairing {
@@ -758,23 +830,24 @@ impl NativeConnectionState {
             runtime.pairing.as_mut().unwrap().poll_in_flight = true;
             (generation, authority, secret)
         };
+        let _reservation = PairingPollReservation {
+            runtime: Arc::clone(&self.runtime),
+            generation,
+            handle: handle.clone(),
+            authority: authority.clone(),
+            request_id: request_id.clone(),
+        };
         let result = self
             .transport
             .pairing_poll(&authority, &request_id, &secret)
             .await;
-        let mut runtime = self.runtime()?;
+        let runtime = self.runtime()?;
         let is_current = runtime.generation == generation
             && runtime.authority_handle.as_deref() == Some(&handle)
-            && runtime.pairing.as_mut().is_some_and(|pairing| {
-                if pairing.request_id == request_id
+            && runtime.pairing.as_ref().is_some_and(|pairing| {
+                pairing.request_id == request_id
                     && pairing.generation == generation
                     && pairing.authority.is_same_pin(&authority)
-                {
-                    pairing.poll_in_flight = false;
-                    true
-                } else {
-                    false
-                }
             });
         if !is_current {
             return Err(NativeDiagnostic::new("stale_connection_attempt", true));
@@ -867,6 +940,13 @@ impl NativeConnectionState {
             }
             runtime.revocation_in_flight = true;
         }
+        let _reservation = RevocationReservation {
+            runtime: Arc::clone(&self.runtime),
+            generation,
+            handle: handle.clone(),
+            authority: authority.clone(),
+            instance_id: instance_id.clone(),
+        };
         let response = match self
             .transport
             .authenticated_read(
@@ -884,14 +964,13 @@ impl NativeConnectionState {
             Ok(response) => response,
             Err(error) => {
                 self.revalidate_authorized(generation, &handle, &authority, &instance_id)?;
-                let mut runtime = self.runtime()?;
+                let runtime = self.runtime()?;
                 runtime.require_current_authorized(
                     generation,
                     &handle,
                     &authority,
                     &instance_id,
                 )?;
-                runtime.revocation_in_flight = false;
                 return Err(error);
             }
         };
@@ -899,7 +978,6 @@ impl NativeConnectionState {
         let action = {
             let mut runtime = self.runtime()?;
             runtime.require_current_authorized(generation, &handle, &authority, &instance_id)?;
-            runtime.revocation_in_flight = false;
             if response.status_code == 401 {
                 Some(runtime.unauthorized.record(&instance_id, &credential))
             } else {
@@ -1287,8 +1365,10 @@ mod tests {
             CaveTaskRunner, NativeDiagnostic, OwnerDiscoveryRecordMetadata,
         },
         keyring::CredentialCustody,
+        operation::{NativeCancelReason, NativeOperationInput},
         transport::{NativeCaveTransport, NativePairingCreated, NativePairingExchange},
     };
+    use tokio::sync::Notify;
 
     struct FakeTransport {
         health_started: Option<Arc<std::sync::Barrier>>,
@@ -1632,6 +1712,195 @@ mod tests {
         creates: AtomicUsize,
         create_started: Arc<Barrier>,
         create_release: Arc<Barrier>,
+    }
+
+    struct CancellationCreateTransport {
+        creates: AtomicUsize,
+        started: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for CancellationCreateTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            if self.creates.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.started.notify_one();
+                return std::future::pending().await;
+            }
+            Ok(NativePairingCreated {
+                secret: "pairing-secret".to_owned(),
+                response: json!({
+                    "requestId": "11111111-1111-4111-8111-111111111111",
+                }),
+            })
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
+    struct CancellationPollTransport {
+        polls: AtomicUsize,
+        started: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for CancellationPollTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            if self.polls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.started.notify_one();
+                return std::future::pending().await;
+            }
+            Ok(json!({
+                "id": request_id,
+                "status": "pending",
+                "expiresAt": 42,
+            }))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+    }
+
+    struct CancellationStatusTransport {
+        reads: AtomicUsize,
+        started: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl NativeCaveTransport for CancellationStatusTransport {
+        async fn health(
+            &self,
+            _authority: &PinnedCaveAuthority,
+        ) -> NativeResult<NativeHttpResponse> {
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: client_v1_health_envelope(),
+            })
+        }
+
+        async fn pairing_create(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request: Value,
+        ) -> NativeResult<NativePairingCreated> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_poll(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<Value> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn pairing_exchange(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _request_id: &str,
+            _secret: &str,
+        ) -> NativeResult<NativePairingExchange> {
+            Err(NativeDiagnostic::new("unused", false))
+        }
+
+        async fn authenticated_read(
+            &self,
+            _authority: &PinnedCaveAuthority,
+            _bearer: &str,
+            _path: CaveReadPath,
+        ) -> NativeResult<NativeHttpResponse> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.started.notify_one();
+                return std::future::pending().await;
+            }
+            Ok(NativeHttpResponse {
+                status_code: 200,
+                payload: json!({
+                    "apiVersion": "1.0",
+                    "minimumClientVersion": "0.1.0",
+                    "capabilities": ["familiars", "cursors"],
+                    "operations": ["familiars.list"],
+                    "data": { "familiars": [] },
+                }),
+            })
+        }
     }
 
     #[async_trait]
@@ -2727,6 +2996,184 @@ mod tests {
                 .unwrap()
                 .request_id,
             "new-request"
+        );
+    }
+
+    #[test]
+    fn cancelling_pairing_create_releases_only_its_own_in_flight_reservation() {
+        let started = Arc::new(Notify::new());
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(CancellationCreateTransport {
+                creates: AtomicUsize::new(0),
+                started: Arc::clone(&started),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation_handle = handle.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_operation(
+                    NativeOperationInput::new(
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                        1_000,
+                    )
+                    .unwrap(),
+                    async move {
+                        operation_state
+                            .cave_pairing_create(operation_handle, pairing_request())
+                            .await
+                    },
+                ),
+            )
+        });
+        tauri::async_runtime::block_on(started.notified());
+
+        assert_eq!(
+            state
+                .cancel_operation(
+                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                    NativeCancelReason::Aborted,
+                )
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        assert!(tauri::async_runtime::block_on(
+            state.cave_pairing_create(handle, pairing_request())
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn cancelling_pairing_poll_releases_only_its_own_poll_reservation() {
+        let started = Arc::new(Notify::new());
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(CancellationPollTransport {
+                polls: AtomicUsize::new(0),
+                started: Arc::clone(&started),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(None),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let request_id = "11111111-1111-4111-8111-111111111111";
+        install_pending_pairing(&state, &handle, request_id);
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation_handle = handle.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_operation(
+                    NativeOperationInput::new(
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                        1_000,
+                    )
+                    .unwrap(),
+                    async move {
+                        operation_state
+                            .cave_pairing_poll(operation_handle, request_id.to_owned())
+                            .await
+                    },
+                ),
+            )
+        });
+        tauri::async_runtime::block_on(started.notified());
+
+        state
+            .cancel_operation(
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                NativeCancelReason::Aborted,
+            )
+            .unwrap();
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        assert!(tauri::async_runtime::block_on(
+            state.cave_pairing_poll(handle, request_id.to_owned())
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn cancelling_credential_status_releases_only_its_own_revocation_reservation() {
+        let started = Arc::new(Notify::new());
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(CancellationStatusTransport {
+                reads: AtomicUsize::new(0),
+                started: Arc::clone(&started),
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(Some(Credential {
+                    bearer: "native-only-bearer".to_owned(),
+                    credential_id: "credential-a".to_owned(),
+                    origin: "http://127.0.0.1:4310/".to_owned(),
+                })),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: deadline_record(),
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation_handle = handle.clone();
+        let operation = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(
+                runner.run_operation(
+                    NativeOperationInput::new(
+                        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                        1_000,
+                    )
+                    .unwrap(),
+                    async move {
+                        operation_state
+                            .cave_credential_status(operation_handle)
+                            .await
+                    },
+                ),
+            )
+        });
+        tauri::async_runtime::block_on(started.notified());
+
+        state
+            .cancel_operation(
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+                NativeCancelReason::Aborted,
+            )
+            .unwrap();
+        assert_eq!(
+            operation.join().unwrap(),
+            Err(NativeDiagnostic::new("aborted", false))
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(state.cave_credential_status(handle)).unwrap()["status"],
+            "valid"
         );
     }
 

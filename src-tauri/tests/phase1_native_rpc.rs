@@ -311,3 +311,250 @@ server.listen(0, '127.0.0.1', () => {
     wait_for_exit(second_pid);
     cleanup.forget_exited(second_pid);
 }
+
+#[cfg(unix)]
+#[test]
+fn subprocess_cancels_inflight_health_by_opaque_attempt_id() {
+    use std::{
+        collections::HashMap,
+        fs,
+        net::TcpListener,
+        os::unix::fs::PermissionsExt,
+        path::PathBuf,
+        sync::mpsc,
+        thread,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    struct ExactRootCleanup(PathBuf);
+
+    impl Drop for ExactRootCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn send(stdin: &mut ChildStdin, value: Value) {
+        serde_json::to_writer(&mut *stdin, &value).expect("request must serialize");
+        stdin
+            .write_all(b"\n")
+            .expect("request delimiter must write");
+        stdin.flush().expect("request must flush");
+    }
+
+    fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
+        let mut line = String::new();
+        stdout
+            .read_line(&mut line)
+            .expect("response line must be readable");
+        serde_json::from_str(&line).expect("response must be JSON")
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock must follow Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "opencoven-phase1-native-rpc-cancel-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&root).expect("isolated Cave root must be created");
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .expect("isolated Cave root must be private");
+    let root = fs::canonicalize(root).expect("isolated Cave root must be canonical");
+    let _root_cleanup = ExactRootCleanup(root.clone());
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("health listener must bind");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("listener address")
+    );
+    let discovery = root.join("client-v1-discovery.json");
+    fs::write(
+        &discovery,
+        serde_json::to_vec(&json!({
+            "version": 2,
+            "endpoint": endpoint,
+            "pid": std::process::id(),
+            "nonce": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8",
+            "startedAt": "2026-08-28T04:00:00.000Z",
+            "authority": {
+                "mechanism": "hpke-bound-v1",
+                "mode": "enforce",
+                "keyId": "Tq04GMSX5BPPPijzO9pHfQ1lAnna_RQKzL1ncDGl-4g",
+                "publicKey": "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6-jCs",
+                "suite": {
+                    "kemId": 32,
+                    "kdfId": 1,
+                    "aeadId": 2,
+                },
+            },
+        }))
+        .expect("discovery record must serialize"),
+    )
+    .expect("discovery record must write");
+    fs::set_permissions(&discovery, fs::Permissions::from_mode(0o600))
+        .expect("discovery record must be private");
+
+    let (accepted_tx, accepted_rx) = mpsc::sync_channel(2);
+    let server = thread::spawn(move || {
+        use std::io::Read as _;
+
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().expect("health request must arrive");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("read timeout must apply");
+            let mut request = [0_u8; 16 * 1024];
+            let length = stream.read(&mut request).expect("request must be readable");
+            assert!(String::from_utf8_lossy(&request[..length])
+                .starts_with("GET /api/client/v1/health "));
+            accepted_tx.send(()).expect("acceptance must publish");
+            let closed = loop {
+                match stream.read(&mut request) {
+                    Ok(0) => break true,
+                    Ok(_) => continue,
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        break false;
+                    }
+                    Err(_) => break true,
+                }
+            };
+            assert!(closed, "bounded health request must close its socket");
+        }
+    });
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env("COVEN_CAVE_HOME", &root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc must start");
+    let mut stdin = child.stdin.take().expect("child stdin must be piped");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout must be piped"));
+    send(
+        &mut stdin,
+        json!({
+            "id": "discovery",
+            "command": "cave_read_discovery",
+            "args": {
+                "operation": {
+                    "attemptId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "timeoutMs": 1_000,
+                },
+            },
+        }),
+    );
+    let discovery_response = receive(&mut stdout);
+    let handle = discovery_response["result"]["handle"]
+        .as_str()
+        .expect("discovery handle must be returned")
+        .to_owned();
+
+    send(
+        &mut stdin,
+        json!({
+            "id": "health",
+            "command": "cave_health",
+            "args": {
+                "handle": handle,
+                "operation": {
+                    "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "timeoutMs": 2_000,
+                },
+            },
+        }),
+    );
+    accepted_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("health request must start");
+    send(
+        &mut stdin,
+        json!({
+            "id": "cancel",
+            "command": "cave_cancel_operation",
+            "args": {
+                "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "reason": "aborted",
+            },
+        }),
+    );
+
+    let responses = [receive(&mut stdout), receive(&mut stdout)]
+        .into_iter()
+        .map(|response| {
+            (
+                response["id"].as_str().expect("response id").to_owned(),
+                response,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    assert_eq!(
+        responses["health"]["error"],
+        json!({ "code": "aborted", "retryable": false })
+    );
+    assert_eq!(
+        responses["cancel"]["result"],
+        json!({ "status": "cancelled" })
+    );
+    send(
+        &mut stdin,
+        json!({
+            "id": "stale",
+            "command": "cave_cancel_operation",
+            "args": {
+                "attemptId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "reason": "timeout",
+            },
+        }),
+    );
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!({ "status": "unknown" })
+    );
+    send(
+        &mut stdin,
+        json!({
+            "id": "timeout",
+            "command": "cave_health",
+            "args": {
+                "handle": discovery_response["result"]["handle"],
+                "operation": {
+                    "attemptId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "timeoutMs": 25,
+                },
+            },
+        }),
+    );
+    accepted_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("timed health request must start");
+    assert_eq!(
+        receive(&mut stdout)["error"],
+        json!({ "code": "timeout", "retryable": true })
+    );
+    server.join().expect("health server must exit");
+    send(
+        &mut stdin,
+        json!({"id":"shutdown","command":"conformance_shutdown"}),
+    );
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!({ "status": "shutting_down" })
+    );
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .expect("phase1-native-rpc must exit after shutdown");
+    assert!(
+        output.status.success(),
+        "native RPC stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

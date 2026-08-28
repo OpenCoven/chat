@@ -728,16 +728,19 @@ describe('Cave connection controller', () => {
     await subject.start();
     await subject.beginPairing();
 
-    expect(requests).toEqual([
-      {
-        handle: 'native-discovery-handle',
-        request: {
-          appName: 'OpenCoven Chat',
-          installationId: INSTALLATION_ID,
-          scopes: ['chat:read'],
-        },
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      handle: 'native-discovery-handle',
+      operation: {
+        attemptId: expect.any(String),
+        timeoutMs: expect.any(Number),
       },
-    ]);
+      request: {
+        appName: 'OpenCoven Chat',
+        installationId: INSTALLATION_ID,
+        scopes: ['chat:read'],
+      },
+    });
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: CAVE_INSTANCE_ID,
@@ -1271,6 +1274,7 @@ describe('Cave connection controller', () => {
       settled = true;
     });
     await pollEntered.promise;
+    await settle();
     await settle();
     expect(testClock.pendingSleeps()).toBe(1);
     subject.cancelPairing();

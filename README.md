@@ -11,6 +11,9 @@ write-oriented design exploration.
 - The main window can invoke only the reviewed `app_identity`,
   `app_installation_id`, and SDK-managed Cave adapter commands.
 - No browser direct HTTP calls or generic native request command are implemented.
+- Managed aborts and deadlines cross the bridge only as single-use opaque
+  attempt IDs, a timeout capped at five seconds, and a dedicated narrow cancel
+  command; signals and error causes are never serialized.
 - Pairing secrets, bearer credentials, headers, and keychain values remain in
   Rust. A random canonical UUID v4 pairing identity is stored per installation
   in the native keyring; browser results are bounded non-secret DTOs and diagnostics.

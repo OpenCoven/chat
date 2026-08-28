@@ -4,6 +4,7 @@ use tauri::State;
 use crate::{
     cave::{NativeDiagnostic, OwnerDiscoveryRecord},
     metadata::AppIdentity,
+    operation::{NativeCancelReason, NativeCancelResult, NativeOperationInput},
     transport::CaveReadPath,
     NativeConnectionState,
 };
@@ -12,6 +13,7 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",
+    "cave_cancel_operation",
     "cave_launch",
     "cave_health",
     "cave_pairing_create",
@@ -40,10 +42,27 @@ pub fn app_installation_id(
 }
 
 #[tauri::command]
-pub fn cave_read_discovery(
+pub async fn cave_read_discovery(
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<OwnerDiscoveryRecord, NativeDiagnostic> {
-    state.cave_read_discovery()
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(
+            operation,
+            async move { operation_state.cave_read_discovery() },
+        )
+        .await
+}
+
+#[tauri::command]
+pub fn cave_cancel_operation(
+    attempt_id: String,
+    reason: NativeCancelReason,
+    state: State<'_, NativeConnectionState>,
+) -> Result<NativeCancelResult, NativeDiagnostic> {
+    state.cancel_operation(attempt_id, reason)
 }
 
 #[tauri::command]
@@ -54,36 +73,66 @@ pub async fn cave_launch(state: State<'_, NativeConnectionState>) -> Result<(), 
 #[tauri::command]
 pub async fn cave_health(
     handle: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_health(handle).await
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state.cave_health(handle).await
+        })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_create(
     handle: String,
     request: Value,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_create(handle, request).await
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state.cave_pairing_create(handle, request).await
+        })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_poll(
     handle: String,
     request_id: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_poll(handle, request_id).await
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state.cave_pairing_poll(handle, request_id).await
+        })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_pairing_exchange(
     handle: String,
     request_id: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_pairing_exchange(handle, request_id).await
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_pairing_exchange(handle, request_id)
+                .await
+        })
+        .await
 }
 
 #[tauri::command]
@@ -97,27 +146,48 @@ pub fn cave_reset_pairing(
 #[tauri::command]
 pub async fn cave_credential_status(
     handle: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_credential_status(handle).await
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state.cave_credential_status(handle).await
+        })
+        .await
 }
 
 #[tauri::command]
-pub fn cave_forget_credential(
+pub async fn cave_forget_credential(
     handle: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state.cave_forget_credential(handle)
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state.cave_forget_credential(handle)
+        })
+        .await
 }
 
 #[tauri::command]
 pub async fn cave_list_familiars(
     handle: String,
     page: crate::transport::NativePage,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state
-        .cave_read(handle, CaveReadPath::Familiars { page })
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(handle, CaveReadPath::Familiars { page })
+                .await
+        })
         .await
 }
 
@@ -125,10 +195,17 @@ pub async fn cave_list_familiars(
 pub async fn cave_list_projects(
     handle: String,
     page: crate::transport::NativePage,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state
-        .cave_read(handle, CaveReadPath::Projects { page })
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(handle, CaveReadPath::Projects { page })
+                .await
+        })
         .await
 }
 
@@ -136,10 +213,17 @@ pub async fn cave_list_projects(
 pub async fn cave_list_conversations(
     handle: String,
     page: crate::transport::NativePage,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state
-        .cave_read(handle, CaveReadPath::Conversations { page })
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(handle, CaveReadPath::Conversations { page })
+                .await
+        })
         .await
 }
 
@@ -147,10 +231,17 @@ pub async fn cave_list_conversations(
 pub async fn cave_get_conversation(
     handle: String,
     conversation_id: String,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state
-        .cave_read(handle, CaveReadPath::Conversation { conversation_id })
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(handle, CaveReadPath::Conversation { conversation_id })
+                .await
+        })
         .await
 }
 
@@ -159,16 +250,23 @@ pub async fn cave_list_conversation_messages(
     handle: String,
     conversation_id: String,
     page: crate::transport::NativePage,
+    operation: NativeOperationInput,
     state: State<'_, NativeConnectionState>,
 ) -> Result<Value, NativeDiagnostic> {
-    state
-        .cave_read(
-            handle,
-            CaveReadPath::ConversationMessages {
-                conversation_id,
-                page,
-            },
-        )
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(
+                    handle,
+                    CaveReadPath::ConversationMessages {
+                        conversation_id,
+                        page,
+                    },
+                )
+                .await
+        })
         .await
 }
 

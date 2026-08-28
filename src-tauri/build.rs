@@ -4,6 +4,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",
+    "cave_cancel_operation",
     "cave_launch",
     "cave_health",
     "cave_pairing_create",

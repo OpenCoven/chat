@@ -6,6 +6,7 @@ mod connection;
 mod hpke_bound;
 mod keyring;
 mod metadata;
+mod operation;
 mod transport;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -17,16 +18,18 @@ use cave::{
 };
 use connection::ConnectionRuntime;
 use keyring::{validate_installation_id, CredentialCustody, NativeKeyring};
+use operation::NativeOperationRegistry;
 use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
-    app_identity, app_installation_id, cave_credential_status, cave_forget_credential,
-    cave_get_conversation, cave_health, cave_launch, cave_list_conversation_messages,
-    cave_list_conversations, cave_list_familiars, cave_list_projects, cave_pairing_create,
-    cave_pairing_exchange, cave_pairing_poll, cave_read_discovery, cave_reset_pairing,
-    registered_command_names,
+    app_identity, app_installation_id, cave_cancel_operation, cave_credential_status,
+    cave_forget_credential, cave_get_conversation, cave_health, cave_launch,
+    cave_list_conversation_messages, cave_list_conversations, cave_list_familiars,
+    cave_list_projects, cave_pairing_create, cave_pairing_exchange, cave_pairing_poll,
+    cave_read_discovery, cave_reset_pairing, registered_command_names,
 };
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
+pub use operation::{NativeCancelReason, NativeCancelResult, NativeOperationInput};
 
 #[derive(Clone)]
 pub struct NativeConnectionState {
@@ -38,6 +41,7 @@ pub struct NativeConnectionState {
     clock: Arc<dyn CaveClock>,
     sleeper: Arc<dyn CaveSleeper>,
     task_runner: Arc<dyn CaveTaskRunner>,
+    operations: Arc<NativeOperationRegistry>,
 }
 
 impl Default for NativeConnectionState {
@@ -51,6 +55,7 @@ impl Default for NativeConnectionState {
             clock: Arc::new(NativeCaveClock::default()),
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
+            operations: Arc::new(NativeOperationRegistry::default()),
         }
     }
 }
@@ -69,6 +74,30 @@ impl NativeConnectionState {
         self.runtime
             .lock()
             .map_err(|_| NativeDiagnostic::new("connection_state_unavailable", true))
+    }
+
+    async fn run_operation<T>(
+        &self,
+        operation: NativeOperationInput,
+        future: impl std::future::Future<Output = Result<T, NativeDiagnostic>>,
+    ) -> Result<T, NativeDiagnostic> {
+        self.operations.run(operation, future).await
+    }
+
+    fn cancel_operation(
+        &self,
+        attempt_id: String,
+        reason: NativeCancelReason,
+    ) -> Result<NativeCancelResult, NativeDiagnostic> {
+        self.operations.cancel(attempt_id, reason)
+    }
+
+    fn cancel_all_operations(&self, reason: NativeCancelReason) {
+        self.operations.cancel_all(reason);
+    }
+
+    fn operation_registry(&self) -> Arc<NativeOperationRegistry> {
+        Arc::clone(&self.operations)
     }
 }
 
@@ -90,6 +119,7 @@ impl NativeConnectionState {
             clock: Arc::new(NativeCaveClock::default()),
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
+            operations: Arc::new(NativeOperationRegistry::default()),
         }
     }
 
@@ -119,7 +149,17 @@ impl NativeConnectionState {
             clock,
             sleeper,
             task_runner,
+            operations: Arc::new(NativeOperationRegistry::default()),
         }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    pub(crate) fn using_operation_registry(
+        mut self,
+        operations: Arc<NativeOperationRegistry>,
+    ) -> Self {
+        self.operations = operations;
+        self
     }
 }
 
@@ -130,6 +170,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             app_identity,
             app_installation_id,
             cave_read_discovery,
+            cave_cancel_operation,
             cave_launch,
             cave_health,
             cave_pairing_create,
@@ -246,6 +287,7 @@ mod smoke_tests {
                 "app_identity",
                 "app_installation_id",
                 "cave_read_discovery",
+                "cave_cancel_operation",
                 "cave_launch",
                 "cave_health",
                 "cave_pairing_create",

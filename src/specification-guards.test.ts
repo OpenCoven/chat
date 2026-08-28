@@ -167,6 +167,7 @@ describe('Phase 1 specification guards', () => {
       'allow-app-identity',
       'allow-app-installation-id',
       'allow-cave-read-discovery',
+      'allow-cave-cancel-operation',
       'allow-cave-launch',
       'allow-cave-health',
       'allow-cave-pairing-create',
@@ -248,6 +249,7 @@ describe('Phase 1 specification guards', () => {
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
+      'cave_cancel_operation',
       'cave_launch',
       'cave_health',
       'cave_pairing_create',
@@ -272,6 +274,7 @@ describe('Phase 1 specification guards', () => {
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
+      'cave_cancel_operation',
       'cave_launch',
       'cave_health',
       'cave_pairing_create',
@@ -307,6 +310,7 @@ describe('Phase 1 specification guards', () => {
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
+      'cave_cancel_operation',
       'cave_launch',
       'cave_health',
       'cave_pairing_create',
@@ -338,10 +342,28 @@ describe('Phase 1 specification guards', () => {
         command !== 'app_identity' &&
         command !== 'app_installation_id' &&
         command !== 'cave_read_discovery' &&
+        command !== 'cave_cancel_operation' &&
         command !== 'cave_launch',
     )) {
       expect(commands).toMatch(
         new RegExp(`pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(\\s*handle:\\s*String`),
+      );
+    }
+    expect(commands).toMatch(
+      /pub\s+fn\s+cave_cancel_operation\s*\(\s*attempt_id:\s*String,\s*reason:\s*NativeCancelReason/,
+    );
+    for (const command of expected.filter(
+      (command) =>
+        command !== 'app_identity' &&
+        command !== 'app_installation_id' &&
+        command !== 'cave_cancel_operation' &&
+        command !== 'cave_launch' &&
+        command !== 'cave_reset_pairing',
+    )) {
+      expect(commands).toMatch(
+        new RegExp(
+          `pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\([\\s\\S]{0,240}?operation:\\s*NativeOperationInput`,
+        ),
       );
     }
     expect(commands).not.toMatch(/\b(?:origin|endpoint|url):\s*String/);
