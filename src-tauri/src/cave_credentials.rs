@@ -1,11 +1,14 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use keyring_core::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Version};
 use zeroize::Zeroizing;
 
-use crate::sdk_diagnostics::{DiagnosticCode, NativeError};
+use crate::{
+    credential_lock::CredentialMutationLock,
+    sdk_diagnostics::{DiagnosticCode, NativeError},
+};
 
 const INSTALLATION_ACCOUNT: &str = "installation-id-v1";
 const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-credential-v1:";
@@ -185,7 +188,6 @@ pub struct KeyringCredentialCustody {
 }
 
 static STORE_AVAILABILITY: OnceLock<CredentialStoreAvailability> = OnceLock::new();
-static CREDENTIAL_MUTATION_LOCK: Mutex<()> = Mutex::new(());
 
 impl KeyringCredentialCustody {
     pub const fn new(service: &'static str) -> Self {
@@ -330,6 +332,7 @@ impl CredentialCustody for KeyringCredentialCustody {
     }
 
     fn installation_id(&self) -> Result<String, NativeError> {
+        let _lock = CredentialMutationLock::acquire(self.service, INSTALLATION_ACCOUNT)?;
         let entry = self.entry(INSTALLATION_ACCOUNT, StoreOperation::Read)?;
         match entry.get_password() {
             Ok(value) => {
@@ -353,6 +356,7 @@ impl CredentialCustody for KeyringCredentialCustody {
 
     fn read_credential(&self, installation_id: &str) -> Result<CredentialLookup, NativeError> {
         let account = Self::credential_account(installation_id)?;
+        let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         let entry = self.entry(&account, StoreOperation::Read)?;
         let bytes = match entry.get_secret() {
             Ok(bytes) => Zeroizing::new(bytes),
@@ -389,10 +393,8 @@ impl CredentialCustody for KeyringCredentialCustody {
     }
 
     fn write_credential(&self, credential: &PreparedCredential) -> Result<(), NativeError> {
-        let _mutation = CREDENTIAL_MUTATION_LOCK
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
         let account = Self::credential_account(&credential.installation_id)?;
+        let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         self.entry(&account, StoreOperation::Write)?
             .set_secret(credential.encoded())
             .map_err(|error| map_keyring_error(&error, StoreOperation::Write))
@@ -402,10 +404,8 @@ impl CredentialCustody for KeyringCredentialCustody {
         &self,
         expected: &PreparedCredential,
     ) -> Result<CredentialDeleteResult, NativeError> {
-        let _mutation = CREDENTIAL_MUTATION_LOCK
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
         let account = Self::credential_account(&expected.installation_id)?;
+        let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         let entry = self.entry(&account, StoreOperation::Delete)?;
         let current = match entry.get_secret() {
             Ok(current) => Zeroizing::new(current),
@@ -425,10 +425,8 @@ impl CredentialCustody for KeyringCredentialCustody {
     }
 
     fn delete_credential(&self, installation_id: &str) -> Result<bool, NativeError> {
-        let _mutation = CREDENTIAL_MUTATION_LOCK
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
         let account = Self::credential_account(installation_id)?;
+        let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         let entry = self.entry(&account, StoreOperation::Delete)?;
         match entry.delete_credential() {
             Ok(()) => Ok(true),

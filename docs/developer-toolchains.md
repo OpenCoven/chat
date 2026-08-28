@@ -30,6 +30,7 @@
 | Apple native keyring store | `1.0.2` |
 | Linux Secret Service keyring store | `1.0.1` |
 | Windows native keyring store | `1.1.0` |
+| windows-sys | `0.61.2` |
 | base64 | `0.22.1` |
 | libc | `0.2.189` |
 | sha2 | `0.10.9` |
@@ -68,6 +69,14 @@
   SDK can no longer request discard. Timeout, late-write, and replacement
   cleanup uses compare-and-delete and reports `absent`, `changed`, or `deleted`
   without deleting a newer credential value.
+- Credential writes and compare/delete operations share an OS-visible lock
+  across Chat processes. Unix uses an owner-private, no-follow `flock` file
+  containing no credential data; Windows uses a current-user-owned named
+  mutex. Lock names are hashes of non-secret service and account identity.
+- Public request identifiers use the Cave envelope's bounded safe identifier
+  grammar while rejecting 43-character base64url secret shapes. Native
+  diagnostic identifiers are UUIDs, and error status/code pairs are
+  allowlisted separately for health, pairing creation, polling, and exchange.
 - macOS and Linux connected Unix peers are inspected from the live socket
   descriptor. Unix-only types and exports are target-gated so Windows builds do
   not reference `std::os::unix`. Windows pipe ownership and connected-identity

@@ -2,6 +2,7 @@ mod cave_credentials;
 mod commands;
 mod coven_peer_identity;
 mod coven_pipe_identity;
+mod credential_lock;
 mod metadata;
 mod sdk_connection;
 mod sdk_diagnostics;

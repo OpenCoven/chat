@@ -19,6 +19,8 @@ webview in this phase.
 - Native health and pairing results use operation-specific exact schemas rather
   than generic JSON filtering, and staged credential rollback uses exact-value
   compare-and-delete so a late cleanup cannot delete a replacement credential.
+- Credential mutations are serialized across Chat processes with owner-private
+  OS locks whose names contain only hashes of non-secret credential identity.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

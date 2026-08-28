@@ -171,20 +171,20 @@ fn operation_responses_reject_causes_keychain_records_and_unknown_fields() {
         json!({
             "apiVersion": "1.0",
             "minimumClientVersion": "0.1.0",
-            "capabilities": ["health"],
-            "operations": ["health.read"],
+            "capabilities": ["pairing"],
+            "operations": ["pairing.create"],
             "requestId": "request-1",
             "error": error
         })
     };
 
     assert_eq!(
-        NativeResponse::health(
-            500,
+        NativeResponse::pairing_create(
+            400,
             error_envelope(json!({
-                "code": "service_unavailable",
+                "code": "invalid_request",
                 "message": "failed at /Users/private/.opencoven/cave.json",
-                "retryable": true,
+                "retryable": false,
                 "cause": "raw keychain failure"
             }))
         )
@@ -193,12 +193,12 @@ fn operation_responses_reject_causes_keychain_records_and_unknown_fields() {
         DiagnosticCode::InvalidResponse
     );
 
-    let safe = NativeResponse::health(
-        500,
+    let safe = NativeResponse::pairing_create(
+        400,
         error_envelope(json!({
-            "code": "service_unavailable",
+            "code": "invalid_request",
             "message": "failed at /Users/private/.opencoven/cave.json",
-            "retryable": true
+            "retryable": false
         })),
     )
     .expect("known protocol errors should be reduced to a safe DTO");
@@ -235,6 +235,102 @@ fn operation_responses_reject_causes_keychain_records_and_unknown_fields() {
         assert_eq!(
             NativeResponse::health(200, payload)
                 .expect_err("unknown operation fields must fail closed")
+                .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+}
+
+#[test]
+fn public_request_identifiers_reject_secret_shapes_but_keep_contract_ids() {
+    let health = |request_id: &str| {
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": ["health"],
+            "operations": ["health.read"],
+            "requestId": request_id,
+            "data": {
+                "instanceId": "00000000-0000-4000-8000-000000000001",
+                "pairingRequired": true,
+                "releaseVersion": "0.1.0"
+            }
+        })
+    };
+
+    assert!(NativeResponse::health(200, health("request-example-success")).is_ok());
+    assert_eq!(
+        NativeResponse::health(200, health("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+            .expect_err("credential-shaped request ids must fail closed")
+            .code,
+        DiagnosticCode::InvalidResponse
+    );
+}
+
+#[test]
+fn operation_error_codes_are_exact_per_public_route() {
+    let error = |capability: &str, operation: &str, code: &str| {
+        json!({
+            "apiVersion": "1.0",
+            "minimumClientVersion": "0.1.0",
+            "capabilities": [capability],
+            "operations": [operation],
+            "requestId": "request-error-1",
+            "error": {
+                "code": code,
+                "message": "producer text is replaced",
+                "retryable": false
+            }
+        })
+    };
+
+    for (status, code) in [
+        (401, "unauthorized"),
+        (429, "rate_limited"),
+        (400, "invalid_request"),
+    ] {
+        assert!(
+            NativeResponse::pairing_create(status, error("pairing", "pairing.create", code))
+                .is_ok()
+        );
+    }
+    for (status, code) in [
+        (401, "unauthorized"),
+        (429, "rate_limited"),
+        (404, "not_found"),
+        (409, "conflict"),
+    ] {
+        assert!(
+            NativeResponse::pairing_poll(status, error("pairing", "pairing.poll", code)).is_ok()
+        );
+    }
+    for (status, code) in [
+        (401, "unauthorized"),
+        (404, "not_found"),
+        (409, "pairing_pending"),
+        (403, "pairing_denied"),
+        (410, "pairing_expired"),
+        (409, "conflict"),
+        (429, "rate_limited"),
+        (500, "internal_error"),
+    ] {
+        assert!(NativeResponse::pairing_exchange(
+            status,
+            error("pairing", "pairing.exchange", code)
+        )
+        .is_ok());
+    }
+
+    for response in [
+        NativeResponse::health(503, error("health", "health.read", "service_unavailable")),
+        NativeResponse::pairing_create(500, error("pairing", "pairing.create", "internal_error")),
+        NativeResponse::pairing_create(500, error("pairing", "pairing.create", "invalid_request")),
+        NativeResponse::pairing_poll(403, error("pairing", "pairing.poll", "pairing_denied")),
+        NativeResponse::pairing_exchange(403, error("pairing", "pairing.exchange", "scope_denied")),
+    ] {
+        assert_eq!(
+            response
+                .expect_err("the code is not public for this operation")
                 .code,
             DiagnosticCode::InvalidResponse
         );

@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use uuid::{Uuid, Version};
@@ -8,8 +6,6 @@ use crate::metadata::APP_NAME;
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const SAFE_ERROR_MESSAGE: &str = "Cave operation failed.";
-
-static NEXT_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,11 +42,10 @@ pub struct NativeError {
 
 impl NativeError {
     pub fn new(code: DiagnosticCode, retryable: bool) -> Self {
-        let sequence = NEXT_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             code,
             retryable,
-            diagnostic_id: format!("native:{sequence:016x}"),
+            diagnostic_id: Uuid::new_v4().to_string(),
         }
     }
 
@@ -363,7 +358,7 @@ where
             .operations
             .iter()
             .any(|operation| operation == required_operation)
-        || !valid_error_code(&envelope.error.code)
+        || !valid_error_code(required_operation, status_code, &envelope.error.code)
         || envelope.error.message.is_empty()
         || envelope.error.message.chars().count() > 256
     {
@@ -433,11 +428,21 @@ fn valid_semver(value: &str) -> bool {
 }
 
 fn valid_request_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
+    let lowercase = value.to_ascii_lowercase();
+    if value.is_empty()
+        || value.len() > 64
+        || value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'.' | b'_' | b':' | b'-'))
+        || lowercase.contains("bearer")
+        || lowercase.contains("secret")
+    {
+        return false;
+    }
+    value.len() != 43
+        || value
+            .bytes()
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'-'))
 }
 
 fn valid_uuid(value: &str) -> bool {
@@ -482,34 +487,25 @@ fn valid_operation(value: &str) -> bool {
     )
 }
 
-fn valid_error_code(value: &str) -> bool {
-    matches!(
-        value,
-        "aborted"
-            | "body_limit"
-            | "conflict"
-            | "credential_update_in_progress"
-            | "incompatible_version"
-            | "invalid_request"
-            | "invalid_response"
-            | "not_found"
-            | "operation_in_progress"
-            | "owner_mismatch"
-            | "pairing_denied"
-            | "pairing_expired"
-            | "pairing_pending"
-            | "platform_security_unavailable"
-            | "rate_limited"
-            | "reconcile_required"
-            | "scope_denied"
-            | "secure_store_unavailable"
-            | "service_unavailable"
-            | "stale_record"
-            | "timeout"
-            | "unauthorized"
-            | "unsafe_endpoint"
-            | "unsupported_operation"
-    )
+fn valid_error_code(operation: &str, status_code: u16, code: &str) -> bool {
+    match (operation, code) {
+        ("health.read", _) => false,
+        ("pairing.create", "unauthorized") => status_code == 401,
+        ("pairing.create", "rate_limited") => status_code == 429,
+        ("pairing.create", "invalid_request") => status_code == 400,
+        ("pairing.poll", "unauthorized") => status_code == 401,
+        ("pairing.poll", "rate_limited") => status_code == 429,
+        ("pairing.poll", "not_found") => status_code == 404,
+        ("pairing.poll", "conflict") => status_code == 409,
+        ("pairing.exchange", "unauthorized") => status_code == 401,
+        ("pairing.exchange", "not_found") => status_code == 404,
+        ("pairing.exchange", "pairing_pending" | "conflict") => status_code == 409,
+        ("pairing.exchange", "pairing_denied") => status_code == 403,
+        ("pairing.exchange", "pairing_expired") => status_code == 410,
+        ("pairing.exchange", "rate_limited") => status_code == 429,
+        ("pairing.exchange", "internal_error") => status_code == 500,
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -582,6 +578,7 @@ const fn diagnostic_architecture() -> &'static str {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use uuid::Uuid;
 
     use super::{DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse};
 
@@ -595,6 +592,12 @@ mod tests {
             object.keys().map(String::as_str).collect::<Vec<_>>(),
             ["code", "diagnosticId", "retryable"]
         );
+        assert!(Uuid::parse_str(
+            rendered["diagnosticId"]
+                .as_str()
+                .expect("diagnostic id should be a string")
+        )
+        .is_ok());
         assert!(!rendered.to_string().contains("secret-sentinel"));
         assert!(!rendered.to_string().contains("private/path"));
     }

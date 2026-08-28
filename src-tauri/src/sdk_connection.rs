@@ -905,9 +905,9 @@ impl StagedCredential {
                 .map_err(|_| NativeError::service_unavailable())?;
             match &mut *state {
                 StagedCredentialState::Pending => {
-                    *state = StagedCredentialState::Finished(CredentialDeleteResult::Deleted);
+                    *state = StagedCredentialState::Finished(CredentialDeleteResult::Absent);
                     self.completed.notify_all();
-                    return Ok(CredentialDeleteResult::Deleted);
+                    return Ok(CredentialDeleteResult::Absent);
                 }
                 StagedCredentialState::Writing { discard_requested } => {
                     *discard_requested = true;
@@ -2154,6 +2154,26 @@ mod tests {
             discarded.result,
             super::PairingDiscardResult::Absent
         ));
+    }
+
+    #[test]
+    fn discard_reports_absent_for_a_pending_unwritten_credential() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard".into(),
+                    commit_handle,
+                })
+                .expect("pending exact discard should complete");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Absent
+            ));
+        });
     }
 
     #[test]
