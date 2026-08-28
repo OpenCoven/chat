@@ -21,6 +21,8 @@ webview in this phase.
   compare-and-delete so a late cleanup cannot delete a replacement credential.
 - Credential mutations are serialized across Chat processes with owner-private
   OS locks whose names contain only hashes of non-secret credential identity.
+- Storage work is bounded and dispatched to Tauri's blocking pool; lifecycle
+  transitions remain responsive and invalidate transient state by generation.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

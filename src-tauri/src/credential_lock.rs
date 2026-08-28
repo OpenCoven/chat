@@ -2,15 +2,25 @@ use sha2::{Digest, Sha256};
 
 use crate::sdk_diagnostics::NativeError;
 
+const CREDENTIAL_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub(crate) struct CredentialMutationLock {
     _platform: PlatformCredentialLock,
 }
 
 impl CredentialMutationLock {
     pub(crate) fn acquire(service: &str, account: &str) -> Result<Self, NativeError> {
+        Self::acquire_with_timeout(service, account, CREDENTIAL_LOCK_TIMEOUT)
+    }
+
+    fn acquire_with_timeout(
+        service: &str,
+        account: &str,
+        timeout: std::time::Duration,
+    ) -> Result<Self, NativeError> {
         let key = credential_key(service, account);
         Ok(Self {
-            _platform: PlatformCredentialLock::acquire(&key)?,
+            _platform: PlatformCredentialLock::acquire(&key, timeout)?,
         })
     }
 }
@@ -27,6 +37,63 @@ fn credential_key(service: &str, account: &str) -> String {
         .collect()
 }
 
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowsPersistenceAction {
+    Accept,
+    Migrate,
+    Reject,
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn windows_persistence_action(value: Option<&str>) -> WindowsPersistenceAction {
+    match value {
+        Some("Local") => WindowsPersistenceAction::Accept,
+        Some("Enterprise") => WindowsPersistenceAction::Migrate,
+        _ => WindowsPersistenceAction::Reject,
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowsAclPolicy {
+    CurrentUserFullControlOnly,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WindowsMutexSpec {
+    pub(crate) name: String,
+    pub(crate) acl: WindowsAclPolicy,
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn windows_mutex_spec(
+    current_user_sid: &[u8],
+    credential_key: &str,
+) -> Result<WindowsMutexSpec, NativeError> {
+    if current_user_sid.is_empty()
+        || credential_key.len() != 64
+        || credential_key
+            .bytes()
+            .any(|byte| !byte.is_ascii_digit() && !(b'a'..=b'f').contains(&byte))
+    {
+        return Err(NativeError::platform_security_unavailable());
+    }
+    let user_key = Sha256::digest(current_user_sid)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let name = format!("Global\\OpenCoven.Chat.Credential.{user_key}.{credential_key}");
+    if name.len() > 240 {
+        return Err(NativeError::platform_security_unavailable());
+    }
+    Ok(WindowsMutexSpec {
+        name,
+        acl: WindowsAclPolicy::CurrentUserFullControlOnly,
+    })
+}
+
 #[cfg(unix)]
 struct PlatformCredentialLock {
     _file: std::fs::File,
@@ -34,7 +101,7 @@ struct PlatformCredentialLock {
 
 #[cfg(unix)]
 impl PlatformCredentialLock {
-    fn acquire(key: &str) -> Result<Self, NativeError> {
+    fn acquire(key: &str, timeout: std::time::Duration) -> Result<Self, NativeError> {
         use std::{
             ffi::CString,
             os::fd::{FromRawFd, RawFd},
@@ -117,14 +184,23 @@ impl PlatformCredentialLock {
         {
             return Err(platform_error());
         }
+        let deadline = std::time::Instant::now() + timeout;
         loop {
             // SAFETY: flock operates on the live lock-file descriptor.
-            if unsafe { libc::flock(descriptor, libc::LOCK_EX) } == 0 {
+            if unsafe { libc::flock(descriptor, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
                 break;
             }
-            if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            let code = std::io::Error::last_os_error().raw_os_error();
+            if code == Some(libc::EINTR) {
+                continue;
+            }
+            if code != Some(libc::EWOULDBLOCK) && code != Some(libc::EAGAIN) {
                 return Err(platform_error());
             }
+            if std::time::Instant::now() >= deadline {
+                return Err(NativeError::credential_update_in_progress());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         Ok(Self { _file: file })
     }
@@ -137,19 +213,26 @@ struct PlatformCredentialLock {
 
 #[cfg(windows)]
 impl PlatformCredentialLock {
-    fn acquire(key: &str) -> Result<Self, NativeError> {
+    fn acquire(key: &str, timeout: std::time::Duration) -> Result<Self, NativeError> {
         use windows_sys::Win32::{
             Foundation::{
                 CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL, WAIT_ABANDONED,
-                WAIT_OBJECT_0,
+                WAIT_OBJECT_0, WAIT_TIMEOUT,
             },
             Security::{
-                Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT},
-                EqualSid, GetLengthSid, GetTokenInformation, TokenUser, OWNER_SECURITY_INFORMATION,
-                PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, TOKEN_USER,
+                Authorization::{
+                    GetExplicitEntriesFromAclW, GetSecurityInfo, SetEntriesInAclW,
+                    EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_KERNEL_OBJECT, TRUSTEE_IS_SID,
+                    TRUSTEE_IS_USER,
+                },
+                EqualSid, GetLengthSid, GetTokenInformation, InitializeSecurityDescriptor,
+                SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser,
+                DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+                SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
             },
             System::Threading::{
-                CreateMutexW, GetCurrentProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
+                CreateMutexW, GetCurrentProcess, OpenProcessToken, WaitForSingleObject,
+                MUTEX_ALL_ACCESS,
             },
         };
 
@@ -164,6 +247,19 @@ impl PlatformCredentialLock {
                 // SAFETY: this handle is owned by the guard.
                 unsafe {
                     CloseHandle(self.0);
+                }
+            }
+        }
+
+        struct LocalAllocation(HLOCAL);
+
+        impl Drop for LocalAllocation {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    // SAFETY: this pointer was allocated by a Windows local-allocation API.
+                    unsafe {
+                        LocalFree(self.0);
+                    }
                 }
             }
         }
@@ -213,57 +309,108 @@ impl PlatformCredentialLock {
         // SAFETY: GetLengthSid returned the readable byte length for current_sid.
         let sid_bytes =
             unsafe { std::slice::from_raw_parts(current_sid.cast::<u8>(), sid_length as usize) };
-        let user_key = Sha256::digest(sid_bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let name = format!("Local\\OpenCoven.Chat.Credential.{user_key}.{key}")
+        let spec = windows_mutex_spec(sid_bytes, key)?;
+        let name = spec
+            .name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
-        // SAFETY: the name is NUL-terminated and the default DACL comes from the current token.
-        let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+
+        let mut access = EXPLICIT_ACCESS_W::default();
+        access.grfAccessPermissions = MUTEX_ALL_ACCESS;
+        access.grfAccessMode = GRANT_ACCESS;
+        access.grfInheritance = 0;
+        access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        access.Trustee.ptstrName = current_sid.cast();
+        let mut acl = std::ptr::null_mut();
+        // SAFETY: access references the live current-user SID and acl receives local allocation.
+        let acl_status =
+            unsafe { SetEntriesInAclW(1, &raw const access, std::ptr::null(), &raw mut acl) };
+        let acl_allocation = LocalAllocation(acl.cast());
+        if acl_status != ERROR_SUCCESS || acl.is_null() {
+            return Err(platform_error());
+        }
+        let mut descriptor = SECURITY_DESCRIPTOR::default();
+        // SAFETY: descriptor is writable and current_sid remains alive through CreateMutexW.
+        if unsafe {
+            InitializeSecurityDescriptor((&raw mut descriptor).cast(), 1) == 0
+                || SetSecurityDescriptorOwner((&raw mut descriptor).cast(), current_sid, 0) == 0
+                || SetSecurityDescriptorDacl((&raw mut descriptor).cast(), 1, acl, 0) == 0
+        } {
+            return Err(platform_error());
+        }
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: (&raw mut descriptor).cast(),
+            bInheritHandle: 0,
+        };
+        // SAFETY: the name and owner-only security attributes remain live for this call.
+        let mutex = unsafe { CreateMutexW(&raw const attributes, 0, name.as_ptr()) };
+        drop(acl_allocation);
         if mutex.is_null() {
             return Err(platform_error());
         }
         let mutex = OwnedHandle(mutex);
 
         let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl = std::ptr::null_mut();
         let mut security_descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-        // SAFETY: GetSecurityInfo initializes owner and the allocated security descriptor.
+        // SAFETY: GetSecurityInfo initializes owner, dacl, and the allocated descriptor.
         let security_status = unsafe {
             GetSecurityInfo(
                 mutex.0,
                 SE_KERNEL_OBJECT,
-                OWNER_SECURITY_INFORMATION,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                 &raw mut owner,
                 std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                &raw mut dacl,
                 std::ptr::null_mut(),
                 &raw mut security_descriptor,
             )
         };
+        let descriptor_allocation = LocalAllocation(security_descriptor.cast());
         if security_status != ERROR_SUCCESS
             || owner.is_null()
+            || dacl.is_null()
             || security_descriptor.is_null()
             // SAFETY: both SIDs are valid while their backing buffers remain alive.
             || unsafe { EqualSid(owner, current_sid) } == 0
         {
-            if !security_descriptor.is_null() {
-                // SAFETY: GetSecurityInfo allocated this descriptor with LocalAlloc.
-                unsafe {
-                    LocalFree(security_descriptor as HLOCAL);
-                }
-            }
             return Err(platform_error());
         }
-        // SAFETY: GetSecurityInfo allocated this descriptor with LocalAlloc.
-        unsafe {
-            LocalFree(security_descriptor as HLOCAL);
+        let mut entry_count = 0;
+        let mut entries = std::ptr::null_mut();
+        // SAFETY: dacl is owned by security_descriptor and entries receives local allocation.
+        let entries_status =
+            unsafe { GetExplicitEntriesFromAclW(dacl, &raw mut entry_count, &raw mut entries) };
+        let entries_allocation = LocalAllocation(entries.cast());
+        if entries_status != ERROR_SUCCESS || entry_count != 1 || entries.is_null() {
+            return Err(platform_error());
         }
+        // SAFETY: the API returned exactly one initialized explicit entry.
+        let entry = unsafe { &*entries };
+        if entry.grfAccessPermissions != MUTEX_ALL_ACCESS
+            || entry.grfAccessMode != GRANT_ACCESS
+            || entry.grfInheritance != 0
+            || !entry.Trustee.pMultipleTrustee.is_null()
+            || entry.Trustee.TrusteeForm != TRUSTEE_IS_SID
+            || entry.Trustee.TrusteeType != TRUSTEE_IS_USER
+            || entry.Trustee.ptstrName.is_null()
+            // SAFETY: trustee name is a SID for TRUSTEE_IS_SID.
+            || unsafe { EqualSid(entry.Trustee.ptstrName.cast(), current_sid) } == 0
+        {
+            return Err(platform_error());
+        }
+        drop(entries_allocation);
+        drop(descriptor_allocation);
 
+        let timeout_millis = timeout.as_millis().min(u128::from(u32::MAX - 1)) as u32;
         // SAFETY: the mutex handle is live.
-        let wait = unsafe { WaitForSingleObject(mutex.0, INFINITE) };
+        let wait = unsafe { WaitForSingleObject(mutex.0, timeout_millis) };
+        if wait == WAIT_TIMEOUT {
+            return Err(NativeError::credential_update_in_progress());
+        }
         if wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED {
             return Err(platform_error());
         }
@@ -291,7 +438,7 @@ struct PlatformCredentialLock;
 
 #[cfg(not(any(unix, windows)))]
 impl PlatformCredentialLock {
-    fn acquire(_key: &str) -> Result<Self, NativeError> {
+    fn acquire(_key: &str, _timeout: std::time::Duration) -> Result<Self, NativeError> {
         Err(NativeError::platform_security_unavailable())
     }
 }
@@ -427,5 +574,61 @@ mod tests {
         symlink("/dev/null", &path).expect("create hostile lock symlink");
         assert!(CredentialMutationLock::acquire(service, &account).is_err());
         std::fs::remove_file(path).expect("remove hostile lock symlink");
+    }
+
+    #[test]
+    fn contended_lock_times_out_with_retryable_failure() {
+        let service = "ai.opencoven.chat.test";
+        let account = format!("test-{}", uuid::Uuid::new_v4());
+        let first = CredentialMutationLock::acquire(service, &account).expect("first lock");
+        let started = std::time::Instant::now();
+        let error = CredentialMutationLock::acquire_with_timeout(
+            service,
+            &account,
+            Duration::from_millis(50),
+        )
+        .err()
+        .expect("second lock must not wait indefinitely");
+        assert_eq!(
+            error.code,
+            crate::sdk_diagnostics::DiagnosticCode::CredentialUpdateInProgress
+        );
+        assert!(error.retryable);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(first);
+        std::fs::remove_file(lock_path(service, &account)).expect("remove test lock");
+    }
+}
+
+#[cfg(test)]
+mod windows_contract_tests {
+    use super::{
+        windows_mutex_spec, windows_persistence_action, WindowsAclPolicy, WindowsPersistenceAction,
+    };
+
+    #[test]
+    fn windows_credentials_are_local_machine_and_enterprise_values_migrate() {
+        assert_eq!(
+            windows_persistence_action(Some("Local")),
+            WindowsPersistenceAction::Accept
+        );
+        assert_eq!(
+            windows_persistence_action(Some("Enterprise")),
+            WindowsPersistenceAction::Migrate
+        );
+        assert_eq!(
+            windows_persistence_action(Some("Session")),
+            WindowsPersistenceAction::Reject
+        );
+    }
+
+    #[test]
+    fn windows_mutex_spec_is_global_bounded_and_current_user_only() {
+        let spec = windows_mutex_spec(&[7_u8; 28], &"a".repeat(64))
+            .expect("bounded current-user mutex spec");
+        assert!(spec.name.starts_with("Global\\OpenCoven.Chat.Credential."));
+        assert!(spec.name.len() <= 240);
+        assert_eq!(spec.acl, WindowsAclPolicy::CurrentUserFullControlOnly);
+        assert!(!spec.name.contains("S-1-"));
     }
 }

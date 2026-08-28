@@ -71,8 +71,23 @@
   without deleting a newer credential value.
 - Credential writes and compare/delete operations share an OS-visible lock
   across Chat processes. Unix uses an owner-private, no-follow `flock` file
-  containing no credential data; Windows uses a current-user-owned named
-  mutex. Lock names are hashes of non-secret service and account identity.
+  containing no credential data; Windows uses a current-user-only
+  `Global\` named mutex. Lock names are bounded hashes of non-secret user,
+  service, and account identity. Contention is bounded and reports retryable
+  `credential_update_in_progress` instead of waiting indefinitely.
+- Windows credentials are created with explicit non-roaming `Local`
+  persistence. Existing `Enterprise` credentials are rewritten under the
+  cross-process lock with `Local` persistence, while unsupported persistence
+  classes fail closed.
+- Credential bytes and parsed bearer strings enter zeroizing owners before
+  validation. Invalid JSON, metadata, encoding, and oversized-record paths
+  zero the owned allocations before returning.
+- Authority replacement and close cleanup are generation-scoped. Interleaved
+  transitions cannot clear newer pairing or staged-credential state, and an
+  open superseded before completion returns `reconcile_required`.
+- All platform-store and cross-process-lock work runs on Tauri's blocking pool.
+  Lifecycle mutexes are released before backend I/O so discovery and authority
+  replacement remain responsive while storage is unavailable or contended.
 - Public request identifiers use the Cave envelope's bounded safe identifier
   grammar while rejecting 43-character base64url secret shapes. Native
   diagnostic identifiers are UUIDs, and error status/code pairs are

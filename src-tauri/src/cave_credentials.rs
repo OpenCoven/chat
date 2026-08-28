@@ -3,8 +3,10 @@ use std::sync::OnceLock;
 use keyring_core::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Version};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(windows)]
+use crate::credential_lock::{windows_persistence_action, WindowsPersistenceAction};
 use crate::{
     credential_lock::CredentialMutationLock,
     sdk_diagnostics::{DiagnosticCode, NativeError},
@@ -12,6 +14,7 @@ use crate::{
 
 const INSTALLATION_ACCOUNT: &str = "installation-id-v1";
 const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-credential-v1:";
+const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialStoreAvailability {
@@ -20,7 +23,80 @@ pub enum CredentialStoreAvailability {
     Unavailable,
 }
 
-pub struct SecretValue(Zeroizing<Vec<u8>>);
+struct ZeroizingBuffer {
+    value: Option<Vec<u8>>,
+    #[cfg(test)]
+    observer: Option<std::sync::Arc<ZeroizeTestObserver>>,
+}
+
+impl ZeroizingBuffer {
+    fn new(value: Vec<u8>) -> Self {
+        Self {
+            value: Some(value),
+            #[cfg(test)]
+            observer: current_zeroize_test_observer(),
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        self.value.as_deref().unwrap_or_default()
+    }
+}
+
+impl Drop for ZeroizingBuffer {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.as_mut() {
+            value.as_mut_slice().zeroize();
+            #[cfg(test)]
+            if let Some(observer) = &self.observer {
+                observer.observe(value);
+            }
+            value.clear();
+        }
+    }
+}
+
+struct ZeroizingText {
+    value: Option<String>,
+    #[cfg(test)]
+    observer: Option<std::sync::Arc<ZeroizeTestObserver>>,
+}
+
+impl ZeroizingText {
+    fn into_bytes(mut self) -> Vec<u8> {
+        self.value.take().unwrap_or_default().into_bytes()
+    }
+}
+
+impl<'de> Deserialize<'de> for ZeroizingText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self {
+            value: Some(String::deserialize(deserializer)?),
+            #[cfg(test)]
+            observer: current_zeroize_test_observer(),
+        })
+    }
+}
+
+impl Drop for ZeroizingText {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.as_mut() {
+            // SAFETY: replacing every byte with zero preserves valid UTF-8.
+            let bytes = unsafe { value.as_bytes_mut() };
+            bytes.zeroize();
+            #[cfg(test)]
+            if let Some(observer) = &self.observer {
+                observer.observe(bytes);
+            }
+            value.clear();
+        }
+    }
+}
+
+pub struct SecretValue(ZeroizingBuffer);
 
 impl SecretValue {
     pub fn bearer(value: Vec<u8>) -> Result<Self, NativeError> {
@@ -32,14 +108,16 @@ impl SecretValue {
     }
 
     fn opaque_32_byte_base64url(value: Vec<u8>) -> Result<Self, NativeError> {
-        if value.len() != 43
+        let value = ZeroizingBuffer::new(value);
+        if value.as_slice().len() != 43
             || value
+                .as_slice()
                 .iter()
                 .any(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_' && *byte != b'-')
         {
             return Err(NativeError::invalid_response());
         }
-        Ok(Self(Zeroizing::new(value)))
+        Ok(Self(value))
     }
 
     pub fn expose(&self) -> &[u8] {
@@ -49,7 +127,7 @@ impl SecretValue {
 
 impl Clone for SecretValue {
     fn clone(&self) -> Self {
-        Self(Zeroizing::new(self.0.to_vec()))
+        Self(ZeroizingBuffer::new(self.0.as_slice().to_vec()))
     }
 }
 
@@ -204,7 +282,60 @@ impl KeyringCredentialCustody {
                 return Err(NativeError::secure_store_unavailable());
             }
         }
-        Entry::new(self.service, account).map_err(|error| map_keyring_error(&error, operation))
+        #[cfg(windows)]
+        {
+            return Entry::new_with_modifiers(
+                self.service,
+                account,
+                &std::collections::HashMap::from([("persistence", "Local")]),
+            )
+            .map_err(|error| map_keyring_error(&error, operation));
+        }
+        #[cfg(not(windows))]
+        {
+            Entry::new(self.service, account).map_err(|error| map_keyring_error(&error, operation))
+        }
+    }
+
+    #[cfg(windows)]
+    fn ensure_windows_local_persistence(
+        entry: &Entry,
+        secret: &[u8],
+        operation: StoreOperation,
+    ) -> Result<(), NativeError> {
+        let persistence = entry
+            .get_attributes()
+            .map_err(|error| map_keyring_error(&error, operation))?
+            .get("persistence")
+            .cloned();
+        match windows_persistence_action(persistence.as_deref()) {
+            WindowsPersistenceAction::Accept => Ok(()),
+            WindowsPersistenceAction::Migrate => {
+                entry
+                    .set_secret(secret)
+                    .map_err(|error| map_keyring_error(&error, StoreOperation::Write))?;
+                let migrated = entry
+                    .get_attributes()
+                    .map_err(|error| map_keyring_error(&error, StoreOperation::Read))?;
+                if windows_persistence_action(migrated.get("persistence").map(String::as_str))
+                    == WindowsPersistenceAction::Accept
+                {
+                    Ok(())
+                } else {
+                    Err(NativeError::platform_security_unavailable())
+                }
+            }
+            WindowsPersistenceAction::Reject => Err(NativeError::platform_security_unavailable()),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn ensure_windows_local_persistence(
+        _entry: &Entry,
+        _secret: &[u8],
+        _operation: StoreOperation,
+    ) -> Result<(), NativeError> {
+        Ok(())
     }
 
     fn credential_account(installation_id: &str) -> Result<String, NativeError> {
@@ -323,7 +454,98 @@ struct CredentialWire {
     version: u8,
     installation_id: String,
     authority_fingerprint: String,
-    bearer: String,
+    bearer: ZeroizingText,
+}
+
+fn decode_credential_bytes(bytes: Vec<u8>, installation_id: &str) -> CredentialLookup {
+    let bytes = ZeroizingBuffer::new(bytes);
+    if bytes.as_slice().len() > MAX_CREDENTIAL_RECORD_BYTES {
+        return CredentialLookup::Invalid;
+    }
+    let wire = match serde_json::from_slice::<CredentialWire>(bytes.as_slice()) {
+        Ok(wire) => wire,
+        Err(_) => return CredentialLookup::Invalid,
+    };
+    if wire.version != 1
+        || wire.installation_id != installation_id
+        || validate_installation_id(&wire.installation_id).is_err()
+        || validate_authority_fingerprint(&wire.authority_fingerprint).is_err()
+    {
+        return CredentialLookup::Invalid;
+    }
+    let bearer = match SecretValue::bearer(wire.bearer.into_bytes()) {
+        Ok(bearer) => bearer,
+        Err(_) => return CredentialLookup::Invalid,
+    };
+
+    CredentialLookup::Present(CredentialRecord {
+        installation_id: wire.installation_id,
+        authority_fingerprint: wire.authority_fingerprint,
+        bearer,
+    })
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct ZeroizeTestObserver {
+    drops: std::sync::atomic::AtomicUsize,
+    observed_nonzero: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ZeroizeTestObserver {
+    fn observe(&self, value: &[u8]) {
+        if value.iter().any(|byte| *byte != 0) {
+            self.observed_nonzero
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.drops
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn assert_zeroized(&self) {
+        assert!(
+            self.drops.load(std::sync::atomic::Ordering::Relaxed) > 0,
+            "at least one secret owner must be dropped"
+        );
+        assert!(
+            !self
+                .observed_nonzero
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "secret owners must zero their allocation before drop"
+        );
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static ZEROIZE_TEST_OBSERVER: std::cell::RefCell<Option<std::sync::Arc<ZeroizeTestObserver>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn current_zeroize_test_observer() -> Option<std::sync::Arc<ZeroizeTestObserver>> {
+    ZEROIZE_TEST_OBSERVER.with(|observer| observer.borrow().clone())
+}
+
+#[cfg(test)]
+fn with_zeroize_test_observer<T>(
+    observer: std::sync::Arc<ZeroizeTestObserver>,
+    operation: impl FnOnce() -> T,
+) -> T {
+    struct RestoreObserver(Option<std::sync::Arc<ZeroizeTestObserver>>);
+
+    impl Drop for RestoreObserver {
+        fn drop(&mut self) {
+            ZEROIZE_TEST_OBSERVER.with(|observer| {
+                *observer.borrow_mut() = self.0.take();
+            });
+        }
+    }
+
+    let previous = ZEROIZE_TEST_OBSERVER.with(|current| current.borrow_mut().replace(observer));
+    let _restore = RestoreObserver(previous);
+    operation()
 }
 
 impl CredentialCustody for KeyringCredentialCustody {
@@ -336,6 +558,11 @@ impl CredentialCustody for KeyringCredentialCustody {
         let entry = self.entry(INSTALLATION_ACCOUNT, StoreOperation::Read)?;
         match entry.get_password() {
             Ok(value) => {
+                Self::ensure_windows_local_persistence(
+                    &entry,
+                    value.as_bytes(),
+                    StoreOperation::Read,
+                )?;
                 validate_installation_id(&value)?;
                 Ok(value)
             }
@@ -347,8 +574,17 @@ impl CredentialCustody for KeyringCredentialCustody {
                 let stored = entry
                     .get_password()
                     .map_err(|error| map_keyring_error(&error, StoreOperation::Read))?;
+                Self::ensure_windows_local_persistence(
+                    &entry,
+                    stored.as_bytes(),
+                    StoreOperation::Read,
+                )?;
                 validate_installation_id(&stored)?;
                 Ok(stored)
+            }
+            Err(KeyringError::BadEncoding(bytes) | KeyringError::BadDataFormat(bytes, _)) => {
+                drop(ZeroizingBuffer::new(bytes));
+                Err(operation_error(StoreOperation::Read))
             }
             Err(error) => Err(map_keyring_error(&error, StoreOperation::Read)),
         }
@@ -359,45 +595,31 @@ impl CredentialCustody for KeyringCredentialCustody {
         let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         let entry = self.entry(&account, StoreOperation::Read)?;
         let bytes = match entry.get_secret() {
-            Ok(bytes) => Zeroizing::new(bytes),
+            Ok(bytes) => {
+                Self::ensure_windows_local_persistence(&entry, &bytes, StoreOperation::Read)?;
+                bytes
+            }
             Err(KeyringError::NoEntry) => return Ok(CredentialLookup::Missing),
-            Err(
-                KeyringError::BadEncoding(_)
-                | KeyringError::BadDataFormat(_, _)
-                | KeyringError::BadStoreFormat(_)
-                | KeyringError::Ambiguous(_),
-            ) => return Ok(CredentialLookup::Invalid),
+            Err(KeyringError::BadEncoding(bytes) | KeyringError::BadDataFormat(bytes, _)) => {
+                drop(ZeroizingBuffer::new(bytes));
+                return Ok(CredentialLookup::Invalid);
+            }
+            Err(KeyringError::BadStoreFormat(_) | KeyringError::Ambiguous(_)) => {
+                return Ok(CredentialLookup::Invalid);
+            }
             Err(error) => return Err(map_keyring_error(&error, StoreOperation::Read)),
         };
-        let wire = match serde_json::from_slice::<CredentialWire>(&bytes) {
-            Ok(wire) => wire,
-            Err(_) => return Ok(CredentialLookup::Invalid),
-        };
-        if wire.version != 1
-            || wire.installation_id != installation_id
-            || validate_installation_id(&wire.installation_id).is_err()
-            || validate_authority_fingerprint(&wire.authority_fingerprint).is_err()
-        {
-            return Ok(CredentialLookup::Invalid);
-        }
-        let bearer = match SecretValue::bearer(wire.bearer.into_bytes()) {
-            Ok(bearer) => bearer,
-            Err(_) => return Ok(CredentialLookup::Invalid),
-        };
-
-        Ok(CredentialLookup::Present(CredentialRecord {
-            installation_id: wire.installation_id,
-            authority_fingerprint: wire.authority_fingerprint,
-            bearer,
-        }))
+        Ok(decode_credential_bytes(bytes, installation_id))
     }
 
     fn write_credential(&self, credential: &PreparedCredential) -> Result<(), NativeError> {
         let account = Self::credential_account(&credential.installation_id)?;
         let _lock = CredentialMutationLock::acquire(self.service, &account)?;
-        self.entry(&account, StoreOperation::Write)?
+        let entry = self.entry(&account, StoreOperation::Write)?;
+        entry
             .set_secret(credential.encoded())
-            .map_err(|error| map_keyring_error(&error, StoreOperation::Write))
+            .map_err(|error| map_keyring_error(&error, StoreOperation::Write))?;
+        Self::ensure_windows_local_persistence(&entry, credential.encoded(), StoreOperation::Write)
     }
 
     fn compare_delete_credential(
@@ -408,8 +630,15 @@ impl CredentialCustody for KeyringCredentialCustody {
         let _lock = CredentialMutationLock::acquire(self.service, &account)?;
         let entry = self.entry(&account, StoreOperation::Delete)?;
         let current = match entry.get_secret() {
-            Ok(current) => Zeroizing::new(current),
+            Ok(current) => {
+                Self::ensure_windows_local_persistence(&entry, &current, StoreOperation::Read)?;
+                Zeroizing::new(current)
+            }
             Err(KeyringError::NoEntry) => return Ok(CredentialDeleteResult::Absent),
+            Err(KeyringError::BadEncoding(bytes) | KeyringError::BadDataFormat(bytes, _)) => {
+                drop(ZeroizingBuffer::new(bytes));
+                return Err(operation_error(StoreOperation::Read));
+            }
             Err(error) => return Err(map_keyring_error(&error, StoreOperation::Read)),
         };
         if current.as_slice() != expected.encoded() {
@@ -438,7 +667,13 @@ impl CredentialCustody for KeyringCredentialCustody {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_authority_fingerprint, validate_installation_id};
+    use std::sync::Arc;
+
+    use super::{
+        decode_credential_bytes, validate_authority_fingerprint, validate_installation_id,
+        with_zeroize_test_observer, CredentialLookup, ZeroizeTestObserver,
+        MAX_CREDENTIAL_RECORD_BYTES,
+    };
 
     #[test]
     fn rejects_non_v4_or_noncanonical_installation_ids() {
@@ -451,5 +686,44 @@ mod tests {
     fn bounds_authority_fingerprints() {
         assert!(validate_authority_fingerprint(&format!("sha256:{}", "a".repeat(64))).is_ok());
         assert!(validate_authority_fingerprint(&format!("sha256:{}", "a".repeat(65))).is_err());
+    }
+
+    #[test]
+    fn credential_decode_zeroizes_invalid_metadata_bearer_ownership() {
+        let observer = Arc::new(ZeroizeTestObserver::default());
+        let result = with_zeroize_test_observer(observer.clone(), || {
+            decode_credential_bytes(
+                br#"{"version":1,"installationId":"invalid","authorityFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bearer":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}"#.to_vec(),
+                "00000000-0000-4000-8000-000000000010",
+            )
+        });
+        assert!(matches!(result, CredentialLookup::Invalid));
+        observer.assert_zeroized();
+    }
+
+    #[test]
+    fn credential_decode_zeroizes_invalid_json_after_bearer() {
+        let observer = Arc::new(ZeroizeTestObserver::default());
+        let result = with_zeroize_test_observer(observer.clone(), || {
+            decode_credential_bytes(
+                br#"{"version":1,"installationId":"00000000-0000-4000-8000-000000000010","authorityFingerprint":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bearer":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"} trailing"#.to_vec(),
+                "00000000-0000-4000-8000-000000000010",
+            )
+        });
+        assert!(matches!(result, CredentialLookup::Invalid));
+        observer.assert_zeroized();
+    }
+
+    #[test]
+    fn credential_decode_zeroizes_oversized_raw_records() {
+        let observer = Arc::new(ZeroizeTestObserver::default());
+        let result = with_zeroize_test_observer(observer.clone(), || {
+            decode_credential_bytes(
+                vec![b'x'; MAX_CREDENTIAL_RECORD_BYTES + 1],
+                "00000000-0000-4000-8000-000000000010",
+            )
+        });
+        assert!(matches!(result, CredentialLookup::Invalid));
+        observer.assert_zeroized();
     }
 }

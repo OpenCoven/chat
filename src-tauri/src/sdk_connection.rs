@@ -457,32 +457,13 @@ impl AuthorityLifecycle {
         }
     }
 
-    fn synchronous_request<T>(
-        &self,
-        authority: &AuthorityReference,
-        request_id: &str,
-        operation: impl FnOnce(&AuthorityDescriptor) -> Result<T, NativeError>,
-    ) -> Result<T, NativeError> {
+    fn is_current(&self, authority: &AuthorityReference) -> Result<bool, NativeError> {
         authority.validate()?;
-        validate_request_id(request_id)?;
-        let mut state = self
+        let state = self
             .state
             .lock()
             .map_err(|_| NativeError::service_unavailable())?;
-        let Some(active) = state.active.as_ref() else {
-            return Err(NativeError::reconcile_required());
-        };
-        if active.reference != *authority {
-            return Err(NativeError::reconcile_required());
-        }
-        let descriptor = active.descriptor.clone();
-        let request_key = (authority.generation, request_id.to_owned());
-        if !state.requests.insert(request_key.clone()) {
-            return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
-        }
-        let result = operation(&descriptor);
-        state.requests.remove(&request_key);
-        result
+        Ok(state.active.as_ref().map(|active| &active.reference) == Some(authority))
     }
 }
 
@@ -1012,13 +993,20 @@ impl NativeSdkBoundary {
         &self,
         authority: AuthorityDescriptor,
     ) -> Result<AuthorityReference, NativeError> {
+        self.authority_open_with_transition(authority, |_| {})
+    }
+
+    fn authority_open_with_transition(
+        &self,
+        authority: AuthorityDescriptor,
+        after_replace: impl FnOnce(&AuthorityReference),
+    ) -> Result<AuthorityReference, NativeError> {
         let reference = self.lifecycle.replace(authority)?;
-        let mut transient = self
-            .transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
-        transient.pairings.clear();
-        transient.credentials.clear();
+        after_replace(&reference);
+        self.invalidate_transients_before(reference.generation)?;
+        if !self.lifecycle.is_current(&reference)? {
+            return Err(NativeError::reconcile_required());
+        }
         Ok(reference)
     }
 
@@ -1026,16 +1014,90 @@ impl NativeSdkBoundary {
         &self,
         input: CloseAuthorityInput,
     ) -> Result<AuthorityCloseResult, NativeError> {
+        self.authority_close_with_transition(input, || {})
+    }
+
+    fn authority_close_with_transition(
+        &self,
+        input: CloseAuthorityInput,
+        after_close: impl FnOnce(),
+    ) -> Result<AuthorityCloseResult, NativeError> {
         let closed = self.lifecycle.close(&input.authority)?;
         if closed {
-            let mut transient = self
-                .transient
-                .lock()
-                .map_err(|_| NativeError::service_unavailable())?;
-            transient.pairings.clear();
-            transient.credentials.clear();
+            after_close();
+            self.invalidate_transients_through(input.authority.generation)?;
         }
         Ok(AuthorityCloseResult { closed })
+    }
+
+    fn invalidate_transients_before(&self, minimum_generation: u64) -> Result<(), NativeError> {
+        let mut transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        transient
+            .pairings
+            .retain(|_, pairing| pairing.authority.generation >= minimum_generation);
+        transient
+            .credentials
+            .retain(|_, credential| credential.authority.generation >= minimum_generation);
+        Ok(())
+    }
+
+    fn invalidate_transients_through(&self, generation: u64) -> Result<(), NativeError> {
+        let mut transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        transient
+            .pairings
+            .retain(|_, pairing| pairing.authority.generation > generation);
+        transient
+            .credentials
+            .retain(|_, credential| credential.authority.generation > generation);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn insert_test_pairing(&self, authority: &AuthorityReference, handle: &str) {
+        self.transient
+            .lock()
+            .expect("test transient lock")
+            .pairings
+            .insert(
+                handle.into(),
+                PendingPairing {
+                    authority: authority.clone(),
+                    installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                    remote_request_id: "11111111-1111-4111-8111-111111111111".into(),
+                    pairing_secret: SecretValue::pairing(
+                        b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
+                    )
+                    .expect("test pairing secret"),
+                    status: PendingPairingStatus::Ready,
+                },
+            );
+    }
+
+    #[cfg(test)]
+    fn insert_test_staged_credential(&self, authority: &AuthorityReference, handle: &str) {
+        let credential = CredentialRecord {
+            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+            authority_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            bearer: SecretValue::bearer(b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_vec())
+                .expect("test bearer"),
+        };
+        self.transient
+            .lock()
+            .expect("test transient lock")
+            .credentials
+            .insert(
+                handle.into(),
+                Arc::new(StagedCredential::new(
+                    authority.clone(),
+                    PreparedCredential::from_record(&credential).expect("test credential"),
+                )),
+            );
     }
 
     pub async fn health(
@@ -1065,7 +1127,11 @@ impl NativeSdkBoundary {
         &self,
         input: PairingCreateCommandInput,
     ) -> Result<OperationResult<PairingCreatedOutput>, NativeError> {
-        let installation_id = self.custody.installation_id()?;
+        let custody = Arc::clone(&self.custody);
+        let installation_id =
+            tauri::async_runtime::spawn_blocking(move || custody.installation_id())
+                .await
+                .map_err(|_| NativeError::service_unavailable())??;
         input.request.validate(&installation_id)?;
         let request = self
             .lifecycle
@@ -1332,38 +1398,75 @@ impl NativeSdkBoundary {
         &self,
         input: CredentialCommandInput,
     ) -> Result<OperationResult<CredentialStateOutput>, NativeError> {
-        let status = self.lifecycle.synchronous_request(
-            &input.authority,
-            &input.request_id,
-            |authority| {
-                let transient = self
-                    .transient
-                    .lock()
-                    .map_err(|_| NativeError::service_unavailable())?;
-                let update_in_progress = transient
-                    .credentials
-                    .values()
-                    .filter(|credential| credential.authority == input.authority)
-                    .try_fold(false, |in_progress, credential| {
-                        Ok::<_, NativeError>(in_progress || credential.update_in_progress()?)
-                    })?;
-                drop(transient);
-                if update_in_progress {
-                    return Ok(CredentialState::UpdateInProgress);
+        let request = self
+            .lifecycle
+            .begin_request(&input.authority, &input.request_id)?;
+        let authority = match self.lifecycle.descriptor(&input.authority) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let authority_fingerprint = match authority.fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let update_in_progress = {
+            let transient = match self.transient.lock() {
+                Ok(transient) => transient,
+                Err(_) => {
+                    self.lifecycle.cancel_request(&request);
+                    return Err(NativeError::service_unavailable());
                 }
-                let installation_id = self.custody.installation_id()?;
-                Ok(match self.custody.read_credential(&installation_id)? {
-                    CredentialLookup::Missing => CredentialState::Missing,
-                    CredentialLookup::Invalid => CredentialState::Invalid,
-                    CredentialLookup::Present(credential)
-                        if credential.authority_fingerprint == authority.fingerprint()? =>
-                    {
-                        CredentialState::Present
-                    }
-                    CredentialLookup::Present(_) => CredentialState::Invalid,
+            };
+            transient
+                .credentials
+                .values()
+                .filter(|credential| credential.authority == input.authority)
+                .try_fold(false, |in_progress, credential| {
+                    Ok::<_, NativeError>(in_progress || credential.update_in_progress()?)
                 })
-            },
-        )?;
+        };
+        let update_in_progress = match update_in_progress {
+            Ok(update_in_progress) => update_in_progress,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let status = if update_in_progress {
+            CredentialState::UpdateInProgress
+        } else {
+            let installation_id = match self.custody.installation_id() {
+                Ok(installation_id) => installation_id,
+                Err(error) => {
+                    self.lifecycle.cancel_request(&request);
+                    return Err(error);
+                }
+            };
+            let lookup = match self.custody.read_credential(&installation_id) {
+                Ok(lookup) => lookup,
+                Err(error) => {
+                    self.lifecycle.cancel_request(&request);
+                    return Err(error);
+                }
+            };
+            match lookup {
+                CredentialLookup::Missing => CredentialState::Missing,
+                CredentialLookup::Invalid => CredentialState::Invalid,
+                CredentialLookup::Present(credential)
+                    if credential.authority_fingerprint == authority_fingerprint =>
+                {
+                    CredentialState::Present
+                }
+                CredentialLookup::Present(_) => CredentialState::Invalid,
+            }
+        };
+        self.lifecycle.finish_request(&request)?;
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -1375,14 +1478,24 @@ impl NativeSdkBoundary {
         &self,
         input: CredentialCommandInput,
     ) -> Result<OperationResult<bool>, NativeError> {
-        let deleted = self.lifecycle.synchronous_request(
-            &input.authority,
-            &input.request_id,
-            |_authority| {
-                let installation_id = self.custody.installation_id()?;
-                self.custody.delete_credential(&installation_id)
-            },
-        )?;
+        let request = self
+            .lifecycle
+            .begin_request(&input.authority, &input.request_id)?;
+        let installation_id = match self.custody.installation_id() {
+            Ok(installation_id) => installation_id,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let deleted = match self.custody.delete_credential(&installation_id) {
+            Ok(deleted) => deleted,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.lifecycle.finish_request(&request)?;
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -1488,10 +1601,13 @@ impl NativeSdkState {
 }
 
 #[tauri::command]
-pub fn sdk_installation_identity(
+pub async fn sdk_installation_identity(
     state: tauri::State<'_, NativeSdkState>,
 ) -> Result<InstallationIdentity, NativeError> {
-    state.boundary.installation_identity()
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.installation_identity())
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
@@ -1566,24 +1682,35 @@ pub async fn cave_pairing_discard(
 }
 
 #[tauri::command]
-pub fn cave_credential_state(
+pub async fn cave_credential_state(
     state: tauri::State<'_, NativeSdkState>,
     input: CredentialCommandInput,
 ) -> Result<OperationResult<CredentialStateOutput>, NativeError> {
-    state.boundary.credential_state(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.credential_state(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
-pub fn cave_forget_credential(
+pub async fn cave_forget_credential(
     state: tauri::State<'_, NativeSdkState>,
     input: CredentialCommandInput,
 ) -> Result<OperationResult<bool>, NativeError> {
-    state.boundary.forget_credential(input)
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.forget_credential(input))
+        .await
+        .map_err(|_| NativeError::service_unavailable())?
 }
 
 #[tauri::command]
-pub fn sdk_native_diagnostics(state: tauri::State<'_, NativeSdkState>) -> NativeDiagnostics {
-    state.boundary.diagnostics()
+pub async fn sdk_native_diagnostics(
+    state: tauri::State<'_, NativeSdkState>,
+) -> Result<NativeDiagnostics, NativeError> {
+    let boundary = Arc::clone(&state.boundary);
+    tauri::async_runtime::spawn_blocking(move || boundary.diagnostics())
+        .await
+        .map_err(|_| NativeError::service_unavailable())
 }
 
 #[cfg(test)]
@@ -1679,6 +1806,80 @@ mod tests {
         assert!(!lifecycle
             .close(&second)
             .expect("second close should be absent"));
+    }
+
+    #[test]
+    fn open_open_interleaving_preserves_new_generation_transients() {
+        let boundary =
+            NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+        let mut second = None;
+        let first = boundary.authority_open_with_transition(
+            authority("00000000-0000-4000-8000-000000000001"),
+            |_| {
+                let reference = boundary
+                    .authority_open(authority("00000000-0000-4000-8000-000000000002"))
+                    .expect("second authority should open");
+                boundary.insert_test_pairing(&reference, "pairing:new-generation");
+                boundary.insert_test_staged_credential(&reference, "commit:new-generation");
+                second = Some(reference);
+            },
+        );
+        assert_eq!(
+            first.expect_err("first open became stale").code,
+            DiagnosticCode::ReconcileRequired
+        );
+        let second = second.expect("second authority reference");
+        assert!(boundary.lifecycle.descriptor(&second).is_ok());
+        assert!(boundary
+            .transient
+            .lock()
+            .expect("transient lock")
+            .pairings
+            .contains_key("pairing:new-generation"));
+        assert!(boundary
+            .transient
+            .lock()
+            .expect("transient lock")
+            .credentials
+            .contains_key("commit:new-generation"));
+    }
+
+    #[test]
+    fn close_open_interleaving_preserves_new_generation_transients() {
+        let boundary =
+            NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+        let first = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("first authority should open");
+        let mut second = None;
+        let closed = boundary
+            .authority_close_with_transition(
+                super::CloseAuthorityInput { authority: first },
+                || {
+                    let reference = boundary
+                        .authority_open(authority("00000000-0000-4000-8000-000000000002"))
+                        .expect("replacement authority should open");
+                    boundary.insert_test_pairing(&reference, "pairing:new-generation");
+                    boundary.insert_test_staged_credential(&reference, "commit:new-generation");
+                    second = Some(reference);
+                },
+            )
+            .expect("close transition should complete");
+        assert!(closed.closed);
+        let second = second.expect("replacement reference");
+        assert!(boundary.lifecycle.descriptor(&second).is_ok());
+        assert!(boundary
+            .transient
+            .lock()
+            .expect("transient lock")
+            .pairings
+            .contains_key("pairing:new-generation"));
+        assert!(boundary
+            .transient
+            .lock()
+            .expect("transient lock")
+            .credentials
+            .contains_key("commit:new-generation"));
     }
 
     struct FakeCustody {
@@ -1925,6 +2126,78 @@ mod tests {
         stored: Mutex<Option<Vec<u8>>>,
         gate: Mutex<(bool, bool)>,
         changed: Condvar,
+    }
+
+    struct HungReadCustody {
+        gate: Mutex<(bool, bool)>,
+        changed: Condvar,
+    }
+
+    impl HungReadCustody {
+        fn new() -> Self {
+            Self {
+                gate: Mutex::new((false, false)),
+                changed: Condvar::new(),
+            }
+        }
+
+        fn wait_until_blocked(&self) {
+            let mut gate = self.gate.lock().expect("hung store gate");
+            while !gate.0 {
+                gate = self.changed.wait(gate).expect("hung store wait");
+            }
+        }
+
+        fn release(&self) {
+            let mut gate = self.gate.lock().expect("hung store gate");
+            gate.1 = true;
+            self.changed.notify_all();
+        }
+
+        fn block(&self) {
+            let mut gate = self.gate.lock().expect("hung store gate");
+            gate.0 = true;
+            self.changed.notify_all();
+            while !gate.1 {
+                gate = self.changed.wait(gate).expect("hung store wait");
+            }
+        }
+    }
+
+    impl CredentialCustody for HungReadCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            self.block();
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            Ok(CredentialLookup::Missing)
+        }
+
+        fn write_credential(
+            &self,
+            _credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            _expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            Ok(CredentialDeleteResult::Absent)
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(false)
+        }
     }
 
     impl BlockingCustody {
@@ -2289,6 +2562,50 @@ mod tests {
             );
             assert!(custody.stored().is_none());
         });
+    }
+
+    #[test]
+    fn hung_credential_io_does_not_block_authority_replacement() {
+        let custody = Arc::new(HungReadCustody::new());
+        let boundary = Arc::new(NativeSdkBoundary::new(
+            custody.clone(),
+            Arc::new(FakeProvider),
+        ));
+        let first = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("first authority should open");
+        let state_boundary = Arc::clone(&boundary);
+        let state = std::thread::spawn(move || {
+            state_boundary.credential_state(CredentialCommandInput {
+                authority: first,
+                request_id: "request-state".into(),
+            })
+        });
+        custody.wait_until_blocked();
+
+        let open_boundary = Arc::clone(&boundary);
+        let (opened_tx, opened_rx) = std::sync::mpsc::channel();
+        let open = std::thread::spawn(move || {
+            opened_tx
+                .send(
+                    open_boundary.authority_open(authority("00000000-0000-4000-8000-000000000002")),
+                )
+                .expect("send open result");
+        });
+        let responsive = opened_rx.recv_timeout(Duration::from_secs(1));
+        custody.release();
+        open.join().expect("open thread");
+        assert!(responsive
+            .expect("authority replacement must not wait for credential I/O")
+            .is_ok());
+        assert_eq!(
+            state
+                .join()
+                .expect("credential state thread")
+                .expect_err("stale state must be rejected")
+                .code,
+            DiagnosticCode::ReconcileRequired
+        );
     }
 
     #[test]

@@ -57,6 +57,10 @@ impl NativeError {
         Self::new(DiagnosticCode::InvalidResponse, false)
     }
 
+    pub fn credential_update_in_progress() -> Self {
+        Self::new(DiagnosticCode::CredentialUpdateInProgress, true)
+    }
+
     pub fn platform_security_unavailable() -> Self {
         Self::new(DiagnosticCode::PlatformSecurityUnavailable, false)
     }
