@@ -807,9 +807,20 @@ impl StagedCredential {
         lifecycle_error: Option<NativeError>,
     ) -> Result<(), NativeError> {
         if let Err(write_error) = write_result {
-            let rollback = custody
-                .compare_delete_credential(&self.credential)
-                .map_err(|_| NativeError::secret_store_rollback_failed());
+            if write_error.code == DiagnosticCode::CredentialUpdateInProgress {
+                let mut state = self
+                    .state
+                    .lock()
+                    .map_err(|_| NativeError::service_unavailable())?;
+                *state = if lifecycle_error.is_some() {
+                    StagedCredentialState::Finished(CredentialDeleteResult::Absent)
+                } else {
+                    StagedCredentialState::Pending
+                };
+                self.completed.notify_all();
+                return Err(lifecycle_error.unwrap_or(write_error));
+            }
+            let rollback = custody.compare_delete_credential(&self.credential);
             let mut state = self
                 .state
                 .lock()
@@ -821,6 +832,12 @@ impl StagedCredential {
                     return Err(write_error);
                 }
                 Err(error) => {
+                    if error.code == DiagnosticCode::CredentialUpdateInProgress {
+                        *state = StagedCredentialState::Pending;
+                        self.completed.notify_all();
+                        return Err(error);
+                    }
+                    let error = NativeError::secret_store_rollback_failed();
                     *state = StagedCredentialState::Failed(error.clone());
                     self.completed.notify_all();
                     return Err(error);
@@ -854,9 +871,7 @@ impl StagedCredential {
         let Some(error) = rollback_error else {
             return Ok(());
         };
-        let rollback = custody
-            .compare_delete_credential(&self.credential)
-            .map_err(|_| NativeError::secret_store_rollback_failed());
+        let rollback = custody.compare_delete_credential(&self.credential);
         let mut state = self
             .state
             .lock()
@@ -867,10 +882,18 @@ impl StagedCredential {
                 self.completed.notify_all();
                 Err(error)
             }
-            Err(ref rollback_error) => {
+            Err(rollback_error)
+                if rollback_error.code == DiagnosticCode::CredentialUpdateInProgress =>
+            {
+                *state = StagedCredentialState::Committed;
+                self.completed.notify_all();
+                Err(rollback_error)
+            }
+            Err(_) => {
+                let rollback_error = NativeError::secret_store_rollback_failed();
                 *state = StagedCredentialState::Failed(rollback_error.clone());
                 self.completed.notify_all();
-                Err(rollback_error.clone())
+                Err(rollback_error)
             }
         }
     }
@@ -913,6 +936,11 @@ impl StagedCredential {
                             return Ok(result);
                         }
                         Err(error) => {
+                            if error.code == DiagnosticCode::CredentialUpdateInProgress {
+                                *state = StagedCredentialState::Committed;
+                                self.completed.notify_all();
+                                return Err(error);
+                            }
                             *state = StagedCredentialState::Failed(error.clone());
                             self.completed.notify_all();
                             return Err(error);
@@ -1246,20 +1274,31 @@ impl NativeSdkBoundary {
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
         let authority = self.lifecycle.descriptor(&input.authority)?;
-        let pending = self
-            .transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?
-            .pairings
-            .remove(&input.pairing_handle);
-        let Some(pending) = pending else {
-            self.lifecycle.cancel_request(&request);
-            return Err(NativeError::reconcile_required());
+        let pending = {
+            let mut transient = match self.transient.lock() {
+                Ok(transient) => transient,
+                Err(_) => {
+                    self.lifecycle.cancel_request(&request);
+                    return Err(NativeError::service_unavailable());
+                }
+            };
+            let Some(pending) = transient.pairings.get(&input.pairing_handle) else {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::reconcile_required());
+            };
+            if pending.authority != input.authority {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::reconcile_required());
+            }
+            if pending.status != PendingPairingStatus::Ready {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
+            }
+            transient
+                .pairings
+                .remove(&input.pairing_handle)
+                .ok_or_else(NativeError::reconcile_required)?
         };
-        if pending.authority != input.authority || pending.status != PendingPairingStatus::Ready {
-            self.lifecycle.cancel_request(&request);
-            return Err(NativeError::reconcile_required());
-        }
         let exchanged = match self
             .provider
             .pairing_exchange(
@@ -2128,6 +2167,168 @@ mod tests {
         changed: Condvar,
     }
 
+    struct ContentionCustody {
+        stored: Mutex<Option<Vec<u8>>>,
+        write_contentions: AtomicUsize,
+        delete_contentions: AtomicUsize,
+    }
+
+    impl ContentionCustody {
+        fn new(write_contentions: usize, delete_contentions: usize) -> Self {
+            Self {
+                stored: Mutex::new(None),
+                write_contentions: AtomicUsize::new(write_contentions),
+                delete_contentions: AtomicUsize::new(delete_contentions),
+            }
+        }
+    }
+
+    impl CredentialCustody for ContentionCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            Ok(CredentialLookup::Missing)
+        }
+
+        fn write_credential(
+            &self,
+            credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            if self
+                .write_contentions
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(crate::NativeError::credential_update_in_progress());
+            }
+            *self.stored.lock().expect("contention store lock") =
+                Some(credential.exact_value().to_vec());
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            if self
+                .delete_contentions
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(crate::NativeError::credential_update_in_progress());
+            }
+            let mut stored = self.stored.lock().expect("contention store lock");
+            match stored.as_ref() {
+                None => Ok(CredentialDeleteResult::Absent),
+                Some(current) if current.as_slice() != expected.exact_value() => {
+                    Ok(CredentialDeleteResult::Changed)
+                }
+                Some(_) => {
+                    *stored = None;
+                    Ok(CredentialDeleteResult::Deleted)
+                }
+            }
+        }
+
+        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
+            Ok(false)
+        }
+    }
+
+    struct BlockingPollProvider {
+        gate: Arc<(Mutex<(bool, bool)>, Condvar)>,
+    }
+
+    impl BlockingPollProvider {
+        fn new() -> Self {
+            Self {
+                gate: Arc::new((Mutex::new((false, false)), Condvar::new())),
+            }
+        }
+
+        fn wait_until_polling(&self) {
+            let (lock, changed) = &*self.gate;
+            let mut state = lock.lock().expect("poll gate");
+            while !state.0 {
+                state = changed.wait(state).expect("poll wait");
+            }
+        }
+
+        fn release_poll(&self) {
+            let (lock, changed) = &*self.gate;
+            let mut state = lock.lock().expect("poll gate");
+            state.1 = true;
+            changed.notify_all();
+        }
+    }
+
+    impl ManagedNativeAuthorityProvider for BlockingPollProvider {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
+            FakeProvider.health(authority)
+        }
+
+        fn pairing_create(
+            &self,
+            authority: AuthorityDescriptor,
+            request: PairingRequest,
+        ) -> ProviderFuture<ProviderPairingCreated> {
+            FakeProvider.pairing_create(authority, request)
+        }
+
+        fn pairing_poll(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<crate::NativeResponse> {
+            let (lock, changed) = &*self.gate;
+            let mut state = match lock.lock() {
+                Ok(state) => state,
+                Err(_) => {
+                    return Box::pin(async { Err(crate::NativeError::service_unavailable()) });
+                }
+            };
+            state.0 = true;
+            changed.notify_all();
+            while !state.1 {
+                state = match changed.wait(state) {
+                    Ok(state) => state,
+                    Err(_) => {
+                        return Box::pin(async { Err(crate::NativeError::service_unavailable()) });
+                    }
+                };
+            }
+            drop(state);
+            FakeProvider.pairing_poll(authority, remote_request_id, pairing_secret)
+        }
+
+        fn pairing_exchange(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<ProviderPairingExchange> {
+            FakeProvider.pairing_exchange(authority, remote_request_id, pairing_secret)
+        }
+    }
+
     struct HungReadCustody {
         gate: Mutex<(bool, bool)>,
         changed: Condvar,
@@ -2410,6 +2611,71 @@ mod tests {
     }
 
     #[test]
+    fn commit_handle_can_retry_after_lock_contention() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(ContentionCustody::new(1, 0));
+            let boundary = NativeSdkBoundary::new(custody, Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit-1".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("first commit should report lock contention")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-commit-2".into(),
+                    commit_handle,
+                })
+                .expect("same commit handle should retry successfully");
+        });
+    }
+
+    #[test]
+    fn discard_handle_can_retry_after_lock_contention() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(ContentionCustody::new(0, 1));
+            let boundary = NativeSdkBoundary::new(custody, Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-commit".into(),
+                    commit_handle: commit_handle.clone(),
+                })
+                .expect("credential should commit");
+            assert_eq!(
+                boundary
+                    .pairing_discard(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-discard-1".into(),
+                        commit_handle: commit_handle.clone(),
+                    })
+                    .expect_err("first discard should report lock contention")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            let discarded = boundary
+                .pairing_discard(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-discard-2".into(),
+                    commit_handle,
+                })
+                .expect("same discard handle should retry");
+            assert!(matches!(
+                discarded.result,
+                super::PairingDiscardResult::Deleted
+            ));
+        });
+    }
+
+    #[test]
     fn discard_reports_absent_for_an_unknown_exact_handle() {
         let boundary =
             NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
@@ -2561,6 +2827,130 @@ mod tests {
                 DiagnosticCode::ReconcileRequired
             );
             assert!(custody.stored().is_none());
+        });
+    }
+
+    #[test]
+    fn concurrent_poll_does_not_consume_pairing_before_exchange_validation() {
+        tauri::async_runtime::block_on(async {
+            let provider = Arc::new(BlockingPollProvider::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                Arc::new(RaceCustody::new(false)),
+                provider.clone(),
+            ));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let created = boundary
+                .pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("pairing should be created");
+            let pairing_handle = created.result.handle;
+            let poll_boundary = Arc::clone(&boundary);
+            let poll_authority = authority.clone();
+            let poll_handle = pairing_handle.clone();
+            let poll = std::thread::spawn(move || {
+                tauri::async_runtime::block_on(poll_boundary.pairing_poll(
+                    PairingHandleCommandInput {
+                        authority: poll_authority,
+                        request_id: "request-poll".into(),
+                        pairing_handle: poll_handle,
+                    },
+                ))
+            });
+            provider.wait_until_polling();
+
+            assert_eq!(
+                boundary
+                    .pairing_exchange(PairingHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-exchange-busy".into(),
+                        pairing_handle: pairing_handle.clone(),
+                    })
+                    .await
+                    .expect_err("exchange must reject a concurrent poll")
+                    .code,
+                DiagnosticCode::OperationInProgress
+            );
+            assert!(boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .pairings
+                .contains_key(&pairing_handle));
+            provider.release_poll();
+            poll.join()
+                .expect("poll thread")
+                .expect("poll should complete");
+            boundary
+                .pairing_exchange(PairingHandleCommandInput {
+                    authority,
+                    request_id: "request-exchange-retry".into(),
+                    pairing_handle,
+                })
+                .await
+                .expect("pairing should survive and exchange");
+        });
+    }
+
+    #[test]
+    fn mismatched_pairing_authority_does_not_remove_handle() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let pairing_handle = format!("pairing:{}", uuid::Uuid::new_v4());
+            let mismatched = super::AuthorityReference {
+                handle: format!("authority:{}", uuid::Uuid::new_v4()),
+                generation: authority.generation,
+            };
+            boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .pairings
+                .insert(
+                    pairing_handle.clone(),
+                    super::PendingPairing {
+                        authority: mismatched,
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        remote_request_id: "11111111-1111-4111-8111-111111111111".into(),
+                        pairing_secret: SecretValue::pairing(
+                            b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
+                        )
+                        .expect("pairing secret"),
+                        status: super::PendingPairingStatus::Ready,
+                    },
+                );
+
+            assert_eq!(
+                boundary
+                    .pairing_exchange(PairingHandleCommandInput {
+                        authority,
+                        request_id: "request-exchange".into(),
+                        pairing_handle: pairing_handle.clone(),
+                    })
+                    .await
+                    .expect_err("mismatched pairing authority must fail")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert!(boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .pairings
+                .contains_key(&pairing_handle));
         });
     }
 

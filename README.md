@@ -23,6 +23,8 @@ webview in this phase.
   OS locks whose names contain only hashes of non-secret credential identity.
 - Storage work is bounded and dispatched to Tauri's blocking pool; lifecycle
   transitions remain responsive and invalidate transient state by generation.
+- Retryable storage contention preserves opaque pairing and commit handles,
+  allowing the exact operation to resume without widening authority.
 - The protected Cave authority provider fails closed with
   `platform_security_unavailable` until the reviewed native
   `hpke-bound-v1` transport is installed.

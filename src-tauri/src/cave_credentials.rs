@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Version};
 use zeroize::{Zeroize, Zeroizing};
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 use crate::credential_lock::{windows_persistence_action, WindowsPersistenceAction};
 use crate::{
     credential_lock::CredentialMutationLock,
@@ -267,6 +267,73 @@ pub struct KeyringCredentialCustody {
 
 static STORE_AVAILABILITY: OnceLock<CredentialStoreAvailability> = OnceLock::new();
 
+#[cfg(any(windows, test))]
+enum WindowsPersistenceValue<'a> {
+    Password(&'a str),
+    Binary(&'a [u8]),
+}
+
+#[cfg(any(windows, test))]
+trait WindowsPersistenceEntry {
+    fn persistence(&self) -> Result<Option<String>, NativeError>;
+    fn set_password_value(&self, value: &str) -> Result<(), NativeError>;
+    fn set_binary_value(&self, value: &[u8]) -> Result<(), NativeError>;
+}
+
+#[cfg(any(windows, test))]
+fn ensure_windows_local_persistence_for(
+    entry: &impl WindowsPersistenceEntry,
+    value: WindowsPersistenceValue<'_>,
+) -> Result<(), NativeError> {
+    match windows_persistence_action(entry.persistence()?.as_deref()) {
+        WindowsPersistenceAction::Accept => Ok(()),
+        WindowsPersistenceAction::Migrate => {
+            match value {
+                WindowsPersistenceValue::Password(value) => entry.set_password_value(value)?,
+                WindowsPersistenceValue::Binary(value) => entry.set_binary_value(value)?,
+            }
+            if windows_persistence_action(entry.persistence()?.as_deref())
+                == WindowsPersistenceAction::Accept
+            {
+                Ok(())
+            } else {
+                Err(NativeError::platform_security_unavailable())
+            }
+        }
+        WindowsPersistenceAction::Reject => Err(NativeError::platform_security_unavailable()),
+    }
+}
+
+#[cfg(windows)]
+struct KeyringWindowsPersistenceEntry<'a> {
+    entry: &'a Entry,
+    operation: StoreOperation,
+}
+
+#[cfg(windows)]
+impl WindowsPersistenceEntry for KeyringWindowsPersistenceEntry<'_> {
+    fn persistence(&self) -> Result<Option<String>, NativeError> {
+        Ok(self
+            .entry
+            .get_attributes()
+            .map_err(|error| map_keyring_error(&error, self.operation))?
+            .get("persistence")
+            .cloned())
+    }
+
+    fn set_password_value(&self, value: &str) -> Result<(), NativeError> {
+        self.entry
+            .set_password(value)
+            .map_err(|error| map_keyring_error(&error, StoreOperation::Write))
+    }
+
+    fn set_binary_value(&self, value: &[u8]) -> Result<(), NativeError> {
+        self.entry
+            .set_secret(value)
+            .map_err(|error| map_keyring_error(&error, StoreOperation::Write))
+    }
+}
+
 impl KeyringCredentialCustody {
     pub const fn new(service: &'static str) -> Self {
         Self { service }
@@ -298,39 +365,40 @@ impl KeyringCredentialCustody {
     }
 
     #[cfg(windows)]
-    fn ensure_windows_local_persistence(
+    fn ensure_windows_local_password_persistence(
+        entry: &Entry,
+        password: &str,
+        operation: StoreOperation,
+    ) -> Result<(), NativeError> {
+        ensure_windows_local_persistence_for(
+            &KeyringWindowsPersistenceEntry { entry, operation },
+            WindowsPersistenceValue::Password(password),
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn ensure_windows_local_password_persistence(
+        _entry: &Entry,
+        _password: &str,
+        _operation: StoreOperation,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn ensure_windows_local_binary_persistence(
         entry: &Entry,
         secret: &[u8],
         operation: StoreOperation,
     ) -> Result<(), NativeError> {
-        let persistence = entry
-            .get_attributes()
-            .map_err(|error| map_keyring_error(&error, operation))?
-            .get("persistence")
-            .cloned();
-        match windows_persistence_action(persistence.as_deref()) {
-            WindowsPersistenceAction::Accept => Ok(()),
-            WindowsPersistenceAction::Migrate => {
-                entry
-                    .set_secret(secret)
-                    .map_err(|error| map_keyring_error(&error, StoreOperation::Write))?;
-                let migrated = entry
-                    .get_attributes()
-                    .map_err(|error| map_keyring_error(&error, StoreOperation::Read))?;
-                if windows_persistence_action(migrated.get("persistence").map(String::as_str))
-                    == WindowsPersistenceAction::Accept
-                {
-                    Ok(())
-                } else {
-                    Err(NativeError::platform_security_unavailable())
-                }
-            }
-            WindowsPersistenceAction::Reject => Err(NativeError::platform_security_unavailable()),
-        }
+        ensure_windows_local_persistence_for(
+            &KeyringWindowsPersistenceEntry { entry, operation },
+            WindowsPersistenceValue::Binary(secret),
+        )
     }
 
     #[cfg(not(windows))]
-    fn ensure_windows_local_persistence(
+    fn ensure_windows_local_binary_persistence(
         _entry: &Entry,
         _secret: &[u8],
         _operation: StoreOperation,
@@ -457,8 +525,16 @@ struct CredentialWire {
     bearer: ZeroizingText,
 }
 
+#[cfg(test)]
 fn decode_credential_bytes(bytes: Vec<u8>, installation_id: &str) -> CredentialLookup {
     let bytes = ZeroizingBuffer::new(bytes);
+    decode_owned_credential_bytes(bytes, installation_id)
+}
+
+fn decode_owned_credential_bytes(
+    bytes: ZeroizingBuffer,
+    installation_id: &str,
+) -> CredentialLookup {
     if bytes.as_slice().len() > MAX_CREDENTIAL_RECORD_BYTES {
         return CredentialLookup::Invalid;
     }
@@ -558,9 +634,9 @@ impl CredentialCustody for KeyringCredentialCustody {
         let entry = self.entry(INSTALLATION_ACCOUNT, StoreOperation::Read)?;
         match entry.get_password() {
             Ok(value) => {
-                Self::ensure_windows_local_persistence(
+                Self::ensure_windows_local_password_persistence(
                     &entry,
-                    value.as_bytes(),
+                    &value,
                     StoreOperation::Read,
                 )?;
                 validate_installation_id(&value)?;
@@ -574,9 +650,9 @@ impl CredentialCustody for KeyringCredentialCustody {
                 let stored = entry
                     .get_password()
                     .map_err(|error| map_keyring_error(&error, StoreOperation::Read))?;
-                Self::ensure_windows_local_persistence(
+                Self::ensure_windows_local_password_persistence(
                     &entry,
-                    stored.as_bytes(),
+                    &stored,
                     StoreOperation::Read,
                 )?;
                 validate_installation_id(&stored)?;
@@ -596,7 +672,12 @@ impl CredentialCustody for KeyringCredentialCustody {
         let entry = self.entry(&account, StoreOperation::Read)?;
         let bytes = match entry.get_secret() {
             Ok(bytes) => {
-                Self::ensure_windows_local_persistence(&entry, &bytes, StoreOperation::Read)?;
+                let bytes = ZeroizingBuffer::new(bytes);
+                Self::ensure_windows_local_binary_persistence(
+                    &entry,
+                    bytes.as_slice(),
+                    StoreOperation::Read,
+                )?;
                 bytes
             }
             Err(KeyringError::NoEntry) => return Ok(CredentialLookup::Missing),
@@ -609,7 +690,7 @@ impl CredentialCustody for KeyringCredentialCustody {
             }
             Err(error) => return Err(map_keyring_error(&error, StoreOperation::Read)),
         };
-        Ok(decode_credential_bytes(bytes, installation_id))
+        Ok(decode_owned_credential_bytes(bytes, installation_id))
     }
 
     fn write_credential(&self, credential: &PreparedCredential) -> Result<(), NativeError> {
@@ -619,7 +700,11 @@ impl CredentialCustody for KeyringCredentialCustody {
         entry
             .set_secret(credential.encoded())
             .map_err(|error| map_keyring_error(&error, StoreOperation::Write))?;
-        Self::ensure_windows_local_persistence(&entry, credential.encoded(), StoreOperation::Write)
+        Self::ensure_windows_local_binary_persistence(
+            &entry,
+            credential.encoded(),
+            StoreOperation::Write,
+        )
     }
 
     fn compare_delete_credential(
@@ -631,8 +716,13 @@ impl CredentialCustody for KeyringCredentialCustody {
         let entry = self.entry(&account, StoreOperation::Delete)?;
         let current = match entry.get_secret() {
             Ok(current) => {
-                Self::ensure_windows_local_persistence(&entry, &current, StoreOperation::Read)?;
-                Zeroizing::new(current)
+                let current = ZeroizingBuffer::new(current);
+                Self::ensure_windows_local_binary_persistence(
+                    &entry,
+                    current.as_slice(),
+                    StoreOperation::Read,
+                )?;
+                current
             }
             Err(KeyringError::NoEntry) => return Ok(CredentialDeleteResult::Absent),
             Err(KeyringError::BadEncoding(bytes) | KeyringError::BadDataFormat(bytes, _)) => {
@@ -667,13 +757,42 @@ impl CredentialCustody for KeyringCredentialCustody {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     use super::{
         decode_credential_bytes, validate_authority_fingerprint, validate_installation_id,
-        with_zeroize_test_observer, CredentialLookup, ZeroizeTestObserver,
-        MAX_CREDENTIAL_RECORD_BYTES,
+        with_zeroize_test_observer, CredentialLookup, WindowsPersistenceEntry,
+        WindowsPersistenceValue, ZeroizeTestObserver, MAX_CREDENTIAL_RECORD_BYTES,
     };
+
+    struct FakeWindowsPersistenceEntry {
+        persistence: Mutex<String>,
+        password: Mutex<Option<String>>,
+        binary_writes: AtomicUsize,
+    }
+
+    impl WindowsPersistenceEntry for FakeWindowsPersistenceEntry {
+        fn persistence(&self) -> Result<Option<String>, crate::NativeError> {
+            Ok(Some(
+                self.persistence.lock().expect("persistence lock").clone(),
+            ))
+        }
+
+        fn set_password_value(&self, value: &str) -> Result<(), crate::NativeError> {
+            *self.password.lock().expect("password lock") = Some(value.into());
+            *self.persistence.lock().expect("persistence lock") = "Local".into();
+            Ok(())
+        }
+
+        fn set_binary_value(&self, _value: &[u8]) -> Result<(), crate::NativeError> {
+            self.binary_writes.fetch_add(1, Ordering::Relaxed);
+            *self.persistence.lock().expect("persistence lock") = "Local".into();
+            Ok(())
+        }
+    }
 
     #[test]
     fn rejects_non_v4_or_noncanonical_installation_ids() {
@@ -725,5 +844,45 @@ mod tests {
         });
         assert!(matches!(result, CredentialLookup::Invalid));
         observer.assert_zeroized();
+    }
+
+    #[test]
+    fn enterprise_installation_migration_round_trips_as_password() {
+        let installation_id = "00000000-0000-4000-8000-000000000010";
+        let entry = FakeWindowsPersistenceEntry {
+            persistence: Mutex::new("Enterprise".into()),
+            password: Mutex::new(None),
+            binary_writes: AtomicUsize::new(0),
+        };
+        super::ensure_windows_local_persistence_for(
+            &entry,
+            WindowsPersistenceValue::Password(installation_id),
+        )
+        .expect("enterprise password should migrate");
+        assert_eq!(
+            entry.password.lock().expect("password lock").as_deref(),
+            Some(installation_id)
+        );
+        assert_eq!(entry.binary_writes.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            entry.persistence().expect("persistence read").as_deref(),
+            Some("Local")
+        );
+    }
+
+    #[test]
+    fn enterprise_credential_migration_uses_binary_storage() {
+        let entry = FakeWindowsPersistenceEntry {
+            persistence: Mutex::new("Enterprise".into()),
+            password: Mutex::new(None),
+            binary_writes: AtomicUsize::new(0),
+        };
+        super::ensure_windows_local_persistence_for(
+            &entry,
+            WindowsPersistenceValue::Binary(b"binary-credential-record"),
+        )
+        .expect("enterprise binary credential should migrate");
+        assert!(entry.password.lock().expect("password lock").is_none());
+        assert_eq!(entry.binary_writes.load(Ordering::Relaxed), 1);
     }
 }

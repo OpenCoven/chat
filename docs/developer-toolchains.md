@@ -77,11 +77,17 @@
   `credential_update_in_progress` instead of waiting indefinitely.
 - Windows credentials are created with explicit non-roaming `Local`
   persistence. Existing `Enterprise` credentials are rewritten under the
-  cross-process lock with `Local` persistence, while unsupported persistence
-  classes fail closed.
+  cross-process lock with `Local` persistence: installation UUIDs migrate with
+  password encoding, while binary credential records migrate as binary
+  secrets. Unsupported persistence classes fail closed.
 - Credential bytes and parsed bearer strings enter zeroizing owners before
   validation. Invalid JSON, metadata, encoding, and oversized-record paths
   zero the owned allocations before returning.
+- Retryable lock contention preserves pending commit and committed discard
+  handles so the exact operation can be retried. It is never converted into a
+  terminal rollback failure.
+- Pairing exchange validates authority generation and Ready state while the
+  pairing map is locked, and removes the handle only after those checks pass.
 - Authority replacement and close cleanup are generation-scoped. Interleaved
   transitions cannot clear newer pairing or staged-credential state, and an
   open superseded before completion returns `reconcile_required`.
