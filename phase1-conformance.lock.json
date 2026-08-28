@@ -2,7 +2,7 @@
   "version": 1,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "73bec85903646773db8267171c7c3eb1e23a1d46"
+    "revision": "0021d30d0cddc5d3f00a41c55d025cf3ce4611c5"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
