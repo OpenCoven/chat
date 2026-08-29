@@ -389,7 +389,8 @@ class DefaultConnectionController implements ConnectionController {
         this.#setFailure(error);
         if (
           error instanceof NativeBoundaryError &&
-          error.code === 'operation_in_progress' &&
+          (error.code === 'operation_in_progress' ||
+            (error.code === 'conflict' && error.retryable)) &&
           this.#authorityIsCurrent(authority) &&
           this.#pairing === pairing
         ) {
@@ -530,12 +531,19 @@ class DefaultConnectionController implements ConnectionController {
 
   async #confirmReady(authority: AuthorityReference, generation: number): Promise<void> {
     const health = await this.#boundary.health(authority, this.#requestId());
-    const credential = await this.#boundary.credentialState(authority, this.#requestId());
     if (!this.#isCurrent(generation) || !this.#authorityIsCurrent(authority)) {
       return;
     }
     this.#instanceId = health.instanceId;
     this.#lastHealthyAt = this.#now();
+    if (health.pairingRequired) {
+      this.#setState({ state: 'pairing_required', caveInstanceId: health.instanceId });
+      return;
+    }
+    const credential = await this.#boundary.credentialState(authority, this.#requestId());
+    if (!this.#isCurrent(generation) || !this.#authorityIsCurrent(authority)) {
+      return;
+    }
     if (credential === 'update_in_progress') {
       throw new NativeBoundaryError('credential_update_in_progress', true, 'credential-update');
     }

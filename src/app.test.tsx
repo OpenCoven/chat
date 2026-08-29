@@ -137,16 +137,28 @@ describe('App', () => {
 
   it('guides pairing through explicit approval and completion actions', async () => {
     const boundary = makeBoundary({
-      health: vi.fn().mockResolvedValue({
-        status: 'ok',
-        apiVersion: '1.0',
-        minimumClientVersion: '0.1.0',
-        capabilities: ['health'],
-        operations: ['health.read'],
-        instanceId: INSTANCE_ID,
-        pairingRequired: true,
-        releaseVersion: '0.1.0',
-      }),
+      health: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'ok',
+          apiVersion: '1.0',
+          minimumClientVersion: '0.1.0',
+          capabilities: ['health'],
+          operations: ['health.read'],
+          instanceId: INSTANCE_ID,
+          pairingRequired: true,
+          releaseVersion: '0.1.0',
+        })
+        .mockResolvedValue({
+          status: 'ok',
+          apiVersion: '1.0',
+          minimumClientVersion: '0.1.0',
+          capabilities: ['health'],
+          operations: ['health.read'],
+          instanceId: INSTANCE_ID,
+          pairingRequired: false,
+          releaseVersion: '0.1.0',
+        }),
       credentialState: vi.fn().mockResolvedValueOnce('missing').mockResolvedValue('present'),
     });
 

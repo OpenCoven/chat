@@ -144,6 +144,10 @@ fn public_snapshots_reject_secret_and_private_control_fields() {
     for payload in [
         json!({"data": {"bearer": "credential"}}),
         json!({"data": {"pairingSecret": "credential"}}),
+        json!({"data": {"api_key": "x"}}),
+        json!({"data": {"API-Key": "x"}}),
+        json!({"data": {"private_key": "x"}}),
+        json!({"data": {"Private-Key": "x"}}),
         json!({"data": {"prompt": "private prompt"}}),
         json!({"error": {"cause": "raw keychain failure"}}),
         json!({"data": {"attachment": {"name": "private.pdf"}}}),

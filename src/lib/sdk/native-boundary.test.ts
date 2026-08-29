@@ -1,3 +1,4 @@
+import { createConnectionController } from './connection-controller';
 import {
   createNativeBoundary,
   type InvokeCommand,
@@ -310,6 +311,161 @@ describe('native boundary with packed managed SDK', () => {
       code: 'credential_update_in_progress',
       retryable: true,
     });
+  });
+
+  it('preserves retryable pre-mutation credential contention', async () => {
+    const pairingCreate = vi.fn((args: Record<string, unknown>) =>
+      operation(args.input as Record<string, unknown>, {
+        requestId: PAIRING_ID,
+        expiresAt: 2_000_000_000_000,
+      }),
+    );
+    const exchange = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw {
+          code: 'conflict',
+          retryable: true,
+          diagnosticId: DIAGNOSTIC_ID,
+        };
+      })
+      .mockImplementationOnce((args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          credential: {
+            id: '00000000-0000-4000-8000-000000000006',
+            appName: 'OpenCoven Chat',
+            installationId: '00000000-0000-4000-8000-000000000007',
+            scopes: ['chat:read'],
+            createdAt: 1,
+            lastUsedAt: null,
+            revokedAt: null,
+            revocationReason: null,
+          },
+        }),
+      );
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: pairingCreate,
+        [NATIVE_COMMANDS.pairingExchange]: exchange,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const pairing = await boundary.pairingCreate(authority, 'ignored', {
+      appName: 'OpenCoven Chat',
+      installationId: '00000000-0000-4000-8000-000000000007',
+      scopes: ['chat:read'],
+    });
+
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).rejects.toMatchObject({
+      code: 'conflict',
+      retryable: true,
+    });
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).resolves.toMatchObject({
+      credential: {
+        id: '00000000-0000-4000-8000-000000000006',
+      },
+    });
+    expect(exchange).toHaveBeenCalledTimes(2);
+    expect(pairingCreate).toHaveBeenCalledOnce();
+  });
+
+  it('retries pre-mutation contention end to end without recreating native pairing', async () => {
+    let healthCalls = 0;
+    let credentialCalls = 0;
+    const pairingCreate = vi.fn((args: Record<string, unknown>) =>
+      operation(args.input as Record<string, unknown>, {
+        requestId: PAIRING_ID,
+        expiresAt: 2_000_000_000_000,
+      }),
+    );
+    const pairingExchange = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw {
+          code: 'conflict',
+          retryable: true,
+          diagnosticId: DIAGNOSTIC_ID,
+        };
+      })
+      .mockImplementationOnce((args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          credential: {
+            id: '00000000-0000-4000-8000-000000000006',
+            appName: 'OpenCoven Chat',
+            installationId: '00000000-0000-4000-8000-000000000007',
+            scopes: ['chat:read'],
+            createdAt: 1,
+            lastUsedAt: null,
+            revokedAt: null,
+            revocationReason: null,
+          },
+        }),
+      );
+    const boundary = createNativeBoundary({
+      available: () => true,
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.installationIdentity]: {
+          installationId: '00000000-0000-4000-8000-000000000007',
+        },
+        [NATIVE_COMMANDS.health]: (args: Record<string, unknown>) => {
+          healthCalls += 1;
+          return operation(
+            args.input as Record<string, unknown>,
+            response(
+              {
+                instanceId: INSTANCE_ID,
+                pairingRequired: healthCalls === 1,
+                releaseVersion: '0.1.0',
+              },
+              ['health'],
+              ['health.read'],
+            ),
+          );
+        },
+        [NATIVE_COMMANDS.credentialState]: (args: Record<string, unknown>) => {
+          credentialCalls += 1;
+          return operation(args.input as Record<string, unknown>, {
+            status: credentialCalls === 1 ? 'missing' : 'present',
+          });
+        },
+        [NATIVE_COMMANDS.pairingCreate]: pairingCreate,
+        [NATIVE_COMMANDS.pairingPoll]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            id: PAIRING_ID,
+            status: 'approved',
+            expiresAt: 2_000_000_000_000,
+          }),
+        [NATIVE_COMMANDS.pairingExchange]: pairingExchange,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const controller = createConnectionController(boundary, {
+      now: () => 1_000,
+      requestId: () => REQUEST_ID,
+    });
+
+    await controller.connect();
+    await controller.beginPairing();
+    await controller.pollApproval();
+    await controller.completePairing();
+    expect(controller.canRetry()).toBe(true);
+
+    await controller.retry();
+
+    expect(controller.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: INSTANCE_ID,
+      covenAvailable: false,
+    });
+    expect(pairingCreate).toHaveBeenCalledOnce();
+    expect(pairingExchange).toHaveBeenCalledTimes(2);
   });
 
   it('rejects hostile error-status declarations without evaluating accessors', async () => {

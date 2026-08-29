@@ -289,6 +289,7 @@ type ActiveClient = Readonly<{
 type RetainedPairingSession = {
   authority: AuthorityReference;
   session: CavePairingSession;
+  request: CavePairingRequest;
   active: boolean;
 };
 
@@ -897,6 +898,24 @@ export function createNativeBoundary(
     };
   }
 
+  async function restorePairingSession(
+    retained: RetainedPairingSession,
+  ): Promise<CavePairingSession> {
+    const transport = createTransport(retained.authority);
+    const restoredClient = createManagedCaveClient({
+      transport: {
+        ...transport,
+        async managedPairingCreate() {
+          return {
+            requestId: retained.session.requestId,
+            expiresAt: retained.session.expiresAt,
+          };
+        },
+      },
+    });
+    return restoredClient.createPairing(retained.request);
+  }
+
   const boundary: NativeBoundary = {
     isAvailable: available,
     async discover() {
@@ -959,7 +978,14 @@ export function createNativeBoundary(
       try {
         const client = requireClient(authority);
         releaseReservation = reservePairingSession();
-        const session = await client.createPairing(request);
+        const retainedRequest: CavePairingRequest = {
+          appName: request.appName,
+          installationId: request.installationId,
+          scopes: [...request.scopes],
+        };
+        Object.freeze(retainedRequest.scopes);
+        Object.freeze(retainedRequest);
+        const session = await client.createPairing(retainedRequest);
         if (
           active === null ||
           active.client !== client ||
@@ -971,6 +997,7 @@ export function createNativeBoundary(
         pairingSessions.set(handle, {
           authority,
           session,
+          request: retainedRequest,
           active: false,
         });
         prunePairingSessions();
@@ -1043,7 +1070,24 @@ export function createNativeBoundary(
         return { credential };
       } catch (error) {
         const mapped = sdkError(error);
-        consume = mapped.code !== 'operation_in_progress';
+        if (mapped.code === 'conflict' && mapped.retryable) {
+          try {
+            const session = await restorePairingSession(retained);
+            if (
+              pairingSessions.get(pairingHandle) === retained &&
+              active !== null &&
+              sameAuthority(active.authority, retained.authority)
+            ) {
+              retained.session = session;
+              consume = false;
+            }
+          } catch {
+            consume = true;
+            throw invalidResponse();
+          }
+        } else {
+          consume = mapped.code !== 'operation_in_progress';
+        }
         throw mapped;
       } finally {
         if (pairingSessions.get(pairingHandle) === retained) {

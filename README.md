@@ -2,13 +2,15 @@
 
 OpenCoven Chat now contains the read-only desktop connection surface for the
 reviewed native SDK boundary. The webview can discover an opaque native
-authority, guide explicit pairing, reuse or forget the native credential, and
-load bounded canonical familiar, project, conversation, and message pages.
+authority, guide the non-secret pairing UI, and load bounded canonical
+familiar, project, conversation, and message pages through fakeable boundary
+tests.
 
-The production protected HTTP/HPKE provider is still intentionally fail-closed.
-This branch proves the Tauri command boundary, controller, query behavior, and
-product journey with focused unit tests and mocked-Tauri Playwright coverage; it
-does **not** claim real-authority completion.
+The production protected HTTP/HPKE provider and production credential custody
+are intentionally fail-closed. This branch proves the Tauri command boundary,
+controller, query behavior, and product journey with focused unit tests and
+mocked-Tauri Playwright coverage; it does **not** claim real-authority or
+persistent-credential completion.
 
 ## Security boundaries
 
@@ -16,23 +18,33 @@ does **not** claim real-authority completion.
   command table. `src/lib/sdk/native-boundary.ts` validates exact own-data
   command and event objects before exposing typed non-secret values.
 - No direct arbitrary HTTP calls are implemented.
-- Cave credential values are confined to native platform custody. No bearer,
-  pairing secret, raw keychain value, or canonical data enters browser storage
-  or command diagnostics.
+- Production credential custody reports `platform_security_unavailable` on
+  every platform. The application does not launch a credential helper or call
+  Keychain Services, Secret Service, or Credential Manager because those
+  operations are not portably cancellable and the removed helper could not
+  authenticate the loaded child image or contain its complete process tree.
+  There is no plaintext, environment, file, public-IPC, browser-storage, or
+  memory-persistence fallback.
+- Pairing secrets and staged bearers remain in zeroizing Rust owners. An
+  app-state janitor removes idle expired entries without a later command.
+  Shutdown signals and joins the worker; it performs no backend I/O or blocking
+  state acquisition, and each scan is count-bounded. OS scheduling itself is
+  not cancellable, so the guarantee is bounded cooperative work rather than a
+  false hard wall-clock cancellation claim.
 - Native health and read commands return bounded, secret-filtered snapshots.
   The packed SDK managed client is the sole Client v1 envelope and DTO parser.
-  Staged credential rollback still uses exact-value compare-and-delete so a
-  late cleanup cannot delete a replacement credential.
-- Credential mutations are serialized across Chat processes with owner-private
-  OS locks whose names contain only hashes of non-secret credential identity.
-- Storage work is bounded and dispatched to Tauri's blocking pool; lifecycle
-  transitions remain responsive and invalidate transient state by generation.
-- Retryable storage contention preserves native-only pairing and commit state
-  without exposing those handles to JavaScript.
-- Partial writes retain an exact rollback-needed token until compare-and-delete
-  proves the stored value absent, changed, or deleted.
-- Authority replacement and close preserve that token until bounded cleanup
-  succeeds, including when an in-flight write completes after close.
+- Credential rollback targets use unique v3 non-secret record addresses.
+  Legacy v1/v2 mutable-account records are never accepted as delete targets;
+  because production custody is unavailable, no migration or deletion of those
+  records is attempted.
+- New discovery is rejected before provider work when all 64 retained handles
+  are live. Expired handles are pruned and can free capacity.
+- Retryable `conflict` from native managed exchange means contention was proven
+  before the pairing handle was consumed or exchange began, so the controller
+  retries exchange. The boundary rebuilds only the packed SDK's local session
+  wrapper from the existing non-secret request ID; it does not replay native
+  pairing creation. `credential_update_in_progress` remains reserved for
+  ambiguous or post-persistence state and triggers confirmation only.
 - Authority establishment and close run as blocking-dispatched async Tauri
   commands, so cleanup contention cannot stall unrelated IPC/runtime work.
 - The protected Cave authority provider fails closed with

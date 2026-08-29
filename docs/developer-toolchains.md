@@ -26,11 +26,6 @@
 | tauri-build | `2.6.2` |
 | serde | `1.0.228` |
 | serde_json | `1.0.145` |
-| keyring-core | `1.0.0` |
-| Apple native keyring store | `1.0.2` |
-| Linux Secret Service keyring store | `1.0.1` |
-| Windows native keyring store | `1.1.0` |
-| windows-sys | `0.61.2` |
 | base64 | `0.22.1` |
 | libc | `0.2.189` |
 | sha2 | `0.10.9` |
@@ -70,11 +65,18 @@
 - The Tauri host registers only operation-specific native SDK commands. It does
   not expose generic fetch, shell, filesystem, credential-store, or arbitrary
   invoke commands.
-- Cave installation identity and credential records use the platform store
-  selected at compile time: macOS Keychain Services, Linux Secret Service, or
-  Windows Credential Manager. Missing or inaccessible native storage fails
-  closed; there is no plaintext, environment, browser-storage, or memory
-  persistence fallback.
+- Production credential custody is disabled on macOS, Linux, and Windows and
+  diagnostics report `platform_security_unavailable`. No credential helper is
+  launched and no Keychain Services, Secret Service, or Credential Manager API
+  is called. Native secure-store calls are OS operations that cannot be
+  portably canceled after entry; the rejected helper also could not
+  independently authenticate the loaded executable image or guarantee
+  descendant and pipe reaping. The reviewed response is to start no such
+  operation rather than claim a timeout canceled it.
+- There is no plaintext, environment, argument, file, public-IPC,
+  browser-storage, or memory-persistence fallback. A future production backend
+  must prove actual store initialization and use before diagnostics can report
+  availability.
 - Native discovery returns an owner-checked byte snapshot plus an opaque
   one-time handle. The SDK parses the bytes; the webview can establish an
   authority only with that handle. `sdk_authority_open` is not registered or
@@ -85,30 +87,30 @@
 - Pairing commands return only the managed SDK's non-secret request, status,
   and credential metadata shapes. Pairing secrets and staged credential
   handles remain native.
-- Credential commits retain a zeroized exact-value rollback token until the
-  SDK can no longer request discard. Timeout, late-write, and replacement
-  cleanup uses compare-and-delete and reports `absent`, `changed`, or `deleted`
-  without deleting a newer credential value.
-- Credential writes and compare/delete operations share an OS-visible lock
-  across Chat processes. Unix uses an owner-private, no-follow `flock` file
-  containing no credential data; Windows uses a current-user-only
-  `Global\` named mutex. Lock names are bounded hashes of non-secret user,
-  service, and account identity. Contention is bounded and reports retryable
-  `credential_update_in_progress` instead of waiting indefinitely.
-- Windows credentials are created with explicit non-roaming `Local`
-  persistence. Existing `Enterprise` credentials are rewritten under the
-  cross-process lock with `Local` persistence: installation UUIDs migrate with
-  password encoding, while binary credential records migrate as binary
-  secrets. Unsupported persistence classes fail closed.
+- Prepared credentials use v3 unique record addresses containing only the
+  installation UUID and a fresh record UUID. Exact cleanup can address record A
+  without targeting replacement record B even if B becomes current between a
+  comparison and deletion. Legacy v1/v2 mutable-account records are rejected as
+  delete targets and left untouched; production custody performs no migration.
 - Credential bytes and parsed bearer strings enter zeroizing owners before
   validation. Invalid JSON, metadata, encoding, and oversized-record paths
   zero the owned allocations before returning.
-- Retryable lock contention preserves externally reachable staged state.
-  Managed exchange consumes an unreachable pre-write commit token immediately;
-  if an exact rollback remains contended, status recovery retains only one
-  active credential copy for that authority before accepting another exchange.
-  The web controller never replays an ambiguous mutation and retries only
-  health/status confirmation.
+- An app-state janitor wakes every 250 milliseconds, upgrades only a weak
+  reference to transient state, and uses non-blocking locks. It autonomously
+  prunes expired ready pairings and pending staged bearers, while active
+  operations retain their existing provider deadline. Shutdown signals and
+  joins the worker. A scan performs no backend I/O or blocking state
+  acquisition and visits only the bounded transient maps. OS scheduling itself
+  cannot be given a portable hard deadline, so no cancellation success is
+  claimed and no worker is detached.
+- Retryable `conflict` from managed exchange is emitted only before the pairing
+  handle is removed or provider exchange starts. The controller retains the
+  managed session and retries exchange after contention clears. Because the
+  packed SDK spends a session wrapper after any exchange error, the boundary
+  rebuilds that local wrapper from the existing non-secret request ID and
+  original request without invoking native pairing creation again. Once
+  exchange or persistence may have occurred, `credential_update_in_progress`
+  keeps confirmation-only recovery and never replays the mutation.
 - A potentially partial write whose rollback is contended enters an explicit
   rollback-needed state retaining the zeroized exact expected credential.
   Commit retry or discard must finish compare-and-delete before the handle can
@@ -120,9 +122,11 @@
   retained in an unreachable disposition cache.
 - Pairing exchange validates authority generation and Ready state while the
   pairing map is locked, and removes the handle only after those checks pass.
-- Expired and terminal pairing state is consumed eagerly. Active native and
-  managed pairing maps retain at most 64 oldest-first entries, and the webview
-  wrapper applies the same expiry and count bound without exposing secrets.
+- Discovery and pairing maps retain at most 64 entries. New discovery is
+  rejected before provider work when all 64 handles are live; no unexpired
+  handle is inserted and then evicted. Expired handles are pruned and a retry
+  can then succeed. Pairing reservations use the same reject-before-create
+  capacity rule.
 - Managed exchange drops committed and safely discarded in-memory credential
   copies immediately. Staged rollback tokens needed for late exact discard
   remain reachable through credential status cleanup; terminal copies are
@@ -130,9 +134,6 @@
 - Authority replacement and close cleanup are generation-scoped. Interleaved
   transitions cannot clear newer pairing or staged-credential state, and an
   open superseded before completion returns `reconcile_required`.
-- All platform-store and cross-process-lock work runs on Tauri's blocking pool.
-  Lifecycle mutexes are released before backend I/O so discovery and authority
-  replacement remain responsive while storage is unavailable or contended.
 - `sdk_authority_establish` and `sdk_authority_close` dispatch blocking
   lifecycle work through Tauri's blocking pool. Establishment accepts only a
   native discovery handle, never an endpoint or authority descriptor from

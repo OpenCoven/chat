@@ -2,14 +2,11 @@ mod cave_credentials;
 mod commands;
 mod coven_peer_identity;
 mod coven_pipe_identity;
-mod credential_lock;
 mod metadata;
 mod sdk_connection;
 mod sdk_diagnostics;
 
-pub use cave_credentials::{
-    run_credential_helper_if_requested, SecretValue, UnavailableCredentialCustody,
-};
+pub use cave_credentials::{SecretValue, UnavailableCredentialCustody};
 pub use commands::app_identity;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use coven_peer_identity::inspect_connected_unix_peer;

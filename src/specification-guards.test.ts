@@ -182,6 +182,20 @@ describe('Phase 0 specification guards', () => {
     expect(buildScript).not.toContain('"sdk_authority_open"');
   });
 
+  it('keeps production credential custody fail-closed without a helper process', () => {
+    const manifest = readText('src-tauri/Cargo.toml');
+    const main = readText('src-tauri/src/main.rs');
+    const credentials = readText('src-tauri/src/cave_credentials.rs');
+
+    expect(main).not.toMatch(/credential_helper|credential-helper/);
+    expect(credentials).not.toMatch(
+      /ProcessCredentialCustody|KeyringCredentialCustody|current_exe|Command::new|credential-helper|process::exit/,
+    );
+    expect(manifest).not.toMatch(
+      /keyring-core|apple-native-keyring-store|zbus-secret-service-keyring-store|windows-native-keyring-store/,
+    );
+  });
+
   it('delegates Cave protocol parsing to the exact packed managed client', () => {
     const packageManifest = readJson<
       PackageManifest & { pnpm?: { overrides?: Record<string, string> } }

@@ -6,7 +6,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex, Weak,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -20,9 +20,9 @@ use uuid::Uuid;
 use crate::{
     cave_credentials::{
         CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialRecord,
-        CredentialStoreAvailability, PreparedCredential, ProcessCredentialCustody, SecretValue,
+        CredentialStoreAvailability, PreparedCredential, SecretValue, UnavailableCredentialCustody,
     },
-    metadata::{APP_IDENTIFIER, APP_NAME},
+    metadata::APP_NAME,
     sdk_diagnostics::{
         validate_public_snapshot, DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse,
         NativeResponseOperation, SecurityCheck, SecurityComponent, SecurityStatus,
@@ -45,6 +45,7 @@ const PROVIDER_DEADLINE_MILLIS: u64 = 5 * 1_000;
 const PROVIDER_DEADLINE_MILLIS: u64 = 100;
 const PENDING_CREDENTIAL_TTL_MILLIS: u64 = 5 * 60 * 1_000;
 const TERMINAL_CREDENTIAL_TTL_MILLIS: u64 = 5 * 60 * 1_000;
+const EXPIRY_JANITOR_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1163,6 +1164,11 @@ enum StagedCredentialRetention {
     Terminal(u64),
 }
 
+enum JanitorCredentialDisposition {
+    Retain,
+    Remove { faulted: bool },
+}
+
 struct StagedCredential {
     authority: AuthorityReference,
     credential: Mutex<Option<PreparedCredential>>,
@@ -1646,6 +1652,93 @@ impl StagedCredential {
         })
     }
 
+    fn janitor_disposition(&self, now: u64) -> JanitorCredentialDisposition {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return JanitorCredentialDisposition::Retain;
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return JanitorCredentialDisposition::Remove { faulted: true };
+            }
+        };
+        match &*state {
+            StagedCredentialState::Pending => {
+                if now.saturating_sub(self.staged_at.load(AtomicOrdering::Acquire))
+                    < PENDING_CREDENTIAL_TTL_MILLIS
+                {
+                    return JanitorCredentialDisposition::Retain;
+                }
+                match self.credential.try_lock() {
+                    Ok(mut credential) => {
+                        credential.take();
+                        JanitorCredentialDisposition::Remove { faulted: false }
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        JanitorCredentialDisposition::Retain
+                    }
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        JanitorCredentialDisposition::Remove { faulted: true }
+                    }
+                }
+            }
+            StagedCredentialState::Writing { deadline_at, .. }
+            | StagedCredentialState::RollbackNeeded { deadline_at, .. }
+            | StagedCredentialState::Discarding { deadline_at }
+                if *deadline_at <= now =>
+            {
+                match self.credential.try_lock() {
+                    Ok(mut credential) => {
+                        credential.take();
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        return JanitorCredentialDisposition::Retain;
+                    }
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        return JanitorCredentialDisposition::Remove { faulted: true };
+                    }
+                }
+                let _ = self.terminal_at.compare_exchange(
+                    0,
+                    now,
+                    AtomicOrdering::Release,
+                    AtomicOrdering::Relaxed,
+                );
+                *state =
+                    StagedCredentialState::Faulted(NativeError::secret_store_rollback_failed());
+                JanitorCredentialDisposition::Retain
+            }
+            StagedCredentialState::Committed
+            | StagedCredentialState::Finished(_)
+            | StagedCredentialState::Faulted(_) => {
+                let retained_at = self.terminal_at.load(AtomicOrdering::Acquire);
+                let retained_at = if retained_at == 0 {
+                    match self.terminal_at.compare_exchange(
+                        0,
+                        now,
+                        AtomicOrdering::AcqRel,
+                        AtomicOrdering::Acquire,
+                    ) {
+                        Ok(_) => now,
+                        Err(retained_at) => retained_at,
+                    }
+                } else {
+                    retained_at
+                };
+                if now.saturating_sub(retained_at) < TERMINAL_CREDENTIAL_TTL_MILLIS {
+                    JanitorCredentialDisposition::Retain
+                } else {
+                    JanitorCredentialDisposition::Remove {
+                        faulted: matches!(*state, StagedCredentialState::Faulted(_)),
+                    }
+                }
+            }
+            StagedCredentialState::Writing { .. }
+            | StagedCredentialState::RollbackNeeded { .. }
+            | StagedCredentialState::Discarding { .. } => JanitorCredentialDisposition::Retain,
+        }
+    }
+
     fn cleanup_recoverable(
         &self,
         custody: &dyn CredentialCustody,
@@ -1725,7 +1818,6 @@ struct PendingDiscovery {
     descriptor: AuthorityDescriptor,
     context: AuthorityContext,
     expires_at: u64,
-    sequence: u64,
 }
 
 struct CredentialReservation {
@@ -1741,6 +1833,7 @@ struct PairingReservation {
 #[derive(Default)]
 struct TransientState {
     discoveries: std::collections::HashMap<String, PendingDiscovery>,
+    discovery_reservations: HashSet<String>,
     pairings: std::collections::HashMap<String, PendingPairing>,
     managed_pairings: std::collections::HashMap<String, String>,
     pairing_reservations: std::collections::HashMap<String, PairingReservation>,
@@ -1795,17 +1888,19 @@ impl TransientState {
     fn prune_discoveries(&mut self, now: u64) {
         self.discoveries
             .retain(|_, discovery| discovery.expires_at > now);
-        while self.discoveries.len() > MAX_RETAINED_DISCOVERIES {
-            let oldest = self
-                .discoveries
-                .iter()
-                .min_by_key(|(_, discovery)| discovery.sequence)
-                .map(|(handle, _)| handle.clone());
-            let Some(handle) = oldest else {
-                break;
-            };
-            self.discoveries.remove(&handle);
+    }
+
+    fn ensure_discovery_slot(&mut self, now: u64) -> Result<(), NativeError> {
+        self.prune_discoveries(now);
+        if self
+            .discoveries
+            .len()
+            .saturating_add(self.discovery_reservations.len())
+            >= MAX_RETAINED_DISCOVERIES
+        {
+            return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
         }
+        Ok(())
     }
 
     fn retain_managed_pairings(&mut self) {
@@ -1886,6 +1981,31 @@ impl TransientState {
         Ok(())
     }
 
+    fn prune_expired_for_janitor(&mut self, now: u64) {
+        self.prune_discoveries(now);
+        self.prune_pairings(now);
+        self.credential_reservations
+            .retain(|_, reservation| reservation.active || reservation.expires_at > now);
+        let expired = self
+            .credentials
+            .iter()
+            .filter_map(
+                |(handle, credential)| match credential.janitor_disposition(now) {
+                    JanitorCredentialDisposition::Retain => None,
+                    JanitorCredentialDisposition::Remove { faulted } => {
+                        Some((handle.clone(), faulted))
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+        for (handle, faulted) in expired {
+            self.credentials.remove(&handle);
+            if faulted && self.credential_fault.is_none() {
+                self.credential_fault = Some(NativeError::secret_store_rollback_failed());
+            }
+        }
+    }
+
     fn credential_update_in_progress(
         &self,
         authority: &AuthorityReference,
@@ -1941,6 +2061,18 @@ fn terminal_pairing_status(value: &Value) -> bool {
         .is_some_and(|status| matches!(status, "denied" | "expired"))
 }
 
+fn classify_started_exchange_error(error: NativeError, managed: bool) -> NativeError {
+    if managed && error.retryable {
+        NativeError {
+            code: DiagnosticCode::CredentialUpdateInProgress,
+            retryable: true,
+            diagnostic_id: error.diagnostic_id,
+        }
+    } else {
+        error
+    }
+}
+
 async fn await_provider<T>(future: ProviderFuture<T>) -> Result<T, NativeError> {
     await_provider_until(
         future,
@@ -1979,14 +2111,27 @@ pub struct NativeSdkBoundary {
     authority_mutation: Mutex<()>,
     credential_in_flight: Arc<AtomicBool>,
     installation_id: Mutex<Option<String>>,
-    transient: Mutex<TransientState>,
+    transient: Arc<Mutex<TransientState>>,
 }
 
 struct CredentialOperationGuard(Arc<AtomicBool>);
 
+struct DiscoveryReservationGuard<'a> {
+    boundary: &'a NativeSdkBoundary,
+    handle: String,
+}
+
 impl Drop for CredentialOperationGuard {
     fn drop(&mut self) {
         self.0.store(false, AtomicOrdering::Release);
+    }
+}
+
+impl Drop for DiscoveryReservationGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut transient) = self.boundary.transient.lock() {
+            transient.discovery_reservations.remove(&self.handle);
+        }
     }
 }
 
@@ -2050,7 +2195,7 @@ impl NativeSdkBoundary {
             authority_mutation: Mutex::new(()),
             credential_in_flight: Arc::new(AtomicBool::new(false)),
             installation_id: Mutex::new(None),
-            transient: Mutex::new(TransientState::default()),
+            transient: Arc::new(Mutex::new(TransientState::default())),
         }
     }
 
@@ -2080,6 +2225,23 @@ impl NativeSdkBoundary {
         Ok(PairingReservationGuard {
             boundary: self,
             authority: authority.clone(),
+            handle,
+        })
+    }
+
+    fn reserve_discovery_slot(
+        &self,
+        now: u64,
+    ) -> Result<DiscoveryReservationGuard<'_>, NativeError> {
+        let mut transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        transient.ensure_discovery_slot(now)?;
+        let handle = format!("discovery-reservation:{}", Uuid::new_v4());
+        transient.discovery_reservations.insert(handle.clone());
+        Ok(DiscoveryReservationGuard {
+            boundary: self,
             handle,
         })
     }
@@ -2130,10 +2292,7 @@ impl NativeSdkBoundary {
     }
 
     pub fn with_provider(provider: Arc<dyn ManagedNativeAuthorityProvider>) -> Self {
-        Self::new(
-            Arc::new(ProcessCredentialCustody::new(APP_IDENTIFIER)),
-            provider,
-        )
+        Self::new(Arc::new(UnavailableCredentialCustody::platform()), provider)
     }
 
     pub fn production() -> Self {
@@ -2171,6 +2330,7 @@ impl NativeSdkBoundary {
     }
 
     async fn discovery_read_at(&self, now: u64) -> Result<DiscoveryReadOutput, NativeError> {
+        let reservation = self.reserve_discovery_slot(now)?;
         let descriptor = await_provider(self.provider.discover()).await?;
         descriptor.validate()?;
         let snapshot = descriptor.managed_snapshot()?;
@@ -2184,17 +2344,17 @@ impl NativeSdkBoundary {
             .lock()
             .map_err(|_| NativeError::service_unavailable())?;
         transient.prune_discoveries(now);
-        let sequence = transient.allocate_sequence()?;
+        if !transient.discovery_reservations.remove(&reservation.handle) {
+            return Err(NativeError::reconcile_required());
+        }
         transient.discoveries.insert(
             handle.clone(),
             PendingDiscovery {
                 descriptor,
                 context,
                 expires_at,
-                sequence,
             },
         );
-        transient.prune_discoveries(now);
         Ok(DiscoveryReadOutput { handle, snapshot })
     }
 
@@ -2829,7 +2989,7 @@ impl NativeSdkBoundary {
             transient.prune_pairings(now);
             transient.prune_credentials(now)?;
             if managed && transient.credential_update_in_progress(&input.authority)? {
-                return Err(NativeError::credential_update_in_progress());
+                return Err(NativeError::new(DiagnosticCode::Conflict, true));
             }
             let reservation_expires_at = {
                 let pending = transient
@@ -2844,7 +3004,12 @@ impl NativeSdkBoundary {
                 }
                 pending.expires_at
             };
-            transient.ensure_credential_slot(now)?;
+            if let Err(error) = transient.ensure_credential_slot(now) {
+                if managed && error.code == DiagnosticCode::CredentialUpdateInProgress {
+                    return Err(NativeError::new(DiagnosticCode::Conflict, true));
+                }
+                return Err(error);
+            }
             if transient.credentials.contains_key(&commit_handle)
                 || transient
                     .credential_reservations
@@ -2893,7 +3058,7 @@ impl NativeSdkBoundary {
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
                 self.remove_credential_reservation(&commit_handle, &input.authority)?;
-                return Err(error);
+                return Err(classify_started_exchange_error(error, managed));
             }
         };
         let public_credential = match validate_provider_credential_metadata(
@@ -3070,11 +3235,15 @@ impl NativeSdkBoundary {
                 |credential| credential.authority == cleanup_authority,
                 RecoverableCleanupMode::Observe,
             )?;
-            Ok(prior_cleanup_pending || current_cleanup_pending)
+            Ok::<bool, NativeError>(prior_cleanup_pending || current_cleanup_pending)
         })
         .await;
         let cleanup_pending = match cleanup {
             Ok(Ok(cleanup_pending)) => cleanup_pending,
+            Ok(Err(error)) if error.code == DiagnosticCode::CredentialUpdateInProgress => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::new(DiagnosticCode::Conflict, true));
+            }
             Ok(Err(error)) => {
                 self.lifecycle.cancel_request(&request);
                 return Err(error);
@@ -3086,7 +3255,7 @@ impl NativeSdkBoundary {
         };
         if cleanup_pending {
             self.lifecycle.cancel_request(&request);
-            return Err(NativeError::credential_update_in_progress());
+            return Err(NativeError::new(DiagnosticCode::Conflict, true));
         }
         let exchanged_result = self
             .pairing_exchange_with_request(
@@ -4046,27 +4215,121 @@ fn validate_opaque_handle(value: &str, prefix: &str) -> Result<(), NativeError> 
     Ok(())
 }
 
-#[cfg(test)]
-async fn run_blocking_native<T>(
-    operation: impl FnOnce() -> Result<T, NativeError> + Send + 'static,
-) -> Result<T, NativeError>
-where
-    T: Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(operation)
-        .await
-        .map_err(|_| NativeError::service_unavailable())?
+type JanitorClock = Arc<dyn Fn() -> u64 + Send + Sync>;
+
+struct ExpiryJanitorSignal {
+    stopped: Mutex<bool>,
+    changed: Condvar,
+}
+
+struct ExpiryJanitor {
+    signal: Arc<ExpiryJanitorSignal>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ExpiryJanitor {
+    fn start(
+        transient: &Arc<Mutex<TransientState>>,
+        clock: JanitorClock,
+        interval: Duration,
+    ) -> Self {
+        let signal = Arc::new(ExpiryJanitorSignal {
+            stopped: Mutex::new(false),
+            changed: Condvar::new(),
+        });
+        let worker_signal = Arc::clone(&signal);
+        let transient = Arc::downgrade(transient);
+        let worker = std::thread::Builder::new()
+            .name("opencoven-expiry-janitor".into())
+            .spawn(move || {
+                run_expiry_janitor(transient, worker_signal, clock, interval);
+            })
+            .expect("the bounded expiry janitor must start before native state is available");
+        Self {
+            signal,
+            worker: Some(worker),
+        }
+    }
+}
+
+impl Drop for ExpiryJanitor {
+    fn drop(&mut self) {
+        if let Ok(mut stopped) = self.signal.stopped.lock() {
+            *stopped = true;
+        }
+        self.signal.changed.notify_all();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn run_expiry_janitor(
+    transient: Weak<Mutex<TransientState>>,
+    signal: Arc<ExpiryJanitorSignal>,
+    clock: JanitorClock,
+    interval: Duration,
+) {
+    loop {
+        let stopped = match signal.stopped.lock() {
+            Ok(stopped) => stopped,
+            Err(_) => break,
+        };
+        if *stopped {
+            break;
+        }
+        let (stopped, _) = match signal.changed.wait_timeout(stopped, interval) {
+            Ok(result) => result,
+            Err(_) => break,
+        };
+        if *stopped {
+            break;
+        }
+        drop(stopped);
+
+        let Some(transient) = transient.upgrade() else {
+            break;
+        };
+        if let Ok(mut transient) = transient.try_lock() {
+            transient.prune_expired_for_janitor(clock());
+        };
+    }
 }
 
 pub struct NativeSdkState {
+    _janitor: ExpiryJanitor,
     boundary: Arc<NativeSdkBoundary>,
 }
 
 impl NativeSdkState {
     pub fn new(boundary: NativeSdkBoundary) -> Self {
+        Self::new_with_clock_and_interval(
+            boundary,
+            Arc::new(current_time_millis),
+            EXPIRY_JANITOR_INTERVAL,
+        )
+    }
+
+    fn new_with_clock_and_interval(
+        boundary: NativeSdkBoundary,
+        clock: JanitorClock,
+        interval: Duration,
+    ) -> Self {
+        let boundary = Arc::new(boundary);
+        let janitor = ExpiryJanitor::start(&boundary.transient, clock, interval);
         Self {
-            boundary: Arc::new(boundary),
+            _janitor: janitor,
+            boundary,
         }
+    }
+
+    #[cfg(test)]
+    fn new_with_clock(
+        boundary: NativeSdkBoundary,
+        clock: JanitorClock,
+        interval: Duration,
+    ) -> Self {
+        Self::new_with_clock_and_interval(boundary, clock, interval)
     }
 
     pub fn production() -> Self {
@@ -4221,7 +4484,7 @@ pub async fn sdk_native_diagnostics(
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Barrier, Condvar, Mutex,
     };
     use std::time::{Duration, Instant};
@@ -4238,7 +4501,7 @@ mod tests {
         CredentialCustody, CredentialDeleteResult, CredentialDeleteTarget, CredentialLookup,
         CredentialRecord, CredentialStoreAvailability, PreparedCredential, SecretValue,
     };
-    use crate::sdk_diagnostics::{DiagnosticCode, NativeResponseOperation};
+    use crate::sdk_diagnostics::{DiagnosticCode, NativeResponseOperation, SecurityStatus};
 
     const PUBLIC_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const KEY_ID: &str = "tDE1VahIyqtAoH7mJ7uT3yzaF6EnK70vG9JMvTMCOAM";
@@ -4477,6 +4740,16 @@ mod tests {
 
     struct FakeProvider;
 
+    #[derive(Default)]
+    struct CountingDiscoveryProvider {
+        discoveries: AtomicUsize,
+    }
+
+    #[derive(Default)]
+    struct RetryableConflictExchangeProvider {
+        exchanges: AtomicUsize,
+    }
+
     struct NeverSecretProvider {
         poll_calls: AtomicUsize,
         exchange_calls: AtomicUsize,
@@ -4508,6 +4781,84 @@ mod tests {
                 expires_at,
                 poll_status,
             }
+        }
+    }
+
+    impl ManagedNativeAuthorityProvider for CountingDiscoveryProvider {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn discover(&self) -> ProviderFuture<AuthorityDescriptor> {
+            self.discoveries.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async { Ok(authority("00000000-0000-4000-8000-000000000001")) })
+        }
+
+        fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
+            FakeProvider.health(authority)
+        }
+
+        fn pairing_create(
+            &self,
+            authority: AuthorityDescriptor,
+            request: PairingRequest,
+        ) -> ProviderFuture<ProviderPairingCreated> {
+            FakeProvider.pairing_create(authority, request)
+        }
+
+        fn pairing_poll(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<Value> {
+            FakeProvider.pairing_poll(authority, remote_request_id, pairing_secret)
+        }
+
+        fn pairing_exchange(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<ProviderPairingExchange> {
+            FakeProvider.pairing_exchange(authority, remote_request_id, pairing_secret)
+        }
+    }
+
+    impl ManagedNativeAuthorityProvider for RetryableConflictExchangeProvider {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
+            FakeProvider.health(authority)
+        }
+
+        fn pairing_create(
+            &self,
+            authority: AuthorityDescriptor,
+            request: PairingRequest,
+        ) -> ProviderFuture<ProviderPairingCreated> {
+            FakeProvider.pairing_create(authority, request)
+        }
+
+        fn pairing_poll(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<Value> {
+            FakeProvider.pairing_poll(authority, remote_request_id, pairing_secret)
+        }
+
+        fn pairing_exchange(
+            &self,
+            _authority: AuthorityDescriptor,
+            _remote_request_id: String,
+            _pairing_secret: SecretValue,
+        ) -> ProviderFuture<ProviderPairingExchange> {
+            self.exchanges.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async { Err(crate::NativeError::new(DiagnosticCode::Conflict, true)) })
         }
     }
 
@@ -5105,20 +5456,6 @@ mod tests {
         changed: Condvar,
     }
 
-    #[cfg(unix)]
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum UnreleasedStoreOperation {
-        Write,
-        Rollback,
-        Discard,
-    }
-
-    #[cfg(unix)]
-    struct UnreleasedProcessCustody {
-        operation: UnreleasedStoreOperation,
-        stored: Mutex<Option<CredentialDeleteTarget>>,
-    }
-
     struct ContentionCustody {
         stored: Mutex<Option<Vec<u8>>>,
         write_contentions: AtomicUsize,
@@ -5621,95 +5958,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    impl UnreleasedProcessCustody {
-        fn new(operation: UnreleasedStoreOperation) -> Self {
-            Self {
-                operation,
-                stored: Mutex::new(None),
-            }
-        }
-
-        fn timeout_without_release(&self) -> crate::NativeError {
-            let mut child = std::process::Command::new("sh")
-                .args(["-c", "exec sleep 60"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .expect("hung store helper should start");
-            let deadline = Instant::now() + Duration::from_millis(20);
-            loop {
-                if child
-                    .try_wait()
-                    .expect("hung store helper status")
-                    .is_some()
-                {
-                    panic!("hung store helper exited before its deadline");
-                }
-                if Instant::now() >= deadline {
-                    child.kill().expect("hung store helper should terminate");
-                    child.wait().expect("hung store helper should be reaped");
-                    return crate::NativeError::new(DiagnosticCode::Timeout, false);
-                }
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    impl CredentialCustody for UnreleasedProcessCustody {
-        fn availability(&self) -> CredentialStoreAvailability {
-            CredentialStoreAvailability::Available
-        }
-
-        fn installation_id(&self) -> Result<String, crate::NativeError> {
-            Ok("00000000-0000-4000-8000-000000000010".into())
-        }
-
-        fn read_credential(
-            &self,
-            _installation_id: &str,
-        ) -> Result<CredentialLookup, crate::NativeError> {
-            Ok(CredentialLookup::Missing)
-        }
-
-        fn write_credential(
-            &self,
-            credential: &PreparedCredential,
-        ) -> Result<(), crate::NativeError> {
-            *self.stored.lock().expect("hung store lock") = Some(credential.delete_target());
-            match self.operation {
-                UnreleasedStoreOperation::Write => Err(self.timeout_without_release()),
-                UnreleasedStoreOperation::Rollback => {
-                    Err(crate::NativeError::new(DiagnosticCode::Timeout, false))
-                }
-                UnreleasedStoreOperation::Discard => Ok(()),
-            }
-        }
-
-        fn compare_delete_credential(
-            &self,
-            expected: &CredentialDeleteTarget,
-        ) -> Result<CredentialDeleteResult, crate::NativeError> {
-            if matches!(
-                self.operation,
-                UnreleasedStoreOperation::Rollback | UnreleasedStoreOperation::Discard
-            ) {
-                return Err(self.timeout_without_release());
-            }
-            let mut stored = self.stored.lock().expect("hung store lock");
-            match stored.as_ref() {
-                None => Ok(CredentialDeleteResult::Absent),
-                Some(current) if current != expected => Ok(CredentialDeleteResult::Changed),
-                Some(_) => {
-                    *stored = None;
-                    Ok(CredentialDeleteResult::Deleted)
-                }
-            }
-        }
-    }
-
     impl CredentialCustody for BlockingCustody {
         fn availability(&self) -> CredentialStoreAvailability {
             CredentialStoreAvailability::Available
@@ -5947,15 +6195,16 @@ mod tests {
     }
 
     #[test]
-    fn discovery_handles_are_count_bounded() {
+    fn discovery_rejects_at_exact_live_capacity_and_retries_after_expiry() {
         tauri::async_runtime::block_on(async {
+            let provider = Arc::new(CountingDiscoveryProvider::default());
             let boundary =
-                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), provider.clone());
             let mut handles = Vec::new();
-            for index in 0..=super::MAX_RETAINED_DISCOVERIES {
+            for _ in 0..super::MAX_RETAINED_DISCOVERIES {
                 handles.push(
                     boundary
-                        .discovery_read_at(1_000 + index as u64)
+                        .discovery_read_at(1_000)
                         .await
                         .expect("discovery should succeed")
                         .handle,
@@ -5964,16 +6213,48 @@ mod tests {
 
             assert_eq!(
                 boundary
+                    .discovery_read_at(1_000)
+                    .await
+                    .expect_err("all-live discovery capacity must reject without eviction")
+                    .code,
+                DiagnosticCode::OperationInProgress
+            );
+            assert_eq!(provider.discoveries.load(Ordering::Relaxed), 64);
+            assert_eq!(
+                boundary
+                    .transient
+                    .lock()
+                    .expect("transient lock")
+                    .discoveries
+                    .len(),
+                super::MAX_RETAINED_DISCOVERIES
+            );
+
+            let replacement = boundary
+                .discovery_read_at(1_000 + super::DISCOVERY_TTL_MILLIS)
+                .await
+                .expect("expired discoveries should free capacity");
+            assert_eq!(provider.discoveries.load(Ordering::Relaxed), 65);
+            assert_eq!(
+                boundary
                     .authority_establish_at(
                         super::DiscoveryHandleInput {
                             discovery_handle: handles[0].clone(),
                         },
-                        2_000,
+                        1_000 + super::DISCOVERY_TTL_MILLIS,
                     )
-                    .expect_err("the oldest discovery should be pruned")
+                    .expect_err("expired discovery must not survive capacity pruning")
                     .code,
                 DiagnosticCode::ReconcileRequired
             );
+            boundary
+                .authority_establish_at(
+                    super::DiscoveryHandleInput {
+                        discovery_handle: replacement.handle,
+                    },
+                    1_000 + super::DISCOVERY_TTL_MILLIS,
+                )
+                .expect("replacement discovery should remain live");
         });
     }
 
@@ -6366,7 +6647,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_exchange_reserves_capacity_before_consuming_pairing_state() {
+    fn managed_pre_exchange_contention_retains_a_retryable_pairing_session() {
         tauri::async_runtime::block_on(async {
             let provider = Arc::new(BlockingExchangeProvider::new());
             let boundary = Arc::new(NativeSdkBoundary::new(
@@ -6426,7 +6707,7 @@ mod tests {
 
             let second_result = boundary
                 .managed_pairing_exchange(super::ManagedPairingCommandInput {
-                    authority,
+                    authority: authority.clone(),
                     request_id: "request-second-exchange".into(),
                     pairing_request_id: second_request_id.clone(),
                 })
@@ -6441,12 +6722,133 @@ mod tests {
                 second_result
                     .expect_err("second exchange must wait for the active reservation")
                     .code,
+                DiagnosticCode::Conflict
+            );
+            assert_eq!(provider.exchanges.load(Ordering::Relaxed), 1);
+            {
+                let transient = boundary.transient.lock().expect("transient lock");
+                assert!(transient.managed_pairings.contains_key(&second_request_id));
+                assert!(transient.credential_reservations.is_empty());
+            }
+
+            boundary
+                .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                    authority,
+                    request_id: "request-second-exchange-retry".into(),
+                    pairing_request_id: second_request_id,
+                })
+                .await
+                .expect("pre-exchange contention must leave the managed session retryable");
+            assert_eq!(provider.exchanges.load(Ordering::Relaxed), 2);
+        });
+    }
+
+    #[test]
+    fn managed_pre_exchange_cleanup_contention_uses_retryable_conflict() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(2));
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody,
+                Arc::new(SequencedPairingProvider::new(2_000_000_000_000, "approved")),
+            ));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-seed-cleanup-contention".into(),
+                        commit_handle,
+                    })
+                    .expect_err("seed write should leave recoverable cleanup")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            let created = boundary
+                .managed_pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-cleanup-contention".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("managed pairing should create");
+            let pairing_request_id = created.result.request_id;
+
+            assert_eq!(
+                boundary
+                    .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                        authority,
+                        request_id: "request-cleanup-contention".into(),
+                        pairing_request_id: pairing_request_id.clone(),
+                    })
+                    .await
+                    .expect_err("pre-exchange cleanup contention must remain retryable")
+                    .code,
+                DiagnosticCode::Conflict
+            );
+            assert!(boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .managed_pairings
+                .contains_key(&pairing_request_id));
+        });
+    }
+
+    #[test]
+    fn provider_failure_after_exchange_start_is_confirmation_only() {
+        tauri::async_runtime::block_on(async {
+            let provider = Arc::new(RetryableConflictExchangeProvider::default());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                Arc::new(RaceCustody::new(false)),
+                provider.clone(),
+            ));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let created = boundary
+                .managed_pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-provider-conflict".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("managed pairing should create");
+            let pairing_request_id = created.result.request_id;
+
+            assert_eq!(
+                boundary
+                    .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-provider-conflict".into(),
+                        pairing_request_id: pairing_request_id.clone(),
+                    })
+                    .await
+                    .expect_err("post-start conflict must become confirmation-only")
+                    .code,
                 DiagnosticCode::CredentialUpdateInProgress
             );
             assert_eq!(provider.exchanges.load(Ordering::Relaxed), 1);
-            let transient = boundary.transient.lock().expect("transient lock");
-            assert!(transient.managed_pairings.contains_key(&second_request_id));
-            assert!(transient.credential_reservations.is_empty());
+            assert_eq!(
+                boundary
+                    .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                        authority,
+                        request_id: "request-provider-conflict-replay".into(),
+                        pairing_request_id,
+                    })
+                    .await
+                    .expect_err("consumed exchange must not replay")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert_eq!(provider.exchanges.load(Ordering::Relaxed), 1);
         });
     }
 
@@ -6512,29 +6914,38 @@ mod tests {
             let authority = boundary
                 .authority_open(authority("00000000-0000-4000-8000-000000000001"))
                 .expect("authority should open");
-
-            for index in 0..8 {
-                let created = boundary
-                    .managed_pairing_create(PairingCreateCommandInput {
+            let created = boundary
+                .managed_pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-rollback".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("managed pairing should be created");
+            assert_eq!(
+                boundary
+                    .managed_pairing_exchange(super::ManagedPairingCommandInput {
                         authority: authority.clone(),
-                        request_id: format!("request-create-rollback-{index}"),
-                        request: PairingRequest {
-                            app_name: "OpenCoven Chat".into(),
-                            installation_id: "00000000-0000-4000-8000-000000000010".into(),
-                            scopes: vec!["chat:read".into()],
-                        },
+                        request_id: "request-exchange-rollback".into(),
+                        pairing_request_id: created.result.request_id,
                     })
                     .await
-                    .expect("managed pairing should be created");
+                    .expect_err("post-persistence rollback contention needs confirmation")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            for index in 0..7 {
                 assert_eq!(
                     boundary
-                        .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                        .credential_state(CredentialCommandInput {
                             authority: authority.clone(),
-                            request_id: format!("request-exchange-rollback-{index}"),
-                            pairing_request_id: created.result.request_id,
+                            request_id: format!("request-status-rollback-{index}"),
                         })
-                        .await
-                        .expect_err("rollback contention should remain retryable")
+                        .expect_err("confirmation should report unresolved cleanup")
                         .code,
                     DiagnosticCode::CredentialUpdateInProgress
                 );
@@ -6770,6 +7181,24 @@ mod tests {
                 .iter()
                 .any(|check| { check.code == Some(DiagnosticCode::CredentialUpdateInProgress) }));
         });
+    }
+
+    #[test]
+    fn production_diagnostics_never_claim_unprobed_credential_custody() {
+        let diagnostics = NativeSdkBoundary::production().diagnostics();
+        let custody = diagnostics
+            .checks
+            .iter()
+            .find(|check| {
+                check.component == crate::sdk_diagnostics::SecurityComponent::CaveCredentialCustody
+            })
+            .expect("credential custody diagnostic");
+
+        assert_eq!(custody.status, SecurityStatus::Unavailable);
+        assert_eq!(
+            custody.code,
+            Some(DiagnosticCode::PlatformSecurityUnavailable)
+        );
     }
 
     #[test]
@@ -7498,40 +7927,6 @@ mod tests {
                 .code,
             DiagnosticCode::ReconcileRequired
         );
-    }
-
-    #[test]
-    fn contended_transition_cleanup_does_not_stall_unrelated_runtime_work() {
-        tauri::async_runtime::block_on(async {
-            let service = "ai.opencoven.chat.runtime-test";
-            let account = format!("test-{}", uuid::Uuid::new_v4());
-            let held = crate::credential_lock::CredentialMutationLock::acquire(service, &account)
-                .expect("hold test lock");
-            let blocked_account = account.clone();
-            let blocked = tauri::async_runtime::spawn(async move {
-                super::run_blocking_native(move || {
-                    crate::credential_lock::CredentialMutationLock::acquire_with_timeout(
-                        service,
-                        &blocked_account,
-                        Duration::from_millis(50),
-                    )
-                    .map(drop)
-                })
-                .await
-            });
-            let unrelated = tauri::async_runtime::spawn(async { 7_u8 });
-            assert_eq!(unrelated.await.expect("unrelated runtime task"), 7);
-            assert_eq!(
-                blocked
-                    .await
-                    .expect("blocked transition task")
-                    .expect_err("lock acquisition should time out")
-                    .code,
-                DiagnosticCode::CredentialUpdateInProgress
-            );
-            drop(held);
-            crate::credential_lock::remove_test_lock(service, &account);
-        });
     }
 
     #[test]
@@ -8304,6 +8699,69 @@ mod tests {
     }
 
     #[test]
+    fn app_state_janitor_expires_idle_secret_state_without_an_external_command() {
+        let observer = Arc::new(crate::cave_credentials::ZeroizeTestObserver::default());
+        crate::cave_credentials::with_zeroize_test_observer(observer.clone(), || {
+            let now = Arc::new(AtomicU64::new(1_000));
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let pairing_handle = format!("pairing:{}", uuid::Uuid::new_v4());
+            let credential_handle = format!("commit:{}", uuid::Uuid::new_v4());
+            boundary.insert_test_pairing(&authority, &pairing_handle);
+            boundary.insert_test_staged_credential(&authority, &credential_handle);
+            {
+                let mut transient = boundary.transient.lock().expect("transient lock");
+                transient
+                    .pairings
+                    .get_mut(&pairing_handle)
+                    .expect("test pairing")
+                    .expires_at = 1_000 + super::PENDING_CREDENTIAL_TTL_MILLIS;
+                transient
+                    .credentials
+                    .get(&credential_handle)
+                    .expect("test staged credential")
+                    .staged_at
+                    .store(1_000, Ordering::Release);
+            }
+            let clock = Arc::clone(&now);
+            let state = super::NativeSdkState::new_with_clock(
+                boundary,
+                Arc::new(move || clock.load(Ordering::Acquire)),
+                Duration::from_millis(1),
+            );
+            now.store(
+                1_000 + super::PENDING_CREDENTIAL_TTL_MILLIS,
+                Ordering::Release,
+            );
+
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                let transient = state.boundary.transient.lock().expect("transient lock");
+                if transient.pairings.is_empty() && transient.credentials.is_empty() {
+                    break;
+                }
+                drop(transient);
+                assert!(
+                    Instant::now() < deadline,
+                    "idle expired secret-bearing state must be pruned autonomously"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+
+            let shutdown_started = Instant::now();
+            drop(state);
+            assert!(
+                shutdown_started.elapsed() < Duration::from_secs(1),
+                "janitor shutdown must be bounded"
+            );
+        });
+        observer.assert_zeroized();
+    }
+
+    #[test]
     fn elapsed_provider_deadlines_reject_immediately_ready_results() {
         tauri::async_runtime::block_on(async {
             assert_eq!(
@@ -8808,202 +9266,6 @@ mod tests {
                 .expect("lifecycle lock")
                 .requests
                 .is_empty());
-        });
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn hung_write_is_killed_without_retaining_staged_secret_state() {
-        let observer = Arc::new(crate::cave_credentials::ZeroizeTestObserver::default());
-        crate::cave_credentials::with_zeroize_test_observer(observer.clone(), || {
-            tauri::async_runtime::block_on(async {
-                let custody = Arc::new(UnreleasedProcessCustody::new(
-                    UnreleasedStoreOperation::Write,
-                ));
-                let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
-                let (authority, commit_handle) = stage_test_credential(&boundary).await;
-                let staged = boundary
-                    .transient
-                    .lock()
-                    .expect("transient lock")
-                    .credentials
-                    .get(&commit_handle)
-                    .cloned()
-                    .expect("staged credential");
-                let started = Instant::now();
-
-                assert_eq!(
-                    boundary
-                        .pairing_commit(super::CommitHandleCommandInput {
-                            authority,
-                            request_id: "request-hung-write".into(),
-                            commit_handle,
-                        })
-                        .expect_err("hung write must time out after exact rollback")
-                        .code,
-                    DiagnosticCode::Timeout
-                );
-                assert!(started.elapsed() < Duration::from_secs(1));
-                assert!(staged
-                    .credential
-                    .lock()
-                    .expect("staged secret lock")
-                    .is_none());
-                assert!(custody.stored.lock().expect("hung store lock").is_none());
-            });
-        });
-        observer.assert_zeroized();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn hung_rollback_expires_to_a_bearer_free_fail_closed_fault() {
-        let observer = Arc::new(crate::cave_credentials::ZeroizeTestObserver::default());
-        crate::cave_credentials::with_zeroize_test_observer(observer.clone(), || {
-            tauri::async_runtime::block_on(async {
-                let custody = Arc::new(UnreleasedProcessCustody::new(
-                    UnreleasedStoreOperation::Rollback,
-                ));
-                let boundary = NativeSdkBoundary::new(custody, Arc::new(FakeProvider));
-                let (authority, commit_handle) = stage_test_credential(&boundary).await;
-                let staged = boundary
-                    .transient
-                    .lock()
-                    .expect("transient lock")
-                    .credentials
-                    .get(&commit_handle)
-                    .cloned()
-                    .expect("staged credential");
-
-                assert_eq!(
-                    boundary
-                        .pairing_commit(super::CommitHandleCommandInput {
-                            authority: authority.clone(),
-                            request_id: "request-hung-rollback".into(),
-                            commit_handle,
-                        })
-                        .expect_err("hung rollback must fail closed")
-                        .code,
-                    DiagnosticCode::SecretStoreRollbackFailed
-                );
-                assert!(staged
-                    .credential
-                    .lock()
-                    .expect("staged secret lock")
-                    .is_none());
-                assert_eq!(
-                    boundary
-                        .installation_identity()
-                        .expect_err("faulted rollback must quarantine custody immediately")
-                        .code,
-                    DiagnosticCode::SecretStoreRollbackFailed
-                );
-                assert_eq!(
-                    boundary
-                        .list_conversations(CanonicalPageCommandInput {
-                            authority: authority.clone(),
-                            request_id: "request-read-during-fault".into(),
-                            options: CanonicalPageOptions {
-                                limit: 25,
-                                cursor: None,
-                            },
-                        })
-                        .await
-                        .expect_err("faulted rollback must not authorize stored bearer use")
-                        .code,
-                    DiagnosticCode::SecretStoreRollbackFailed
-                );
-                boundary
-                    .transient
-                    .lock()
-                    .expect("transient lock")
-                    .prune_credentials(u64::MAX)
-                    .expect("faulted state should expire to quarantine");
-                assert!(boundary
-                    .transient
-                    .lock()
-                    .expect("transient lock")
-                    .credentials
-                    .is_empty());
-                assert_eq!(
-                    boundary
-                        .installation_identity()
-                        .expect_err("expired recovery uncertainty must remain fail closed")
-                        .code,
-                    DiagnosticCode::SecretStoreRollbackFailed
-                );
-            });
-        });
-        observer.assert_zeroized();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn hung_discard_expires_to_a_bearer_free_fail_closed_fault() {
-        tauri::async_runtime::block_on(async {
-            let custody = Arc::new(UnreleasedProcessCustody::new(
-                UnreleasedStoreOperation::Discard,
-            ));
-            let boundary = NativeSdkBoundary::new(custody, Arc::new(FakeProvider));
-            let (authority, commit_handle) = stage_test_credential(&boundary).await;
-            boundary
-                .pairing_commit(super::CommitHandleCommandInput {
-                    authority: authority.clone(),
-                    request_id: "request-commit-before-hung-discard".into(),
-                    commit_handle: commit_handle.clone(),
-                })
-                .expect("credential should commit before discard");
-            let staged = boundary
-                .transient
-                .lock()
-                .expect("transient lock")
-                .credentials
-                .get(&commit_handle)
-                .cloned()
-                .expect("committed credential state");
-
-            assert_eq!(
-                boundary
-                    .pairing_discard(super::CommitHandleCommandInput {
-                        authority,
-                        request_id: "request-hung-discard".into(),
-                        commit_handle,
-                    })
-                    .expect_err("hung discard must time out")
-                    .code,
-                DiagnosticCode::Timeout
-            );
-            assert!(staged
-                .credential
-                .lock()
-                .expect("staged secret lock")
-                .is_none());
-            assert_eq!(
-                boundary
-                    .installation_identity()
-                    .expect_err("faulted discard must quarantine custody immediately")
-                    .code,
-                DiagnosticCode::SecretStoreRollbackFailed
-            );
-            boundary
-                .transient
-                .lock()
-                .expect("transient lock")
-                .prune_credentials(u64::MAX)
-                .expect("faulted discard should expire to quarantine");
-            assert!(boundary
-                .transient
-                .lock()
-                .expect("transient lock")
-                .credentials
-                .is_empty());
-            assert_eq!(
-                boundary
-                    .installation_identity()
-                    .expect_err("unknown discard disposition must remain fail closed")
-                    .code,
-                DiagnosticCode::SecretStoreRollbackFailed
-            );
         });
     }
 }

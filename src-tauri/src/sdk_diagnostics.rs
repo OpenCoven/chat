@@ -363,18 +363,23 @@ fn project_snapshot(value: &mut Value, error_object: bool) {
 }
 
 fn forbidden_snapshot_key(key: &str) -> bool {
-    let lowercase = key.to_ascii_lowercase();
-    lowercase.contains("bearer")
-        || lowercase.contains("secret")
-        || lowercase.ends_with("token")
+    let normalized = key
+        .bytes()
+        .filter(|byte| byte.is_ascii_alphanumeric())
+        .map(|byte| byte.to_ascii_lowercase() as char)
+        .collect::<String>();
+    normalized.contains("bearer")
+        || normalized.contains("secret")
+        || normalized.ends_with("token")
+        || normalized.ends_with("apikey")
+        || normalized.ends_with("privatekey")
+        || normalized.ends_with("password")
+        || normalized.ends_with("credential")
+        || normalized.ends_with("credentials")
+        || (normalized.starts_with("attachment") && normalized != "attachmentcount")
         || matches!(
-            lowercase.as_str(),
-            "apikey" | "authorization" | "password" | "privatekey"
-        )
-        || (lowercase.starts_with("attachment") && lowercase != "attachmentcount")
-        || matches!(
-            lowercase.as_str(),
-            "cause" | "prompt" | "serializedkeychainrecord"
+            normalized.as_str(),
+            "authorization" | "cause" | "prompt" | "serializedkeychainrecord"
         )
 }
 
@@ -652,12 +657,29 @@ mod tests {
 
     #[test]
     fn forbidden_credential_keys_are_rejected_in_canonical_content() {
-        for key in ["bearer", "pairingSecret", "accessToken", "authorization"] {
+        for key in [
+            "bearer",
+            "pairingSecret",
+            "pairing_secret",
+            "client-secret",
+            "accessToken",
+            "access-token",
+            "refresh.token",
+            "auth_token",
+            "api_key",
+            "API-Key",
+            "private_key",
+            "Private-Key",
+            "password",
+            "credential",
+            "serialized-keychain-record",
+            "authorization",
+        ] {
             assert_eq!(
                 NativeResponse::snapshot(
                     NativeResponseOperation::ListConversationMessages,
                     200,
-                    json!({"data": {"messages": [{"text": "safe", key: "credential"}]}}),
+                    json!({"data": {"messages": [{"text": "safe", key: "x"}]}}),
                 )
                 .expect_err("credential keys must be rejected at every structural location")
                 .code,
