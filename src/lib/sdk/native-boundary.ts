@@ -3,7 +3,12 @@ import type {
   CaveManagedDiscoverySource,
   CavePairingRequest,
 } from '@opencoven/cave-client/managed';
-import type { OperationContext, PageOptions } from '@opencoven/sdk-core/browser';
+import {
+  type OperationContext,
+  type OperationOptions,
+  type PageOptions,
+  runOperation,
+} from '@opencoven/sdk-core/browser';
 
 import { nativeUnavailable, snapshotNativeDiagnostic, snapshotNativeResult } from './diagnostics';
 
@@ -55,6 +60,14 @@ function invalidNativeInput(): never {
     code: 'invalid_response',
     retryable: false,
     message: 'Cave request was invalid.',
+  });
+}
+
+function invalidCovenHealthResult(): never {
+  throw Object.freeze({
+    code: 'invalid_response',
+    retryable: false,
+    message: 'Coven response was invalid.',
   });
 }
 
@@ -190,6 +203,7 @@ async function invokeNativeOperation(
     requestNativeCancellation(invoke, attemptId, reason);
     return cancellationDiagnostic(reason);
   }
+
   const remaining =
     deadline === undefined ? NATIVE_OPERATION_TIMEOUT_MS : Math.floor(deadline - performance.now());
   if (remaining <= 0) {
@@ -240,6 +254,44 @@ async function invokeNativeOperation(
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
+}
+
+export type CovenHealthResult = Readonly<{ status: 'ok' }>;
+
+export async function invokeCovenHealth(
+  invoke: NativeSdkInvoke,
+  options: OperationOptions = {},
+): Promise<CovenHealthResult> {
+  const snapshot = await runOperation(
+    { system: 'coven', operation: 'health' },
+    options,
+    (context) => invokeNativeOperation(invoke, 'coven_health', undefined, context),
+  );
+  try {
+    if (
+      typeof snapshot !== 'object' ||
+      snapshot === null ||
+      Array.isArray(snapshot) ||
+      Object.getPrototypeOf(snapshot) !== Object.prototype
+    ) {
+      return invalidCovenHealthResult();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(snapshot);
+    const keys = Reflect.ownKeys(descriptors);
+    const status = descriptors.status;
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'status' ||
+      status === undefined ||
+      !Object.hasOwn(status, 'value') ||
+      status.value !== 'ok'
+    ) {
+      return invalidCovenHealthResult();
+    }
+  } catch {
+    return invalidCovenHealthResult();
+  }
+  return Object.freeze({ status: 'ok' });
 }
 
 function canonicalCursor(value: unknown): value is string {

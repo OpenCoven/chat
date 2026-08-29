@@ -25,6 +25,7 @@ tauri-build = { version = "=2.6.2", features = [] }
 [dependencies]
 async-trait = "=0.1.89"
 base64 = "=0.22.1"
+coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b84026c042e431b0882dcd14fdb29ac07d" }
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
@@ -53,6 +54,7 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_Com",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
   "Win32_UI_Shell",

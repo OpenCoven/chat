@@ -48,6 +48,15 @@
   a timeout of at most five seconds; aborts use the dedicated
   `cave_cancel_operation` command with only the attempt ID and the canonical
   `aborted` or `timeout` reason.
+- The same bounded operation and cancellation controls expose only the exact
+  `{ status: "ok" }` Coven health result. Native production code consumes the
+  producer-owned Rust `coven-client` at exact Coven revision
+  `721437b84026c042e431b0882dcd14fdb29ac07d`; it resolves explicit
+  `COVEN_HOME` or the current account's real platform home plus `.coven`, then
+  relies on that crate for live Unix connected-peer credentials or Windows
+  named-pipe ownership and connected identity. Native trust unavailability
+  fails closed, with no pathname-only, constructed-pipe, shell, PowerShell,
+  `lsof`, or Node-private fallback.
 - Native credential mutations use one bounded worker reservation. Work
   cancelled while queued never acquires the keyring lock; once an irreversible
   mutation starts, concurrent retries fail with non-retryable

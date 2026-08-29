@@ -51,6 +51,19 @@ function discoverySnapshot(handle: string) {
 }
 
 describe('Cave connection host', () => {
+  it('runs Coven health through the bounded native operation boundary', async () => {
+    const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue({ status: 'ok' });
+    const host = createCaveConnectionHost(invoke);
+
+    await expect(host.covenHealth({ timeoutMs: 250 })).resolves.toEqual({ status: 'ok' });
+    expect(invoke).toHaveBeenCalledWith('coven_health', {
+      operation: {
+        attemptId: expect.any(String),
+        timeoutMs: expect.any(Number),
+      },
+    });
+  });
+
   it('creates a handle-bound managed client only after SDK discovery validation', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue({
       handle: 'native-discovery-handle',

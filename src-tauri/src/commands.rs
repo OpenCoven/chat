@@ -16,6 +16,7 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "cave_cancel_operation",
     "cave_launch",
     "cave_health",
+    "coven_health",
     "cave_pairing_create",
     "cave_pairing_poll",
     "cave_pairing_exchange",
@@ -81,6 +82,21 @@ pub async fn cave_health(
         .run_operation(operation, async move {
             operation_state.cave_health(handle).await
         })
+        .await
+}
+
+#[tauri::command]
+pub async fn coven_health(
+    operation: NativeOperationInput,
+    state: State<'_, NativeConnectionState>,
+) -> Result<crate::CovenHealthResult, NativeDiagnostic> {
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(
+            operation,
+            async move { operation_state.coven_health().await },
+        )
         .await
 }
 

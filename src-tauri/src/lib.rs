@@ -3,6 +3,7 @@ mod commands;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;
 mod connection;
+mod coven;
 mod hpke_bound;
 mod keyring;
 mod metadata;
@@ -17,6 +18,7 @@ use cave::{
     NativeDiagnostic,
 };
 use connection::ConnectionRuntime;
+use coven::{CovenHealth, NativeCovenHealth};
 use keyring::{validate_installation_id, CredentialCustody, NativeKeyring};
 use operation::{
     NativeMutationContext, NativeMutationQueue, NativeOperationLease, NativeOperationRegistry,
@@ -28,8 +30,9 @@ pub use commands::{
     cave_forget_credential, cave_get_conversation, cave_health, cave_launch,
     cave_list_conversation_messages, cave_list_conversations, cave_list_familiars,
     cave_list_projects, cave_pairing_create, cave_pairing_exchange, cave_pairing_poll,
-    cave_read_discovery, cave_reset_pairing, registered_command_names,
+    cave_read_discovery, cave_reset_pairing, coven_health, registered_command_names,
 };
+pub use coven::CovenHealthResult;
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 pub use operation::{NativeCancelReason, NativeCancelResult, NativeOperationInput};
 
@@ -43,6 +46,7 @@ pub struct NativeConnectionState {
     clock: Arc<dyn CaveClock>,
     sleeper: Arc<dyn CaveSleeper>,
     task_runner: Arc<dyn CaveTaskRunner>,
+    coven_health: Arc<dyn CovenHealth>,
     operations: Arc<NativeOperationRegistry>,
     mutations: Arc<NativeMutationQueue>,
 }
@@ -58,6 +62,7 @@ impl Default for NativeConnectionState {
             clock: Arc::new(NativeCaveClock::default()),
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
+            coven_health: Arc::new(NativeCovenHealth::default()),
             operations: Arc::new(NativeOperationRegistry::default()),
             mutations: Arc::new(NativeMutationQueue::default()),
         }
@@ -118,6 +123,13 @@ impl NativeConnectionState {
         self.mutations.execute(context, task).await
     }
 
+    async fn coven_health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
+        let health = Arc::clone(&self.coven_health);
+        tokio::task::spawn_blocking(move || health.health())
+            .await
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
+    }
+
     fn cancel_operation(
         &self,
         attempt_id: String,
@@ -167,6 +179,7 @@ impl NativeConnectionState {
             clock: Arc::new(NativeCaveClock::default()),
             sleeper: Arc::new(NativeCaveSleeper),
             task_runner: Arc::new(NativeCaveTaskRunner),
+            coven_health: Arc::new(NativeCovenHealth::default()),
             operations: Arc::new(NativeOperationRegistry::default()),
             mutations: Arc::new(NativeMutationQueue::default()),
         }
@@ -176,6 +189,14 @@ impl NativeConnectionState {
     pub(crate) fn with_test_keyring(keyring: Arc<dyn CredentialCustody>) -> Self {
         Self {
             keyring,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_coven_health(coven_health: Arc<dyn CovenHealth>) -> Self {
+        Self {
+            coven_health,
             ..Self::default()
         }
     }
@@ -198,6 +219,7 @@ impl NativeConnectionState {
             clock,
             sleeper,
             task_runner,
+            coven_health: Arc::new(NativeCovenHealth::default()),
             operations: Arc::new(NativeOperationRegistry::default()),
             mutations: Arc::new(NativeMutationQueue::default()),
         }
@@ -225,6 +247,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             cave_cancel_operation,
             cave_launch,
             cave_health,
+            coven_health,
             cave_pairing_create,
             cave_pairing_poll,
             cave_pairing_exchange,
@@ -252,13 +275,32 @@ mod smoke_tests {
 
     use super::{
         app_identity,
+        cave::NativeDiagnostic,
+        coven::{CovenHealth, CovenHealthResult},
         keyring::{Credential, CredentialCustody, CredentialSlot, KeyringError},
-        registered_command_names, NativeConnectionState, APP_PHASE,
+        registered_command_names, NativeConnectionState, NativeOperationInput, APP_PHASE,
     };
     use serde_json::json;
 
     struct FakeInstallationKeyring {
         installation_id: Option<&'static str>,
+    }
+
+    struct HealthyCoven;
+
+    impl CovenHealth for HealthyCoven {
+        fn health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
+            Ok(CovenHealthResult { status: "ok" })
+        }
+    }
+
+    struct SlowCoven;
+
+    impl CovenHealth for SlowCoven {
+        fn health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            Ok(CovenHealthResult { status: "ok" })
+        }
     }
 
     impl CredentialCustody for FakeInstallationKeyring {
@@ -342,6 +384,7 @@ mod smoke_tests {
                 "cave_cancel_operation",
                 "cave_launch",
                 "cave_health",
+                "coven_health",
                 "cave_pairing_create",
                 "cave_pairing_poll",
                 "cave_pairing_exchange",
@@ -354,6 +397,39 @@ mod smoke_tests {
                 "cave_get_conversation",
                 "cave_list_conversation_messages",
             ]
+        );
+    }
+
+    #[test]
+    fn returns_only_the_minimal_coven_health_result() {
+        let state = NativeConnectionState::with_test_coven_health(Arc::new(HealthyCoven));
+
+        assert_eq!(
+            tauri::async_runtime::block_on(state.coven_health()),
+            Ok(CovenHealthResult { status: "ok" })
+        );
+        assert_eq!(
+            serde_json::to_value(CovenHealthResult { status: "ok" }).unwrap(),
+            json!({ "status": "ok" })
+        );
+    }
+
+    #[test]
+    fn bounds_coven_health_with_the_native_operation_registry() {
+        let state = NativeConnectionState::with_test_coven_health(Arc::new(SlowCoven));
+        let runner = state.clone();
+        let operation_state = runner.clone();
+        let operation = NativeOperationInput::new(
+            "op1-1787900000000-1-00000000000000000000000000000000".to_owned(),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            tauri::async_runtime::block_on(runner.run_operation(operation, async move {
+                operation_state.coven_health().await
+            })),
+            Err(NativeDiagnostic::new("timeout", true))
         );
     }
 

@@ -45,7 +45,7 @@ type CaveConnectionClient = CaveReadClient &
 
 export type CaveConnectionHostPort = Pick<
   CaveConnectionHost,
-  'discover' | 'launch' | 'resetPairing'
+  'covenHealth' | 'discover' | 'launch' | 'resetPairing'
 >;
 
 export type CavePairingIdentity = Readonly<{
@@ -141,6 +141,7 @@ type DiagnosticCode =
   | 'unsupported_operation';
 
 type DiagnosticCategory =
+  | 'coven'
   | 'credential'
   | 'credential_management'
   | 'discovery'
@@ -257,6 +258,7 @@ function failureFrom(error: unknown): SafeFailure {
       incompatible: false,
     });
   }
+
   if (!isCaveClientError(error)) {
     return Object.freeze({
       code: 'service_unavailable',
@@ -271,6 +273,39 @@ function failureFrom(error: unknown): SafeFailure {
     retryable: error.retryable,
     incompatible: code === 'incompatible_version' || error.compatibility?.compatible === false,
   });
+}
+
+function nativeFailureFrom(error: unknown): SafeFailure {
+  try {
+    if (
+      typeof error !== 'object' ||
+      error === null ||
+      Array.isArray(error)
+    ) {
+      return failureFrom(error);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(error);
+    const code = descriptors.code;
+    const retryable = descriptors.retryable;
+    if (
+      code === undefined ||
+      retryable === undefined ||
+      !Object.hasOwn(code, 'value') ||
+      !Object.hasOwn(retryable, 'value') ||
+      typeof code.value !== 'string' ||
+      typeof retryable.value !== 'boolean'
+    ) {
+      return failureFrom(error);
+    }
+    const boundedCode = diagnosticCode(code.value);
+    return Object.freeze({
+      code: boundedCode,
+      retryable: retryable.value,
+      incompatible: boundedCode === 'incompatible_version',
+    });
+  } catch {
+    return failureFrom(error);
+  }
 }
 
 function isPairingTimeout(error: unknown): boolean {
@@ -502,13 +537,14 @@ export function createCaveConnectionController(
     });
   }
 
-  function setCredentialStatus(
+  async function setCredentialStatus(
     generation: number,
     selectedClient: CaveConnectionClient,
     caveHealth: CaveHealth,
     credentialStatus: CaveCredentialStatus,
+    signal: AbortSignal,
     pairingRequiredReason?: PairingRequiredReason,
-  ): void {
+  ): Promise<void> {
     if (!current(generation)) {
       return;
     }
@@ -573,10 +609,32 @@ export function createCaveConnectionController(
             ) {
               return;
             }
+            try {
+              await deadlineBounded(
+                options.host.covenHealth(operationOptions(signal)),
+                operationTimeoutMs,
+                signal,
+              );
+            } catch (error) {
+              if (!current(generation)) {
+                return;
+              }
+              const failure = nativeFailureFrom(error);
+              recordDiagnostic(failure.code, failure.retryable, 'coven');
+              setState(generation, {
+                state: 'ready',
+                caveInstanceId: credentialStatus.health.instanceId,
+                covenAvailable: false,
+              });
+              return;
+            }
+            if (!current(generation)) {
+              return;
+            }
             setState(generation, {
               state: 'ready',
               caveInstanceId: credentialStatus.health.instanceId,
-              covenAvailable: false,
+              covenAvailable: true,
             });
             return;
           case 'scope_denied':
@@ -645,11 +703,12 @@ export function createCaveConnectionController(
       setFailure(generation, failureFrom(error), 'credential');
       return;
     }
-    setCredentialStatus(
+    await setCredentialStatus(
       generation,
       selectedClient,
       caveHealth,
       credentialStatus,
+      signal,
       pairingRequiredReason,
     );
   }

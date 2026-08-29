@@ -34,12 +34,20 @@ write-oriented design exploration.
 - The webview uses frozen packed `@opencoven/cave-client/managed` and
   `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
   source or makes repository-relative imports.
+- Production Coven health crosses the bounded Tauri operation boundary and
+  uses the producer-owned Rust `coven-client` pinned exactly to Coven commit
+  `721437b84026c042e431b0882dcd14fdb29ac07d`. Discovery uses explicit
+  `COVEN_HOME` when set, otherwise the current account's platform home plus
+  `.coven`; the client validates the live connected Unix peer credentials or
+  Windows named-pipe ownership and connected identity before health succeeds.
+  Missing native trust fails closed. There is no pathname, naming, shell,
+  PowerShell, or process-list fallback.
 
 ### Current native-host limitation
 
-The HPKE-bound Client v1 Cave path is implemented. Release evidence still
-requires the Coven Unix connected-peer and Windows named-pipe identity adapters
-plus complete real-authority runs on the frozen platform matrix.
+The HPKE-bound Client v1 Cave path and producer-backed Coven native health path
+are implemented. Release evidence still requires complete real-authority runs
+on the frozen platform matrix.
 
 ## Prerequisites
 

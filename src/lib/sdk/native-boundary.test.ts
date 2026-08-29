@@ -7,6 +7,7 @@ import {
   createCaveManagedCredentialTransport,
   createCaveManagedDiscoveryBinding,
   createCaveManagedDiscoverySource,
+  invokeCovenHealth,
   invokeNative,
   type NativeSdkInvoke,
 } from './native-boundary';
@@ -29,6 +30,39 @@ function expectNativeOperation(value: unknown, maximumTimeoutMs = 5_000): void {
 }
 
 describe('Cave managed native boundary', () => {
+  it('accepts only the exact plain Coven health result', async () => {
+    const valid = await invokeCovenHealth(
+      vi.fn<NativeSdkInvoke>().mockResolvedValue({ status: 'ok' }),
+    );
+
+    expect(valid).toEqual({ status: 'ok' });
+    expect(Object.isFrozen(valid)).toBe(true);
+
+    const accessor = {};
+    Object.defineProperty(accessor, 'status', {
+      enumerable: true,
+      get() {
+        return 'ok';
+      },
+    });
+    const customPrototype = Object.create({ inherited: true });
+    customPrototype.status = 'ok';
+
+    for (const hostile of [
+      { status: 'ok', extra: true },
+      accessor,
+      customPrototype,
+      Object.freeze(['ok']),
+    ]) {
+      await expect(
+        invokeCovenHealth(vi.fn<NativeSdkInvoke>().mockResolvedValue(hostile)),
+      ).rejects.toMatchObject({
+        code: 'invalid_response',
+        retryable: false,
+      });
+    }
+  });
+
   it('maps each SDK-managed operation to its narrow native command', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse);
     const transport = createCaveManagedCredentialTransport(invoke, 'native-discovery-handle');
