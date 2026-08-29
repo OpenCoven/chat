@@ -9,6 +9,8 @@ export type ManualPageWalk = Readonly<{
   acceptNextPage(requestedCursor: string, page: Page<unknown>): boolean;
 }>;
 
+type RequestedCursor = Readonly<{ kind: 'root' }> | Readonly<{ kind: 'cursor'; value: string }>;
+
 export function createManualPageWalk(): ManualPageWalk {
   const seenCursors = new Set<string>();
   let fetchedPages = 0;
@@ -18,13 +20,15 @@ export function createManualPageWalk(): ManualPageWalk {
     fetchedPages = 0;
   }
 
-  function acceptPage(requestedCursor: string | undefined, page: Page<unknown>): boolean {
+  function acceptPage(requestedCursor: RequestedCursor, page: Page<unknown>): boolean {
     if (fetchedPages >= MAX_MANUAL_PAGE_WALK_PAGES) {
       return false;
     }
 
     const current = page.cursor?.current;
-    if (requestedCursor !== undefined && current !== requestedCursor) {
+    const matchesRequestedCursor =
+      requestedCursor.kind === 'root' ? current === undefined : current === requestedCursor.value;
+    if (!matchesRequestedCursor) {
       return false;
     }
 
@@ -51,13 +55,13 @@ export function createManualPageWalk(): ManualPageWalk {
     reset,
     acceptRootPage(page) {
       reset();
-      return acceptPage(undefined, page);
+      return acceptPage({ kind: 'root' }, page);
     },
     canFetchNextPage() {
       return fetchedPages < MAX_MANUAL_PAGE_WALK_PAGES;
     },
     acceptNextPage(requestedCursor, page) {
-      return acceptPage(requestedCursor, page);
+      return acceptPage({ kind: 'cursor', value: requestedCursor }, page);
     },
   });
 }

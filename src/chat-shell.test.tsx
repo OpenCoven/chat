@@ -68,10 +68,12 @@ function message(id: string, conversationId: string, text: string) {
 }
 
 async function expectInvalidPaginationWithoutCursor(...cursors: readonly string[]) {
-  const alert = await screen.findByRole('alert');
-  expect(alert).toHaveTextContent('Cave returned invalid response.');
-  for (const cursor of cursors) {
-    expect(alert).not.toHaveTextContent(cursor);
+  const alerts = await screen.findAllByRole('alert');
+  for (const alert of alerts) {
+    expect(alert).toHaveTextContent('Cave returned invalid response.');
+    for (const cursor of cursors) {
+      expect(alert).not.toHaveTextContent(cursor);
+    }
   }
 }
 
@@ -349,7 +351,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([conversation('conversation-1', 'First thread')], {
-          current: 'cursor-root',
           next: 'cursor-a',
           hasMore: true,
         }),
@@ -392,7 +393,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([message('message-1', 'conversation-1', 'First reply')], {
-          current: 'messages-root',
           next: 'messages-a',
           hasMore: true,
         }),
@@ -420,7 +420,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([conversation('conversation-1', 'First thread')], {
-          current: 'cursor-root',
           next: 'cursor-a',
           hasMore: true,
         }),
@@ -444,12 +443,55 @@ describe('ChatShell', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('rejects a paginated response with hasMore but an empty next cursor', async () => {
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: 'cursor-a',
+          next: '',
+          hasMore: true,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await screen.findByRole('option', { name: /First thread/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+
+    await expectInvalidPaginationWithoutCursor('cursor-a');
+    expect(listConversations).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole('button', { name: 'Load more conversations' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a root response with a non-root current cursor', async () => {
+    const listConversations = vi.fn().mockResolvedValue(
+      okPage([conversation('conversation-1', 'First thread')], {
+        current: 'cursor-unrequested',
+        hasMore: false,
+      }),
+    );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await expectInvalidPaginationWithoutCursor('cursor-unrequested');
+    expect(listConversations).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('option', { name: /First thread/ })).not.toBeInTheDocument();
+  });
+
   it('rejects a response current cursor that does not match the requested message cursor', async () => {
     const listMessages = vi
       .fn()
       .mockResolvedValueOnce(
         okPage([message('message-1', 'conversation-1', 'First reply')], {
-          current: 'messages-root',
           next: 'messages-a',
           hasMore: true,
         }),
@@ -474,7 +516,7 @@ describe('ChatShell', () => {
   it('allows eight conversation pages and rejects the ninth before fetching it', async () => {
     const pages = Array.from({ length: 8 }, (_, index) =>
       okPage([conversation(`conversation-${index + 1}`, `Thread ${index + 1}`)], {
-        current: index === 0 ? 'cursor-root' : `cursor-${index}`,
+        ...(index === 0 ? {} : { current: `cursor-${index}` }),
         next: `cursor-${index + 1}`,
         hasMore: true,
       }),
@@ -513,7 +555,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([conversation('conversation-1', 'First thread')], {
-          current: 'cursor-root',
           next: 'cursor-a',
           hasMore: true,
         }),
@@ -561,7 +602,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([conversation('conversation-1', 'First root')], {
-          current: 'cursor-root',
           next: 'cursor-a',
           hasMore: true,
         }),
@@ -577,7 +617,6 @@ describe('ChatShell', () => {
       .fn()
       .mockResolvedValueOnce(
         okPage([conversation('conversation-3', 'Second root')], {
-          current: 'cursor-root',
           next: 'cursor-a',
           hasMore: true,
         }),
@@ -745,7 +784,6 @@ describe('ChatShell', () => {
     const firstConversationRoot = okPage(
       [message('message-1', 'conversation-1', 'First root reply')],
       {
-        current: 'messages-root',
         next: 'messages-a',
         hasMore: true,
       },
