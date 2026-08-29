@@ -77,7 +77,7 @@ const fileSymlinksSupported = supportsFileSymlinks();
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: 'f856742c961a132b78a900c222b81d46a7bac831',
+    revision: '8d0087fc5fd2f75f36cde1974df8122b564afa09',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
