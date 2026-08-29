@@ -206,6 +206,7 @@ describe('process-owned artifact root', () => {
       await root.cleanup();
       activeRoots.delete(root);
 
+      expect(parent.signalCode).toBe('SIGKILL');
       let grandchildAlive = true;
       try {
         process.kill(grandchildPid, 0);

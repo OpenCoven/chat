@@ -298,6 +298,17 @@ async function terminateAndReapChild(child, terminationGraceMs, processGroup) {
     return;
   }
 
+  if (processGroup) {
+    const killed = signalOwnedChild(child, 'SIGKILL', true);
+    if (!killed && child.exitCode === null && child.signalCode === null) {
+      throw new Error(`Tracked child ${pid} process group could not be killed.`);
+    }
+    if (!(await waitForOwnedExecutionClose(child, true, terminationGraceMs))) {
+      throw new Error(`Tracked child ${pid} process group could not be reaped.`);
+    }
+    return;
+  }
+
   const signaled = signalOwnedChild(child, 'SIGTERM', processGroup);
   if (
     !signaled &&
@@ -312,7 +323,7 @@ async function terminateAndReapChild(child, terminationGraceMs, processGroup) {
     return;
   }
 
-  const killed = signalOwnedChild(child, 'SIGKILL', processGroup);
+  const killed = signalOwnedChild(child, 'SIGKILL', false);
   if (
     !killed &&
     child.exitCode === null &&

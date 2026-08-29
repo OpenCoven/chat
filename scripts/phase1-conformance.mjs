@@ -65,6 +65,18 @@ const approvedCommandFailureReasons = new Set([
   'timeout',
 ]);
 
+function killUntrackedOwnedChild(child) {
+  if (ownedProcessGroupsSupported && child.exitCode === null && child.signalCode === null) {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    } catch {
+      // Fall through to the direct child handle if the group is already gone.
+    }
+  }
+  child.kill('SIGKILL');
+}
+
 function defaultSourceRoot(environmentName, repositoryName) {
   return process.env[environmentName] === undefined
     ? resolve(repositoriesParent, repositoryName)
@@ -412,7 +424,7 @@ function runCommand(
       try {
         artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
       } catch {
-        child.kill('SIGKILL');
+        killUntrackedOwnedChild(child);
         fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'tracking' });
       }
     });
@@ -851,16 +863,28 @@ async function reserveLoopbackPort() {
   return port;
 }
 
-function drainBoundedChildOutput(child) {
+function drainBoundedChildOutput(artifactRoot, child) {
+  const state = {
+    terminationReason: undefined,
+    terminationError: undefined,
+    terminationPromise: undefined,
+  };
+  const terminate = (reason) => {
+    state.terminationReason ??= reason;
+    state.terminationPromise ??= artifactRoot.terminateChild(child).catch((error) => {
+      state.terminationError = error;
+    });
+  };
   for (const stream of [child.stdout, child.stderr]) {
     let bytes = 0;
     stream.on('data', (chunk) => {
       bytes += chunk.length;
       if (bytes > commandOutputLimit) {
-        child.kill('SIGKILL');
+        terminate('output-limit');
       }
     });
   }
+  return state;
 }
 
 async function startCompatibilityCave({ artifactRoot, roots, environment, preset }) {
@@ -888,14 +912,21 @@ async function startCompatibilityCave({ artifactRoot, roots, environment, preset
   try {
     artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
   } catch (error) {
-    child.kill('SIGKILL');
+    killUntrackedOwnedChild(child);
     throw error;
   }
-  drainBoundedChildOutput(child);
+  const outputState = drainBoundedChildOutput(artifactRoot, child);
   await once(child, 'spawn');
 
   const deadline = Date.now() + rpcTimeoutMs;
   while (Date.now() < deadline) {
+    if (outputState.terminationError !== undefined) {
+      throw outputState.terminationError;
+    }
+    if (outputState.terminationReason !== undefined) {
+      await outputState.terminationPromise;
+      throw new Error(`${preset} compatibility Cave exceeded its output limit`);
+    }
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(`${preset} compatibility Cave exited before readiness`);
     }
@@ -1321,6 +1352,7 @@ async function runNativeMissingKeychainTrustScenario(
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let terminationReason;
+  let terminationPromise;
   let killError;
   let processError;
   let closed = false;
@@ -1335,9 +1367,12 @@ async function runNativeMissingKeychainTrustScenario(
     if (closed || child.exitCode !== null || child.signalCode !== null) {
       return;
     }
-    if (!child.kill('SIGKILL') && child.exitCode === null && child.signalCode === null) {
-      killError = new Error(`native missing-keychain-trust child could not be killed (${reason})`);
-    }
+    terminationPromise ??= artifactRoot.terminateChild(child).catch((error) => {
+      killError =
+        error instanceof Error
+          ? error
+          : new Error(`native missing-keychain-trust child could not be killed (${reason})`);
+    });
   };
   child.once('error', (error) => {
     processError = error;
@@ -1386,6 +1421,9 @@ async function runNativeMissingKeychainTrustScenario(
     clearTimeout(reapTimeoutHandle);
   }
   clearTimeout(timeoutHandle);
+  if (terminationPromise !== undefined) {
+    await terminationPromise;
+  }
   if (closeResult === null) {
     throw new Error('native missing-keychain-trust child could not be reaped');
   }
