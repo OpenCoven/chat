@@ -67,6 +67,16 @@ function code(error: unknown): string {
   return error instanceof NativeBoundaryError ? error.code : 'service_unavailable';
 }
 
+function terminalPairingError(error: unknown): boolean {
+  return (
+    error instanceof NativeBoundaryError &&
+    (error.code === 'pairing_denied' ||
+      error.code === 'pairing_expired' ||
+      error.code === 'conflict' ||
+      error.code === 'reconcile_required')
+  );
+}
+
 class DefaultConnectionController implements ConnectionController {
   readonly #boundary: NativeBoundary;
   readonly #now: () => number;
@@ -273,6 +283,7 @@ class DefaultConnectionController implements ConnectionController {
     const generation = this.#generation;
     if (pairing.expiresAt <= this.#now()) {
       this.#pairing = null;
+      this.#retryOperation = null;
       this.#setState({
         state: 'error',
         code: 'pairing_expired',
@@ -291,6 +302,7 @@ class DefaultConnectionController implements ConnectionController {
       }
       if (status.id !== pairing.requestId) {
         this.#pairing = null;
+        this.#retryOperation = null;
         this.#setState({
           state: 'error',
           code: 'reconcile_required',
@@ -310,6 +322,7 @@ class DefaultConnectionController implements ConnectionController {
       }
       if (status.status === 'denied' || status.status === 'expired') {
         this.#pairing = null;
+        this.#retryOperation = null;
         this.#setState({
           state: 'error',
           code: status.status === 'denied' ? 'pairing_denied' : 'pairing_expired',
@@ -318,6 +331,14 @@ class DefaultConnectionController implements ConnectionController {
       }
     } catch (error) {
       if (this.#isCurrent(generation)) {
+        if (
+          terminalPairingError(error) &&
+          this.#authorityIsCurrent(authority) &&
+          this.#pairing === pairing
+        ) {
+          this.#pairing = null;
+          this.#retryOperation = null;
+        }
         this.#setFailure(error);
       }
     }
@@ -365,12 +386,21 @@ class DefaultConnectionController implements ConnectionController {
       }
     } catch (error) {
       if (this.#isCurrent(generation)) {
-        this.#pairing = null;
         this.#setFailure(error);
-        this.#retryOperation =
-          error instanceof NativeBoundaryError && error.code === 'credential_update_in_progress'
-            ? confirm
-            : null;
+        if (
+          error instanceof NativeBoundaryError &&
+          error.code === 'operation_in_progress' &&
+          this.#authorityIsCurrent(authority) &&
+          this.#pairing === pairing
+        ) {
+          this.#retryOperation = () => this.#completePairing();
+        } else {
+          this.#pairing = null;
+          this.#retryOperation =
+            error instanceof NativeBoundaryError && error.code === 'credential_update_in_progress'
+              ? confirm
+              : null;
+        }
       }
       return;
     }

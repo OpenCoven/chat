@@ -286,15 +286,16 @@ type ActiveClient = Readonly<{
   authority: AuthorityReference;
   client: CaveClient;
 }>;
-type RetainedPairingSession = Readonly<{
-  sequence: number;
+type RetainedPairingSession = {
+  authority: AuthorityReference;
   session: CavePairingSession;
-}>;
+  active: boolean;
+};
 
 const MAX_RETAINED_PAIRING_SESSIONS = 64;
 
-function invalidResponse(): NativeBoundaryError {
-  return new NativeBoundaryError('invalid_response', false, 'local-diagnostic');
+function invalidResponse(statusCode?: number): NativeBoundaryError {
+  return new NativeBoundaryError('invalid_response', false, 'local-diagnostic', statusCode);
 }
 
 function exactRecord(
@@ -543,7 +544,11 @@ function nativeResponse(
   if (responseStatus !== successStatus) {
     throw canonicalStatusError(response.payload, responseStatus, requirements);
   }
-  return { statusCode: responseStatus, payload: response.payload };
+  const payload = dataRecord(response.payload);
+  if (!Object.hasOwn(payload, 'data') || Object.hasOwn(payload, 'error')) {
+    throw invalidResponse(responseStatus);
+  }
+  return { statusCode: responseStatus, payload };
 }
 
 function declarationIds(value: unknown): readonly string[] | undefined {
@@ -652,7 +657,8 @@ function canonicalStatusError(
       (requirements !== undefined &&
         (!operations.includes(requirements.operation) ||
           requirements.capabilities.some((capability) => !capabilities.includes(capability)))) ||
-      (envelope.data !== undefined && envelope.error !== undefined)
+      Object.hasOwn(envelope, 'data') ||
+      !Object.hasOwn(envelope, 'error')
     ) {
       return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
     }
@@ -722,27 +728,38 @@ export function createNativeBoundary(
   const available = dependencies.available ?? platformAvailable;
   const nextRequestId = dependencies.requestId ?? (() => `native:${crypto.randomUUID()}`);
   const pairingSessions = new Map<string, RetainedPairingSession>();
-  let nextPairingSequence = 0;
+  let pairingReservations = 0;
   let active: ActiveClient | null = null;
 
   function prunePairingSessions(now = Date.now()): void {
     for (const [handle, retained] of pairingSessions) {
-      if (retained.session.expiresAt <= now) {
+      if (!retained.active && retained.session.expiresAt <= now) {
         pairingSessions.delete(handle);
       }
     }
-    while (pairingSessions.size > MAX_RETAINED_PAIRING_SESSIONS) {
-      let oldest: Readonly<{ handle: string; sequence: number }> | undefined;
-      for (const [handle, retained] of pairingSessions) {
-        if (oldest === undefined || retained.sequence < oldest.sequence) {
-          oldest = { handle, sequence: retained.sequence };
-        }
+  }
+
+  function retireInactivePairingSessions(): void {
+    for (const [handle, retained] of pairingSessions) {
+      if (!retained.active) {
+        pairingSessions.delete(handle);
       }
-      if (oldest === undefined) {
-        break;
-      }
-      pairingSessions.delete(oldest.handle);
     }
+  }
+
+  function reservePairingSession(): () => void {
+    prunePairingSessions();
+    if (pairingSessions.size + pairingReservations >= MAX_RETAINED_PAIRING_SESSIONS) {
+      throw new NativeBoundaryError('operation_in_progress', true, 'pairing-capacity');
+    }
+    pairingReservations += 1;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        pairingReservations -= 1;
+      }
+    };
   }
 
   function retainedPairing(pairingHandle: string): RetainedPairingSession | undefined {
@@ -897,7 +914,7 @@ export function createNativeBoundary(
             input: { discoveryHandle },
           }),
         );
-        pairingSessions.clear();
+        retireInactivePairingSessions();
         active = {
           authority,
           client: createManagedCaveClient({
@@ -918,7 +935,7 @@ export function createNativeBoundary(
       }
       if (active !== null && sameAuthority(active.authority, authority)) {
         active = null;
-        pairingSessions.clear();
+        retireInactivePairingSessions();
       }
       return result.closed;
     },
@@ -938,13 +955,23 @@ export function createNativeBoundary(
       }
     },
     async pairingCreate(authority, _requestId, request) {
+      let releaseReservation: (() => void) | undefined;
       try {
-        const session = await requireClient(authority).createPairing(request);
+        const client = requireClient(authority);
+        releaseReservation = reservePairingSession();
+        const session = await client.createPairing(request);
+        if (
+          active === null ||
+          active.client !== client ||
+          !sameAuthority(active.authority, authority)
+        ) {
+          throw new NativeBoundaryError('reconcile_required', false, 'native-generation-changed');
+        }
         const handle = `session:${crypto.randomUUID()}`;
-        nextPairingSequence += 1;
         pairingSessions.set(handle, {
-          sequence: nextPairingSequence,
+          authority,
           session,
+          active: false,
         });
         prunePairingSessions();
         return {
@@ -954,48 +981,82 @@ export function createNativeBoundary(
         };
       } catch (error) {
         throw sdkError(error);
+      } finally {
+        releaseReservation?.();
       }
     },
     async pairingPoll(authority, _requestId, pairingHandle) {
       const retained = retainedPairing(pairingHandle);
       if (
         retained === undefined ||
+        !sameAuthority(retained.authority, authority) ||
         active === null ||
         !sameAuthority(active.authority, authority)
       ) {
         throw new NativeBoundaryError('reconcile_required', false, 'pairing-session-missing');
       }
+      if (retained.active) {
+        throw new NativeBoundaryError('operation_in_progress', true, 'pairing-operation-active');
+      }
+      retained.active = true;
+      let consume = false;
       try {
         const status = await retained.session.poll();
-        if (
-          (status.status === 'denied' || status.status === 'expired') &&
-          pairingSessions.get(pairingHandle) === retained
-        ) {
-          pairingSessions.delete(pairingHandle);
-        }
+        consume = status.status === 'denied' || status.status === 'expired';
         return status;
       } catch (error) {
         const mapped = sdkError(error);
-        if (terminalPairingError(mapped) && pairingSessions.get(pairingHandle) === retained) {
-          pairingSessions.delete(pairingHandle);
-        }
+        consume = terminalPairingError(mapped);
         throw mapped;
+      } finally {
+        if (pairingSessions.get(pairingHandle) === retained) {
+          retained.active = false;
+          if (
+            consume ||
+            retained.session.expiresAt <= Date.now() ||
+            active === null ||
+            !sameAuthority(active.authority, retained.authority)
+          ) {
+            pairingSessions.delete(pairingHandle);
+          }
+        }
       }
     },
     async pairingExchange(authority, _requestId, pairingHandle) {
       const retained = retainedPairing(pairingHandle);
       if (
         retained === undefined ||
+        !sameAuthority(retained.authority, authority) ||
         active === null ||
         !sameAuthority(active.authority, authority)
       ) {
         throw new NativeBoundaryError('reconcile_required', false, 'pairing-session-missing');
       }
-      pairingSessions.delete(pairingHandle);
+      if (retained.active) {
+        throw new NativeBoundaryError('operation_in_progress', true, 'pairing-operation-active');
+      }
+      retained.active = true;
+      let consume = false;
       try {
-        return { credential: await retained.session.exchange() };
+        const credential = await retained.session.exchange();
+        consume = true;
+        return { credential };
       } catch (error) {
-        throw sdkError(error);
+        const mapped = sdkError(error);
+        consume = mapped.code !== 'operation_in_progress';
+        throw mapped;
+      } finally {
+        if (pairingSessions.get(pairingHandle) === retained) {
+          retained.active = false;
+          if (
+            consume ||
+            retained.session.expiresAt <= Date.now() ||
+            active === null ||
+            !sameAuthority(active.authority, retained.authority)
+          ) {
+            pairingSessions.delete(pairingHandle);
+          }
+        }
       }
     },
     async credentialState(authority) {

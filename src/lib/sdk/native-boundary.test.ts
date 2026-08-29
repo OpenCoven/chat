@@ -101,6 +101,16 @@ function pairingId(index: number): string {
   return `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function routedInvoke(
   routes: Partial<Record<(typeof NATIVE_COMMANDS)[keyof typeof NATIVE_COMMANDS], unknown>>,
 ): InvokeCommand {
@@ -365,7 +375,138 @@ describe('native boundary with packed managed SDK', () => {
 
     await expect(
       boundary.listConversations(authority, 'ignored', { limit: 25 }),
-    ).rejects.toMatchObject({ code: 'unauthorized' });
+    ).rejects.toMatchObject({ code: 'invalid_response', statusCode: 200 });
+  });
+
+  it.each([
+    [
+      'both branches',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+        data: { conversations: [] },
+        error: {
+          code: 'unauthorized',
+          message: 'Cave operation failed.',
+          retryable: false,
+        },
+      },
+    ],
+    [
+      'neither branch',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+      },
+    ],
+    [
+      'an explicit undefined error branch',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+        data: { conversations: [] },
+        error: undefined,
+      },
+    ],
+  ])('rejects a success status with %s', async (_description, payload) => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            statusCode: 200,
+            payload,
+          }),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(
+      boundary.listConversations(authority, 'ignored', { limit: 25 }),
+    ).rejects.toMatchObject({ code: 'invalid_response', statusCode: 200 });
+  });
+
+  it.each([
+    [
+      'data only',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+        data: { conversations: [] },
+      },
+    ],
+    [
+      'both branches',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+        data: { conversations: [] },
+        error: {
+          code: 'service_unavailable',
+          message: 'Cave operation failed.',
+          retryable: true,
+        },
+      },
+    ],
+    [
+      'neither branch',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+      },
+    ],
+    [
+      'an explicit undefined data branch',
+      {
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        requestId: REQUEST_ID,
+        capabilities: ['conversations', 'cursors'],
+        operations: ['conversations.list'],
+        data: undefined,
+        error: {
+          code: 'service_unavailable',
+          message: 'Cave operation failed.',
+          retryable: true,
+        },
+      },
+    ],
+  ])('rejects an error status with %s', async (_description, payload) => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            statusCode: 500,
+            payload,
+          }),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(
+      boundary.listConversations(authority, 'ignored', { limit: 25 }),
+    ).rejects.toMatchObject({ code: 'invalid_response', statusCode: 500 });
   });
 
   it.each([
@@ -516,12 +657,20 @@ describe('native boundary with packed managed SDK', () => {
     );
   });
 
-  it('consumes terminal managed pairing sessions after denied status', async () => {
-    const pairingPoll = vi.fn((args: Record<string, unknown>) =>
+  it('retains a managed pairing after local poll contention and exchanges after the poll ends', async () => {
+    const polled = deferred<unknown>();
+    const pairingExchange = vi.fn((args: Record<string, unknown>) =>
       operation(args.input as Record<string, unknown>, {
-        id: PAIRING_ID,
-        status: 'denied',
-        expiresAt: 2_000_000_000_000,
+        credential: {
+          id: '00000000-0000-4000-8000-000000000006',
+          appName: 'OpenCoven Chat',
+          installationId: '00000000-0000-4000-8000-000000000007',
+          scopes: ['chat:read'],
+          createdAt: 1,
+          lastUsedAt: null,
+          revokedAt: null,
+          revocationReason: null,
+        },
       }),
     );
     const boundary = createNativeBoundary({
@@ -532,7 +681,8 @@ describe('native boundary with packed managed SDK', () => {
             requestId: PAIRING_ID,
             expiresAt: 2_000_000_000_000,
           }),
-        [NATIVE_COMMANDS.pairingPoll]: pairingPoll,
+        [NATIVE_COMMANDS.pairingPoll]: () => polled.promise,
+        [NATIVE_COMMANDS.pairingExchange]: pairingExchange,
       }),
       requestId: () => REQUEST_ID,
     });
@@ -543,15 +693,117 @@ describe('native boundary with packed managed SDK', () => {
       scopes: ['chat:read'],
     });
 
-    await expect(boundary.pairingPoll(authority, 'ignored', pairing.handle)).resolves.toMatchObject(
-      {
-        status: 'denied',
-      },
+    const pendingPoll = boundary.pairingPoll(authority, 'ignored', pairing.handle);
+    await Promise.resolve();
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).rejects.toMatchObject({ code: 'operation_in_progress' });
+    expect(pairingExchange).not.toHaveBeenCalled();
+
+    polled.resolve(
+      operation(
+        {
+          authority,
+          requestId: REQUEST_ID,
+        },
+        {
+          id: PAIRING_ID,
+          status: 'approved',
+          expiresAt: 2_000_000_000_000,
+        },
+      ),
     );
-    await expect(boundary.pairingPoll(authority, 'ignored', pairing.handle)).rejects.toMatchObject({
+    await expect(pendingPoll).resolves.toMatchObject({ status: 'approved' });
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).resolves.toMatchObject({
+      credential: {
+        id: '00000000-0000-4000-8000-000000000006',
+      },
+    });
+    expect(pairingExchange).toHaveBeenCalledOnce();
+  });
+
+  it.each(['denied', 'expired'] as const)(
+    'consumes terminal managed pairing sessions after %s status',
+    async (status) => {
+      const pairingPoll = vi.fn((args: Record<string, unknown>) =>
+        operation(args.input as Record<string, unknown>, {
+          id: PAIRING_ID,
+          status,
+          expiresAt: 2_000_000_000_000,
+        }),
+      );
+      const boundary = createNativeBoundary({
+        invoke: routedInvoke({
+          [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+          [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) =>
+            operation(args.input as Record<string, unknown>, {
+              requestId: PAIRING_ID,
+              expiresAt: 2_000_000_000_000,
+            }),
+          [NATIVE_COMMANDS.pairingPoll]: pairingPoll,
+        }),
+        requestId: () => REQUEST_ID,
+      });
+      const authority = await boundary.discover();
+      const pairing = await boundary.pairingCreate(authority, 'ignored', {
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000007',
+        scopes: ['chat:read'],
+      });
+
+      await expect(
+        boundary.pairingPoll(authority, 'ignored', pairing.handle),
+      ).resolves.toMatchObject({
+        status,
+      });
+      await expect(
+        boundary.pairingPoll(authority, 'ignored', pairing.handle),
+      ).rejects.toMatchObject({
+        code: 'reconcile_required',
+      });
+      expect(pairingPoll).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('rejects a pairing created after its authority was closed during the await', async () => {
+    const created = deferred<unknown>();
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: () => created.promise,
+        [NATIVE_COMMANDS.close]: {
+          closed: true,
+        },
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const pendingCreate = boundary.pairingCreate(authority, 'ignored', {
+      appName: 'OpenCoven Chat',
+      installationId: '00000000-0000-4000-8000-000000000007',
+      scopes: ['chat:read'],
+    });
+    await Promise.resolve();
+
+    await expect(boundary.close(authority)).resolves.toBe(true);
+    created.resolve(
+      operation(
+        {
+          authority,
+          requestId: REQUEST_ID,
+        },
+        {
+          requestId: PAIRING_ID,
+          expiresAt: 2_000_000_000_000,
+        },
+      ),
+    );
+
+    await expect(pendingCreate).rejects.toMatchObject({
       code: 'reconcile_required',
     });
-    expect(pairingPoll).toHaveBeenCalledOnce();
   });
 
   it('prunes expired sessions and bounds retained managed pairings', async () => {
@@ -580,7 +832,7 @@ describe('native boundary with packed managed SDK', () => {
     });
     const authority = await boundary.discover();
     const sessions = [];
-    for (let index = 0; index < 66; index += 1) {
+    for (let index = 0; index < 65; index += 1) {
       sessions.push(
         await boundary.pairingCreate(authority, 'ignored', {
           appName: 'OpenCoven Chat',
@@ -589,14 +841,105 @@ describe('native boundary with packed managed SDK', () => {
         }),
       );
     }
+    await expect(
+      boundary.pairingCreate(authority, 'ignored', {
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000007',
+        scopes: ['chat:read'],
+      }),
+    ).rejects.toMatchObject({ code: 'operation_in_progress' });
+    expect(nextPairing).toBe(65);
 
     await expect(
       boundary.pairingPoll(authority, 'ignored', sessions[0]?.handle ?? ''),
     ).rejects.toMatchObject({ code: 'reconcile_required' });
     await expect(
       boundary.pairingPoll(authority, 'ignored', sessions[1]?.handle ?? ''),
-    ).rejects.toMatchObject({ code: 'reconcile_required' });
-    expect(pairingPoll).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ status: 'approved' });
+    expect(pairingPoll).toHaveBeenCalledOnce();
+  });
+
+  it('rejects managed pairing creation pressure without evicting an active poll', async () => {
+    let nextPairing = 0;
+    const polled = deferred<unknown>();
+    const pairingExchange = vi.fn((args: Record<string, unknown>) =>
+      operation(args.input as Record<string, unknown>, {
+        credential: {
+          id: '00000000-0000-4000-8000-000000000006',
+          appName: 'OpenCoven Chat',
+          installationId: '00000000-0000-4000-8000-000000000007',
+          scopes: ['chat:read'],
+          createdAt: 1,
+          lastUsedAt: null,
+          revokedAt: null,
+          revocationReason: null,
+        },
+      }),
+    );
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) => {
+          nextPairing += 1;
+          return operation(args.input as Record<string, unknown>, {
+            requestId: pairingId(nextPairing),
+            expiresAt: 2_000_000_000_000,
+          });
+        },
+        [NATIVE_COMMANDS.pairingPoll]: () => polled.promise,
+        [NATIVE_COMMANDS.pairingExchange]: pairingExchange,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const sessions = [];
+    for (let index = 0; index < 64; index += 1) {
+      sessions.push(
+        await boundary.pairingCreate(authority, 'ignored', {
+          appName: 'OpenCoven Chat',
+          installationId: '00000000-0000-4000-8000-000000000007',
+          scopes: ['chat:read'],
+        }),
+      );
+    }
+    const active = sessions[0];
+    if (active === undefined) {
+      throw new Error('Expected an active pairing fixture.');
+    }
+    const pendingPoll = boundary.pairingPoll(authority, 'ignored', active.handle);
+    await Promise.resolve();
+
+    await expect(
+      boundary.pairingCreate(authority, 'ignored', {
+        appName: 'OpenCoven Chat',
+        installationId: '00000000-0000-4000-8000-000000000007',
+        scopes: ['chat:read'],
+      }),
+    ).rejects.toMatchObject({ code: 'operation_in_progress' });
+    expect(nextPairing).toBe(64);
+
+    polled.resolve(
+      operation(
+        {
+          authority,
+          requestId: REQUEST_ID,
+        },
+        {
+          id: active.requestId,
+          status: 'approved',
+          expiresAt: 2_000_000_000_000,
+        },
+      ),
+    );
+    await expect(pendingPoll).resolves.toMatchObject({ status: 'approved' });
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', active.handle),
+    ).resolves.toMatchObject({
+      credential: {
+        id: '00000000-0000-4000-8000-000000000006',
+      },
+    });
+    expect(pairingExchange).toHaveBeenCalledOnce();
   });
 
   it('maps only exact native error objects into presentation-safe errors', async () => {
