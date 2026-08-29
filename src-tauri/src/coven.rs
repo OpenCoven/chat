@@ -1,10 +1,11 @@
 use std::{
     env,
     ffi::OsString,
+    panic::{self, AssertUnwindSafe},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -20,6 +21,44 @@ pub struct CovenHealthResult {
 
 pub(crate) trait CovenHealth: Send + Sync {
     fn health(&self) -> NativeResult<CovenHealthResult>;
+}
+
+static COVEN_HEALTH_PANIC_HOOK_LOCK: Mutex<()> = Mutex::new(());
+
+type PanicHook = Box<dyn Fn(&panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
+
+struct ScopedRedactingPanicHook {
+    previous: Option<PanicHook>,
+}
+
+impl ScopedRedactingPanicHook {
+    fn install() -> Self {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        Self {
+            previous: Some(previous),
+        }
+    }
+}
+
+impl Drop for ScopedRedactingPanicHook {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            panic::set_hook(previous);
+        }
+    }
+}
+
+fn call_health_with_redacted_panic(health: &dyn CovenHealth) -> NativeResult<CovenHealthResult> {
+    let result = {
+        let _hook_lock = COVEN_HEALTH_PANIC_HOOK_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _hook = ScopedRedactingPanicHook::install();
+        panic::catch_unwind(AssertUnwindSafe(|| health.health()))
+    };
+
+    result.unwrap_or_else(|_| Err(NativeDiagnostic::new("service_unavailable", true)))
 }
 
 #[derive(Default)]
@@ -51,7 +90,7 @@ impl NativeCovenHealthExecutor {
             }
 
             let _busy = BusyReset(Arc::clone(&executor.busy));
-            health.health()
+            call_health_with_redacted_panic(health.as_ref())
         })
         .await
         .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
