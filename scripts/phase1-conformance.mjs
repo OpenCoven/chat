@@ -10,7 +10,6 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';

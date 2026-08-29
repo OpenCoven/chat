@@ -13,9 +13,9 @@ import {
   assertNativeMissingKeychainResponses,
   assertPairingStatus,
   buildPhase1Report,
-  classifyCavePackageFailure,
   CommandExecutionError,
   cargoBuildTimeoutMs,
+  classifyCavePackageFailure,
   NativeRpcClient,
   parseArgs,
   parseCaveConformanceOutput,
@@ -355,7 +355,10 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.each([
     ['timeout while receiving message from process', 'turbopack-plugin-timeout'],
-    ['FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory', 'memory-exhausted'],
+    [
+      'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory',
+      'memory-exhausted',
+    ],
     ['write failed: ENOSPC', 'disk-exhausted'],
     ['command terminated by SIGKILL', 'process-killed'],
     ['TurbopackInternalError: worker panicked', 'compiler-crash'],
@@ -367,6 +370,8 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test('does not classify unknown Cave package output', () => {
-    expect(classifyCavePackageFailure({ stdout: 'arbitrary private output', stderr: '' })).toBeUndefined();
+    expect(
+      classifyCavePackageFailure({ stdout: 'arbitrary private output', stderr: '' }),
+    ).toBeUndefined();
   });
 });
