@@ -1057,32 +1057,96 @@ async function runNativeMissingKeychainTrustScenario(
   });
   await once(child, 'spawn');
   artifactRoot.trackChild(child);
-  let stdout = '';
-  let stderr = '';
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
+  const stdout = [];
+  const stderr = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let terminationReason;
+  let killError;
+  let processError;
+  let closed = false;
+  const closePromise = new Promise((resolveClose) => {
+    child.once('close', (code, signal) => {
+      closed = true;
+      resolveClose([code, signal]);
+    });
+  });
+  const requestKill = (reason) => {
+    terminationReason ??= reason;
+    if (closed || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    if (!child.kill('SIGKILL') && child.exitCode === null && child.signalCode === null) {
+      killError = new Error(`native missing-keychain-trust child could not be killed (${reason})`);
+    }
+  };
+  child.once('error', (error) => {
+    processError = error;
+    requestKill('process-error');
+  });
+  const capture = (target, bytes, chunk, stream) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const nextBytes = bytes + buffer.length;
+    if (nextBytes > commandOutputLimit) {
+      requestKill(`${stream}-limit`);
+      return bytes;
+    }
+    target.push(buffer);
+    return nextBytes;
+  };
   child.stdout.on('data', (chunk) => {
-    stdout += chunk;
+    stdoutBytes = capture(stdout, stdoutBytes, chunk, 'stdout');
   });
   child.stderr.on('data', (chunk) => {
-    stderr += chunk;
+    stderrBytes = capture(stderr, stderrBytes, chunk, 'stderr');
   });
   child.stdin.end(
     `${JSON.stringify({ id: 'installation', command: 'app_installation_id' })}\n` +
       `${JSON.stringify({ id: 'shutdown', command: 'conformance_shutdown' })}\n`,
   );
-  const [code, signal] = await once(child, 'close');
-  const responses = stdout
+  let timeoutHandle;
+  const timeout = new Promise((resolveTimeout) => {
+    timeoutHandle = setTimeout(() => {
+      requestKill('timeout');
+      resolveTimeout();
+    }, rpcTimeoutMs);
+  });
+  const firstResult = await Promise.race([
+    closePromise.then((result) => ({ closed: true, result })),
+    timeout.then(() => ({ closed: false })),
+  ]);
+  let closeResult;
+  if (firstResult.closed) {
+    closeResult = firstResult.result;
+  } else {
+    let reapTimeoutHandle;
+    const reapTimeout = new Promise((resolveReapTimeout) => {
+      reapTimeoutHandle = setTimeout(resolveReapTimeout, rpcTimeoutMs, null);
+    });
+    closeResult = await Promise.race([closePromise, reapTimeout]);
+    clearTimeout(reapTimeoutHandle);
+  }
+  clearTimeout(timeoutHandle);
+  if (closeResult === null) {
+    throw new Error('native missing-keychain-trust child could not be reaped');
+  }
+  const [code, signal] = closeResult;
+  const stdoutText = Buffer.concat(stdout).toString('utf8');
+  const stderrText = Buffer.concat(stderr).toString('utf8');
+  const responses = stdoutText
     .trim()
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line));
   const unchanged = JSON.stringify(readdirSync(trustHome)) === JSON.stringify(beforeEntries);
   if (
+    terminationReason !== undefined ||
+    killError !== undefined ||
+    processError !== undefined ||
     code !== 0 ||
     signal !== null ||
-    stderr.includes(canary) ||
-    stdout.includes(canary) ||
+    stderrText.includes(canary) ||
+    stdoutText.includes(canary) ||
     !unchanged ||
     JSON.stringify(responses) !==
       JSON.stringify([
@@ -1098,7 +1162,11 @@ async function runNativeMissingKeychainTrustScenario(
         },
       ])
   ) {
-    throw new Error('native missing-keychain-trust preset returned an unsafe result');
+    throw new Error(
+      `native missing-keychain-trust preset returned an unsafe result${
+        terminationReason === undefined ? '' : ` (${terminationReason})`
+      }`,
+    );
   }
   addAssertion(
     results,

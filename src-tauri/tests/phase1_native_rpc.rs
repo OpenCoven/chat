@@ -13,29 +13,91 @@ const NATIVE_PROVIDER_PRESET_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PR
 
 #[test]
 fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_mutating_home() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::{
-        fs,
+        fs, io,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     let canary = "native-keychain-canary-must-not-escape";
+    let manifest_root =
+        fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("manifest root must be canonical");
+    let temp_root = fs::canonicalize(std::env::temp_dir()).expect("OS temp root must be canonical");
+    assert!(
+        !temp_root.starts_with(&manifest_root),
+        "OS temp root must be outside the repository"
+    );
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock must follow Unix epoch")
         .as_nanos();
-    let home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!(".phase1-native-trust-home-{nonce}"));
-    struct HomeCleanup(PathBuf);
+    let home_name = format!(
+        "opencoven-phase1-native-trust-home-{}-{nonce}",
+        std::process::id()
+    );
+    let home = temp_root.join(&home_name);
+    fs::create_dir(&home).expect("isolated home must be created");
+    #[cfg(unix)]
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+        .expect("isolated home must be private");
+    let home = fs::canonicalize(home).expect("isolated home must be canonical");
+    assert_eq!(
+        home.parent(),
+        Some(temp_root.as_path()),
+        "isolated home must be a direct child of the OS temp root"
+    );
 
-    impl Drop for HomeCleanup {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+    struct HomeCleanup {
+        path: PathBuf,
+        temp_root: PathBuf,
+        expected_name: String,
+        cleaned: bool,
+    }
+
+    impl HomeCleanup {
+        fn verify_owned_directory(&self) -> io::Result<()> {
+            let metadata = fs::symlink_metadata(&self.path)?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err(io::Error::other(
+                    "isolated home is no longer an owned directory",
+                ));
+            }
+            let canonical = fs::canonicalize(&self.path)?;
+            if canonical != self.path
+                || canonical.parent() != Some(self.temp_root.as_path())
+                || canonical.file_name() != Some(std::ffi::OsStr::new(&self.expected_name))
+            {
+                return Err(io::Error::other(
+                    "isolated home is outside the owned OS temp-directory scope",
+                ));
+            }
+            Ok(())
+        }
+
+        fn cleanup(&mut self) -> io::Result<()> {
+            self.verify_owned_directory()?;
+            fs::remove_dir_all(&self.path)?;
+            self.cleaned = true;
+            Ok(())
         }
     }
 
-    fs::create_dir(&home).expect("isolated home must be created");
-    let _home_cleanup = HomeCleanup(home.clone());
+    impl Drop for HomeCleanup {
+        fn drop(&mut self) {
+            if !self.cleaned && std::thread::panicking() && self.verify_owned_directory().is_ok() {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
+    }
+
+    let mut home_cleanup = HomeCleanup {
+        path: home.clone(),
+        temp_root,
+        expected_name: home_name,
+        cleaned: false,
+    };
     let before = fs::read_dir(&home)
         .expect("isolated home must be readable")
         .count();
@@ -96,6 +158,9 @@ fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_muta
             .count(),
         before
     );
+    home_cleanup
+        .cleanup()
+        .expect("isolated home cleanup must succeed");
 }
 
 #[test]
