@@ -228,6 +228,17 @@ export function assertPairingStatus(value, expectedStatus) {
   return value;
 }
 
+export function assertCompatibilityFailure(error, preset) {
+  const code =
+    error !== null && typeof error === 'object'
+      ? Object.getOwnPropertyDescriptor(error, 'code')?.value
+      : undefined;
+  if (code !== 'incompatible_version') {
+    throw new Error(`${preset} preset did not produce incompatible_version`);
+  }
+  return { code };
+}
+
 function makeAssertion(id, status, diagnosticId) {
   return {
     id,
@@ -630,10 +641,16 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
   );
 
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await runCommand(artifactRoot, 'Cave release package', 'corepack', ['pnpm@10.34.0', 'build'], {
-    cwd: roots.caveRoot,
-    env: environment,
-  });
+  await runCommand(
+    artifactRoot,
+    'Cave conformance package',
+    'corepack',
+    ['pnpm@10.34.0', 'build:conformance'],
+    {
+      cwd: roots.caveRoot,
+      env: environment,
+    },
+  );
 
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
   mkdirSync(covenTarget, { recursive: true, mode: 0o700 });
@@ -747,6 +764,172 @@ function requestJson(origin, { method = 'GET', path, headers = {}, body }) {
     }
     request.end();
   });
+}
+
+async function reserveLoopbackPort() {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const port = address.port;
+  await new Promise((resolveClose, rejectClose) =>
+    server.close((error) => (error ? rejectClose(error) : resolveClose())),
+  );
+  return port;
+}
+
+function drainBoundedChildOutput(child) {
+  for (const stream of [child.stdout, child.stderr]) {
+    let bytes = 0;
+    stream.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > commandOutputLimit) {
+        child.kill('SIGKILL');
+      }
+    });
+  }
+}
+
+async function startCompatibilityCave({ artifactRoot, roots, environment, preset }) {
+  const compatibilityRoot = resolve(artifactRoot.rootPath, `compatibility-${preset}`);
+  const covenHome = resolve(compatibilityRoot, 'coven');
+  const caveHome = resolve(covenHome, 'cave');
+  mkdirSync(caveHome, { recursive: true, mode: 0o700 });
+  const port = await reserveLoopbackPort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, [resolve(roots.caveRoot, 'server.mjs')], {
+    cwd: roots.caveRoot,
+    env: {
+      ...environment,
+      COVEN_HOME: covenHome,
+      COVEN_CAVE_HOME: caveHome,
+      COVEN_CAVE_PORT: String(port),
+      COVEN_CAVE_CLIENT_V1_AUTHORITY_MODE: 'off',
+      COVEN_CAVE_CLIENT_V1_COMPATIBILITY_PRESET: preset,
+      COVEN_CAVE_HEAP_MONITOR: '0',
+      NODE_ENV: 'production',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    artifactRoot.trackChild(child);
+  } catch (error) {
+    child.kill('SIGKILL');
+    throw error;
+  }
+  drainBoundedChildOutput(child);
+  await once(child, 'spawn');
+
+  const deadline = Date.now() + rpcTimeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`${preset} compatibility Cave exited before readiness`);
+    }
+    try {
+      const response = await requestJson(origin, {
+        path: '/api/client/v1/health',
+      });
+      if (response.status >= 200 && response.status < 300) {
+        return origin;
+      }
+    } catch {
+      // The packaged Cave may not have bound its loopback port yet.
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(`${preset} compatibility Cave did not become ready`);
+}
+
+async function runPackedSdkCompatibilityCheck({
+  artifactRoot,
+  roots,
+  environment,
+  origin,
+  preset,
+}) {
+  const caveClientEntry = resolve(
+    roots.chatRoot,
+    'node_modules',
+    '@opencoven',
+    'cave-client',
+    'dist',
+    'index.js',
+  );
+  const wrapperPath = resolve(artifactRoot.rootPath, `compatibility-sdk-${preset}.mjs`);
+  writeFileSync(
+    wrapperPath,
+    [
+      `import { CaveClient } from ${JSON.stringify(pathToFileURL(caveClientEntry).href)};`,
+      `const origin = ${JSON.stringify(origin)};`,
+      `const client = new CaveClient({`,
+      `  transport: {`,
+      `    async health() {`,
+      `      const response = await fetch(new URL('/api/client/v1/health', origin), {`,
+      `        cache: 'no-store',`,
+      `        credentials: 'omit',`,
+      `        redirect: 'error',`,
+      `      });`,
+      `      if (!response.ok) throw new Error('compatibility health request failed');`,
+      `      return response.json();`,
+      `    },`,
+      `  },`,
+      `});`,
+      `const failure = await client.health().then(() => undefined, (error) => error);`,
+      `const code = failure && typeof failure === 'object'`,
+      `  ? Object.getOwnPropertyDescriptor(failure, 'code')?.value`,
+      `  : undefined;`,
+      `if (code !== 'incompatible_version') {`,
+      `  throw new Error(${JSON.stringify(
+        `${preset} preset did not produce incompatible_version`,
+      )});`,
+      `}`,
+      '',
+    ].join('\n'),
+    { mode: 0o600 },
+  );
+  await runCommand(
+    artifactRoot,
+    `Cave ${preset} packed SDK compatibility`,
+    process.execPath,
+    [wrapperPath],
+    {
+      cwd: roots.chatRoot,
+      env: environment,
+    },
+  );
+}
+
+async function runCompatibilityScenarios({ artifactRoot, roots, environment, results }) {
+  try {
+    for (const preset of ['api-major', 'minimum-client']) {
+      const origin = await startCompatibilityCave({
+        artifactRoot,
+        roots,
+        environment,
+        preset,
+      });
+      await runPackedSdkCompatibilityCheck({
+        artifactRoot,
+        roots,
+        environment,
+        origin,
+        preset,
+      });
+    }
+    addAssertion(
+      results,
+      'phase1.compat.api-major-min-client',
+      'passed',
+      'phase1.compat.incompatible-version',
+    );
+  } catch {
+    addAssertion(
+      results,
+      'phase1.compat.api-major-min-client',
+      'failed',
+      'phase1.compat.incompatible-version',
+    );
+  }
 }
 
 function startFixtureDaemon(roster) {
@@ -1830,12 +2013,12 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     });
     await runCovenIdentityScenario(executionRoot, packaged.covenBinaryPath, environment, results);
 
-    addAssertion(
+    await runCompatibilityScenarios({
+      artifactRoot: executionRoot,
+      roots,
+      environment,
       results,
-      'phase1.compat.api-major-min-client',
-      'blocked',
-      'phase1.producer.compatibility-control-unavailable',
-    );
+    });
     const operatorIsolationValid =
       environment.HOME !== process.env.HOME &&
       environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&
@@ -1865,8 +2048,8 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     addAssertion(
       results,
       'phase1.compat.api-major-min-client',
-      'blocked',
-      'phase1.producer.compatibility-control-unavailable',
+      'failed',
+      'phase1.compat.incompatible-version',
     );
   }
   fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');

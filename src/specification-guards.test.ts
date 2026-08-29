@@ -901,6 +901,13 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain('path: test-results/phase1-conformance/report.json');
   });
 
+  it('packages the Cave compatibility controls only for the Phase 1 harness', () => {
+    const script = readText('scripts/phase1-conformance.mjs');
+
+    expect(script).toContain("'build:conformance'");
+    expect(script).not.toContain("'Cave release package', 'corepack', ['pnpm@10.34.0', 'build']");
+  });
+
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
     const readme = readText('README.md');
     const toolchains = readText('docs/developer-toolchains.md');

@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
+  assertCompatibilityFailure,
   assertExactAssertionResults,
   assertPairingStatus,
   buildPhase1Report,
@@ -190,6 +191,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(assertPairingStatus({ status: 'denied' }, 'denied')).toEqual({ status: 'denied' });
     expect(() => assertPairingStatus({ status: 'pending' }, 'denied')).toThrow(
       /pairing status was pending instead of denied/,
+    );
+  });
+
+  test('accepts only the SDK incompatible-version failure from compatibility presets', () => {
+    expect(assertCompatibilityFailure({ code: 'incompatible_version' }, 'api-major')).toEqual({
+      code: 'incompatible_version',
+    });
+    expect(() =>
+      assertCompatibilityFailure({ code: 'invalid_response' }, 'minimum-client'),
+    ).toThrow(/minimum-client preset did not produce incompatible_version/);
+    expect(() => assertCompatibilityFailure(undefined, 'api-major')).toThrow(
+      /api-major preset did not produce incompatible_version/,
     );
   });
 

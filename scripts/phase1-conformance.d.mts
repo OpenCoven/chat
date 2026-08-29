@@ -48,6 +48,10 @@ export function assertPairingStatus(
   value: { status?: string } | null | undefined,
   expectedStatus: string,
 ): { status?: string };
+export function assertCompatibilityFailure(
+  error: { code?: string } | null | undefined,
+  preset: string,
+): { code: 'incompatible_version' };
 export class CommandExecutionError extends Error {
   label: string;
   result: unknown;
