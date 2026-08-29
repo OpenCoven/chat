@@ -99,6 +99,107 @@ function createGitWorktreeFixture(prefix: string) {
   };
 }
 
+function sha256(bytes: Buffer | string) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function createCaveAuthorityFixture() {
+  const scratchRoot = createRepoLocalScratchRoot('cave-authority');
+  const caveRoot = resolve(scratchRoot, 'cave');
+  const harnessRoot = resolve(scratchRoot, 'harness');
+  const authorityDirectory = resolve(caveRoot, 'src/lib/server/client-v1');
+  const installedFixtureDirectory = resolve(
+    harnessRoot,
+    'node_modules',
+    '@opencoven',
+    'cave-client',
+    'fixtures',
+  );
+  const fixtureBytes = Buffer.from('historical Cave contract fixture\n', 'utf8');
+  const fixtureDigest = sha256(fixtureBytes);
+  const vectorBytes = Buffer.from('current Cave HPKE vector\n', 'utf8');
+  const vectorDigest = sha256(vectorBytes);
+
+  mkdirSync(authorityDirectory, { recursive: true });
+  mkdirSync(installedFixtureDirectory, { recursive: true });
+  runGit(['init', '--initial-branch=main'], caveRoot);
+  runGit(['config', 'user.name', 'OpenCoven Test'], caveRoot);
+  runGit(['config', 'user.email', 'opencoven-test@example.com'], caveRoot);
+  runGit(['config', 'commit.gpgsign', 'false'], caveRoot);
+  writeFileSync(resolve(authorityDirectory, 'contract-fixture.json'), fixtureBytes);
+  writeFileSync(resolve(authorityDirectory, 'contract-fixture.sha256'), `${fixtureDigest}\n`);
+  runGit(['add', '.'], caveRoot);
+  runGit(['commit', '-m', 'contract fixture authority'], caveRoot);
+  const provenanceCommit = runGit(['rev-parse', 'HEAD'], caveRoot);
+
+  runGit(['checkout', '-b', 'non-ancestor'], caveRoot);
+  writeFileSync(resolve(caveRoot, 'side.txt'), 'side branch\n');
+  runGit(['add', 'side.txt'], caveRoot);
+  runGit(['commit', '-m', 'non-ancestor authority'], caveRoot);
+  const nonAncestorCommit = runGit(['rev-parse', 'HEAD'], caveRoot);
+  runGit(['checkout', 'main'], caveRoot);
+
+  writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.json'), vectorBytes);
+  writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.sha256'), `${vectorDigest}\n`);
+  runGit(['add', '.'], caveRoot);
+  runGit(['commit', '-m', 'HPKE vector authority'], caveRoot);
+  const caveRevision = runGit(['rev-parse', 'HEAD'], caveRoot);
+
+  const provenance = {
+    repository: 'https://github.com/OpenCoven/coven-cave',
+    commit: provenanceCommit,
+    fixturePath: 'src/lib/server/client-v1/contract-fixture.json',
+    digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+    sha256: fixtureDigest,
+  };
+  const installedFixturePath = resolve(installedFixtureDirectory, 'contract-fixture.json');
+  const installedDigestPath = resolve(installedFixtureDirectory, 'contract-fixture.sha256');
+  const installedProvenancePath = resolve(
+    installedFixtureDirectory,
+    'contract-fixture.provenance.json',
+  );
+  const installedVectorPath = resolve(installedFixtureDirectory, 'hpke-bound-v1-vectors.json');
+
+  writeFileSync(installedFixturePath, fixtureBytes);
+  writeFileSync(installedDigestPath, `${fixtureDigest}\n`);
+  writeFileSync(installedProvenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+  writeFileSync(installedVectorPath, vectorBytes);
+  writeFileSync(
+    resolve(installedFixtureDirectory, 'hpke-bound-v1-vectors.sha256'),
+    `${vectorDigest}\n`,
+  );
+
+  const lock: Parameters<typeof assertPackedFixtureMatchesCaveCheckout>[0] = {
+    cave: {
+      revision: caveRevision,
+      artifacts: {
+        contractFixture: {
+          path: 'src/lib/server/client-v1/contract-fixture.json',
+          digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
+          sha256: fixtureDigest,
+        },
+        hpkeVectors: {
+          path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+          digestPath: 'src/lib/server/client-v1/hpke-bound-v1-vectors.sha256',
+          sha256: vectorDigest,
+        },
+      },
+    },
+  };
+
+  return {
+    caveRoot,
+    harnessRoot,
+    lock,
+    nonAncestorCommit,
+    provenance,
+    installedFixturePath,
+    installedDigestPath,
+    installedProvenancePath,
+    installedVectorPath,
+  };
+}
+
 describe('contract canary temp directory safety', () => {
   test.each(['.', '..', '../escape', '/Users/buns', '/'])(
     'rejects unsafe temp child path segment %s',
@@ -452,6 +553,96 @@ describe('contract canary temp directory safety', () => {
     },
     15_000,
   );
+});
+
+describe('packed Cave authority artifact validation', () => {
+  test('accepts exact historical fixture provenance and reviewed HPKE vector bytes', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).not.toThrow();
+  }, 10_000);
+
+  test('rejects mutated installed Cave fixture bytes', () => {
+    const fixture = createCaveAuthorityFixture();
+    const mutatedFixture = Buffer.from('mutated installed Cave contract fixture\n', 'utf8');
+    const mutatedDigest = sha256(mutatedFixture);
+
+    writeFileSync(fixture.installedFixturePath, mutatedFixture);
+    writeFileSync(fixture.installedDigestPath, `${mutatedDigest}\n`);
+    writeFileSync(
+      fixture.installedProvenancePath,
+      `${JSON.stringify({ ...fixture.provenance, sha256: mutatedDigest }, null, 2)}\n`,
+    );
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow('Packed Cave fixture bytes did not match their pinned historical producer.');
+  }, 10_000);
+
+  test('rejects mutated installed HPKE vector bytes', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    writeFileSync(fixture.installedVectorPath, 'mutated installed Cave HPKE vector\n');
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow('Packed Cave HPKE vectors did not match the reviewed producer revision.');
+  }, 10_000);
+
+  test('rejects invalid Cave provenance JSON', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    writeFileSync(fixture.installedProvenancePath, '{');
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow(SyntaxError);
+  }, 10_000);
+
+  test('rejects a Cave provenance digest mismatch', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    writeFileSync(
+      fixture.installedProvenancePath,
+      `${JSON.stringify({ ...fixture.provenance, sha256: '0'.repeat(64) }, null, 2)}\n`,
+    );
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow('Packed Cave fixture provenance was invalid.');
+  }, 10_000);
+
+  test('rejects an unavailable Cave provenance commit', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    writeFileSync(
+      fixture.installedProvenancePath,
+      `${JSON.stringify({ ...fixture.provenance, commit: '0'.repeat(40) }, null, 2)}\n`,
+    );
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow(
+      'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
+    );
+  }, 10_000);
+
+  test('rejects a valid but non-ancestor Cave provenance commit', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    writeFileSync(
+      fixture.installedProvenancePath,
+      `${JSON.stringify({ ...fixture.provenance, commit: fixture.nonAncestorCommit }, null, 2)}\n`,
+    );
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).toThrow(
+      'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
+    );
+  }, 10_000);
 });
 
 describe('generated SDK release manifest validation', () => {
