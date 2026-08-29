@@ -114,6 +114,84 @@ function invokeHandlerCommandNames(source: string): string[] {
     .filter((command) => command.length > 0);
 }
 
+function workflowJobRunCommands(source: string, jobName: string): string[] {
+  const lines = source.split(/\r?\n/);
+  const jobLine = `  ${jobName}:`;
+  const jobIndex = lines.indexOf(jobLine);
+
+  if (jobIndex === -1) {
+    throw new Error(`CI workflow must keep the ${jobName} job.`);
+  }
+
+  let jobLimit = lines.length;
+  for (let index = jobIndex + 1; index < lines.length; index++) {
+    if (/^ {2}[a-z][\w-]*:$/.test(lines[index] ?? '')) {
+      jobLimit = index;
+      break;
+    }
+  }
+
+  let stepsIndex = -1;
+  for (let index = jobIndex + 1; index < jobLimit; index++) {
+    if (/^ {4}steps:$/.test(lines[index] ?? '')) {
+      stepsIndex = index;
+      break;
+    }
+  }
+
+  if (stepsIndex === -1 || stepsIndex >= jobLimit) {
+    throw new Error(`CI workflow must keep steps in the ${jobName} job.`);
+  }
+
+  const commands: string[] = [];
+
+  for (let i = stepsIndex + 1; i < jobLimit; i++) {
+    const stepLine = lines[i];
+
+    if (typeof stepLine !== 'string' || !/^ {6}- /.test(stepLine)) {
+      continue;
+    }
+
+    const inlineRun = stepLine.match(/^ {6}- run:\s*(.*)$/);
+
+    if (inlineRun) {
+      commands.push((inlineRun[1] ?? '').trim());
+      continue;
+    }
+
+    let stepLimit = jobLimit;
+    for (let j = i + 1; j < jobLimit; j++) {
+      const nextStepLine = lines[j];
+
+      if (typeof nextStepLine === 'string' && /^ {6}- /.test(nextStepLine)) {
+        stepLimit = j;
+        break;
+      }
+    }
+
+    for (let j = i + 1; j < stepLimit; j++) {
+      const runLine = lines[j];
+
+      if (typeof runLine !== 'string') {
+        continue;
+      }
+
+      const runMatch = runLine.match(/^ {8}run:\s*(.*)$/);
+
+      if (!runMatch) {
+        continue;
+      }
+
+      commands.push((runMatch[1] ?? '').trim());
+      break;
+    }
+
+    i = stepLimit - 1;
+  }
+
+  return commands;
+}
+
 describe('Phase 1 specification guards', () => {
   it('ignores sibling worktrees from the repository root', () => {
     const output = execFileSync(
@@ -280,19 +358,22 @@ describe('Phase 1 specification guards', () => {
   it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
     const workflow = readText('.github/workflows/ci.yml');
-    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
-      ?.groups?.job;
+    const rustJobRuns = workflowJobRunCommands(workflow, 'rust');
 
     expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
       'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
     );
-    expect(rustJob).toContain(
-      '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
-    );
-    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
-    expect(rustJob).toContain('- run: brew install mingw-w64');
-    expect(rustJob).toContain('- run: command -v x86_64-w64-mingw32-windres');
-    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+    expect(rustJobRuns.length, 'Rust job must keep active run steps').toBeGreaterThan(0);
+
+    const mingwInstallIndex = rustJobRuns.indexOf('brew install mingw-w64');
+    const windresIndex = rustJobRuns.indexOf('command -v x86_64-w64-mingw32-windres');
+    const cargoCheckWindowsIndex = rustJobRuns.indexOf('corepack pnpm cargo:check:windows-gnu');
+
+    expect(mingwInstallIndex).toBeGreaterThan(-1);
+    expect(windresIndex).toBeGreaterThan(-1);
+    expect(cargoCheckWindowsIndex).toBeGreaterThan(-1);
+    expect(mingwInstallIndex).toBeLessThan(windresIndex);
+    expect(windresIndex).toBeLessThan(cargoCheckWindowsIndex);
   });
 
   it('keeps the capability schema resolvable from a fresh checkout', () => {
