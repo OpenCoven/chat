@@ -901,6 +901,14 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain('path: test-results/phase1-conformance/report.json');
   });
 
+  it('does not persist checkout credentials into the Phase 1 execution workspace', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const phase1Job = workflow.slice(workflow.indexOf('  phase1-conformance:'));
+
+    expect(phase1Job.match(/persist-credentials: false/g)).toHaveLength(4);
+    expect(phase1Job).toContain('pnpm install --frozen-lockfile --ignore-scripts');
+  });
+
   it('packages the Cave compatibility controls only for the Phase 1 harness', () => {
     const script = readText('scripts/phase1-conformance.mjs');
 
