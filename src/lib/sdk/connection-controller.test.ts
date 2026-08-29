@@ -56,6 +56,7 @@ type ManagedNativeResponses = Readonly<{
   forgetCredential?: NativeResponse;
   launch?: NativeResponse;
   resetPairing?: NativeResponse;
+  covenHealth?: NativeResponse;
 }>;
 type PairingPhase = 'create' | 'poll' | 'exchange';
 type RateLimitCalls = {
@@ -178,6 +179,8 @@ function nativeInvoke(responses: ManagedNativeResponses = {}): NativeSdkInvoke {
         return responses.resetPairing === undefined
           ? { status: 'invalidated' }
           : responses.resetPairing(args);
+      case 'coven_health':
+        return responses.covenHealth === undefined ? { status: 'ok' } : responses.covenHealth(args);
       default:
         throw new Error('unexpected native command');
     }
@@ -275,11 +278,13 @@ function hostPort(
   discover: CaveConnectionHost['discover'],
   launch: CaveConnectionHost['launch'] = async () => undefined,
   resetPairing: CaveConnectionHost['resetPairing'] = async () => undefined,
+  covenHealth: CaveConnectionHost['covenHealth'] = async () => Object.freeze({ status: 'ok' }),
 ): CaveConnectionHostPort {
   return Object.freeze({
     discover,
     launch,
     resetPairing,
+    covenHealth,
   });
 }
 
@@ -513,9 +518,94 @@ describe('Cave connection controller', () => {
     expect(ready.getState()).toEqual({
       state: 'ready',
       caveInstanceId: CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
     expect(denied.getState()).toMatchObject({ state: 'error', code: 'scope_denied' });
+  });
+
+  it('keeps the Cave read client ready when Coven health fails or times out', async () => {
+    const failed = controller(
+      nativeHost({
+        covenHealth: async () =>
+          Promise.reject(Object.freeze({ code: 'reconcile_required', retryable: false })),
+      }),
+    );
+
+    await failed.start();
+    expect(failed.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: CAVE_INSTANCE_ID,
+      covenAvailable: false,
+    });
+    expect(failed.getReadyClient()).not.toBeNull();
+
+    const testClock = clock();
+    const pending = deferred<unknown>();
+    const covenEntered = deferred<void>();
+    const timed = controller(
+      nativeHost({
+        covenHealth: async () => {
+          covenEntered.resolve();
+          return pending.promise;
+        },
+      }),
+      testClock,
+      10,
+      50,
+    );
+    const started = timed.start();
+    await covenEntered.promise;
+    testClock.advance(50);
+    await started;
+
+    expect(timed.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: CAVE_INSTANCE_ID,
+      covenAvailable: false,
+    });
+    expect(timed.getReadyClient()).not.toBeNull();
+  });
+
+  it('ignores stale and aborted Coven health completions', async () => {
+    const staleCoven = deferred<unknown>();
+    const staleEntered = deferred<void>();
+    const first = nativeHost({
+      covenHealth: async () => {
+        staleEntered.resolve();
+        return staleCoven.promise;
+      },
+    });
+    const replacement = nativeHost({
+      health: async () => healthEnvelope(NEXT_CAVE_INSTANCE_ID),
+      credentialStatus: async () => validCredentialStatus('chat:read', NEXT_CAVE_INSTANCE_ID),
+    });
+    const discover = vi
+      .fn<CaveConnectionHost['discover']>()
+      .mockImplementationOnce(first.discover)
+      .mockImplementationOnce(replacement.discover);
+    const covenHealth = vi
+      .fn<CaveConnectionHost['covenHealth']>()
+      .mockImplementationOnce(first.covenHealth)
+      .mockResolvedValue(Object.freeze({ status: 'ok' }));
+    const subject = controller(hostPort(discover, undefined, undefined, covenHealth));
+
+    const initial = subject.start();
+    await staleEntered.promise;
+    await subject.retry();
+
+    expect(subject.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: NEXT_CAVE_INSTANCE_ID,
+      covenAvailable: true,
+    });
+    staleCoven.resolve({ status: 'ok' });
+    await initial;
+    await settle();
+    expect(subject.getState()).toEqual({
+      state: 'ready',
+      caveInstanceId: NEXT_CAVE_INSTANCE_ID,
+      covenAvailable: true,
+    });
   });
 
   it('forgets a validated packed scope-denied credential before requiring pairing', async () => {
@@ -760,7 +850,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
   });
 
@@ -916,7 +1006,7 @@ describe('Cave connection controller', () => {
             ? {
                 state: 'ready',
                 caveInstanceId: CAVE_INSTANCE_ID,
-                covenAvailable: false,
+                covenAvailable: true,
               }
             : {
                 state: 'pairing_required',
@@ -990,7 +1080,7 @@ describe('Cave connection controller', () => {
       expect(subject.getState()).toEqual({
         state: 'ready',
         caveInstanceId: NEXT_CAVE_INSTANCE_ID,
-        covenAvailable: false,
+        covenAvailable: true,
       });
       expect(calls.pairingRequests).toHaveLength(1);
       expect(calls.polls).toBe(phase === 'create' ? 0 : 1);
@@ -1145,7 +1235,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
   });
 
@@ -1205,7 +1295,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
     for (const value of [...events, subject.getState()]) {
       expect(JSON.stringify(value)).not.toContain(canary);
@@ -1407,7 +1497,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: NEXT_CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
 
     exchangeResult.resolve({ credential: credentialMetadata() });
@@ -1415,7 +1505,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: NEXT_CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
     await pairing;
   });
@@ -1465,7 +1555,7 @@ describe('Cave connection controller', () => {
           ? {
               state: 'ready',
               caveInstanceId: CAVE_INSTANCE_ID,
-              covenAvailable: false,
+              covenAvailable: true,
             }
           : {
               state: 'pairing_required',
@@ -1796,7 +1886,7 @@ describe('Cave connection controller', () => {
     expect(subject.getState()).toEqual({
       state: 'ready',
       caveInstanceId: NEXT_CAVE_INSTANCE_ID,
-      covenAvailable: false,
+      covenAvailable: true,
     });
   });
 

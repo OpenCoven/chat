@@ -3,7 +3,12 @@ import type {
   CaveManagedDiscoverySource,
   CavePairingRequest,
 } from '@opencoven/cave-client/managed';
-import type { OperationContext, PageOptions } from '@opencoven/sdk-core/browser';
+import {
+  type OperationContext,
+  type OperationOptions,
+  type PageOptions,
+  runOperation,
+} from '@opencoven/sdk-core/browser';
 
 import { nativeUnavailable, snapshotNativeDiagnostic, snapshotNativeResult } from './diagnostics';
 
@@ -33,12 +38,25 @@ export async function invokeNative(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<unknown> {
+  const result = await invokeRawNative(invoke, command, args);
+  return snapshotNativeSuccess(result);
+}
+
+async function invokeRawNative(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<unknown> {
   let result: unknown;
   try {
     result = await (args === undefined ? invoke(command) : invoke(command, args));
   } catch (error) {
     throw snapshotNativeDiagnostic(error);
   }
+  return result;
+}
+
+function snapshotNativeSuccess(result: unknown): unknown {
   try {
     return snapshotNativeResult(result);
   } catch {
@@ -55,6 +73,14 @@ function invalidNativeInput(): never {
     code: 'invalid_response',
     retryable: false,
     message: 'Cave request was invalid.',
+  });
+}
+
+function invalidCovenHealthResult(): never {
+  throw Object.freeze({
+    code: 'invalid_response',
+    retryable: false,
+    message: 'Coven response was invalid.',
   });
 }
 
@@ -182,6 +208,20 @@ async function invokeNativeOperation(
   command: string,
   args: Record<string, unknown> | undefined,
   context: OperationContext | undefined,
+): Promise<unknown>;
+async function invokeNativeOperation<T>(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args: Record<string, unknown> | undefined,
+  context: OperationContext | undefined,
+  validateRawResult: (result: unknown) => T,
+): Promise<T>;
+async function invokeNativeOperation(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args: Record<string, unknown> | undefined,
+  context: OperationContext | undefined,
+  validateRawResult: (result: unknown) => unknown = snapshotNativeSuccess,
 ): Promise<unknown> {
   const attemptId = createAttemptId();
   const { deadline, signal } = validateOperationContext(context);
@@ -190,6 +230,7 @@ async function invokeNativeOperation(
     requestNativeCancellation(invoke, attemptId, reason);
     return cancellationDiagnostic(reason);
   }
+
   const remaining =
     deadline === undefined ? NATIVE_OPERATION_TIMEOUT_MS : Math.floor(deadline - performance.now());
   if (remaining <= 0) {
@@ -228,18 +269,58 @@ async function invokeNativeOperation(
       return await cancellation;
     }
     return await Promise.race([
-      invokeNative(invoke, command, {
+      invokeRawNative(invoke, command, {
         ...args,
         operation: {
           attemptId,
           timeoutMs,
         },
-      }),
+      }).then(validateRawResult),
       cancellation,
     ]);
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
+}
+
+export type CovenHealthResult = Readonly<{ status: 'ok' }>;
+
+function validateRawCovenHealthResult(result: unknown): CovenHealthResult {
+  try {
+    if (
+      typeof result !== 'object' ||
+      result === null ||
+      Array.isArray(result) ||
+      Object.getPrototypeOf(result) !== Object.prototype
+    ) {
+      return invalidCovenHealthResult();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(result);
+    const keys = Reflect.ownKeys(descriptors);
+    const status = descriptors.status;
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'status' ||
+      status === undefined ||
+      status.enumerable !== true ||
+      !Object.hasOwn(status, 'value') ||
+      status.value !== 'ok'
+    ) {
+      return invalidCovenHealthResult();
+    }
+  } catch {
+    return invalidCovenHealthResult();
+  }
+  return Object.freeze({ status: 'ok' });
+}
+
+export async function invokeCovenHealth(
+  invoke: NativeSdkInvoke,
+  options: OperationOptions = {},
+): Promise<CovenHealthResult> {
+  return await runOperation({ system: 'coven', operation: 'health' }, options, (context) =>
+    invokeNativeOperation(invoke, 'coven_health', undefined, context, validateRawCovenHealthResult),
+  );
 }
 
 function canonicalCursor(value: unknown): value is string {

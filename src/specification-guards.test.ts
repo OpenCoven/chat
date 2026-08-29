@@ -200,6 +200,7 @@ describe('Phase 1 specification guards', () => {
       'allow-cave-cancel-operation',
       'allow-cave-launch',
       'allow-cave-health',
+      'allow-coven-health',
       'allow-cave-pairing-create',
       'allow-cave-pairing-poll',
       'allow-cave-pairing-exchange',
@@ -248,6 +249,50 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('pins Coven health to an isolated producer-client self probe without fallback trust', () => {
+    const manifest = readText('src-tauri/Cargo.toml');
+    const covenSource =
+      readText('src-tauri/src/coven.rs').split('\n#[cfg(test)]\nmod tests')[0] ?? '';
+    const nativeSource = [
+      covenSource,
+      readText('src-tauri/src/commands.rs'),
+      readText('src-tauri/src/lib.rs'),
+    ].join('\n');
+
+    expect(manifest).toContain(
+      'coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b84026c042e431b0882dcd14fdb29ac07d" }',
+    );
+    expect(nativeSource).toContain('DaemonEndpoint::discover');
+    expect(nativeSource).toContain('.health()');
+    expect(nativeSource).toContain('std::env::current_exe()');
+    expect(nativeSource).toContain('COVEN_HEALTH_PROBE_ARGUMENT');
+    expect(nativeSource).toContain('Command::new(&request.executable)');
+    expect(nativeSource).toContain('.stdin(Stdio::null())');
+    expect(nativeSource).toContain('.stdout(Stdio::null())');
+    expect(nativeSource).toContain('.stderr(Stdio::null())');
+    expect(nativeSource).not.toMatch(
+      /\b(?:powershell|pwsh|lsof|netstat|Get-NamedPipe|coven\.sock|\\\\\.\\pipe\\)\b/iu,
+    );
+    expect(nativeSource).not.toContain('set_hook');
+    expect(nativeSource).not.toContain('take_hook');
+  });
+
+  it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const workflow = readText('.github/workflows/ci.yml');
+    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
+      ?.groups?.job;
+
+    expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
+      'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
+    );
+    expect(rustJob).toContain(
+      '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
+    );
+    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
+    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+  });
+
   it('keeps the capability schema resolvable from a fresh checkout', () => {
     const capability = readJson<CapabilityFile>('src-tauri/capabilities/default.json');
     const schemaPath = resolve(projectRoot, 'src-tauri/capabilities', capability.$schema ?? '');
@@ -283,6 +328,7 @@ describe('Phase 1 specification guards', () => {
       'cave_cancel_operation',
       'cave_launch',
       'cave_health',
+      'coven_health',
       'cave_pairing_create',
       'cave_pairing_poll',
       'cave_pairing_exchange',
@@ -308,6 +354,7 @@ describe('Phase 1 specification guards', () => {
       'cave_cancel_operation',
       'cave_launch',
       'cave_health',
+      'coven_health',
       'cave_pairing_create',
       'cave_pairing_poll',
       'cave_pairing_exchange',
@@ -344,6 +391,7 @@ describe('Phase 1 specification guards', () => {
       'cave_cancel_operation',
       'cave_launch',
       'cave_health',
+      'coven_health',
       'cave_pairing_create',
       'cave_pairing_poll',
       'cave_pairing_exchange',
@@ -374,7 +422,8 @@ describe('Phase 1 specification guards', () => {
         command !== 'app_installation_id' &&
         command !== 'cave_read_discovery' &&
         command !== 'cave_cancel_operation' &&
-        command !== 'cave_launch',
+        command !== 'cave_launch' &&
+        command !== 'coven_health',
     )) {
       expect(commands).toMatch(
         new RegExp(`pub\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(\\s*handle:\\s*String`),

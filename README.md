@@ -34,12 +34,24 @@ write-oriented design exploration.
 - The webview uses frozen packed `@opencoven/cave-client/managed` and
   `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
   source or makes repository-relative imports.
+- Production Coven health crosses the bounded Tauri operation boundary and
+  uses the producer-owned Rust `coven-client` pinned exactly to Coven commit
+  `721437b84026c042e431b0882dcd14fdb29ac07d`. Discovery uses explicit
+  `COVEN_HOME` when set, otherwise the current account's platform home plus
+  `.coven`; the client validates the live connected Unix peer credentials or
+  Windows named-pipe ownership and connected identity before health succeeds.
+  The direct producer probe runs in the same trusted executable behind one
+  fixed internal argument, with null standard streams and an independent
+  absolute parent timeout that terminates and reaps only that child. The parent
+  consumes only its success or failure status. Missing native trust fails
+  closed. There is no pathname, naming, shell, PowerShell, or process-list
+  fallback.
 
 ### Current native-host limitation
 
-The HPKE-bound Client v1 Cave path is implemented. Release evidence still
-requires the Coven Unix connected-peer and Windows named-pipe identity adapters
-plus complete real-authority runs on the frozen platform matrix.
+The HPKE-bound Client v1 Cave path and producer-backed Coven native health path
+are implemented. Release evidence still requires complete real-authority runs
+on the frozen platform matrix.
 
 ## Prerequisites
 
@@ -74,6 +86,7 @@ pnpm exec playwright install chromium
 | `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
+| `pnpm cargo:check:windows-gnu` | Check all Rust targets for `x86_64-pc-windows-gnu` |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
 | `pnpm cargo:test` | Run Rust smoke tests |
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |
