@@ -915,12 +915,25 @@ describe('Phase 1 specification guards', () => {
 
   it('packages the Cave compatibility controls only for the Phase 1 harness', () => {
     const script = readText('scripts/phase1-conformance.mjs');
+    const packageStart = script.indexOf('async function packageLockedArtifacts');
+    const packageEnd = script.indexOf('\nasync function runCaveAuthorityMatrix', packageStart);
+    const packageBody = script.slice(packageStart, packageEnd);
 
-    expect(script).toContain("'build:conformance'");
-    expect(script).not.toContain("'Cave release package', 'corepack', ['pnpm@10.34.0', 'build']");
-    expect(script.indexOf("'Cave conformance package'")).toBeLessThan(
-      script.indexOf("'Chat web package'"),
-    );
+    expect(packageStart).toBeGreaterThanOrEqual(0);
+    expect(packageEnd).toBeGreaterThan(packageStart);
+    expect(packageBody.match(/'Cave conformance package'/g)).toHaveLength(1);
+    expect(packageBody.match(/'build:conformance'/g)).toHaveLength(1);
+    expect(packageBody).not.toContain('retryCaveConformancePackage');
+    expect(packageBody).not.toContain("resolve(roots.caveRoot, '.next')");
+    for (const laterPackage of [
+      "'Chat web package'",
+      "'SDK package build'",
+      "'Chat native RPC package'",
+    ]) {
+      expect(packageBody.indexOf("'Cave conformance package'")).toBeLessThan(
+        packageBody.indexOf(laterPackage),
+      );
+    }
   });
 
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
