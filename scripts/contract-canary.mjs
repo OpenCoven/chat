@@ -584,11 +584,6 @@ export function assertPackedPackageContentsMatch(
     if (typeof reviewed !== 'string' || typeof frozen !== 'string') {
       throw new Error(`Packed SDK ${artifact.packageName} artifact was missing.`);
     }
-    const reviewedEntries = safeTarEntries(reviewed);
-    const frozenEntries = safeTarEntries(frozen);
-    if (JSON.stringify(reviewedEntries) !== JSON.stringify(frozenEntries)) {
-      throw new Error(`Packed SDK ${artifact.packageName} file list did not match.`);
-    }
     let reviewedTar;
     let frozenTar;
     try {
@@ -599,6 +594,11 @@ export function assertPackedPackageContentsMatch(
     }
     if (!reviewedTar.equals(frozenTar)) {
       throw new Error(`Packed SDK ${artifact.packageName} tar payload did not match.`);
+    }
+    const reviewedEntries = safeTarEntries(reviewed);
+    const frozenEntries = safeTarEntries(frozen);
+    if (JSON.stringify(reviewedEntries) !== JSON.stringify(frozenEntries)) {
+      throw new Error(`Packed SDK ${artifact.packageName} file list did not match.`);
     }
     const packageRoot = resolve(comparisonRoot, key);
     const reviewedRoot = resolve(packageRoot, 'reviewed');
