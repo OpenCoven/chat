@@ -1,16 +1,23 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    convert::Infallible,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hpke::{
     aead::AesGcm256, kdf::HkdfSha256, kem::X25519HkdfSha256, setup_receiver, setup_sender_with_rng,
     Deserializable, Kem as KemTrait, OpModeR, OpModeS, Serializable,
 };
+#[cfg(test)]
 use rand_chacha::ChaCha20Rng;
-use rand_core::{CryptoRng, SeedableRng};
+#[cfg(test)]
+use rand_core::SeedableRng;
+use rand_core::{CryptoRng, TryCryptoRng, TryRng};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::cave::{NativeDiagnostic, NativeResult, PinnedCaveAuthority};
 
@@ -61,7 +68,7 @@ pub(crate) struct CaveHpkeBoundRequest {
 
 pub(crate) struct CaveHpkeOpenedResponse {
     pub(crate) status_code: u16,
-    pub(crate) body: Vec<u8>,
+    pub(crate) body: Zeroizing<Vec<u8>>,
 }
 
 struct CaveHpkeResponseOpener {
@@ -122,6 +129,12 @@ struct ResponsePlaintext {
     version: u8,
 }
 
+impl Drop for ResponsePlaintext {
+    fn drop(&mut self) {
+        self.body.zeroize();
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ResponseHeaders {
@@ -175,10 +188,31 @@ fn base64url_decode(
     Ok(decoded)
 }
 
+fn base64url_decode_secret(
+    value: &str,
+    minimum: usize,
+    maximum: usize,
+) -> Result<Zeroizing<Vec<u8>>, NativeDiagnostic> {
+    if value.contains('=')
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        || value.len() > maximum.saturating_mul(4).div_ceil(3)
+    {
+        return Err(proof_error());
+    }
+    let decoded = Zeroizing::new(URL_SAFE_NO_PAD.decode(value).map_err(|_| proof_error())?);
+    let canonical = Zeroizing::new(base64url_encode(decoded.as_slice()));
+    if decoded.len() < minimum || decoded.len() > maximum || canonical.as_str() != value {
+        return Err(proof_error());
+    }
+    Ok(decoded)
+}
+
 fn validate_authorization(authorization: &CaveHpkeAuthorization<'_>) -> NativeResult<()> {
     match authorization {
         CaveHpkeAuthorization::PairingSecret(value) => {
-            let decoded = base64url_decode(value, RAW_KEY_BYTES, RAW_KEY_BYTES)
+            let decoded = base64url_decode_secret(value, RAW_KEY_BYTES, RAW_KEY_BYTES)
                 .map_err(|_| NativeDiagnostic::new("invalid_response", false))?;
             if decoded.len() != RAW_KEY_BYTES {
                 return Err(invalid_authority());
@@ -301,6 +335,57 @@ fn random_key_material() -> NativeResult<[u8; RAW_KEY_BYTES]> {
     Ok(bytes)
 }
 
+struct OneShotKeyMaterialRng {
+    material: Zeroizing<[u8; RAW_KEY_BYTES]>,
+    offset: usize,
+}
+
+impl OneShotKeyMaterialRng {
+    fn new(material: [u8; RAW_KEY_BYTES]) -> Self {
+        Self {
+            material: Zeroizing::new(material),
+            offset: 0,
+        }
+    }
+
+    fn fill(&mut self, destination: &mut [u8]) {
+        let end = self
+            .offset
+            .checked_add(destination.len())
+            .expect("HPKE random material length overflow");
+        assert!(
+            end <= self.material.len(),
+            "HPKE requested more ephemeral key material than the pinned X25519 KEM requires"
+        );
+        destination.copy_from_slice(&self.material[self.offset..end]);
+        self.material[self.offset..end].zeroize();
+        self.offset = end;
+    }
+}
+
+impl TryRng for OneShotKeyMaterialRng {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0_u8; 4];
+        self.fill(&mut bytes);
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0_u8; 8];
+        self.fill(&mut bytes);
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
+        self.fill(destination);
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for OneShotKeyMaterialRng {}
+
 pub(crate) fn create_bound_request(
     authority: &PinnedCaveAuthority,
     method: &str,
@@ -308,17 +393,17 @@ pub(crate) fn create_bound_request(
     body: &[u8],
     authorization: CaveHpkeAuthorization<'_>,
 ) -> NativeResult<CaveHpkeBoundRequest> {
-    let response_ikm = random_key_material()?;
+    let mut response_ikm = Zeroizing::new(random_key_material()?);
     let request_nonce = random_key_material()?;
     let issued_at = now_millis()?;
-    let mut request_rng = ChaCha20Rng::from_seed(random_key_material()?);
+    let mut request_rng = OneShotKeyMaterialRng::new(random_key_material()?);
     create_bound_request_with_material(
         authority,
         method,
         route,
         body,
         authorization,
-        &response_ikm,
+        response_ikm.as_mut_slice(),
         request_nonce,
         issued_at,
         &mut request_rng,
@@ -332,7 +417,7 @@ fn create_bound_request_with_material(
     route: &str,
     body: &[u8],
     authorization: CaveHpkeAuthorization<'_>,
-    response_ikm: &[u8],
+    response_ikm: &mut [u8],
     request_nonce: [u8; RAW_KEY_BYTES],
     issued_at: u64,
     request_rng: &mut impl CryptoRng,
@@ -349,6 +434,7 @@ fn create_bound_request_with_material(
     let authority_public_key =
         CavePublicKey::from_bytes(&authority.hpke().public_key).map_err(|_| invalid_authority())?;
     let (response_private_key, response_public_key) = CaveKem::derive_keypair(response_ikm);
+    response_ikm.zeroize();
     let response_public_key = response_public_key.to_bytes();
     let request_nonce_encoded = base64url_encode(&request_nonce);
     let binding = CaveHpkeBinding {
@@ -365,21 +451,23 @@ fn create_bound_request_with_material(
         issued_at,
     };
     let request_aad = encode_aad(REQUEST_AAD_DOMAIN, &binding)?;
-    let plaintext = serde_jcs::to_vec(&RequestPlaintext {
-        authorization: match authorization {
-            CaveHpkeAuthorization::PairingSecret(value) => RequestAuthorization {
-                kind: "pairing-secret",
-                value,
+    let plaintext = Zeroizing::new(
+        serde_jcs::to_vec(&RequestPlaintext {
+            authorization: match authorization {
+                CaveHpkeAuthorization::PairingSecret(value) => RequestAuthorization {
+                    kind: "pairing-secret",
+                    value,
+                },
+                CaveHpkeAuthorization::Bearer(value) => RequestAuthorization {
+                    kind: "bearer",
+                    value,
+                },
             },
-            CaveHpkeAuthorization::Bearer(value) => RequestAuthorization {
-                kind: "bearer",
-                value,
-            },
-        },
-        response_public_key: base64url_encode(&response_public_key),
-        version: 1,
-    })
-    .map_err(|_| invalid_authority())?;
+            response_public_key: base64url_encode(&response_public_key),
+            version: 1,
+        })
+        .map_err(|_| invalid_authority())?,
+    );
     if plaintext.len() > REQUEST_PLAINTEXT_BYTES {
         return Err(invalid_authority());
     }
@@ -391,7 +479,7 @@ fn create_bound_request_with_material(
     )
     .map_err(|_| invalid_authority())?;
     let ciphertext = sender
-        .seal(&plaintext, &request_aad)
+        .seal(plaintext.as_slice(), &request_aad)
         .map_err(|_| invalid_authority())?;
     if ciphertext.len() > REQUEST_CIPHERTEXT_BYTES {
         return Err(invalid_authority());
@@ -456,14 +544,17 @@ impl CaveHpkeBoundRequest {
             RESPONSE_INFO,
         )
         .map_err(|_| proof_error())?;
-        let plaintext = recipient
-            .open(&ciphertext, &response_aad)
-            .map_err(|_| proof_error())?;
+        let plaintext = Zeroizing::new(
+            recipient
+                .open(&ciphertext, &response_aad)
+                .map_err(|_| proof_error())?,
+        );
         if plaintext.len() > RESPONSE_PLAINTEXT_BYTES {
             return Err(proof_error());
         }
         let parsed: ResponsePlaintext =
-            serde_json::from_slice(&plaintext).map_err(|_| proof_error())?;
+            serde_json::from_slice(plaintext.as_slice()).map_err(|_| proof_error())?;
+        let canonical = Zeroizing::new(serde_jcs::to_vec(&parsed).map_err(|_| proof_error())?);
         if parsed.version != 1
             || parsed.request_nonce != self.opener.binding.request_nonce
             || !(100..=599).contains(&parsed.status)
@@ -473,7 +564,7 @@ impl CaveHpkeBoundRequest {
                 .retry_after
                 .as_ref()
                 .is_some_and(|value| value.len() > 256)
-            || serde_jcs::to_vec(&parsed).map_err(|_| proof_error())? != plaintext
+            || canonical.as_slice() != plaintext.as_slice()
         {
             return Err(proof_error());
         }
@@ -481,7 +572,7 @@ impl CaveHpkeBoundRequest {
         if parsed.body.len() > maximum_body_bytes.saturating_mul(4).div_ceil(3) {
             return Err(NativeDiagnostic::new("body_limit", false));
         }
-        let body = base64url_decode(&parsed.body, 0, RESPONSE_PLAINTEXT_BYTES)?;
+        let body = base64url_decode_secret(&parsed.body, 0, RESPONSE_PLAINTEXT_BYTES)?;
         if body.len() > maximum_body_bytes {
             return Err(NativeDiagnostic::new("body_limit", false));
         }
@@ -747,7 +838,7 @@ mod tests {
     #[test]
     fn request_matches_the_reviewed_cave_producer_vector() {
         let authority = pinned_authority("http://127.0.0.1:3020");
-        let response_ikm =
+        let mut response_ikm =
             from_hex("404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f");
         let request_nonce: [u8; RAW_KEY_BYTES] =
             base64url_decode("oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8", 32, 32)
@@ -763,12 +854,13 @@ mod tests {
             "/api/client/v1/pairing/requests/11111111-1111-4111-8111-111111111111/exchange",
             &[],
             CaveHpkeAuthorization::PairingSecret("wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8"),
-            &response_ikm,
+            &mut response_ikm,
             request_nonce,
             1_787_672_578_109,
             &mut request_rng,
         )
         .unwrap();
+        assert!(response_ikm.iter().all(|byte| *byte == 0));
 
         assert_eq!(
             base64url_encode(
@@ -816,7 +908,7 @@ mod tests {
         let first_response = tauri::async_runtime::block_on(fetch(&authority, &first));
         let opened = tauri::async_runtime::block_on(first.open(first_response, 1_024)).unwrap();
         assert_eq!(opened.status_code, 200);
-        assert_eq!(opened.body, br#"{"data":{"familiars":[]}}"#);
+        assert_eq!(opened.body.as_slice(), br#"{"data":{"familiars":[]}}"#);
 
         let second_response = tauri::async_runtime::block_on(fetch(&authority, &second));
         assert_eq!(
