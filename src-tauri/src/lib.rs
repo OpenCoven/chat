@@ -302,6 +302,20 @@ mod smoke_tests {
         }
     }
 
+    #[derive(Default)]
+    struct PanicOnceCoven {
+        calls: AtomicUsize,
+    }
+
+    impl CovenHealth for PanicOnceCoven {
+        fn health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("secret producer panic");
+            }
+            Ok(CovenHealthResult { status: "ok" })
+        }
+    }
+
     struct SlowCoven;
 
     impl CovenHealth for SlowCoven {
@@ -472,6 +486,26 @@ mod smoke_tests {
             serde_json::to_value(CovenHealthResult { status: "ok" }).unwrap(),
             json!({ "status": "ok" })
         );
+    }
+
+    #[test]
+    fn coven_health_recovers_worker_capacity_after_a_producer_panic() {
+        let health = Arc::new(PanicOnceCoven::default());
+        let state = NativeConnectionState::with_test_coven_health(health.clone());
+
+        let diagnostic = tauri::async_runtime::block_on(state.coven_health()).unwrap_err();
+        assert_eq!(
+            serde_json::to_value(diagnostic).unwrap(),
+            json!({
+                "code": "service_unavailable",
+                "retryable": true,
+            })
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(state.coven_health()),
+            Ok(CovenHealthResult { status: "ok" })
+        );
+        assert_eq!(health.calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
@@ -25,7 +25,6 @@ pub(crate) trait CovenHealth: Send + Sync {
 #[derive(Default)]
 pub(crate) struct NativeCovenHealthExecutor {
     busy: Arc<AtomicBool>,
-    worker: Arc<Mutex<()>>,
 }
 
 impl NativeCovenHealthExecutor {
@@ -52,10 +51,6 @@ impl NativeCovenHealthExecutor {
             }
 
             let _busy = BusyReset(Arc::clone(&executor.busy));
-            let _worker = executor
-                .worker
-                .lock()
-                .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
             health.health()
         })
         .await
