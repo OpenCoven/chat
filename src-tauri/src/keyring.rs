@@ -1161,6 +1161,8 @@ mod tests {
                 Err(KeyringError::Failure)
             ));
         }
+    }
+
     #[cfg(feature = "phase1-conformance")]
     #[test]
     fn missing_keychain_trust_preset_rejects_before_provider_access() {
