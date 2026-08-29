@@ -45,6 +45,36 @@ function firstElement<T>(values: readonly T[], label: string): T {
   return value;
 }
 
+function conversation(id: string, title: string) {
+  return {
+    id,
+    familiarId: 'familiar-1',
+    title,
+    updatedAt: '2026-08-25T00:00:00.000Z',
+  };
+}
+
+function message(id: string, conversationId: string, text: string) {
+  return {
+    id,
+    conversationId,
+    parentId: null,
+    role: 'assistant' as const,
+    text,
+    createdAt: '2026-08-25T00:00:00.000Z',
+    attachmentCount: 0,
+    toolCount: 0,
+  };
+}
+
+async function expectInvalidPaginationWithoutCursor(...cursors: readonly string[]) {
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Cave returned invalid response.');
+  for (const cursor of cursors) {
+    expect(alert).not.toHaveTextContent(cursor);
+  }
+}
+
 function makeQueryAdapter(overrides: Partial<QueryAdapter> = {}): QueryAdapter {
   return {
     listFamiliars: vi
@@ -282,6 +312,7 @@ describe('ChatShell', () => {
       .mockResolvedValueOnce(okPage([conversationOne], { next: 'cursor-page-2', hasMore: true }))
       .mockResolvedValueOnce(
         okPage([conversationOneUpdated, conversationTwo], {
+          current: 'cursor-page-2',
           next: 'cursor-page-3',
           hasMore: false,
         }),
@@ -311,6 +342,270 @@ describe('ChatShell', () => {
     expect(
       screen.queryByRole('button', { name: 'Load more conversations' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('rejects an A -> B -> A conversation cursor cycle', async () => {
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          current: 'cursor-root',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: 'cursor-a',
+          next: 'cursor-b',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-3', 'Third thread')], {
+          current: 'cursor-b',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await screen.findByRole('option', { name: /First thread/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+    await waitFor(() => {
+      expect(listConversations).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('button', { name: 'Load more conversations' })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+    await expectInvalidPaginationWithoutCursor('cursor-a', 'cursor-b');
+    expect(listConversations).toHaveBeenCalledTimes(3);
+    expect(
+      screen.queryByRole('button', { name: 'Load more conversations' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a message cursor whose next value equals its current value', async () => {
+    const listMessages = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([message('message-1', 'conversation-1', 'First reply')], {
+          current: 'messages-root',
+          next: 'messages-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([message('message-2', 'conversation-1', 'Second reply')], {
+          current: 'messages-a',
+          next: 'messages-a',
+          hasMore: true,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listMessages })} />);
+
+    await screen.findByText('First reply');
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more messages' }));
+
+    await expectInvalidPaginationWithoutCursor('messages-a');
+    expect(listMessages).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: 'Load more messages' })).not.toBeInTheDocument();
+  });
+
+  it('rejects a paginated response with hasMore but no next cursor', async () => {
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          current: 'cursor-root',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: 'cursor-a',
+          hasMore: true,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await screen.findByRole('option', { name: /First thread/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+
+    await expectInvalidPaginationWithoutCursor('cursor-a');
+    expect(listConversations).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole('button', { name: 'Load more conversations' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a response current cursor that does not match the requested message cursor', async () => {
+    const listMessages = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([message('message-1', 'conversation-1', 'First reply')], {
+          current: 'messages-root',
+          next: 'messages-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([message('message-2', 'conversation-1', 'Second reply')], {
+          current: 'messages-b',
+          hasMore: false,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listMessages })} />);
+
+    await screen.findByText('First reply');
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more messages' }));
+
+    await expectInvalidPaginationWithoutCursor('messages-a', 'messages-b');
+    expect(listMessages).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: 'Load more messages' })).not.toBeInTheDocument();
+  });
+
+  it('allows eight conversation pages and rejects the ninth before fetching it', async () => {
+    const pages = Array.from({ length: 8 }, (_, index) =>
+      okPage([conversation(`conversation-${index + 1}`, `Thread ${index + 1}`)], {
+        current: index === 0 ? 'cursor-root' : `cursor-${index}`,
+        next: `cursor-${index + 1}`,
+        hasMore: true,
+      }),
+    );
+    const listConversations = vi.fn().mockImplementation(() => {
+      const page = pages[listConversations.mock.calls.length - 1];
+      if (page === undefined) {
+        throw new Error('Unexpected ninth conversation page fetch.');
+      }
+      return Promise.resolve(page);
+    });
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await screen.findByRole('option', { name: /Thread 1/ });
+    for (let expectedCalls = 2; expectedCalls <= 8; expectedCalls += 1) {
+      fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+      await waitFor(() => {
+        expect(listConversations).toHaveBeenCalledTimes(expectedCalls);
+        expect(screen.getByRole('button', { name: 'Load more conversations' })).toBeEnabled();
+      });
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+    await expectInvalidPaginationWithoutCursor('cursor-8');
+    expect(listConversations).toHaveBeenCalledTimes(8);
+    expect(
+      screen.queryByRole('button', { name: 'Load more conversations' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('resets the conversation walk after an explicit reconciliation action', async () => {
+    const onReconcile = vi.fn();
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          current: 'cursor-root',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: 'cursor-a',
+          next: 'cursor-b',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce({ status: 'reconcile_required' as const })
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-3', 'After repair')], {
+          current: 'cursor-b',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      );
+
+    render(
+      <ChatShell
+        queryAdapter={makeQueryAdapter({ listConversations })}
+        onReconcile={onReconcile}
+      />,
+    );
+
+    await screen.findByRole('option', { name: /First thread/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+    await screen.findByRole('option', { name: /Second thread/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repair Cave access' }));
+    expect(onReconcile).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+    expect(await screen.findByRole('option', { name: /After repair/ })).toBeVisible();
+    expect(listConversations).toHaveBeenCalledTimes(4);
+    expect(screen.queryByText('Cave returned invalid response.')).not.toBeInTheDocument();
+  });
+
+  it('resets the conversation walk when a fresh root load starts', async () => {
+    const firstListConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First root')], {
+          current: 'cursor-root',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'First page two')], {
+          current: 'cursor-a',
+          next: 'cursor-b',
+          hasMore: true,
+        }),
+      );
+    const secondListConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-3', 'Second root')], {
+          current: 'cursor-root',
+          next: 'cursor-a',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-4', 'Second page two')], {
+          current: 'cursor-a',
+          hasMore: false,
+        }),
+      );
+    const { rerender } = render(
+      <ChatShell queryAdapter={makeQueryAdapter({ listConversations: firstListConversations })} />,
+    );
+
+    await screen.findByRole('option', { name: /First root/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+    await screen.findByRole('option', { name: /First page two/ });
+
+    rerender(
+      <ChatShell queryAdapter={makeQueryAdapter({ listConversations: secondListConversations })} />,
+    );
+
+    await screen.findByRole('option', { name: /Second root/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+    expect(await screen.findByRole('option', { name: /Second page two/ })).toBeVisible();
+    expect(secondListConversations).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Cave returned invalid response.')).not.toBeInTheDocument();
   });
 
   it('does not claim there are no conversations when a filtered page is empty but hasMore is true', async () => {
@@ -444,5 +739,61 @@ describe('ChatShell', () => {
     expect(screen.getByText('Second reply')).toBeVisible();
     expect(screen.queryByText('First reply page two')).not.toBeInTheDocument();
     expect(screen.queryByText('First reply')).not.toBeInTheDocument();
+  });
+
+  it('resets the message walk after the selected conversation changes', async () => {
+    const firstConversationRoot = okPage(
+      [message('message-1', 'conversation-1', 'First root reply')],
+      {
+        current: 'messages-root',
+        next: 'messages-a',
+        hasMore: true,
+      },
+    );
+    const firstConversationPageTwo = okPage(
+      [message('message-2', 'conversation-1', 'First page two reply')],
+      {
+        current: 'messages-a',
+        next: 'messages-b',
+        hasMore: true,
+      },
+    );
+    const listMessages = vi.fn().mockImplementation((conversationId: string, options?: object) => {
+      if (conversationId === 'conversation-2') {
+        return Promise.resolve(
+          okPage([message('message-3', 'conversation-2', 'Second conversation reply')]),
+        );
+      }
+      return Promise.resolve(
+        options === undefined ? firstConversationRoot : firstConversationPageTwo,
+      );
+    });
+    const adapter = makeQueryAdapter({
+      listConversations: vi
+        .fn()
+        .mockResolvedValue(
+          okPage([
+            conversation('conversation-1', 'First thread'),
+            conversation('conversation-2', 'Second thread'),
+          ]),
+        ),
+      listMessages,
+    });
+
+    render(<ChatShell queryAdapter={adapter} />);
+
+    await screen.findByText('First root reply');
+    fireEvent.click(screen.getByRole('button', { name: 'Load more messages' }));
+    await screen.findByText('First page two reply');
+
+    fireEvent.click(screen.getByRole('option', { name: /Second thread/ }));
+    await screen.findByText('Second conversation reply');
+    fireEvent.click(screen.getByRole('option', { name: /First thread/ }));
+    await screen.findByText('First root reply');
+    fireEvent.click(screen.getByRole('button', { name: 'Load more messages' }));
+
+    expect(await screen.findByText('First page two reply')).toBeVisible();
+    expect(screen.queryByText('Cave returned invalid response.')).not.toBeInTheDocument();
+    expect(listMessages).toHaveBeenCalledTimes(5);
   });
 });

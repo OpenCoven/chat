@@ -190,6 +190,7 @@ function ConnectedProductionApp({
   return (
     <ConnectionGate controller={controller} state={connectionState}>
       <ChatShell
+        key={connectionState.state === 'ready' ? connectionState.caveInstanceId : 'not-ready'}
         queryAdapter={queryAdapter}
         onForgetCredential={() => {
           void controller.forgetCredential();
