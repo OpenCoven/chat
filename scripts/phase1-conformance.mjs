@@ -653,33 +653,27 @@ export async function retryCaveConformancePackage(runAttempt, cleanBuildOutput) 
 }
 
 async function packageLockedArtifacts(artifactRoot, roots, environment) {
+  await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
+  await retryCaveConformancePackage(
+    () =>
+      runCommand(
+        artifactRoot,
+        'Cave conformance package',
+        'corepack',
+        ['pnpm@10.34.0', 'build:conformance'],
+        {
+          cwd: roots.caveRoot,
+          env: environment,
+        },
+      ),
+    () => rmSync(resolve(roots.caveRoot, '.next'), { recursive: true, force: true }),
+  );
+
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
   await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
     cwd: roots.chatRoot,
     env: environment,
   });
-  const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
-  mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
-  await runCommand(
-    artifactRoot,
-    'Chat native RPC package',
-    'cargo',
-    [
-      'build',
-      '--locked',
-      '--manifest-path',
-      resolve(roots.chatRoot, 'src-tauri', 'Cargo.toml'),
-      '--features',
-      'phase1-conformance',
-      '--bin',
-      'phase1-native-rpc',
-    ],
-    {
-      cwd: roots.chatRoot,
-      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
-      timeoutMs: cargoBuildTimeoutMs,
-    },
-  );
 
   await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK');
   const sdkTarballsRoot = resolve(artifactRoot.rootPath, 'packages', 'sdk');
@@ -746,20 +740,27 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
     },
   );
 
-  await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await retryCaveConformancePackage(
-    () =>
-      runCommand(
-        artifactRoot,
-        'Cave conformance package',
-        'corepack',
-        ['pnpm@10.34.0', 'build:conformance'],
-        {
-          cwd: roots.caveRoot,
-          env: environment,
-        },
-      ),
-    () => rmSync(resolve(roots.caveRoot, '.next'), { recursive: true, force: true }),
+  const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
+  mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
+  await runCommand(
+    artifactRoot,
+    'Chat native RPC package',
+    'cargo',
+    [
+      'build',
+      '--locked',
+      '--manifest-path',
+      resolve(roots.chatRoot, 'src-tauri', 'Cargo.toml'),
+      '--features',
+      'phase1-conformance',
+      '--bin',
+      'phase1-native-rpc',
+    ],
+    {
+      cwd: roots.chatRoot,
+      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
+      timeoutMs: cargoBuildTimeoutMs,
+    },
   );
 
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
