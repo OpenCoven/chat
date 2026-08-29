@@ -52,6 +52,7 @@ export function assertCompatibilityFailure(
   error: { code?: string } | null | undefined,
   preset: string,
 ): { code: 'incompatible_version' };
+export function assertNativeMissingKeychainResponses(responses: unknown[]): unknown[];
 export class CommandExecutionError extends Error {
   label: string;
   result: unknown;

@@ -239,6 +239,39 @@ export function assertCompatibilityFailure(error, preset) {
   return { code };
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJson);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalJson(value[key])]),
+    );
+  }
+  return value;
+}
+
+export function assertNativeMissingKeychainResponses(responses) {
+  const expected = [
+    {
+      id: 'installation',
+      ok: false,
+      error: { code: 'secure_store_unavailable', retryable: true },
+    },
+    {
+      id: 'shutdown',
+      ok: true,
+      result: { status: 'shutting_down' },
+    },
+  ];
+  if (JSON.stringify(canonicalJson(responses)) !== JSON.stringify(canonicalJson(expected))) {
+    throw new Error('native missing-keychain-trust preset returned an unsafe response');
+  }
+  return responses;
+}
+
 function makeAssertion(id, status, diagnosticId) {
   return {
     id,
@@ -1322,6 +1355,12 @@ async function runNativeMissingKeychainTrustScenario(
     .filter(Boolean)
     .map((line) => JSON.parse(line));
   const unchanged = JSON.stringify(readdirSync(trustHome)) === JSON.stringify(beforeEntries);
+  let responsesValid = true;
+  try {
+    assertNativeMissingKeychainResponses(responses);
+  } catch {
+    responsesValid = false;
+  }
   if (
     terminationReason !== undefined ||
     killError !== undefined ||
@@ -1331,19 +1370,7 @@ async function runNativeMissingKeychainTrustScenario(
     stderrText.includes(canary) ||
     stdoutText.includes(canary) ||
     !unchanged ||
-    JSON.stringify(responses) !==
-      JSON.stringify([
-        {
-          id: 'installation',
-          ok: false,
-          error: { code: 'secure_store_unavailable', retryable: true },
-        },
-        {
-          id: 'shutdown',
-          ok: true,
-          result: { status: 'shutting_down' },
-        },
-      ])
+    !responsesValid
   ) {
     throw new Error(
       `native missing-keychain-trust preset returned an unsafe result${

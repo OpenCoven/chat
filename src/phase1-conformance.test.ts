@@ -10,6 +10,7 @@ import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret
 import {
   assertCompatibilityFailure,
   assertExactAssertionResults,
+  assertNativeMissingKeychainResponses,
   assertPairingStatus,
   buildPhase1Report,
   CommandExecutionError,
@@ -204,6 +205,23 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(() => assertCompatibilityFailure(undefined, 'api-major')).toThrow(
       /api-major preset did not produce incompatible_version/,
     );
+  });
+
+  test('compares native missing-keychain responses structurally instead of by key order', () => {
+    expect(
+      assertNativeMissingKeychainResponses([
+        {
+          error: { retryable: true, code: 'secure_store_unavailable' },
+          ok: false,
+          id: 'installation',
+        },
+        {
+          result: { status: 'shutting_down' },
+          ok: true,
+          id: 'shutdown',
+        },
+      ]),
+    ).toHaveLength(2);
   });
 
   test('observes a native RPC child that closes synchronously during shutdown', async () => {
