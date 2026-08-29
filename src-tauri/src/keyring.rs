@@ -125,7 +125,32 @@ pub(crate) trait CredentialCustody: Send + Sync {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct NativeKeyring;
+pub(crate) struct NativeKeyring {
+    #[cfg(feature = "phase1-conformance")]
+    provider_preset: Option<NativeProviderPreset>,
+}
+
+#[cfg(feature = "phase1-conformance")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeProviderPreset {
+    MissingKeychainTrust,
+}
+
+#[cfg(feature = "phase1-conformance")]
+impl NativeKeyring {
+    pub(crate) fn with_provider_preset(preset: NativeProviderPreset) -> Self {
+        Self {
+            provider_preset: Some(preset),
+        }
+    }
+
+    fn reject_provider_if_configured(&self) -> Result<(), KeyringError> {
+        match self.provider_preset {
+            Some(NativeProviderPreset::MissingKeychainTrust) => Err(KeyringError::Unavailable),
+            None => Ok(()),
+        }
+    }
+}
 
 #[cfg(unix)]
 fn mutation_lock() -> &'static Mutex<()> {
@@ -668,6 +693,8 @@ fn parse_stored_credential_entry(
 
 impl CredentialCustody for NativeKeyring {
     fn installation_id(&self) -> Result<String, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
         let _guard = acquire_mutation_lock()?;
         let entry = Self::installation_id_entry()?;
         match entry.get_secret() {
@@ -699,6 +726,8 @@ impl CredentialCustody for NativeKeyring {
         instance_id: &str,
         origin: &str,
     ) -> Result<CredentialSlot, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
         validate_credential_origin(origin)?;
         let _guard = acquire_mutation_lock()?;
         let entry = Self::credential_entry(instance_id)?;
@@ -732,6 +761,8 @@ impl CredentialCustody for NativeKeyring {
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
         validate_credential_origin(origin)?;
         if let Some(expected_credential) = expected_credential {
             validate_credential_origin(&expected_credential.origin)?;
@@ -785,6 +816,8 @@ impl CredentialCustody for NativeKeyring {
         bearer: &str,
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
         validate_credential_origin(origin)?;
         validate_credential_origin(&expected_stale_credential.origin)?;
         if bearer.is_empty()
@@ -831,6 +864,8 @@ impl CredentialCustody for NativeKeyring {
         origin: &str,
         expected_credential: &Credential,
     ) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
         validate_credential_origin(origin)?;
         validate_credential_origin(&expected_credential.origin)?;
         let _guard = acquire_mutation_lock()?;
@@ -1126,6 +1161,19 @@ mod tests {
                 Err(KeyringError::Failure)
             ));
         }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn missing_keychain_trust_preset_rejects_before_provider_access() {
+        let keyring = super::NativeKeyring::with_provider_preset(
+            super::NativeProviderPreset::MissingKeychainTrust,
+        );
+
+        assert!(matches!(
+            super::CredentialCustody::installation_id(&keyring),
+            Err(KeyringError::Unavailable)
+        ));
     }
 
     #[test]
