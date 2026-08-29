@@ -13,6 +13,7 @@ import {
   assertNativeMissingKeychainResponses,
   assertPairingStatus,
   buildPhase1Report,
+  classifyCavePackageFailure,
   CommandExecutionError,
   cargoBuildTimeoutMs,
   NativeRpcClient,
@@ -350,5 +351,22 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('allows cold isolated Cargo builds to exceed the general command deadline', () => {
     expect(cargoBuildTimeoutMs).toBeGreaterThan(20 * 60_000);
+  });
+
+  test.each([
+    ['timeout while receiving message from process', 'turbopack-plugin-timeout'],
+    ['FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory', 'memory-exhausted'],
+    ['write failed: ENOSPC', 'disk-exhausted'],
+    ['command terminated by SIGKILL', 'process-killed'],
+    ['TurbopackInternalError: worker panicked', 'compiler-crash'],
+    ['Build worker exited unexpectedly', 'worker-exited'],
+    ['Failed to collect page data for /api/client/v1/health', 'page-data-failed'],
+    ['Failed to compile.', 'compile-failed'],
+  ])('classifies Cave package failures without retaining output', (stderr, expected) => {
+    expect(classifyCavePackageFailure({ stdout: '', stderr })).toBe(expected);
+  });
+
+  test('does not classify unknown Cave package output', () => {
+    expect(classifyCavePackageFailure({ stdout: 'arbitrary private output', stderr: '' })).toBeUndefined();
   });
 });

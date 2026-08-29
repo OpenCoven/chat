@@ -59,11 +59,19 @@ const ownedProcessGroupsSupported = process.platform !== 'win32';
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
+  'compile-failed',
+  'compiler-crash',
+  'disk-exhausted',
+  'memory-exhausted',
+  'page-data-failed',
+  'process-killed',
   'spawn',
   'tracking',
   'stdout-limit',
   'stderr-limit',
   'timeout',
+  'turbopack-plugin-timeout',
+  'worker-exited',
 ]);
 
 function killUntrackedOwnedChild(child) {
@@ -91,6 +99,24 @@ export class CommandExecutionError extends Error {
     this.label = label;
     this.result = result;
   }
+}
+
+export function classifyCavePackageFailure(result) {
+  const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+  const classifications = [
+    [/timeout while receiving message from process/iu, 'turbopack-plugin-timeout'],
+    [
+      /heap out of memory|allocation failed|javascript heap|fatal process out of memory/iu,
+      'memory-exhausted',
+    ],
+    [/no space left on device|\bENOSPC\b/u, 'disk-exhausted'],
+    [/\b(?:SIGKILL|Killed: 9|signal 9)\b/u, 'process-killed'],
+    [/\b(?:TurbopackInternalError|panic|segmentation fault|bus error)\b/iu, 'compiler-crash'],
+    [/\b(?:static|build) worker exited\b/iu, 'worker-exited'],
+    [/failed to collect page data/iu, 'page-data-failed'],
+    [/failed to compile/iu, 'compile-failed'],
+  ];
+  return classifications.find(([pattern]) => pattern.test(output))?.[1];
 }
 
 function requireString(value, label) {
@@ -479,6 +505,9 @@ function runCommand(
       if (code === 0) {
         resolveRun(result);
       } else {
+        if (label === 'Cave conformance package') {
+          result.reason = classifyCavePackageFailure(result);
+        }
         rejectRun(new CommandExecutionError(label, result));
       }
     });

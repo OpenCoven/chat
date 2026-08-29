@@ -58,6 +58,10 @@ export class CommandExecutionError extends Error {
   result: unknown;
   constructor(label: string, result: unknown);
 }
+export function classifyCavePackageFailure(result: {
+  stdout?: string;
+  stderr?: string;
+}): string | undefined;
 export class NativeRpcClient {
   constructor(child: unknown, options?: { shutdownTimeoutMs?: number });
   close(): Promise<void>;
