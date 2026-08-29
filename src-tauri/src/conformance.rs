@@ -65,6 +65,9 @@ enum RpcCommand {
         handle: String,
         operation: NativeOperationInput,
     },
+    CovenHealth {
+        operation: NativeOperationInput,
+    },
     CavePairingCreate {
         handle: String,
         request: Value,
@@ -127,6 +130,7 @@ impl RpcCommand {
             self,
             Self::CaveReadDiscovery { .. }
                 | Self::CaveHealth { .. }
+                | Self::CovenHealth { .. }
                 | Self::CavePairingCreate { .. }
                 | Self::CavePairingPoll { .. }
                 | Self::CavePairingExchange { .. }
@@ -495,6 +499,16 @@ impl RpcRuntime {
                     operation_state.cave_health(handle).await
                 }))?
             }
+            RpcCommand::CovenHealth { operation } => {
+                let runner = self.state.clone();
+                let operation_state = runner.clone();
+                value_from(tauri::async_runtime::block_on(
+                    runner.run_operation(
+                        operation,
+                        async move { operation_state.coven_health().await },
+                    ),
+                )?)?
+            }
             RpcCommand::CavePairingCreate {
                 handle,
                 request,
@@ -763,6 +777,12 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             expect_exact_args(object, &["handle", "operation"])?;
             Ok(RpcCommand::CaveHealth {
                 handle: required_string(object, "handle")?,
+                operation: required_operation(object)?,
+            })
+        }
+        "coven_health" => {
+            expect_exact_args(object, &["operation"])?;
+            Ok(RpcCommand::CovenHealth {
                 operation: required_operation(object)?,
             })
         }
@@ -1175,9 +1195,9 @@ mod tests {
     };
 
     use super::{
-        parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher, RpcRuntime,
-        SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NODE_PATH_ENV,
-        INVALID_REQUEST_ID, MAX_LINE_BYTES,
+        parse_command, parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher,
+        RpcCommand, RpcRuntime, SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID,
+        CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
         cave::CaveLauncher,
@@ -1191,6 +1211,59 @@ mod tests {
     const FIRST_OPERATION_ATTEMPT: &str = "op1-1787900000000-1-00000000000000000000000000000000";
     const SECOND_OPERATION_ATTEMPT: &str = "op1-1787900000000-2-11111111111111111111111111111111";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn parses_the_bounded_coven_health_rpc_command() {
+        let command = parse_command(
+            "coven_health",
+            Some(json!({
+                "operation": {
+                    "attemptId": FIRST_OPERATION_ATTEMPT,
+                    "timeoutMs": 100
+                }
+            })),
+        )
+        .expect("coven health should be registered");
+
+        assert!(matches!(command, RpcCommand::CovenHealth { .. }));
+    }
+
+    #[test]
+    fn dispatches_coven_health_through_the_bounded_rpc_operation() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::var_os("COVEN_HOME");
+        env::set_var(
+            "COVEN_HOME",
+            env::current_dir().unwrap().join("missing-coven-health"),
+        );
+        let mut runtime = RpcRuntime::new();
+
+        let response = runtime.process_line(
+            format!(
+                r#"{{"id":"coven","command":"coven_health","args":{{"operation":{{"attemptId":"{FIRST_OPERATION_ATTEMPT}","timeoutMs":100}}}}}}"#
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            response,
+            json!({
+                "id": "coven",
+                "ok": false,
+                "error": {
+                    "code": "reconcile_required",
+                    "retryable": false
+                }
+            })
+        );
+        match original {
+            Some(value) => env::set_var("COVEN_HOME", value),
+            None => env::remove_var("COVEN_HOME"),
+        }
+    }
 
     struct ScopedCaveHome(Option<std::ffi::OsString>);
 

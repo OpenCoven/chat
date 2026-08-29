@@ -10,6 +10,7 @@
     "allow-cave-cancel-operation",
     "allow-cave-launch",
     "allow-cave-health",
+    "allow-coven-health",
     "allow-cave-pairing-create",
     "allow-cave-pairing-poll",
     "allow-cave-pairing-exchange",

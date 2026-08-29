@@ -7,6 +7,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "cave_cancel_operation",
     "cave_launch",
     "cave_health",
+    "coven_health",
     "cave_pairing_create",
     "cave_pairing_poll",
     "cave_pairing_exchange",

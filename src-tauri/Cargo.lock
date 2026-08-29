@@ -596,6 +596,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-oid"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
 name = "cookie"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -643,6 +649,21 @@ dependencies = [
  "bitflags 2.13.1",
  "core-foundation",
  "libc",
+]
+
+[[package]]
+name = "coven-client"
+version = "0.1.0"
+source = "git+https://github.com/OpenCoven/coven.git?rev=721437b84026c042e431b0882dcd14fdb29ac07d#721437b84026c042e431b0882dcd14fdb29ac07d"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "siphasher",
+ "socket2",
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -918,6 +939,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -2705,6 +2727,7 @@ dependencies = [
  "apple-native-keyring-store",
  "async-trait",
  "base64 0.22.1",
+ "coven-client",
  "fs2",
  "getrandom 0.4.3",
  "hpke",

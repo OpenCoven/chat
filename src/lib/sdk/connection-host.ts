@@ -8,8 +8,10 @@ import type { OperationOptions } from '@opencoven/sdk-core/browser';
 
 import { nativeUnavailable } from './diagnostics';
 import {
+  type CovenHealthResult,
   createCaveManagedCredentialTransport,
   createCaveManagedDiscoveryBinding,
+  invokeCovenHealth,
   invokeNative,
   type NativeSdkInvoke,
 } from './native-boundary';
@@ -23,6 +25,7 @@ export type CaveConnectionHost = Readonly<{
   >;
   launch: () => Promise<void>;
   resetPairing: () => Promise<void>;
+  covenHealth: (options?: OperationOptions) => Promise<CovenHealthResult>;
 }>;
 
 function isPairingResetResult(value: unknown): boolean {
@@ -74,5 +77,6 @@ export function createCaveConnectionHost(invoke: NativeSdkInvoke): CaveConnectio
         throw nativeUnavailable();
       }
     },
+    covenHealth: (options = {}) => invokeCovenHealth(invoke, options),
   });
 }
