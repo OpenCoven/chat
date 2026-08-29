@@ -413,11 +413,7 @@ function assertNoReplacementRefs(repositoryRoot, context) {
 
   if (count > 0) {
     throw new Error(
-      `${context.label} has ${formatBoundedCount(
-        count,
-        'replacement ref',
-        'replacement refs',
-      )}.`,
+      `${context.label} has ${formatBoundedCount(count, 'replacement ref', 'replacement refs')}.`,
     );
   }
 }
@@ -461,11 +457,7 @@ function throwUnsafeLocalMetadata(label, metadataKind) {
 
 function readLocalMetadata(repositoryRoot, context, gitPathName, metadataKind) {
   const { label } = context;
-  const gitPathOutput = runGit(
-    repositoryRoot,
-    ['rev-parse', '--git-path', gitPathName],
-    context,
-  );
+  const gitPathOutput = runGit(repositoryRoot, ['rev-parse', '--git-path', gitPathName], context);
   let gitPath = gitPathOutput.endsWith('\n') ? gitPathOutput.slice(0, -1) : gitPathOutput;
 
   if (gitPath.endsWith('\r')) {
@@ -611,12 +603,7 @@ function collectTrackedFilterAttributes(
 ) {
   for (let offset = 0; offset < trackedPaths.length; offset += trackedAttributeBatchSize) {
     const pathBatch = trackedPaths.slice(offset, offset + trackedAttributeBatchSize);
-    const output = runGit(
-      repositoryRoot,
-      checkAttributeArgs,
-      context,
-      `${pathBatch.join('\0')}\0`,
-    );
+    const output = runGit(repositoryRoot, checkAttributeArgs, context, `${pathBatch.join('\0')}\0`);
     const fields = output.split('\0');
 
     if (fields.at(-1) === '') {
@@ -715,13 +702,7 @@ function assertTrackedPathLimits(entries, context) {
 function readTrackedEntries(repositoryRoot, context) {
   const { label } = context;
   const indexEntries = parseIndexEntries(
-    runGit(
-      repositoryRoot,
-      ['ls-files', '--cached', '--stage', '-z'],
-      context,
-      undefined,
-      true,
-    ),
+    runGit(repositoryRoot, ['ls-files', '--cached', '--stage', '-z'], context, undefined, true),
     label,
   );
   assertTrackedPathLimits(indexEntries, context);
@@ -739,11 +720,7 @@ function readTrackedEntries(repositoryRoot, context) {
 
   if (submoduleCount > 0) {
     throw new Error(
-      `${label} has ${formatBoundedCount(
-        submoduleCount,
-        'submodule entry',
-        'submodule entries',
-      )}.`,
+      `${label} has ${formatBoundedCount(submoduleCount, 'submodule entry', 'submodule entries')}.`,
     );
   }
 
@@ -752,9 +729,7 @@ function readTrackedEntries(repositoryRoot, context) {
     label,
   );
   assertTrackedPathLimits(headEntries, context);
-  const objectIds = [
-    ...new Set([...indexEntries, ...headEntries].map((entry) => entry.objectId)),
-  ];
+  const objectIds = [...new Set([...indexEntries, ...headEntries].map((entry) => entry.objectId))];
 
   if (objectIds.length > 0) {
     const output = runGit(

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   assertExactAssertionResults,
+  assertPairingStatus,
   buildPhase1Report,
   parseArgs,
   parseCaveConformanceOutput,
@@ -132,5 +133,12 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(parsed.get('pairing.exchange')).toBe('failed');
     expect(parsed.get('reads.messages-canonical-conversation-id')).toBe('skipped');
     expect([...parsed.keys()].join(' ')).not.toContain('private detail');
+  });
+
+  test('accepts pairing denial as a successful status envelope', () => {
+    expect(assertPairingStatus({ status: 'denied' }, 'denied')).toEqual({ status: 'denied' });
+    expect(() => assertPairingStatus({ status: 'pending' }, 'denied')).toThrow(
+      /pairing status was pending instead of denied/,
+    );
   });
 });

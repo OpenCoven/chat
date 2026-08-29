@@ -18,7 +18,11 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 
-import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
+import {
+  cleanupOwnedTempRoot,
+  createOwnedShortTempDirectory,
+  createOwnedTempDirectory,
+} from './owned-temp-directory.mjs';
 
 const defaultTerminationGraceMs = 5_000;
 const noFollow = constants.O_NOFOLLOW ?? 0;
@@ -26,17 +30,19 @@ const noFollow = constants.O_NOFOLLOW ?? 0;
 function requireExactOptions(options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw new Error(
-      'Process-owned artifact root options must contain exactly prefix and optional terminationGraceMs.',
+      'Process-owned artifact root options must contain exactly prefix and optional terminationGraceMs or shortPath.',
     );
   }
 
   const keys = Object.keys(options);
   if (
     !keys.includes('prefix') ||
-    keys.some((key) => key !== 'prefix' && key !== 'terminationGraceMs')
+    keys.some(
+      (key) => key !== 'prefix' && key !== 'terminationGraceMs' && key !== 'shortPath',
+    )
   ) {
     throw new Error(
-      'Process-owned artifact root options must contain exactly prefix and optional terminationGraceMs.',
+      'Process-owned artifact root options must contain exactly prefix and optional terminationGraceMs or shortPath.',
     );
   }
 
@@ -44,10 +50,15 @@ function requireExactOptions(options) {
   if (!Number.isSafeInteger(terminationGraceMs) || terminationGraceMs <= 0) {
     throw new Error('Process-owned artifact root terminationGraceMs must be a positive integer.');
   }
+  const shortPath = options.shortPath ?? false;
+  if (typeof shortPath !== 'boolean') {
+    throw new Error('Process-owned artifact root shortPath must be a boolean.');
+  }
 
   return {
     prefix: options.prefix,
     terminationGraceMs,
+    shortPath,
   };
 }
 
@@ -247,8 +258,9 @@ async function terminateAndReapChild(child, terminationGraceMs) {
 }
 
 export function createProcessOwnedArtifactRoot(options) {
-  const { prefix, terminationGraceMs } = requireExactOptions(options);
-  const owned = createOwnedTempDirectory({ prefix: `${prefix}-${process.pid}` });
+  const { prefix, terminationGraceMs, shortPath } = requireExactOptions(options);
+  const createOwnedRoot = shortPath ? createOwnedShortTempDirectory : createOwnedTempDirectory;
+  const owned = createOwnedRoot({ prefix: `${prefix}-${process.pid}` });
   const trackedChildren = new Map();
   const cleanedChildren = [];
   const reapedChildren = [];

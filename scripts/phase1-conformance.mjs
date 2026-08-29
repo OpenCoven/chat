@@ -210,6 +210,14 @@ export function parseCaveConformanceOutput(output) {
   return assertions;
 }
 
+export function assertPairingStatus(value, expectedStatus) {
+  const status = value?.status;
+  if (status !== expectedStatus) {
+    throw new Error(`pairing status was ${status ?? 'missing'} instead of ${expectedStatus}`);
+  }
+  return value;
+}
+
 function makeAssertion(id, status, diagnosticId) {
   return {
     id,
@@ -1158,15 +1166,15 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         `/admin/pairing-requests/${created.requestId}/decision`,
         { decision: 'denied' },
       );
-      await rpc.error(
+      const denied = await rpc.ok(
         'cave_pairing_poll',
         {
           handle,
           requestId: created.requestId,
           operation: rpc.operation(),
         },
-        'pairing_denied',
       );
+      assertPairingStatus(denied, 'denied');
       addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
     } catch (error) {
       process.stderr.write(
@@ -1426,14 +1434,15 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
 }
 
 async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environment, results) {
-  const covenHome = resolve(artifactRoot.rootPath, 'cv');
+  const covenRoot = createProcessOwnedArtifactRoot({ prefix: 'p1cv', shortPath: true });
+  const covenHome = resolve(covenRoot.rootPath, 'cv');
   mkdirSync(covenHome, { recursive: true, mode: 0o700 });
   const child = spawn(covenBinaryPath, ['daemon', 'serve'], {
     env: { ...environment, COVEN_HOME: covenHome },
     stdio: ['ignore', 'ignore', 'ignore'],
   });
   await once(child, 'spawn');
-  artifactRoot.trackChild(child);
+  covenRoot.trackChild(child);
   try {
     let running = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1486,6 +1495,8 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
       'failed',
       'phase1.integration.coven-identity-failed',
     );
+  } finally {
+    await covenRoot.cleanup();
   }
 }
 

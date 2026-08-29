@@ -97,6 +97,20 @@ describe('process-owned artifact root', () => {
     expect(root.rootStamp).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  test.skipIf(process.platform === 'win32')(
+    'can create an owned short root for Unix socket authorities',
+    () => {
+      const root = createProcessOwnedArtifactRoot({
+        prefix: 'p1',
+        shortPath: true,
+      });
+      activeRoots.add(root);
+
+      expect(resolve(root.rootPath, 'cv', 'coven.sock').length).toBeLessThan(104);
+      expect(lstatSync(root.rootPath).mode & 0o777).toBe(0o700);
+    },
+  );
+
   test('rejects caller-selected cleanup roots and unsafe prefixes', () => {
     expect(() =>
       createProcessOwnedArtifactRoot({

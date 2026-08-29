@@ -439,10 +439,7 @@ describe('Phase 1 checkout verification', () => {
   gitTest('does not refresh the index or execute local hooks during verification', () => {
     const fixture = createCheckoutFixture();
     const repositoryRoot = fixture.roots.chatRoot;
-    const hooksPath = runGit(
-      ['config', '--local', '--get', 'core.hooksPath'],
-      repositoryRoot,
-    );
+    const hooksPath = runGit(['config', '--local', '--get', 'core.hooksPath'], repositoryRoot);
     const markerPath = resolve(createScratchRoot('post-index-change-canary'), 'hook-ran');
     const hookPath = resolve(hooksPath, 'post-index-change');
     writeFileSync(
@@ -1352,10 +1349,7 @@ setInterval(() => {}, 1_000);
   gitTest('bounds submodule diagnostics without disclosing index paths', () => {
     const fixture = createCheckoutFixture();
     const repositoryRoot = fixture.roots.chatRoot;
-    const secretPaths = Array.from(
-      { length: 101 },
-      (_, index) => `do-not-leak-submodule-${index}`,
-    );
+    const secretPaths = Array.from({ length: 101 }, (_, index) => `do-not-leak-submodule-${index}`);
     const indexInput = secretPaths
       .map((path) => `160000 ${fixture.revisions.sdk}\t${path}`)
       .join('\n');
@@ -1394,11 +1388,9 @@ setInterval(() => {}, 1_000);
             limits,
           }),
         () =>
-          phase1ConformanceTestOnly.assertPhase1CheckoutHeads(
-            fixture.lock,
-            fixture.roots,
-            { limits },
-          ),
+          phase1ConformanceTestOnly.assertPhase1CheckoutHeads(fixture.lock, fixture.roots, {
+            limits,
+          }),
       ]) {
         expect(verify).toThrow('chat checkout exceeds tracked path limits.');
       }
@@ -1450,9 +1442,7 @@ process.exit(result.status ?? 1);
         readFileSync(invocationMarker, 'utf8').split('\n').filter(Boolean).length,
       ).toBeGreaterThan(1);
       expect(
-        readdirSync(projectRoot).filter((entry) =>
-          entry.startsWith('.phase1-conformance-hooks-'),
-        ),
+        readdirSync(projectRoot).filter((entry) => entry.startsWith('.phase1-conformance-hooks-')),
       ).toEqual([]);
     },
     gitIntegrationTestTimeout,
