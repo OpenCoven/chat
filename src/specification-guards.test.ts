@@ -918,6 +918,9 @@ describe('Phase 1 specification guards', () => {
 
     expect(script).toContain("'build:conformance'");
     expect(script).not.toContain("'Cave release package', 'corepack', ['pnpm@10.34.0', 'build']");
+    expect(script.indexOf("'Cave conformance package'")).toBeLessThan(
+      script.indexOf("'Chat web package'"),
+    );
   });
 
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {

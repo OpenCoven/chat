@@ -663,33 +663,23 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
 }
 
 async function packageLockedArtifacts(artifactRoot, roots, environment) {
+  await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
+  await runCommand(
+    artifactRoot,
+    'Cave conformance package',
+    'corepack',
+    ['pnpm@10.34.0', 'build:conformance'],
+    {
+      cwd: roots.caveRoot,
+      env: environment,
+    },
+  );
+
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
   await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
     cwd: roots.chatRoot,
     env: environment,
   });
-  const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
-  mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
-  await runCommand(
-    artifactRoot,
-    'Chat native RPC package',
-    'cargo',
-    [
-      'build',
-      '--locked',
-      '--manifest-path',
-      resolve(roots.chatRoot, 'src-tauri', 'Cargo.toml'),
-      '--features',
-      'phase1-conformance',
-      '--bin',
-      'phase1-native-rpc',
-    ],
-    {
-      cwd: roots.chatRoot,
-      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
-      timeoutMs: cargoBuildTimeoutMs,
-    },
-  );
 
   await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK');
   const sdkTarballsRoot = resolve(artifactRoot.rootPath, 'packages', 'sdk');
@@ -756,15 +746,26 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
     },
   );
 
-  await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
+  const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
+  mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
   await runCommand(
     artifactRoot,
-    'Cave conformance package',
-    'corepack',
-    ['pnpm@10.34.0', 'build:conformance'],
+    'Chat native RPC package',
+    'cargo',
+    [
+      'build',
+      '--locked',
+      '--manifest-path',
+      resolve(roots.chatRoot, 'src-tauri', 'Cargo.toml'),
+      '--features',
+      'phase1-conformance',
+      '--bin',
+      'phase1-native-rpc',
+    ],
     {
-      cwd: roots.caveRoot,
-      env: environment,
+      cwd: roots.chatRoot,
+      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
+      timeoutMs: cargoBuildTimeoutMs,
     },
   );
 
