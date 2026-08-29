@@ -287,6 +287,8 @@ jobs:
           toolchain: 1.95.0
           components: clippy,rustfmt
       - run: rustup target add x86_64-pc-windows-gnu
+      - run: brew install mingw-w64
+      - run: command -v x86_64-w64-mingw32-windres
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
       - run: corepack pnpm cargo:check:windows-gnu

@@ -290,6 +290,8 @@ describe('Phase 1 specification guards', () => {
       '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
     );
     expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
+    expect(rustJob).toContain('- run: brew install mingw-w64');
+    expect(rustJob).toContain('- run: command -v x86_64-w64-mingw32-windres');
     expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
   });
 
