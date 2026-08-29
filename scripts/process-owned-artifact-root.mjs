@@ -37,9 +37,7 @@ function requireExactOptions(options) {
   const keys = Object.keys(options);
   if (
     !keys.includes('prefix') ||
-    keys.some(
-      (key) => key !== 'prefix' && key !== 'terminationGraceMs' && key !== 'shortPath',
-    )
+    keys.some((key) => key !== 'prefix' && key !== 'terminationGraceMs' && key !== 'shortPath')
   ) {
     throw new Error(
       'Process-owned artifact root options must contain exactly prefix and optional terminationGraceMs or shortPath.',

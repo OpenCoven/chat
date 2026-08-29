@@ -1179,14 +1179,11 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         `/admin/pairing-requests/${created.requestId}/decision`,
         { decision: 'denied' },
       );
-      const denied = await rpc.ok(
-        'cave_pairing_poll',
-        {
-          handle,
-          requestId: created.requestId,
-          operation: rpc.operation(),
-        },
-      );
+      const denied = await rpc.ok('cave_pairing_poll', {
+        handle,
+        requestId: created.requestId,
+        operation: rpc.operation(),
+      });
       assertPairingStatus(denied, 'denied');
       addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
     } catch (error) {
@@ -1394,9 +1391,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         ) {
           throw new Error('native credential did not request revocation reconciliation');
         }
-        await new Promise((resolveWait) =>
-          setTimeout(resolveWait, revocationConfirmationDelayMs),
-        );
+        await new Promise((resolveWait) => setTimeout(resolveWait, revocationConfirmationDelayMs));
         const rediscovery = await waitForDiscovery(rpc);
         handle = rediscovery.handle;
         await rpc.ok('cave_health', { handle, operation: rpc.operation() });
@@ -1496,19 +1491,17 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
     if (!running) {
       throw new Error('Coven daemon did not authenticate its same-user transport');
     }
-    await triggerAndWaitForChildClose(
-      child,
-      () =>
-        runCommand(
-          artifactRoot,
-          'Coven daemon authenticated stop',
-          covenBinaryPath,
-          ['daemon', 'stop'],
-          {
-            env: { ...environment, COVEN_HOME: covenHome },
-            timeoutMs: 10_000,
-          },
-        ),
+    await triggerAndWaitForChildClose(child, () =>
+      runCommand(
+        artifactRoot,
+        'Coven daemon authenticated stop',
+        covenBinaryPath,
+        ['daemon', 'stop'],
+        {
+          env: { ...environment, COVEN_HOME: covenHome },
+          timeoutMs: 10_000,
+        },
+      ),
     );
     addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
   } catch (error) {

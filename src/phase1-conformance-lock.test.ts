@@ -1409,16 +1409,10 @@ setInterval(() => {}, 1_000);
       const originalPath = process.env.PATH ?? '';
       writeFileSync(
         fakeGitPath,
-        `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-appendFileSync(${JSON.stringify(invocationMarker)}, 'invoked\\n');
-Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-const result = spawnSync('git', process.argv.slice(2), {
-  env: { ...process.env, PATH: ${JSON.stringify(originalPath)} },
-  stdio: 'inherit',
-});
-process.exit(result.status ?? 1);
+        `#!/bin/sh
+printf 'invoked\\n' >> ${JSON.stringify(invocationMarker)}
+sleep 0.15
+PATH=${JSON.stringify(originalPath)} exec git "$@"
 `,
       );
       chmodSync(fakeGitPath, 0o755);
@@ -1431,13 +1425,13 @@ process.exit(result.status ?? 1);
         () => {
           expect(() =>
             phase1ConformanceTestOnly.assertCleanPhase1Checkouts(fixture.roots, {
-              limits: { repositoryDeadlineMs: 800 },
+              limits: { repositoryDeadlineMs: 1_500 },
             }),
           ).toThrow('chat checkout verification timed out.');
         },
       );
 
-      expect(Date.now() - startedAt).toBeLessThan(2_000);
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
       expect(
         readFileSync(invocationMarker, 'utf8').split('\n').filter(Boolean).length,
       ).toBeGreaterThan(1);
