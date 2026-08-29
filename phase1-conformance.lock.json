@@ -6,7 +6,7 @@
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "163961f4e59cfdef51d2271fa98e7c514977203f"
+    "revision": "acc38488f00860d246c3c553375634d64806eabb"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
