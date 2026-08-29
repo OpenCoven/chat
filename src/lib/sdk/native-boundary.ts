@@ -38,12 +38,25 @@ export async function invokeNative(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<unknown> {
+  const result = await invokeRawNative(invoke, command, args);
+  return snapshotNativeSuccess(result);
+}
+
+async function invokeRawNative(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<unknown> {
   let result: unknown;
   try {
     result = await (args === undefined ? invoke(command) : invoke(command, args));
   } catch (error) {
     throw snapshotNativeDiagnostic(error);
   }
+  return result;
+}
+
+function snapshotNativeSuccess(result: unknown): unknown {
   try {
     return snapshotNativeResult(result);
   } catch {
@@ -195,6 +208,20 @@ async function invokeNativeOperation(
   command: string,
   args: Record<string, unknown> | undefined,
   context: OperationContext | undefined,
+): Promise<unknown>;
+async function invokeNativeOperation<T>(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args: Record<string, unknown> | undefined,
+  context: OperationContext | undefined,
+  validateRawResult: (result: unknown) => T,
+): Promise<T>;
+async function invokeNativeOperation(
+  invoke: NativeSdkInvoke,
+  command: string,
+  args: Record<string, unknown> | undefined,
+  context: OperationContext | undefined,
+  validateRawResult: (result: unknown) => unknown = snapshotNativeSuccess,
 ): Promise<unknown> {
   const attemptId = createAttemptId();
   const { deadline, signal } = validateOperationContext(context);
@@ -242,13 +269,17 @@ async function invokeNativeOperation(
       return await cancellation;
     }
     return await Promise.race([
-      invokeNative(invoke, command, {
-        ...args,
-        operation: {
-          attemptId,
-          timeoutMs,
+      invokeRawNative(
+        invoke,
+        command,
+        {
+          ...args,
+          operation: {
+            attemptId,
+            timeoutMs,
+          },
         },
-      }),
+      ).then(validateRawResult),
       cancellation,
     ]);
   } finally {
@@ -258,31 +289,24 @@ async function invokeNativeOperation(
 
 export type CovenHealthResult = Readonly<{ status: 'ok' }>;
 
-export async function invokeCovenHealth(
-  invoke: NativeSdkInvoke,
-  options: OperationOptions = {},
-): Promise<CovenHealthResult> {
-  const snapshot = await runOperation(
-    { system: 'coven', operation: 'health' },
-    options,
-    (context) => invokeNativeOperation(invoke, 'coven_health', undefined, context),
-  );
+function validateRawCovenHealthResult(result: unknown): CovenHealthResult {
   try {
     if (
-      typeof snapshot !== 'object' ||
-      snapshot === null ||
-      Array.isArray(snapshot) ||
-      Object.getPrototypeOf(snapshot) !== Object.prototype
+      typeof result !== 'object' ||
+      result === null ||
+      Array.isArray(result) ||
+      Object.getPrototypeOf(result) !== Object.prototype
     ) {
       return invalidCovenHealthResult();
     }
-    const descriptors = Object.getOwnPropertyDescriptors(snapshot);
+    const descriptors = Object.getOwnPropertyDescriptors(result);
     const keys = Reflect.ownKeys(descriptors);
     const status = descriptors.status;
     if (
       keys.length !== 1 ||
       keys[0] !== 'status' ||
       status === undefined ||
+      status.enumerable !== true ||
       !Object.hasOwn(status, 'value') ||
       status.value !== 'ok'
     ) {
@@ -292,6 +316,24 @@ export async function invokeCovenHealth(
     return invalidCovenHealthResult();
   }
   return Object.freeze({ status: 'ok' });
+}
+
+export async function invokeCovenHealth(
+  invoke: NativeSdkInvoke,
+  options: OperationOptions = {},
+): Promise<CovenHealthResult> {
+  return await runOperation(
+    { system: 'coven', operation: 'health' },
+    options,
+    (context) =>
+      invokeNativeOperation(
+        invoke,
+        'coven_health',
+        undefined,
+        context,
+        validateRawCovenHealthResult,
+      ),
+  );
 }
 
 function canonicalCursor(value: unknown): value is string {

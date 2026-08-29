@@ -82,6 +82,7 @@ pnpm exec playwright install chromium
 | `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
+| `pnpm cargo:check:windows-gnu` | Check all Rust targets for `x86_64-pc-windows-gnu` |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
 | `pnpm cargo:test` | Run Rust smoke tests |
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |

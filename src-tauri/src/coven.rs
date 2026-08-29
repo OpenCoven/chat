@@ -1,4 +1,12 @@
-use std::{env, ffi::OsString, path::PathBuf, sync::Arc};
+use std::{
+    env,
+    ffi::OsString,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use coven_client::{ClientError, DaemonClient, DaemonEndpoint};
 use serde::Serialize;
@@ -12,6 +20,47 @@ pub struct CovenHealthResult {
 
 pub(crate) trait CovenHealth: Send + Sync {
     fn health(&self) -> NativeResult<CovenHealthResult>;
+}
+
+#[derive(Default)]
+pub(crate) struct NativeCovenHealthExecutor {
+    busy: Arc<AtomicBool>,
+    worker: Arc<Mutex<()>>,
+}
+
+impl NativeCovenHealthExecutor {
+    pub(crate) async fn execute(
+        self: &Arc<Self>,
+        health: Arc<dyn CovenHealth>,
+    ) -> NativeResult<CovenHealthResult> {
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(NativeDiagnostic::new("service_unavailable", true));
+        }
+
+        let executor = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            struct BusyReset(Arc<AtomicBool>);
+
+            impl Drop for BusyReset {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::SeqCst);
+                }
+            }
+
+            let _busy = BusyReset(Arc::clone(&executor.busy));
+            let _worker = executor
+                .worker
+                .lock()
+                .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+            health.health()
+        })
+        .await
+        .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
+    }
 }
 
 type CovenHomeResolver = dyn Fn() -> NativeResult<PathBuf> + Send + Sync;

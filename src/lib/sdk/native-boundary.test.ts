@@ -18,6 +18,41 @@ const opaqueResponse = Object.freeze({
 });
 const PAIRING_REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 const ATTEMPT_ID_PATTERN = /^op1-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{32}$/u;
+const invalidCovenHealthResults: ReadonlyArray<readonly [string, () => unknown]> = [
+  ['null-prototype object', () => Object.assign(Object.create(null), { status: 'ok' })],
+  [
+    'custom-prototype object',
+    () => Object.assign(Object.create({ inherited: true }), { status: 'ok' }),
+  ],
+  [
+    'accessor property',
+    () => {
+      const value = {};
+      Object.defineProperty(value, 'status', {
+        enumerable: true,
+        get() {
+          return 'ok';
+        },
+      });
+      return value;
+    },
+  ],
+  [
+    'non-enumerable property',
+    () => {
+      const value = {};
+      Object.defineProperty(value, 'status', {
+        enumerable: false,
+        value: 'ok',
+      });
+      return value;
+    },
+  ],
+  ['extra string key', () => ({ status: 'ok', extra: true })],
+  ['extra symbol key', () => ({ status: 'ok', [Symbol('extra')]: true })],
+  ['array', () => Object.freeze(['ok'])],
+  ['wrong status', () => ({ status: 'not-ok' })],
+];
 
 function expectNativeOperation(value: unknown, maximumTimeoutMs = 5_000): void {
   expect(value).toEqual({
@@ -37,30 +72,15 @@ describe('Cave managed native boundary', () => {
 
     expect(valid).toEqual({ status: 'ok' });
     expect(Object.isFrozen(valid)).toBe(true);
+  });
 
-    const accessor = {};
-    Object.defineProperty(accessor, 'status', {
-      enumerable: true,
-      get() {
-        return 'ok';
-      },
+  it.each(invalidCovenHealthResults)('rejects a raw Coven health %s', async (_name, createValue) => {
+    await expect(
+      invokeCovenHealth(vi.fn<NativeSdkInvoke>().mockResolvedValue(createValue())),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
     });
-    const customPrototype = Object.create({ inherited: true });
-    customPrototype.status = 'ok';
-
-    for (const hostile of [
-      { status: 'ok', extra: true },
-      accessor,
-      customPrototype,
-      Object.freeze(['ok']),
-    ]) {
-      await expect(
-        invokeCovenHealth(vi.fn<NativeSdkInvoke>().mockResolvedValue(hostile)),
-      ).rejects.toMatchObject({
-        code: 'invalid_response',
-        retryable: false,
-      });
-    }
   });
 
   it('maps each SDK-managed operation to its narrow native command', async () => {

@@ -269,6 +269,23 @@ describe('Phase 1 specification guards', () => {
     );
   });
 
+  it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const workflow = readText('.github/workflows/ci.yml');
+    const rustJob = workflow.match(
+      /\n  rust:\n(?<job>[\s\S]*?)(?=\n  [a-z][\w-]*:\n|$)/,
+    )?.groups?.job;
+
+    expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
+      'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
+    );
+    expect(rustJob).toContain(
+      '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
+    );
+    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
+    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+  });
+
   it('keeps the capability schema resolvable from a fresh checkout', () => {
     const capability = readJson<CapabilityFile>('src-tauri/capabilities/default.json');
     const schemaPath = resolve(projectRoot, 'src-tauri/capabilities', capability.$schema ?? '');

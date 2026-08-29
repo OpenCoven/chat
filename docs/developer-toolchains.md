@@ -49,8 +49,12 @@
   `cave_cancel_operation` command with only the attempt ID and the canonical
   `aborted` or `timeout` reason.
 - The same bounded operation and cancellation controls expose only the exact
-  `{ status: "ok" }` Coven health result. Native production code consumes the
-  producer-owned Rust `coven-client` at exact Coven revision
+  raw ordinary `{ status: "ok" }` Coven health result. A dedicated native
+  single-worker executor rejects overlapping health work with a retryable
+  bounded diagnostic and releases capacity only after the synchronous producer
+  call actually returns. Caller timeout or cancellation does not stop the OS
+  call. Native production code consumes the producer-owned Rust `coven-client`
+  at exact Coven revision
   `721437b84026c042e431b0882dcd14fdb29ac07d`; it resolves explicit
   `COVEN_HOME` or the current account's real platform home plus `.coven`, then
   relies on that crate for live Unix connected-peer credentials or Windows
@@ -96,3 +100,5 @@
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
 - Run its subprocess integration gate with `pnpm test:native-e2e`; normal
   `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
+- Run the persisted Windows GNU cross-target compile gate with
+  `pnpm cargo:check:windows-gnu`.
