@@ -1319,6 +1319,7 @@ impl NativeConnectionState {
             &credential,
             response.status_code != 401,
         )?;
+        require_success(&response)?;
         Ok(response.payload)
     }
 
@@ -1614,6 +1615,7 @@ mod tests {
         health_started: Option<Arc<std::sync::Barrier>>,
         health_release: Option<Arc<std::sync::Barrier>>,
         read_status: u16,
+        read_payload: Value,
     }
 
     impl Default for FakeTransport {
@@ -1622,6 +1624,7 @@ mod tests {
                 health_started: None,
                 health_release: None,
                 read_status: 401,
+                read_payload: json!({}),
             }
         }
     }
@@ -1717,7 +1720,7 @@ mod tests {
         ) -> NativeResult<NativeHttpResponse> {
             Ok(NativeHttpResponse {
                 status_code: self.read_status,
-                payload: json!({}),
+                payload: self.read_payload.clone(),
             })
         }
     }
@@ -3219,6 +3222,58 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn authenticated_read_returns_the_authority_error_diagnostic() {
+        let state = NativeConnectionState::with_test_collaborators(
+            Arc::new(FakeTransport {
+                read_status: 409,
+                read_payload: json!({
+                    "error": {
+                        "code": "reconcile_required",
+                        "retryable": false,
+                    },
+                }),
+                ..FakeTransport::default()
+            }),
+            Arc::new(FakeKeyring {
+                credential: Mutex::new(Some(Credential {
+                    bearer: "native-only-bearer".to_owned(),
+                    credential_id: "credential-a".to_owned(),
+                    origin: "http://127.0.0.1:4310/".to_owned(),
+                })),
+                deletes: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticDiscovery {
+                record: OwnerDiscoveryRecord {
+                    handle: String::new(),
+                    bytes: test_discovery_bytes("http://127.0.0.1:4310"),
+                    record: OwnerDiscoveryRecordMetadata {
+                        identity: "owner-local-discovery-record".to_owned(),
+                        device: 1,
+                        inode: 2,
+                        process_alive: true,
+                    },
+                },
+            }),
+            Arc::new(FakeLauncher),
+        );
+        let handle = state.cave_read_discovery().unwrap().handle;
+        tauri::async_runtime::block_on(state.cave_health(handle.clone())).unwrap();
+
+        let error = tauri::async_runtime::block_on(state.cave_read(
+            handle,
+            CaveReadPath::Familiars {
+                page: NativePage {
+                    limit: Some(1),
+                    cursor: None,
+                },
+            },
+        ))
+        .unwrap_err();
+
+        assert_eq!(error, NativeDiagnostic::new("reconcile_required", false));
     }
 
     #[test]
