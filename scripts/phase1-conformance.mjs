@@ -56,6 +56,13 @@ const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
+const approvedCommandFailureReasons = new Set([
+  'spawn',
+  'tracking',
+  'stdout-limit',
+  'stderr-limit',
+  'timeout',
+]);
 
 function defaultSourceRoot(environmentName, repositoryName) {
   return process.env[environmentName] === undefined
@@ -65,14 +72,7 @@ function defaultSourceRoot(environmentName, repositoryName) {
 
 export class CommandExecutionError extends Error {
   constructor(label, result) {
-    const approvedReasons = new Set([
-      'spawn',
-      'tracking',
-      'stdout-limit',
-      'stderr-limit',
-      'timeout',
-    ]);
-    const reason = approvedReasons.has(result?.reason) ? ` (${result.reason})` : '';
+    const reason = approvedCommandFailureReasons.has(result?.reason) ? ` (${result.reason})` : '';
     super(`${label} failed${reason}.`);
     this.label = label;
     this.result = result;
@@ -1013,6 +1013,14 @@ export async function withFixtureDaemon(fixtureDaemon, action) {
   }
 }
 
+export async function withOwnedArtifactRoot(ownedRoot, action) {
+  try {
+    return await action();
+  } finally {
+    await ownedRoot.cleanup();
+  }
+}
+
 async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   const child = spawn(binaryPath, [], {
     cwd,
@@ -1259,6 +1267,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     } else {
       try {
         await rpc.ok('conformance_reset_native_state');
+        await rpc.ok('cave_launch');
         const discovery = await waitForDiscovery(rpc);
         handle = discovery.handle;
         await rpc.ok('cave_health', { handle, operation: rpc.operation() });
@@ -1512,70 +1521,70 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
 
 async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environment, results) {
   const covenRoot = createProcessOwnedArtifactRoot({ prefix: 'p1cv', shortPath: true });
-  const covenHome = resolve(covenRoot.rootPath, 'cv');
-  mkdirSync(covenHome, { recursive: true, mode: 0o700 });
-  const child = spawn(covenBinaryPath, ['daemon', 'serve'], {
-    env: { ...environment, COVEN_HOME: covenHome },
-    stdio: ['ignore', 'ignore', 'ignore'],
-  });
-  await once(child, 'spawn');
-  covenRoot.trackChild(child);
-  try {
-    let running = false;
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      try {
-        const status = await runCommand(
+  return withOwnedArtifactRoot(covenRoot, async () => {
+    const covenHome = resolve(covenRoot.rootPath, 'cv');
+    mkdirSync(covenHome, { recursive: true, mode: 0o700 });
+    const child = spawn(covenBinaryPath, ['daemon', 'serve'], {
+      env: { ...environment, COVEN_HOME: covenHome },
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    await once(child, 'spawn');
+    covenRoot.trackChild(child);
+    try {
+      let running = false;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        try {
+          const status = await runCommand(
+            artifactRoot,
+            'Coven daemon authenticated status',
+            covenBinaryPath,
+            ['daemon', 'status', '--json'],
+            {
+              env: { ...environment, COVEN_HOME: covenHome },
+              timeoutMs: 5_000,
+            },
+          );
+          const parsed = JSON.parse(status.stdout);
+          if (parsed.status === 'running' && parsed.ok === true) {
+            running = true;
+            break;
+          }
+        } catch (error) {
+          process.stderr.write(
+            `phase1-conformance: phase1.coven.same-user-identity failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
+          );
+          // The foreground server may not have published its socket yet.
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+      if (!running) {
+        throw new Error('Coven daemon did not authenticate its same-user transport');
+      }
+      await triggerAndWaitForChildClose(child, () =>
+        runCommand(
           artifactRoot,
-          'Coven daemon authenticated status',
+          'Coven daemon authenticated stop',
           covenBinaryPath,
-          ['daemon', 'status', '--json'],
+          ['daemon', 'stop'],
           {
             env: { ...environment, COVEN_HOME: covenHome },
-            timeoutMs: 5_000,
+            timeoutMs: 10_000,
           },
-        );
-        const parsed = JSON.parse(status.stdout);
-        if (parsed.status === 'running' && parsed.ok === true) {
-          running = true;
-          break;
-        }
-      } catch (error) {
-        process.stderr.write(
-          `phase1-conformance: phase1.coven.same-user-identity failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
-        );
-        // The foreground server may not have published its socket yet.
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+        ),
+      );
+      addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
+    } catch (error) {
+      process.stderr.write(
+        `phase1-conformance: phase1.coven.same-user-identity failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
+      );
+      addAssertion(
+        results,
+        'phase1.coven.same-user-identity',
+        'failed',
+        'phase1.integration.coven-identity-failed',
+      );
     }
-    if (!running) {
-      throw new Error('Coven daemon did not authenticate its same-user transport');
-    }
-    await triggerAndWaitForChildClose(child, () =>
-      runCommand(
-        artifactRoot,
-        'Coven daemon authenticated stop',
-        covenBinaryPath,
-        ['daemon', 'stop'],
-        {
-          env: { ...environment, COVEN_HOME: covenHome },
-          timeoutMs: 10_000,
-        },
-      ),
-    );
-    addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
-  } catch (error) {
-    process.stderr.write(
-      `phase1-conformance: phase1.coven.same-user-identity failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
-    );
-    addAssertion(
-      results,
-      'phase1.coven.same-user-identity',
-      'failed',
-      'phase1.integration.coven-identity-failed',
-    );
-  } finally {
-    await covenRoot.cleanup();
-  }
+  });
 }
 
 function recordCaveBackedAssertions(results, caveAssertions) {
@@ -1620,6 +1629,19 @@ function recordCaveBackedAssertions(results, caveAssertions) {
 export function recordCaveMatrixFailure(results, error) {
   recordCaveBackedAssertions(results, new Map());
   return error;
+}
+
+export function wrapInfrastructureFailure(error, report) {
+  if (error instanceof CommandExecutionError) {
+    const reason = approvedCommandFailureReasons.has(error.result?.reason)
+      ? error.result.reason
+      : undefined;
+    return new CommandExecutionError(error.label, {
+      ...(reason === undefined ? {} : { reason }),
+      report,
+    });
+  }
+  return new CommandExecutionError('Phase 1 conformance infrastructure', { report });
 }
 
 function fillMissingAssertions(results, status, diagnosticId) {
@@ -1723,36 +1745,33 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     }
   }
 
-  const report = buildPhase1Report({
-    assertions: [...results.values()],
-    revisions: {
-      chat: lock.chat.revision,
-      sdk: lock.sdk.revision,
-      cave: lock.cave.revision,
-      coven: lock.coven.revision,
-    },
-    artifactDigests,
-    versions: {
-      harness: '1.0.0',
-      node: process.versions.node,
-    },
+  const report = await withOwnedArtifactRoot(reportRoot, async () => {
+    const completedReport = buildPhase1Report({
+      assertions: [...results.values()],
+      revisions: {
+        chat: lock.chat.revision,
+        sdk: lock.sdk.revision,
+        cave: lock.cave.revision,
+        coven: lock.coven.revision,
+      },
+      artifactDigests,
+      versions: {
+        harness: '1.0.0',
+        node: process.versions.node,
+      },
+    });
+    const reportPath = resolve(reportRoot.rootPath, 'report.json');
+    writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
+    await reportRoot.retainSanitizedJsonReport({
+      reportPath,
+      destinationPath: options.retainSanitizedReport,
+      secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
+    });
+    return completedReport;
   });
-  const reportPath = resolve(reportRoot.rootPath, 'report.json');
-  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  await reportRoot.retainSanitizedJsonReport({
-    reportPath,
-    destinationPath: options.retainSanitizedReport,
-    secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
-  });
-  await reportRoot.cleanup();
 
   if (infrastructureFailure !== undefined) {
-    throw new CommandExecutionError(
-      infrastructureFailure instanceof CommandExecutionError
-        ? infrastructureFailure.label
-        : 'Phase 1 conformance infrastructure',
-      { report },
-    );
+    throw wrapInfrastructureFailure(infrastructureFailure, report);
   }
   return report;
 }

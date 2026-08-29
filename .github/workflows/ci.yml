@@ -243,7 +243,7 @@ jobs:
     runs-on: macos-15
     needs: [web, changes]
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:

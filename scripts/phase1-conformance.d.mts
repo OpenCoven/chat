@@ -49,6 +49,8 @@ export function assertPairingStatus(
   expectedStatus: string,
 ): { status?: string };
 export class CommandExecutionError extends Error {
+  label: string;
+  result: unknown;
   constructor(label: string, result: unknown);
 }
 export class NativeRpcClient {
@@ -63,5 +65,10 @@ export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,
 ): Promise<T>;
+export function withOwnedArtifactRoot<T>(
+  ownedRoot: { cleanup(): Promise<void> },
+  action: () => Promise<T>,
+): Promise<T>;
 export function recordCaveMatrixFailure(results: Map<string, unknown>, error: unknown): unknown;
+export function wrapInfrastructureFailure(error: unknown, report: unknown): CommandExecutionError;
 export function runPhase1Conformance(options?: ReturnType<typeof parseArgs>): Promise<unknown>;

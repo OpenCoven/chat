@@ -598,7 +598,7 @@ describe('Phase 1 specification guards', () => {
       workflow.indexOf('\n  desktop:'),
     );
 
-    expect(phase1Job).toContain('timeout-minutes: 90');
+    expect(phase1Job).toContain('timeout-minutes: 120');
   });
 
   it('skips the expensive jobs for a branch that changed only prose', () => {

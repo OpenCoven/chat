@@ -19,6 +19,8 @@ import {
   recordCaveMatrixFailure,
   safeEnvironment,
   withFixtureDaemon,
+  withOwnedArtifactRoot,
+  wrapInfrastructureFailure,
 } from '../scripts/phase1-conformance.mjs';
 
 class SynchronousCloseChild extends EventEmitter {
@@ -258,6 +260,36 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(timeout.message).toBe('Chat native RPC package failed (timeout).');
     expect(timeout.message).not.toContain('private compiler output');
+  });
+
+  test('preserves safe subprocess classification when attaching the final report', () => {
+    const report = { status: 'failed' };
+    const original = new CommandExecutionError('Cave real-authority conformance', {
+      reason: 'timeout',
+      stdout: 'private output',
+      stderr: 'private error',
+    });
+
+    const wrapped = wrapInfrastructureFailure(original, report);
+
+    expect(wrapped.message).toBe('Cave real-authority conformance failed (timeout).');
+    expect(wrapped.result).toEqual({ reason: 'timeout', report });
+  });
+
+  test('cleans an owned root when setup fails before its child starts', async () => {
+    let cleaned = false;
+    const ownedRoot = {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    };
+
+    await expect(
+      withOwnedArtifactRoot(ownedRoot, async () => {
+        throw new Error('spawn failed');
+      }),
+    ).rejects.toThrow(/spawn failed/);
+    expect(cleaned).toBe(true);
   });
 
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
