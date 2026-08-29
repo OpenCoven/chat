@@ -237,18 +237,21 @@ impl ConstrainedTransport {
             let route = canonical_route(&endpoint)?;
             let bound =
                 create_bound_request(authority, method.as_str(), &route, &body, authorization)?;
+            let declares_empty_body = method == Method::POST && body.is_empty();
             let mut request = Self::client()?.request(method, endpoint);
             for (name, value) in &bound.headers {
                 request = request.header(*name, value);
             }
-            if !body.is_empty() {
+            if declares_empty_body {
+                request = request.header(reqwest::header::CONTENT_LENGTH, 0);
+            } else if !body.is_empty() {
                 request = request
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body);
             }
             let response = request.send().await.map_err(request_error)?;
             let opened = bound.open(response, MAX_JSON_BODY_BYTES).await?;
-            let payload = serde_json::from_slice(&opened.body)
+            let payload: Value = serde_json::from_slice(&opened.body)
                 .map_err(|_| NativeDiagnostic::new("invalid_response", false))?;
             return Ok(NativeHttpResponse {
                 status_code: opened.status_code,
@@ -829,6 +832,47 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("x-coven-client-v1-authority-ciphertext:"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn pairing_exchange_empty_post_declares_zero_content_length() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let pairing_secret = "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8";
+        let (request_tx, request_rx) = mpsc::sync_channel(1);
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 16 * 1024];
+            let length = stream.read(&mut request).unwrap();
+            request_tx
+                .send(String::from_utf8_lossy(&request[..length]).into_owned())
+                .unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":{}}",
+                )
+                .unwrap();
+        });
+        let authority =
+            pin_owner_discovery_record(&owner_record(format!("http://{address}")), 1).unwrap();
+        authority.bind_instance_id(INSTANCE_ID).unwrap();
+
+        let result = tauri::async_runtime::block_on(ConstrainedTransport.pairing_exchange(
+            &authority,
+            "11111111-1111-4111-8111-111111111111",
+            pairing_secret,
+        ));
+        let request = request_rx.recv().unwrap().to_ascii_lowercase();
+
+        assert_eq!(
+            result.err(),
+            Some(crate::cave::NativeDiagnostic::new(
+                "reconcile_required",
+                false,
+            )),
+        );
+        assert!(request.contains("\r\ncontent-length: 0\r\n"));
         server.join().unwrap();
     }
 
