@@ -19,6 +19,7 @@ import {
   parseArgs,
   parseCaveConformanceOutput,
   recordCaveMatrixFailure,
+  retryCaveConformancePackage,
   safeEnvironment,
   withFixtureDaemon,
   withOwnedArtifactRoot,
@@ -350,5 +351,52 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('allows cold isolated Cargo builds to exceed the general command deadline', () => {
     expect(cargoBuildTimeoutMs).toBeGreaterThan(20 * 60_000);
+  });
+
+  test('retries failed Cave package exits after clearing only build output', async () => {
+    let attempts = 0;
+    let cleanups = 0;
+
+    await retryCaveConformancePackage(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw new CommandExecutionError('Cave conformance package', {
+            code: 1,
+            signal: null,
+            stdout: '',
+            stderr: '',
+          });
+        }
+      },
+      () => {
+        cleanups += 1;
+      },
+    );
+
+    expect(attempts).toBe(3);
+    expect(cleanups).toBe(2);
+  });
+
+  test('does not retry non-exit Cave package failures', async () => {
+    let attempts = 0;
+    let cleanups = 0;
+
+    await expect(
+      retryCaveConformancePackage(
+        async () => {
+          attempts += 1;
+          throw new CommandExecutionError('Cave conformance package', {
+            reason: 'timeout',
+          });
+        },
+        () => {
+          cleanups += 1;
+        },
+      ),
+    ).rejects.toThrow('Cave conformance package failed (timeout).');
+
+    expect(attempts).toBe(1);
+    expect(cleanups).toBe(0);
   });
 });
