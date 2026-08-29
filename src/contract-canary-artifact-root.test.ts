@@ -122,7 +122,7 @@ function createCaveAuthorityFixture() {
 
   mkdirSync(authorityDirectory, { recursive: true });
   mkdirSync(installedFixtureDirectory, { recursive: true });
-  runGit(['init', '--initial-branch=main'], caveRoot);
+  runGit(['init', '--object-format=sha1', '--initial-branch=main'], caveRoot);
   runGit(['config', 'user.name', 'OpenCoven Test'], caveRoot);
   runGit(['config', 'user.email', 'opencoven-test@example.com'], caveRoot);
   runGit(['config', 'commit.gpgsign', 'false'], caveRoot);
