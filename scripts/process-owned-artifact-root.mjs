@@ -289,20 +289,23 @@ function waitForOwnedExecutionClose(child, processGroup, timeoutMs) {
 
 async function terminateAndReapChild(child, terminationGraceMs, processGroup) {
   const pid = child.pid;
+  const childActive = child.exitCode === null && child.signalCode === null;
 
-  if (
-    (child.exitCode === null && child.signalCode === null) ||
-    (processGroup && processGroupExists(pid))
-  ) {
-    const signaled = signalOwnedChild(child, 'SIGTERM', processGroup);
-    if (
-      !signaled &&
-      child.exitCode === null &&
-      child.signalCode === null &&
-      (!processGroup || !processGroupExists(pid))
-    ) {
-      throw new Error(`Tracked child ${pid} could not be terminated.`);
+  if (!childActive) {
+    if (processGroup && processGroupExists(pid)) {
+      throw new Error(`Tracked child ${pid} exited while its process group still had descendants.`);
     }
+    return;
+  }
+
+  const signaled = signalOwnedChild(child, 'SIGTERM', processGroup);
+  if (
+    !signaled &&
+    child.exitCode === null &&
+    child.signalCode === null &&
+    (!processGroup || !processGroupExists(pid))
+  ) {
+    throw new Error(`Tracked child ${pid} could not be terminated.`);
   }
 
   if (await waitForOwnedExecutionClose(child, processGroup, terminationGraceMs)) {
@@ -365,6 +368,16 @@ export function createProcessOwnedArtifactRoot(options) {
       }
       trackedChildren.set(child.pid, { child, processGroup });
       return child;
+    },
+    async terminateChild(child) {
+      const tracked = trackedChildren.get(child?.pid);
+      if (tracked === undefined || tracked.child !== child) {
+        throw new Error('terminateChild requires a currently tracked ChildProcess.');
+      }
+      await terminateAndReapChild(tracked.child, terminationGraceMs, tracked.processGroup);
+      trackedChildren.delete(child.pid);
+      cleanedChildren.push(child.pid);
+      reapedChildren.push(child.pid);
     },
     async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan }) {
       if (cleaned) {

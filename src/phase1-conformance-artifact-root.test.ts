@@ -182,6 +182,7 @@ describe('process-owned artifact root', () => {
           [
             "const { spawn } = require('node:child_process');",
             "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
+            'child.unref();',
             'process.stdout.write(String(child.pid));',
             'setInterval(() => {}, 1_000);',
           ].join(' '),
@@ -218,6 +219,58 @@ describe('process-owned artifact root', () => {
           process.kill(grandchildPid, 'SIGKILL');
         }
       }
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'refuses to signal a process group after its tracked leader exited',
+    async () => {
+      const root = createRoot();
+      const parent = spawn(
+        process.execPath,
+        [
+          '-e',
+          [
+            "const { spawn } = require('node:child_process');",
+            "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
+            'child.unref();',
+            'process.stdout.write(String(child.pid));',
+          ].join(' '),
+        ],
+        {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      activeChildren.add(parent);
+      root.trackChild(parent, { processGroup: true });
+      const grandchildPid = await new Promise<number>((resolvePid, rejectPid) => {
+        if (parent.stdout === null) {
+          rejectPid(new Error('tracked parent stdout was not piped'));
+          return;
+        }
+        parent.stdout.once('data', (chunk) => resolvePid(Number(String(chunk))));
+        parent.once('error', rejectPid);
+      });
+      await new Promise<void>((resolveClose) => {
+        if (parent.exitCode !== null || parent.signalCode !== null) {
+          resolveClose();
+          return;
+        }
+        parent.once('close', () => resolveClose());
+      });
+
+      try {
+        await expect(root.cleanup()).rejects.toThrow(
+          /exited while its process group still had descendants/,
+        );
+        expect(() => process.kill(grandchildPid, 0)).not.toThrow();
+      } finally {
+        process.kill(grandchildPid, 'SIGKILL');
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      await root.cleanup();
+      activeRoots.delete(root);
     },
   );
 

@@ -385,6 +385,29 @@ function runCommand(
       rejectRun(new CommandExecutionError(label, result));
     };
 
+    const terminateAndFail = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      void artifactRoot.terminateChild(child).then(
+        () => rejectRun(new CommandExecutionError(label, result)),
+        () =>
+          rejectRun(
+            new CommandExecutionError(label, {
+              code: null,
+              signal: null,
+              stdout: '',
+              stderr: '',
+              reason: 'tracking',
+            }),
+          ),
+      );
+    };
+
     child.once('spawn', () => {
       try {
         artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
@@ -399,8 +422,13 @@ function runCommand(
     child.stdout.on('data', (chunk) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > commandOutputLimit) {
-        child.kill('SIGKILL');
-        fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'stdout-limit' });
+        terminateAndFail({
+          code: null,
+          signal: 'SIGKILL',
+          stdout: '',
+          stderr: '',
+          reason: 'stdout-limit',
+        });
         return;
       }
       stdout.push(chunk);
@@ -408,8 +436,13 @@ function runCommand(
     child.stderr.on('data', (chunk) => {
       stderrBytes += chunk.length;
       if (stderrBytes > commandOutputLimit) {
-        child.kill('SIGKILL');
-        fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'stderr-limit' });
+        terminateAndFail({
+          code: null,
+          signal: 'SIGKILL',
+          stdout: '',
+          stderr: '',
+          reason: 'stderr-limit',
+        });
         return;
       }
       stderr.push(chunk);
@@ -435,8 +468,13 @@ function runCommand(
       }
     });
     timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'timeout' });
+      terminateAndFail({
+        code: null,
+        signal: 'SIGKILL',
+        stdout: '',
+        stderr: '',
+        reason: 'timeout',
+      });
     }, timeoutMs);
   });
 }
