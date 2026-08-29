@@ -9,7 +9,17 @@ const SAFE_ERROR_MESSAGE: &str = "Cave operation failed.";
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SnapshotPolicy {
     Strict,
-    CanonicalResponse,
+    CanonicalResponse(NativeResponseOperation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeResponseOperation {
+    Health,
+    ListFamiliars,
+    ListProjects,
+    ListConversations,
+    GetConversation,
+    ListConversationMessages,
 }
 
 #[derive(Clone, Copy)]
@@ -29,19 +39,58 @@ enum SnapshotLocation {
 }
 
 impl SnapshotLocation {
-    fn object_child(self, key: &str) -> Self {
+    fn object_child(self, key: &str, operation: Option<NativeResponseOperation>) -> Self {
         match (self, key) {
             (Self::Root, "data") => Self::Data,
-            (Self::Data, "messages") => Self::Messages,
-            (Self::Data, "conversations") => Self::Conversations,
-            (Self::Data, "conversation") => Self::Conversation,
-            (Self::Data, "familiars") => Self::Familiars,
-            (Self::Data, "projects") => Self::Projects,
+            (Self::Data, "messages")
+                if operation == Some(NativeResponseOperation::ListConversationMessages) =>
+            {
+                Self::Messages
+            }
+            (Self::Data, "conversations")
+                if operation == Some(NativeResponseOperation::ListConversations) =>
+            {
+                Self::Conversations
+            }
+            (Self::Data, "conversation")
+                if operation == Some(NativeResponseOperation::GetConversation) =>
+            {
+                Self::Conversation
+            }
+            (Self::Data, "familiars")
+                if operation == Some(NativeResponseOperation::ListFamiliars) =>
+            {
+                Self::Familiars
+            }
+            (Self::Data, "projects")
+                if operation == Some(NativeResponseOperation::ListProjects) =>
+            {
+                Self::Projects
+            }
             (Self::Message, "text")
-            | (Self::Conversation, "title")
-            | (Self::Familiar, "displayName")
-            | (Self::Familiar, "description")
-            | (Self::Project, "name") => Self::CanonicalContent,
+                if operation == Some(NativeResponseOperation::ListConversationMessages) =>
+            {
+                Self::CanonicalContent
+            }
+            (Self::Conversation, "title")
+                if matches!(
+                    operation,
+                    Some(
+                        NativeResponseOperation::ListConversations
+                            | NativeResponseOperation::GetConversation
+                    )
+                ) =>
+            {
+                Self::CanonicalContent
+            }
+            (Self::Familiar, "displayName" | "description")
+                if operation == Some(NativeResponseOperation::ListFamiliars) =>
+            {
+                Self::CanonicalContent
+            }
+            (Self::Project, "name") if operation == Some(NativeResponseOperation::ListProjects) => {
+                Self::CanonicalContent
+            }
             _ => Self::Other,
         }
     }
@@ -135,6 +184,8 @@ impl NativeError {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeResponse {
+    #[serde(skip)]
+    operation: NativeResponseOperation,
     status_code: u16,
     payload: Value,
 }
@@ -143,6 +194,7 @@ impl std::fmt::Debug for NativeResponse {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("NativeResponse")
+            .field("operation", &self.operation)
             .field("status_code", &self.status_code)
             .field("payload", &"<redacted>")
             .finish()
@@ -150,25 +202,42 @@ impl std::fmt::Debug for NativeResponse {
 }
 
 impl NativeResponse {
-    pub fn snapshot(status_code: u16, payload: Value) -> Result<Self, NativeError> {
+    pub fn snapshot(
+        operation: NativeResponseOperation,
+        status_code: u16,
+        payload: Value,
+    ) -> Result<Self, NativeError> {
         if !(100..=599).contains(&status_code) {
             return Err(NativeError::invalid_response());
         }
         let mut payload = payload;
         let mut budget = SnapshotBudget::default();
+        let policy = if (200..=299).contains(&status_code) {
+            SnapshotPolicy::CanonicalResponse(operation)
+        } else {
+            SnapshotPolicy::Strict
+        };
         validate_snapshot(
             &payload,
             SnapshotLocation::Root,
             false,
             false,
-            SnapshotPolicy::CanonicalResponse,
+            policy,
             &mut budget,
         )?;
         project_snapshot(&mut payload, false);
         Ok(Self {
+            operation,
             status_code,
             payload,
         })
+    }
+
+    pub fn validate_operation(&self, expected: NativeResponseOperation) -> Result<(), NativeError> {
+        if self.operation != expected {
+            return Err(NativeError::invalid_response());
+        }
+        Ok(())
     }
 }
 
@@ -204,7 +273,7 @@ fn validate_snapshot(
             if budget.string_characters > MAX_SNAPSHOT_STRING_CHARACTERS {
                 return Err(NativeError::new(DiagnosticCode::BodyLimit, false));
             }
-            let canonical_content = policy == SnapshotPolicy::CanonicalResponse
+            let canonical_content = matches!(policy, SnapshotPolicy::CanonicalResponse(_))
                 && !inside_error
                 && matches!(location, SnapshotLocation::CanonicalContent);
             if !canonical_content && secret_shaped_value(text) {
@@ -247,7 +316,13 @@ fn validate_snapshot(
                 let child_location = if child_inside_error {
                     SnapshotLocation::Other
                 } else {
-                    location.object_child(key)
+                    location.object_child(
+                        key,
+                        match policy {
+                            SnapshotPolicy::Strict => None,
+                            SnapshotPolicy::CanonicalResponse(operation) => Some(operation),
+                        },
+                    )
                 };
                 validate_snapshot(
                     entry,
@@ -302,10 +377,18 @@ fn forbidden_snapshot_key(key: &str) -> bool {
 }
 
 fn secret_shaped_value(value: &str) -> bool {
-    value.len() == 43
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    let mut run = 0;
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
+            run += 1;
+        } else {
+            if run == 43 {
+                return true;
+            }
+            run = 0;
+        }
+    }
+    run == 43
 }
 
 pub fn validate_public_snapshot(value: Value) -> Result<Value, NativeError> {
@@ -397,7 +480,7 @@ mod tests {
 
     use super::{
         validate_public_snapshot, DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse,
-        MAX_SNAPSHOT_STRING_CHARACTERS, SAFE_ERROR_MESSAGE,
+        NativeResponseOperation, MAX_SNAPSHOT_STRING_CHARACTERS, SAFE_ERROR_MESSAGE,
     };
 
     #[test]
@@ -428,7 +511,7 @@ mod tests {
             json!({"data": {"attachment": {"name": "private.pdf"}}}),
         ] {
             assert_eq!(
-                NativeResponse::snapshot(200, payload)
+                NativeResponse::snapshot(NativeResponseOperation::Health, 200, payload)
                     .expect_err("private command output must fail closed")
                     .code,
                 DiagnosticCode::InvalidResponse
@@ -440,6 +523,7 @@ mod tests {
     fn snapshots_allow_public_content_that_resembles_secret_material() {
         let value = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let response = NativeResponse::snapshot(
+            NativeResponseOperation::ListConversationMessages,
             200,
             json!({"data": {"messages": [{"id": "message-1", "text": value}]}}),
         )
@@ -457,9 +541,13 @@ mod tests {
             json!({"data": {"futureField": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}),
         ] {
             assert_eq!(
-                NativeResponse::snapshot(200, payload)
-                    .expect_err("control and metadata values must reject secret-shaped material")
-                    .code,
+                NativeResponse::snapshot(
+                    NativeResponseOperation::ListConversationMessages,
+                    200,
+                    payload,
+                )
+                .expect_err("control and metadata values must reject secret-shaped material")
+                .code,
                 DiagnosticCode::InvalidResponse
             );
         }
@@ -469,6 +557,7 @@ mod tests {
     fn snapshots_reject_secret_shaped_error_metadata() {
         assert_eq!(
             NativeResponse::snapshot(
+                NativeResponseOperation::Health,
                 500,
                 json!({
                     "error": {
@@ -490,6 +579,7 @@ mod tests {
     fn snapshots_reject_secret_shaped_original_error_messages() {
         assert_eq!(
             NativeResponse::snapshot(
+                NativeResponseOperation::Health,
                 500,
                 json!({
                     "error": {
@@ -522,6 +612,7 @@ mod tests {
         ] {
             assert_eq!(
                 NativeResponse::snapshot(
+                    NativeResponseOperation::Health,
                     500,
                     json!({
                         "error": {
@@ -542,6 +633,7 @@ mod tests {
     fn snapshots_reject_non_object_error_values() {
         assert_eq!(
             NativeResponse::snapshot(
+                NativeResponseOperation::Health,
                 500,
                 json!({
                     "error": [{
@@ -561,6 +653,7 @@ mod tests {
         for key in ["bearer", "pairingSecret", "accessToken", "authorization"] {
             assert_eq!(
                 NativeResponse::snapshot(
+                    NativeResponseOperation::ListConversationMessages,
                     200,
                     json!({"data": {"messages": [{"text": "safe", key: "credential"}]}}),
                 )
@@ -587,6 +680,7 @@ mod tests {
     #[test]
     fn snapshots_sanitize_error_copy_without_parsing_protocol_dtos() {
         let response = NativeResponse::snapshot(
+            NativeResponseOperation::Health,
             409,
             json!({
                 "apiVersion": "future",
@@ -611,11 +705,119 @@ mod tests {
     #[test]
     fn snapshots_bound_untrusted_payloads() {
         let error = NativeResponse::snapshot(
+            NativeResponseOperation::Health,
             200,
             json!({"data": {"text": "x".repeat(MAX_SNAPSHOT_STRING_CHARACTERS + 1)}}),
         )
         .expect_err("oversized snapshots must fail closed");
         assert_eq!(error.code, DiagnosticCode::BodyLimit);
+    }
+
+    #[test]
+    fn snapshots_scope_content_exemptions_to_the_requested_operation() {
+        let value = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let messages = json!({
+            "data": {
+                "messages": [{
+                    "id": "message-1",
+                    "text": value
+                }]
+            }
+        });
+
+        NativeResponse::snapshot(
+            NativeResponseOperation::ListConversationMessages,
+            200,
+            messages.clone(),
+        )
+        .expect("message text is content for the messages operation");
+        assert_eq!(
+            NativeResponse::snapshot(NativeResponseOperation::ListProjects, 200, messages)
+                .expect_err("message paths are not content for project reads")
+                .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn snapshots_cannot_be_reused_for_a_different_operation() {
+        let response = NativeResponse::snapshot(
+            NativeResponseOperation::ListConversationMessages,
+            200,
+            json!({"data": {"messages": []}}),
+        )
+        .expect("snapshot should be valid for messages");
+
+        assert_eq!(
+            response
+                .validate_operation(NativeResponseOperation::ListProjects)
+                .expect_err("operation tags are not interchangeable")
+                .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn health_snapshots_reject_all_canonical_content_exemptions() {
+        assert_eq!(
+            NativeResponse::snapshot(
+                NativeResponseOperation::Health,
+                200,
+                json!({
+                    "data": {
+                        "messages": [{
+                            "id": "message-1",
+                            "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                        }]
+                    }
+                }),
+            )
+            .expect_err("health has no user-content paths")
+            .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn snapshots_reject_wrapped_secret_shaped_values_outside_allowed_content() {
+        assert_eq!(
+            NativeResponse::snapshot(
+                NativeResponseOperation::ListConversationMessages,
+                200,
+                json!({
+                    "data": {
+                        "metadata": {
+                            "trace": "prefix AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA suffix"
+                        }
+                    }
+                }),
+            )
+            .expect_err("wrapped bearer-shaped material must not bypass strict fields")
+            .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn correct_operation_allows_credential_shaped_user_text() {
+        let text =
+            "A user pasted Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA into the chat.";
+        let response = NativeResponse::snapshot(
+            NativeResponseOperation::ListConversationMessages,
+            200,
+            json!({
+                "data": {
+                    "messages": [{
+                        "id": "message-1",
+                        "text": text
+                    }]
+                }
+            }),
+        )
+        .expect("actual message text remains arbitrary user content");
+        let rendered = serde_json::to_value(response).expect("snapshot should serialize");
+
+        assert_eq!(rendered["payload"]["data"]["messages"][0]["text"], text);
     }
 
     #[test]

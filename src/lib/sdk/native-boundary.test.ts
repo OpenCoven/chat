@@ -73,6 +73,30 @@ function response(data: unknown, capabilities: string[], operations: string[], s
   };
 }
 
+function errorResponse(
+  code: string,
+  retryable: boolean,
+  capabilities: string[],
+  operations: string[],
+  statusCode: number,
+) {
+  return {
+    statusCode,
+    payload: {
+      apiVersion: '1.0',
+      minimumClientVersion: '0.1.0',
+      requestId: REQUEST_ID,
+      capabilities,
+      operations,
+      error: {
+        code,
+        message: 'Cave operation failed.',
+        retryable,
+      },
+    },
+  };
+}
+
 function pairingId(index: number): string {
   return `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`;
 }
@@ -205,6 +229,195 @@ describe('native boundary with packed managed SDK', () => {
     await expect(
       boundary.listConversations(authority, 'ignored-by-sdk', { limit: 25 }),
     ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it.each([401, 429, 500])(
+    'rejects success-shaped canonical data carried by HTTP %i',
+    async (statusCode) => {
+      const boundary = createNativeBoundary({
+        invoke: routedInvoke({
+          [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+          [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+            operation(
+              args.input as Record<string, unknown>,
+              response(
+                { conversations: [] },
+                ['conversations', 'cursors'],
+                ['conversations.list'],
+                statusCode,
+              ),
+            ),
+        }),
+        requestId: () => REQUEST_ID,
+      });
+      const authority = await boundary.discover();
+
+      await expect(
+        boundary.listConversations(authority, 'ignored', { limit: 25 }),
+      ).rejects.toMatchObject({
+        code: 'invalid_response',
+        statusCode,
+      });
+    },
+  );
+
+  it('accepts canonical data carried by the expected success status', async () => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(
+            args.input as Record<string, unknown>,
+            response({ conversations: [] }, ['conversations', 'cursors'], ['conversations.list']),
+          ),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(boundary.listConversations(authority, 'ignored', { limit: 25 })).resolves.toEqual({
+      data: [],
+    });
+  });
+
+  it('rejects hostile error-status declarations without evaluating accessors', async () => {
+    let getterRead = false;
+    const capabilities: unknown[] = [];
+    Object.defineProperty(capabilities, '0', {
+      enumerable: true,
+      get() {
+        getterRead = true;
+        return 'conversations';
+      },
+    });
+    capabilities.length = 1;
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            statusCode: 500,
+            payload: {
+              apiVersion: '1.0',
+              minimumClientVersion: '0.1.0',
+              requestId: REQUEST_ID,
+              capabilities,
+              operations: ['conversations.list'],
+              error: {
+                code: 'service_unavailable',
+                message: 'Cave operation failed.',
+                retryable: true,
+              },
+            },
+          }),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(
+      boundary.listConversations(authority, 'ignored', { limit: 25 }),
+    ).rejects.toMatchObject({ code: 'invalid_response', statusCode: 500 });
+    expect(getterRead).toBe(false);
+  });
+
+  it('rejects an error envelope carried by a success status', async () => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(
+            args.input as Record<string, unknown>,
+            errorResponse(
+              'unauthorized',
+              false,
+              ['conversations', 'cursors'],
+              ['conversations.list'],
+              200,
+            ),
+          ),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(
+      boundary.listConversations(authority, 'ignored', { limit: 25 }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it.each([
+    [401, 'unauthorized', false],
+    [429, 'rate_limited', true],
+    [500, 'service_unavailable', true],
+    [409, 'reconcile_required', false],
+    [400, 'incompatible_version', false],
+  ] as const)('preserves HTTP %i canonical %s failures', async (statusCode, code, retryable) => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.listConversations]: (args: Record<string, unknown>) =>
+          operation(
+            args.input as Record<string, unknown>,
+            errorResponse(
+              code,
+              retryable,
+              ['conversations', 'cursors'],
+              ['conversations.list'],
+              statusCode,
+            ),
+          ),
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(
+      boundary.listConversations(authority, 'ignored', { limit: 25 }),
+    ).rejects.toMatchObject({
+      code,
+      retryable,
+      statusCode,
+    });
+  });
+
+  it.each([
+    'wrong app',
+    'wrong installation',
+    'missing chat:read',
+    'unrequested privileged scope',
+    'revoked credential',
+  ])('propagates native rejection for %s metadata without a credential result', async () => {
+    const exchange = vi.fn(() => {
+      throw {
+        code: 'invalid_response',
+        retryable: false,
+        diagnosticId: DIAGNOSTIC_ID,
+      };
+    });
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.pairingCreate]: (args: Record<string, unknown>) =>
+          operation(args.input as Record<string, unknown>, {
+            requestId: PAIRING_ID,
+            expiresAt: 2_000_000_000_000,
+          }),
+        [NATIVE_COMMANDS.pairingExchange]: exchange,
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+    const pairing = await boundary.pairingCreate(authority, 'ignored', {
+      appName: 'OpenCoven Chat',
+      installationId: '00000000-0000-4000-8000-000000000007',
+      scopes: ['chat:read'],
+    });
+
+    await expect(
+      boundary.pairingExchange(authority, 'ignored', pairing.handle),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(exchange).toHaveBeenCalledOnce();
   });
 
   it('orchestrates health and pairing through the managed client without secret returns', async () => {

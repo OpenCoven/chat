@@ -14,7 +14,8 @@ import {
   discoverManagedCaveEndpoint,
   isCaveClientError,
 } from '@opencoven/cave-client/managed';
-import type { Page, PageOptions } from '@opencoven/sdk-core/browser';
+import caveClientPackage from '@opencoven/cave-client/package.json';
+import { assessCompatibility, type Page, type PageOptions } from '@opencoven/sdk-core/browser';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -24,6 +25,10 @@ const AUTHORITY_HANDLE_PATTERN =
 const DISCOVERY_HANDLE_PATTERN =
   /^discovery:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
+const API_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const DECLARATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
 
 export const NATIVE_COMMANDS = Object.freeze({
   discoveryRead: 'sdk_discovery_read',
@@ -136,17 +141,68 @@ const ERROR_CODES = new Set<NativeDiagnosticCode>([
   'unsupported_operation',
 ]);
 
+const CAVE_PROTOCOL_ERROR_CODES = new Set<NativeDiagnosticCode>([
+  'invalid_request',
+  'unauthorized',
+  'scope_denied',
+  'not_found',
+  'conflict',
+  'rate_limited',
+  'pairing_pending',
+  'pairing_denied',
+  'pairing_expired',
+  'incompatible_version',
+  'service_unavailable',
+  'reconcile_required',
+  'internal_error',
+]);
+
+type CanonicalResponseRequirements = Readonly<{
+  capabilities: readonly string[];
+  operation: string;
+}>;
+
+const CANONICAL_RESPONSE_REQUIREMENTS = Object.freeze({
+  listFamiliars: {
+    capabilities: ['familiars', 'cursors'],
+    operation: 'familiars.list',
+  },
+  listProjects: {
+    capabilities: ['projects', 'cursors'],
+    operation: 'projects.list',
+  },
+  listConversations: {
+    capabilities: ['conversations', 'cursors'],
+    operation: 'conversations.list',
+  },
+  getConversation: {
+    capabilities: ['conversations'],
+    operation: 'conversations.read',
+  },
+  listConversationMessages: {
+    capabilities: ['conversation-messages', 'cursors'],
+    operation: 'messages.list',
+  },
+} satisfies Readonly<Record<string, CanonicalResponseRequirements>>);
+
 export class NativeBoundaryError extends Error {
   readonly code: NativeDiagnosticCode;
   readonly retryable: boolean;
   readonly diagnosticId: string;
+  readonly statusCode: number | undefined;
 
-  constructor(code: NativeDiagnosticCode, retryable: boolean, diagnosticId: string) {
+  constructor(
+    code: NativeDiagnosticCode,
+    retryable: boolean,
+    diagnosticId: string,
+    statusCode?: number,
+  ) {
     super('The native OpenCoven operation failed.');
     this.name = 'NativeBoundaryError';
     this.code = code;
     this.retryable = retryable;
     this.diagnosticId = diagnosticId;
+    this.statusCode = statusCode;
   }
 }
 
@@ -282,6 +338,83 @@ function exactRecord(
   }
 }
 
+function dataRecord(value: unknown): ExactRecord {
+  try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value) ||
+      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+    ) {
+      throw invalidResponse();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          descriptors[key] === undefined ||
+          !Object.hasOwn(descriptors[key], 'value') ||
+          descriptors[key].enumerable !== true,
+      )
+    ) {
+      throw invalidResponse();
+    }
+    return Object.fromEntries(
+      Object.entries(descriptors).map(([key, descriptor]) => [key, descriptor.value]),
+    );
+  } catch (error) {
+    if (error instanceof NativeBoundaryError) {
+      throw error;
+    }
+    throw invalidResponse();
+  }
+}
+
+function dataArray(value: unknown): readonly unknown[] | undefined {
+  try {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+      return undefined;
+    }
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+    if (lengthDescriptor === undefined || !Object.hasOwn(lengthDescriptor, 'value')) {
+      return undefined;
+    }
+    const length = lengthDescriptor.value;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+      return undefined;
+    }
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== length + 1 ||
+      keys.some(
+        (key) =>
+          key !== 'length' &&
+          (typeof key !== 'string' ||
+            !/^(?:0|[1-9]\d*)$/u.test(key) ||
+            Number(key) >= length ||
+            descriptors[key] === undefined ||
+            !Object.hasOwn(descriptors[key], 'value')),
+      )
+    ) {
+      return undefined;
+    }
+    const values: unknown[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) {
+        return undefined;
+      }
+      values.push(descriptor.value);
+    }
+    return values;
+  } catch {
+    return undefined;
+  }
+}
+
 function requiredString(value: unknown, pattern?: RegExp, maximum = 4_096): string {
   if (
     typeof value !== 'string' ||
@@ -338,12 +471,19 @@ function nativeError(value: unknown): NativeBoundaryError | undefined {
   }
 }
 
+function statusCode(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : undefined;
+}
+
 function sdkError(value: unknown): NativeBoundaryError {
   if (isCaveClientError(value) && ERROR_CODES.has(value.code as NativeDiagnosticCode)) {
     return new NativeBoundaryError(
       value.code as NativeDiagnosticCode,
       value.retryable,
       value.requestId ?? 'sdk-diagnostic',
+      statusCode(value.statusCode),
     );
   }
   try {
@@ -353,12 +493,18 @@ function sdkError(value: unknown): NativeBoundaryError {
         : undefined;
     const code = descriptors?.code?.value;
     const retryable = descriptors?.retryable?.value;
+    const responseStatus = statusCode(descriptors?.statusCode?.value);
     if (
       typeof code === 'string' &&
       ERROR_CODES.has(code as NativeDiagnosticCode) &&
       typeof retryable === 'boolean'
     ) {
-      return new NativeBoundaryError(code as NativeDiagnosticCode, retryable, 'sdk-diagnostic');
+      return new NativeBoundaryError(
+        code as NativeDiagnosticCode,
+        retryable,
+        'sdk-diagnostic',
+        responseStatus,
+      );
     }
   } catch {
     // Fall through to a fixed local error.
@@ -384,16 +530,162 @@ function operationResult(
 function nativeResponse(
   value: unknown,
   successStatus: number,
+  requirements?: CanonicalResponseRequirements,
 ): Readonly<{ statusCode: number; payload: unknown }> {
   const response = exactRecord(value, ['statusCode', 'payload']);
-  const statusCode = safeInteger(response.statusCode, 100);
+  const responseStatus = safeInteger(response.statusCode, 100);
   if (
-    statusCode > 599 ||
-    (statusCode !== successStatus && (statusCode < 400 || statusCode > 599))
+    responseStatus > 599 ||
+    (responseStatus !== successStatus && (responseStatus < 400 || responseStatus > 599))
   ) {
     throw invalidResponse();
   }
-  return { statusCode, payload: response.payload };
+  if (responseStatus !== successStatus) {
+    throw canonicalStatusError(response.payload, responseStatus, requirements);
+  }
+  return { statusCode: responseStatus, payload: response.payload };
+}
+
+function declarationIds(value: unknown): readonly string[] | undefined {
+  const values = dataArray(value);
+  if (values === undefined || values.length === 0) {
+    return undefined;
+  }
+  const declarations: string[] = [];
+  for (const entry of values) {
+    if (
+      typeof entry !== 'string' ||
+      entry.length > 64 ||
+      !DECLARATION_ID_PATTERN.test(entry) ||
+      declarations.includes(entry)
+    ) {
+      return undefined;
+    }
+    declarations.push(entry);
+  }
+  return declarations;
+}
+
+function protocolStatusFailure(
+  code: NativeDiagnosticCode,
+  retryable: boolean,
+  responseStatus: number,
+  protocolRequestId?: string,
+): Readonly<{
+  code: NativeDiagnosticCode;
+  retryable: boolean;
+  statusCode: number;
+  requestId?: string;
+}> {
+  return Object.freeze({
+    code,
+    retryable,
+    statusCode: responseStatus,
+    ...(protocolRequestId === undefined ? {} : { requestId: protocolRequestId }),
+  });
+}
+
+function canonicalStatusError(
+  payload: unknown,
+  responseStatus: number,
+  requirements?: CanonicalResponseRequirements,
+): Readonly<{
+  code: NativeDiagnosticCode;
+  retryable: boolean;
+  statusCode: number;
+  requestId?: string;
+}> {
+  try {
+    const envelope = dataRecord(payload);
+    const protocolRequestId =
+      typeof envelope.requestId === 'string' &&
+      envelope.requestId.length <= 64 &&
+      REQUEST_ID_PATTERN.test(envelope.requestId)
+        ? envelope.requestId
+        : undefined;
+    if (
+      (envelope.requestId !== undefined &&
+        (typeof envelope.requestId !== 'string' ||
+          envelope.requestId.length === 0 ||
+          envelope.requestId.length > 64)) ||
+      typeof envelope.apiVersion !== 'string' ||
+      !API_VERSION_PATTERN.test(envelope.apiVersion) ||
+      typeof envelope.minimumClientVersion !== 'string' ||
+      !SEMVER_PATTERN.test(envelope.minimumClientVersion)
+    ) {
+      return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+    }
+    if (requirements === undefined) {
+      if (envelope.apiVersion.split('.')[0] !== '1') {
+        return protocolStatusFailure(
+          'incompatible_version',
+          false,
+          responseStatus,
+          protocolRequestId,
+        );
+      }
+    } else if (envelope.apiVersion !== '1.0') {
+      return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+    }
+    let compatible: boolean;
+    try {
+      compatible = assessCompatibility(
+        envelope.minimumClientVersion,
+        caveClientPackage.version,
+      ).compatible;
+    } catch {
+      return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+    }
+    if (!compatible) {
+      return protocolStatusFailure(
+        'incompatible_version',
+        false,
+        responseStatus,
+        protocolRequestId,
+      );
+    }
+    const capabilities = declarationIds(envelope.capabilities);
+    const operations = declarationIds(envelope.operations);
+    if (
+      capabilities === undefined ||
+      operations === undefined ||
+      (requirements !== undefined &&
+        (!operations.includes(requirements.operation) ||
+          requirements.capabilities.some((capability) => !capabilities.includes(capability)))) ||
+      (envelope.data !== undefined && envelope.error !== undefined)
+    ) {
+      return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+    }
+    const error = dataRecord(envelope.error);
+    if (
+      typeof error.code !== 'string' ||
+      !CAVE_PROTOCOL_ERROR_CODES.has(error.code as NativeDiagnosticCode) ||
+      typeof error.message !== 'string' ||
+      error.message.length === 0 ||
+      error.message.length > 256 ||
+      typeof error.retryable !== 'boolean'
+    ) {
+      return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+    }
+    if (error.details !== undefined) {
+      const details = dataRecord(error.details);
+      const entries = Object.entries(details);
+      if (
+        entries.length > 16 ||
+        entries.some(([, entry]) => typeof entry !== 'string' || entry.length > 256)
+      ) {
+        return protocolStatusFailure('invalid_response', false, responseStatus, protocolRequestId);
+      }
+    }
+    return protocolStatusFailure(
+      error.code as NativeDiagnosticCode,
+      error.retryable,
+      responseStatus,
+      protocolRequestId,
+    );
+  } catch {
+    return protocolStatusFailure('invalid_response', false, responseStatus);
+  }
 }
 
 function credentialState(value: unknown): CredentialState {
@@ -551,24 +843,28 @@ export function createNativeBoundary(
         return nativeResponse(
           await callOperation(NATIVE_COMMANDS.listFamiliars, authority, { options }),
           200,
+          CANONICAL_RESPONSE_REQUIREMENTS.listFamiliars,
         ).payload;
       },
       async listProjects(options) {
         return nativeResponse(
           await callOperation(NATIVE_COMMANDS.listProjects, authority, { options }),
           200,
+          CANONICAL_RESPONSE_REQUIREMENTS.listProjects,
         ).payload;
       },
       async listConversations(options) {
         return nativeResponse(
           await callOperation(NATIVE_COMMANDS.listConversations, authority, { options }),
           200,
+          CANONICAL_RESPONSE_REQUIREMENTS.listConversations,
         ).payload;
       },
       async getConversation(conversationId) {
         return nativeResponse(
           await callOperation(NATIVE_COMMANDS.getConversation, authority, { conversationId }),
           200,
+          CANONICAL_RESPONSE_REQUIREMENTS.getConversation,
         ).payload;
       },
       async listConversationMessages(conversationId, options) {
@@ -578,6 +874,7 @@ export function createNativeBoundary(
             options,
           }),
           200,
+          CANONICAL_RESPONSE_REQUIREMENTS.listConversationMessages,
         ).payload;
       },
     };

@@ -1,8 +1,8 @@
 use opencoven_chat_lib::{
     validate_unix_peer_identity, validate_windows_pipe_identity, AuthorityDescriptor,
     AuthorityLifecycle, CanonicalPageCommandInput, DiagnosticCode, DiscoveryHandleInput,
-    HealthCommandInput, ManagedPairingCommandInput, NativeResponse, UnavailableCredentialCustody,
-    UnixPeerIdentity, WindowsPipeIdentity,
+    HealthCommandInput, ManagedPairingCommandInput, NativeResponse, NativeResponseOperation,
+    UnavailableCredentialCustody, UnixPeerIdentity, WindowsPipeIdentity,
 };
 use serde_json::json;
 
@@ -149,7 +149,7 @@ fn public_snapshots_reject_secret_and_private_control_fields() {
         json!({"data": {"attachment": {"name": "private.pdf"}}}),
     ] {
         assert_eq!(
-            NativeResponse::snapshot(200, payload)
+            NativeResponse::snapshot(NativeResponseOperation::Health, 200, payload)
                 .expect_err("sensitive command output must fail closed")
                 .code,
             DiagnosticCode::InvalidResponse
@@ -161,6 +161,7 @@ fn public_snapshots_reject_secret_and_private_control_fields() {
 fn public_snapshots_do_not_duplicate_client_v1_parsing() {
     let content = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let response = NativeResponse::snapshot(
+        NativeResponseOperation::ListConversationMessages,
         299,
         json!({
             "futureEnvelope": true,
@@ -205,7 +206,7 @@ fn public_snapshots_reject_secret_shaped_metadata_and_error_values() {
         }),
     ] {
         assert_eq!(
-            NativeResponse::snapshot(500, payload)
+            NativeResponse::snapshot(NativeResponseOperation::Health, 500, payload)
                 .expect_err("non-content secret-shaped values must fail closed")
                 .code,
             DiagnosticCode::InvalidResponse

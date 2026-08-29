@@ -27,7 +27,7 @@ pub use sdk_connection::{
     ManagedNativeAuthorityProvider, ManagedPairingCommandInput, NativeSdkBoundary, NativeSdkState,
     PairingRequest, ProviderFuture, ProviderPairingCreated, ProviderPairingExchange,
 };
-pub use sdk_diagnostics::{DiagnosticCode, NativeError, NativeResponse};
+pub use sdk_diagnostics::{DiagnosticCode, NativeError, NativeResponse, NativeResponseOperation};
 
 const REGISTERED_COMMANDS: &[&str] = &[
     "app_identity",

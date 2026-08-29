@@ -24,7 +24,7 @@ use crate::{
     metadata::{APP_IDENTIFIER, APP_NAME},
     sdk_diagnostics::{
         validate_public_snapshot, DiagnosticCode, NativeDiagnostics, NativeError, NativeResponse,
-        SecurityCheck, SecurityComponent, SecurityStatus,
+        NativeResponseOperation, SecurityCheck, SecurityComponent, SecurityStatus,
     },
 };
 
@@ -32,8 +32,10 @@ const HPKE_KEY_ID_DOMAIN: &[u8] = b"OpenCoven/client-v1/hpke-bound-v1/key-id\0";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_REQUEST_ID_CHARACTERS: usize = 128;
 const MAX_HANDLE_CHARACTERS: usize = 128;
+const MAX_RETAINED_DISCOVERIES: usize = 64;
 const MAX_RETAINED_PAIRINGS: usize = 64;
 const MAX_RETAINED_TERMINAL_CREDENTIALS: usize = 64;
+const DISCOVERY_TTL_MILLIS: u64 = 30 * 1_000;
 const TERMINAL_CREDENTIAL_TTL_MILLIS: u64 = 5 * 60 * 1_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -374,11 +376,26 @@ struct ActiveAuthority {
     descriptor: AuthorityDescriptor,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthorityContext {
+    generation: u64,
+    active: Option<AuthorityReference>,
+}
+
 #[derive(Default)]
 struct LifecycleState {
     generation: u64,
     active: Option<ActiveAuthority>,
     requests: HashSet<(u64, String)>,
+}
+
+impl LifecycleState {
+    fn context(&self) -> AuthorityContext {
+        AuthorityContext {
+            generation: self.generation,
+            active: self.active.as_ref().map(|active| active.reference.clone()),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -410,6 +427,43 @@ impl AuthorityLifecycle {
         });
         state.requests.clear();
         Ok(reference)
+    }
+
+    fn replace_if_context(
+        &self,
+        descriptor: AuthorityDescriptor,
+        expected: &AuthorityContext,
+    ) -> Result<AuthorityReference, NativeError> {
+        descriptor.validate()?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        if state.context() != *expected {
+            return Err(NativeError::reconcile_required());
+        }
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| NativeError::new(DiagnosticCode::Conflict, false))?;
+        let reference = AuthorityReference {
+            handle: format!("authority:{}", Uuid::new_v4()),
+            generation: state.generation,
+        };
+        state.active = Some(ActiveAuthority {
+            reference: reference.clone(),
+            descriptor,
+        });
+        state.requests.clear();
+        Ok(reference)
+    }
+
+    fn context(&self) -> Result<AuthorityContext, NativeError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        Ok(state.context())
     }
 
     pub fn close(&self, reference: &AuthorityReference) -> Result<bool, NativeError> {
@@ -809,6 +863,101 @@ pub struct ProviderPairingExchange {
     pub credential: Value,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderCredentialMetadata {
+    id: String,
+    app_name: String,
+    installation_id: String,
+    scopes: Vec<String>,
+    created_at: u64,
+    last_used_at: Option<u64>,
+    revoked_at: Option<u64>,
+    revocation_reason: Option<String>,
+}
+
+const PROVIDER_CREDENTIAL_METADATA_FIELDS: &[&str] = &[
+    "id",
+    "appName",
+    "installationId",
+    "scopes",
+    "createdAt",
+    "lastUsedAt",
+    "revokedAt",
+    "revocationReason",
+];
+
+fn valid_credential_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    value.len() == 36
+        && bytes.get(8) == Some(&b'-')
+        && bytes.get(13) == Some(&b'-')
+        && bytes.get(18) == Some(&b'-')
+        && bytes.get(23) == Some(&b'-')
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 8 | 13 | 18 | 23) || byte.is_ascii_hexdigit())
+        && bytes
+            .get(14)
+            .is_some_and(|byte| (b'1'..=b'8').contains(byte))
+        && bytes
+            .get(19)
+            .is_some_and(|byte| matches!(byte.to_ascii_lowercase(), b'8' | b'9' | b'a' | b'b'))
+}
+
+fn valid_provider_scope(value: &str) -> bool {
+    matches!(
+        value,
+        "chat:read"
+            | "chat:write"
+            | "conversations:write"
+            | "attachments:write"
+            | "tasks:write"
+            | "github:write"
+    )
+}
+
+fn validate_provider_credential_metadata(
+    value: Value,
+    expected_app_name: &str,
+    expected_installation_id: &str,
+    expected_scopes: &[String],
+) -> Result<Value, NativeError> {
+    let object = value
+        .as_object()
+        .ok_or_else(NativeError::invalid_response)?;
+    if object.len() != PROVIDER_CREDENTIAL_METADATA_FIELDS.len()
+        || PROVIDER_CREDENTIAL_METADATA_FIELDS
+            .iter()
+            .any(|field| !object.contains_key(*field))
+    {
+        return Err(NativeError::invalid_response());
+    }
+    let metadata = serde_json::from_value::<ProviderCredentialMetadata>(value)
+        .map_err(|_| NativeError::invalid_response())?;
+    let mut seen_scopes = HashSet::new();
+    if !valid_credential_uuid(&metadata.id)
+        || metadata.app_name != expected_app_name
+        || metadata.installation_id != expected_installation_id
+        || metadata.scopes != expected_scopes
+        || metadata.scopes.is_empty()
+        || metadata
+            .scopes
+            .iter()
+            .any(|scope| !valid_provider_scope(scope) || !seen_scopes.insert(scope))
+        || metadata.created_at > MAX_SAFE_INTEGER
+        || metadata
+            .last_used_at
+            .is_some_and(|value| value > MAX_SAFE_INTEGER)
+        || metadata.revoked_at.is_some()
+        || metadata.revocation_reason.is_some()
+    {
+        return Err(NativeError::invalid_response());
+    }
+    serde_json::to_value(metadata).map_err(|_| NativeError::invalid_response())
+}
+
 pub trait ManagedNativeAuthorityProvider: Send + Sync {
     fn available(&self) -> bool;
     fn discover(&self) -> ProviderFuture<AuthorityDescriptor> {
@@ -929,7 +1078,9 @@ enum PendingPairingStatus {
 
 struct PendingPairing {
     authority: AuthorityReference,
+    app_name: String,
     installation_id: String,
+    scopes: Vec<String>,
     remote_request_id: String,
     pairing_secret: SecretValue,
     expires_at: u64,
@@ -1417,9 +1568,16 @@ impl StagedCredential {
     }
 }
 
+struct PendingDiscovery {
+    descriptor: AuthorityDescriptor,
+    context: AuthorityContext,
+    expires_at: u64,
+    sequence: u64,
+}
+
 #[derive(Default)]
 struct TransientState {
-    discoveries: std::collections::HashMap<String, AuthorityDescriptor>,
+    discoveries: std::collections::HashMap<String, PendingDiscovery>,
     pairings: std::collections::HashMap<String, PendingPairing>,
     managed_pairings: std::collections::HashMap<String, String>,
     credentials: std::collections::HashMap<String, Arc<StagedCredential>>,
@@ -1442,6 +1600,22 @@ impl TransientState {
                 .retain(|_, pairing_handle| pairing_handle != handle);
         }
         removed
+    }
+
+    fn prune_discoveries(&mut self, now: u64) {
+        self.discoveries
+            .retain(|_, discovery| discovery.expires_at > now);
+        while self.discoveries.len() > MAX_RETAINED_DISCOVERIES {
+            let oldest = self
+                .discoveries
+                .iter()
+                .min_by_key(|(_, discovery)| discovery.sequence)
+                .map(|(handle, _)| handle.clone());
+            let Some(handle) = oldest else {
+                break;
+            };
+            self.discoveries.remove(&handle);
+        }
     }
 
     fn retain_managed_pairings(&mut self) {
@@ -1580,15 +1754,34 @@ impl NativeSdkBoundary {
     }
 
     pub async fn discovery_read(&self) -> Result<DiscoveryReadOutput, NativeError> {
+        self.discovery_read_at(current_time_millis()).await
+    }
+
+    async fn discovery_read_at(&self, now: u64) -> Result<DiscoveryReadOutput, NativeError> {
         let descriptor = self.provider.discover().await?;
         descriptor.validate()?;
         let snapshot = descriptor.managed_snapshot()?;
+        let context = self.lifecycle.context()?;
+        let expires_at = now
+            .checked_add(DISCOVERY_TTL_MILLIS)
+            .ok_or_else(NativeError::invalid_response)?;
         let handle = format!("discovery:{}", Uuid::new_v4());
-        self.transient
+        let mut transient = self
+            .transient
             .lock()
-            .map_err(|_| NativeError::service_unavailable())?
-            .discoveries
-            .insert(handle.clone(), descriptor);
+            .map_err(|_| NativeError::service_unavailable())?;
+        transient.prune_discoveries(now);
+        let sequence = transient.allocate_sequence()?;
+        transient.discoveries.insert(
+            handle.clone(),
+            PendingDiscovery {
+                descriptor,
+                context,
+                expires_at,
+                sequence,
+            },
+        );
+        transient.prune_discoveries(now);
         Ok(DiscoveryReadOutput { handle, snapshot })
     }
 
@@ -1596,22 +1789,32 @@ impl NativeSdkBoundary {
         &self,
         input: DiscoveryHandleInput,
     ) -> Result<AuthorityReference, NativeError> {
+        self.authority_establish_at(input, current_time_millis())
+    }
+
+    fn authority_establish_at(
+        &self,
+        input: DiscoveryHandleInput,
+        now: u64,
+    ) -> Result<AuthorityReference, NativeError> {
         validate_opaque_handle(&input.discovery_handle, "discovery:")?;
-        let descriptor = self
-            .transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?
-            .discoveries
-            .get(&input.discovery_handle)
-            .cloned()
-            .ok_or_else(NativeError::reconcile_required)?;
-        let authority = self.authority_open(descriptor)?;
-        self.transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?
-            .discoveries
-            .remove(&input.discovery_handle);
-        Ok(authority)
+        let context = self.lifecycle.context()?;
+        let discovery = {
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            transient.prune_discoveries(now);
+            transient
+                .discoveries
+                .remove(&input.discovery_handle)
+                .ok_or_else(NativeError::reconcile_required)?
+        };
+        if discovery.context != context {
+            return Err(NativeError::reconcile_required());
+        }
+        discovery.descriptor.validate()?;
+        self.authority_open_from_context(discovery.descriptor, &context)
     }
 
     fn authority_open_with_transition(
@@ -1621,6 +1824,24 @@ impl NativeSdkBoundary {
     ) -> Result<AuthorityReference, NativeError> {
         self.cleanup_recoverable_credentials()?;
         let reference = self.lifecycle.replace(authority)?;
+        self.finish_authority_open(reference, after_replace)
+    }
+
+    fn authority_open_from_context(
+        &self,
+        authority: AuthorityDescriptor,
+        context: &AuthorityContext,
+    ) -> Result<AuthorityReference, NativeError> {
+        self.cleanup_recoverable_credentials()?;
+        let reference = self.lifecycle.replace_if_context(authority, context)?;
+        self.finish_authority_open(reference, |_| {})
+    }
+
+    fn finish_authority_open(
+        &self,
+        reference: AuthorityReference,
+        after_replace: impl FnOnce(&AuthorityReference),
+    ) -> Result<AuthorityReference, NativeError> {
         after_replace(&reference);
         self.invalidate_transients_before(reference.generation)?;
         self.cleanup_recoverable_credentials()?;
@@ -1755,7 +1976,9 @@ impl NativeSdkBoundary {
             handle.into(),
             PendingPairing {
                 authority: authority.clone(),
+                app_name: "OpenCoven Chat".into(),
                 installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                scopes: vec!["chat:read".into()],
                 remote_request_id: "11111111-1111-4111-8111-111111111111".into(),
                 pairing_secret: SecretValue::pairing(
                     b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
@@ -1805,6 +2028,10 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
+        if let Err(error) = response.validate_operation(NativeResponseOperation::Health) {
+            self.lifecycle.cancel_request(&request);
+            return Err(error);
+        }
         self.lifecycle.finish_request(&request)?;
         Ok(OperationResult {
             authority: input.authority,
@@ -1823,6 +2050,8 @@ impl NativeSdkBoundary {
                 .await
                 .map_err(|_| NativeError::service_unavailable())??;
         input.request.validate(&installation_id)?;
+        let app_name = input.request.app_name.clone();
+        let scopes = input.request.scopes.clone();
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
@@ -1854,7 +2083,9 @@ impl NativeSdkBoundary {
         let sequence = transient.allocate_sequence()?;
         let pending = PendingPairing {
             authority: input.authority.clone(),
+            app_name,
             installation_id,
+            scopes,
             remote_request_id: remote_request_id.clone(),
             pairing_secret: created.pairing_secret,
             expires_at: created.expires_at,
@@ -2051,6 +2282,9 @@ impl NativeSdkBoundary {
             };
             pending
         };
+        let app_name = pending.app_name;
+        let installation_id = pending.installation_id;
+        let scopes = pending.scopes;
         let exchanged = match self
             .provider
             .pairing_exchange(
@@ -2066,7 +2300,12 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        let public_credential = match validate_public_snapshot(exchanged.credential) {
+        let public_credential = match validate_provider_credential_metadata(
+            exchanged.credential,
+            &app_name,
+            &installation_id,
+            &scopes,
+        ) {
             Ok(credential) => credential,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
@@ -2076,7 +2315,7 @@ impl NativeSdkBoundary {
         self.lifecycle.finish_request(&request)?;
         let commit_handle = format!("commit:{}", Uuid::new_v4());
         let credential = CredentialRecord {
-            installation_id: pending.installation_id,
+            installation_id,
             authority_fingerprint: authority.fingerprint()?,
             bearer: exchanged.bearer,
         };
@@ -2530,7 +2769,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        self.finish_read(request, input.authority, input.request_id, response)
+        self.finish_read(
+            request,
+            input.authority,
+            input.request_id,
+            NativeResponseOperation::ListFamiliars,
+            response,
+        )
     }
 
     pub async fn list_projects(
@@ -2552,7 +2797,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        self.finish_read(request, input.authority, input.request_id, response)
+        self.finish_read(
+            request,
+            input.authority,
+            input.request_id,
+            NativeResponseOperation::ListProjects,
+            response,
+        )
     }
 
     pub async fn list_conversations(
@@ -2574,7 +2825,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        self.finish_read(request, input.authority, input.request_id, response)
+        self.finish_read(
+            request,
+            input.authority,
+            input.request_id,
+            NativeResponseOperation::ListConversations,
+            response,
+        )
     }
 
     pub async fn get_conversation(
@@ -2596,7 +2853,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        self.finish_read(request, input.authority, input.request_id, response)
+        self.finish_read(
+            request,
+            input.authority,
+            input.request_id,
+            NativeResponseOperation::GetConversation,
+            response,
+        )
     }
 
     pub async fn list_conversation_messages(
@@ -2619,7 +2882,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        self.finish_read(request, input.authority, input.request_id, response)
+        self.finish_read(
+            request,
+            input.authority,
+            input.request_id,
+            NativeResponseOperation::ListConversationMessages,
+            response,
+        )
     }
 
     async fn begin_authenticated_read(
@@ -2682,8 +2951,13 @@ impl NativeSdkBoundary {
         request: RequestLease,
         authority: AuthorityReference,
         request_id: String,
+        operation: NativeResponseOperation,
         response: NativeResponse,
     ) -> Result<OperationResult<NativeResponse>, NativeError> {
+        if let Err(error) = response.validate_operation(operation) {
+            self.lifecycle.cancel_request(&request);
+            return Err(error);
+        }
         self.lifecycle.finish_request(&request)?;
         Ok(OperationResult {
             authority,
@@ -3015,7 +3289,7 @@ pub async fn sdk_native_diagnostics(
 mod tests {
     use std::sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Condvar, Mutex,
+        Arc, Barrier, Condvar, Mutex,
     };
     use std::time::{Duration, Instant};
 
@@ -3031,7 +3305,7 @@ mod tests {
         CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialStoreAvailability,
         PreparedCredential, SecretValue,
     };
-    use crate::sdk_diagnostics::DiagnosticCode;
+    use crate::sdk_diagnostics::{DiagnosticCode, NativeResponseOperation};
 
     const PUBLIC_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const KEY_ID: &str = "tDE1VahIyqtAoH7mJ7uT3yzaF6EnK70vG9JMvTMCOAM";
@@ -3275,6 +3549,10 @@ mod tests {
 
     struct FakeProvider;
 
+    struct MetadataProvider {
+        credential: Value,
+    }
+
     struct SequencedPairingProvider {
         next: AtomicUsize,
         expires_at: u64,
@@ -3342,6 +3620,54 @@ mod tests {
             pairing_secret: SecretValue,
         ) -> ProviderFuture<ProviderPairingExchange> {
             FakeProvider.pairing_exchange(authority, remote_request_id, pairing_secret)
+        }
+    }
+
+    impl ManagedNativeAuthorityProvider for MetadataProvider {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
+            FakeProvider.health(authority)
+        }
+
+        fn pairing_create(
+            &self,
+            authority: AuthorityDescriptor,
+            request: PairingRequest,
+        ) -> ProviderFuture<ProviderPairingCreated> {
+            FakeProvider.pairing_create(authority, request)
+        }
+
+        fn pairing_poll(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<Value> {
+            FakeProvider.pairing_poll(authority, remote_request_id, pairing_secret)
+        }
+
+        fn pairing_exchange(
+            &self,
+            _authority: AuthorityDescriptor,
+            _remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<ProviderPairingExchange> {
+            let credential = self.credential.clone();
+            Box::pin(async move {
+                assert_eq!(
+                    pairing_secret.expose(),
+                    b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                );
+                Ok(ProviderPairingExchange {
+                    bearer: SecretValue::bearer(
+                        b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_vec(),
+                    )?,
+                    credential,
+                })
+            })
         }
     }
 
@@ -3422,6 +3748,7 @@ mod tests {
         fn health(&self, _authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
             Box::pin(async {
                 crate::NativeResponse::snapshot(
+                    NativeResponseOperation::Health,
                     200,
                     json!({
                         "apiVersion": "1.0",
@@ -3514,6 +3841,7 @@ mod tests {
                     b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
                 );
                 crate::NativeResponse::snapshot(
+                    NativeResponseOperation::ListFamiliars,
                     200,
                     json!({
                         "apiVersion": "1.0",
@@ -3544,6 +3872,7 @@ mod tests {
                     b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
                 );
                 crate::NativeResponse::snapshot(
+                    NativeResponseOperation::ListConversations,
                     200,
                     json!({
                         "apiVersion": "1.0",
@@ -3566,6 +3895,7 @@ mod tests {
     struct RaceCustody {
         stored: Mutex<Option<Vec<u8>>>,
         fail_after_write: bool,
+        writes: AtomicUsize,
     }
 
     impl RaceCustody {
@@ -3573,6 +3903,7 @@ mod tests {
             Self {
                 stored: Mutex::new(None),
                 fail_after_write,
+                writes: AtomicUsize::new(0),
             }
         }
 
@@ -3605,6 +3936,7 @@ mod tests {
             &self,
             credential: &PreparedCredential,
         ) -> Result<(), crate::NativeError> {
+            self.writes.fetch_add(1, Ordering::Relaxed);
             *self.stored.lock().expect("test store lock") = Some(credential.exact_value().to_vec());
             if self.fail_after_write {
                 return Err(crate::NativeError::new(DiagnosticCode::Timeout, false));
@@ -4076,6 +4408,290 @@ mod tests {
             .await
             .expect("pairing should exchange");
         (authority, exchanged.result.commit_handle)
+    }
+
+    #[test]
+    fn managed_exchange_rejects_mismatched_or_revoked_metadata_before_persistence() {
+        tauri::async_runtime::block_on(async {
+            let cases = [
+                (
+                    "wrong-app",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "Different App",
+                        "installationId": "00000000-0000-4000-8000-000000000010",
+                        "scopes": ["chat:read"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": null,
+                        "revocationReason": null
+                    }),
+                ),
+                (
+                    "wrong-installation",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "OpenCoven Chat",
+                        "installationId": "00000000-0000-4000-8000-000000000099",
+                        "scopes": ["chat:read"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": null,
+                        "revocationReason": null
+                    }),
+                ),
+                (
+                    "missing-required-scope",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "OpenCoven Chat",
+                        "installationId": "00000000-0000-4000-8000-000000000010",
+                        "scopes": ["chat:write"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": null,
+                        "revocationReason": null
+                    }),
+                ),
+                (
+                    "unrequested-privileged-scope",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "OpenCoven Chat",
+                        "installationId": "00000000-0000-4000-8000-000000000010",
+                        "scopes": ["chat:read", "chat:write"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": null,
+                        "revocationReason": null
+                    }),
+                ),
+                (
+                    "revoked-metadata",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "OpenCoven Chat",
+                        "installationId": "00000000-0000-4000-8000-000000000010",
+                        "scopes": ["chat:read"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": 2_000_000_000_001_u64,
+                        "revocationReason": "revoked"
+                    }),
+                ),
+                (
+                    "producer-schema-mismatch",
+                    json!({
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "appName": "OpenCoven Chat",
+                        "installationId": "00000000-0000-4000-8000-000000000010",
+                        "scopes": ["chat:read"],
+                        "createdAt": 2_000_000_000_000_u64,
+                        "lastUsedAt": null,
+                        "revokedAt": null,
+                        "revocationReason": null,
+                        "unexpected": true
+                    }),
+                ),
+            ];
+
+            for (index, (label, credential)) in cases.into_iter().enumerate() {
+                let custody = Arc::new(RaceCustody::new(false));
+                let boundary = Arc::new(NativeSdkBoundary::new(
+                    custody.clone(),
+                    Arc::new(MetadataProvider { credential }),
+                ));
+                let authority = boundary
+                    .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                    .expect("authority should open");
+                let created = boundary
+                    .managed_pairing_create(PairingCreateCommandInput {
+                        authority: authority.clone(),
+                        request_id: format!("request-create-metadata-{index}"),
+                        request: PairingRequest {
+                            app_name: "OpenCoven Chat".into(),
+                            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                            scopes: vec!["chat:read".into()],
+                        },
+                    })
+                    .await
+                    .expect("managed pairing should be created");
+
+                assert_eq!(
+                    boundary
+                        .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                            authority,
+                            request_id: format!("request-exchange-metadata-{index}"),
+                            pairing_request_id: created.result.request_id,
+                        })
+                        .await
+                        .expect_err(label)
+                        .code,
+                    DiagnosticCode::InvalidResponse
+                );
+                assert_eq!(
+                    custody.writes.load(Ordering::Relaxed),
+                    0,
+                    "{label} must fail before persistence"
+                );
+                assert!(
+                    custody.stored().is_none(),
+                    "{label} must not leave a credential behind"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn discovery_handles_expire_before_establishment() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let discovered = boundary
+                .discovery_read_at(1_000)
+                .await
+                .expect("discovery should succeed");
+
+            assert_eq!(
+                boundary
+                    .authority_establish_at(
+                        super::DiscoveryHandleInput {
+                            discovery_handle: discovered.handle,
+                        },
+                        1_000 + super::DISCOVERY_TTL_MILLIS,
+                    )
+                    .expect_err("expired discovery must fail")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+        });
+    }
+
+    #[test]
+    fn discovery_handles_are_count_bounded() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let mut handles = Vec::new();
+            for index in 0..=super::MAX_RETAINED_DISCOVERIES {
+                handles.push(
+                    boundary
+                        .discovery_read_at(1_000 + index as u64)
+                        .await
+                        .expect("discovery should succeed")
+                        .handle,
+                );
+            }
+
+            assert_eq!(
+                boundary
+                    .authority_establish_at(
+                        super::DiscoveryHandleInput {
+                            discovery_handle: handles[0].clone(),
+                        },
+                        2_000,
+                    )
+                    .expect_err("the oldest discovery should be pruned")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+        });
+    }
+
+    #[test]
+    fn discovery_handles_are_consumed_once() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let discovered = boundary
+                .discovery_read_at(1_000)
+                .await
+                .expect("discovery should succeed");
+            let input = super::DiscoveryHandleInput {
+                discovery_handle: discovered.handle,
+            };
+
+            boundary
+                .authority_establish_at(input.clone(), 1_001)
+                .expect("first establishment should win");
+            assert_eq!(
+                boundary
+                    .authority_establish_at(input, 1_002)
+                    .expect_err("replayed discovery must fail")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+        });
+    }
+
+    #[test]
+    fn concurrent_discovery_establishment_has_one_winner() {
+        tauri::async_runtime::block_on(async {
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                Arc::new(RaceCustody::new(false)),
+                Arc::new(FakeProvider),
+            ));
+            let discovered = boundary
+                .discovery_read()
+                .await
+                .expect("discovery should succeed");
+            let workers = 16;
+            let gate = Arc::new(Barrier::new(workers));
+            let mut threads = Vec::new();
+            for _ in 0..workers {
+                let boundary = Arc::clone(&boundary);
+                let gate = Arc::clone(&gate);
+                let discovery_handle = discovered.handle.clone();
+                threads.push(std::thread::spawn(move || {
+                    gate.wait();
+                    boundary.authority_establish(super::DiscoveryHandleInput { discovery_handle })
+                }));
+            }
+            let successes = threads
+                .into_iter()
+                .map(|thread| thread.join().expect("worker should not panic"))
+                .filter(Result::is_ok)
+                .count();
+
+            assert_eq!(successes, 1, "one-time discovery must have one winner");
+        });
+    }
+
+    #[test]
+    fn concurrent_discoveries_from_one_generation_cannot_replace_each_other() {
+        tauri::async_runtime::block_on(async {
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                Arc::new(RaceCustody::new(false)),
+                Arc::new(FakeProvider),
+            ));
+            let first = boundary
+                .discovery_read()
+                .await
+                .expect("first discovery should succeed");
+            let second = boundary
+                .discovery_read()
+                .await
+                .expect("second discovery should succeed");
+            let gate = Arc::new(Barrier::new(2));
+            let threads = [first.handle, second.handle].map(|discovery_handle| {
+                let boundary = Arc::clone(&boundary);
+                let gate = Arc::clone(&gate);
+                std::thread::spawn(move || {
+                    gate.wait();
+                    boundary.authority_establish(super::DiscoveryHandleInput { discovery_handle })
+                })
+            });
+            let successes = threads
+                .into_iter()
+                .map(|thread| thread.join().expect("worker should not panic"))
+                .filter(Result::is_ok)
+                .count();
+
+            assert_eq!(
+                successes, 1,
+                "only one handle from a captured authority generation may establish"
+            );
+        });
     }
 
     #[test]
@@ -4901,7 +5517,9 @@ mod tests {
                     pairing_handle.clone(),
                     super::PendingPairing {
                         authority: mismatched,
+                        app_name: "OpenCoven Chat".into(),
                         installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
                         remote_request_id: "11111111-1111-4111-8111-111111111111".into(),
                         pairing_secret: SecretValue::pairing(
                             b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
