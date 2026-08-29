@@ -47,8 +47,20 @@ export function assertPairingStatus(
   value: { status?: string } | null | undefined,
   expectedStatus: string,
 ): { status?: string };
+export class CommandExecutionError extends Error {
+  constructor(label: string, result: unknown);
+}
 export class NativeRpcClient {
-  constructor(child: unknown);
+  constructor(child: unknown, options?: { shutdownTimeoutMs?: number });
   close(): Promise<void>;
 }
+export function safeEnvironment(
+  rootPath: string,
+  extra?: Record<string, string>,
+): Record<string, string>;
+export function withFixtureDaemon<T>(
+  fixtureDaemon: { close(): Promise<void> },
+  action: () => Promise<T>,
+): Promise<T>;
+export function recordCaveMatrixFailure(results: Map<string, unknown>, error: unknown): unknown;
 export function runPhase1Conformance(options?: ReturnType<typeof parseArgs>): Promise<unknown>;

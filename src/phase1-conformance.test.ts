@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, test } from 'vitest';
@@ -8,9 +11,13 @@ import {
   assertExactAssertionResults,
   assertPairingStatus,
   buildPhase1Report,
+  CommandExecutionError,
   NativeRpcClient,
   parseArgs,
   parseCaveConformanceOutput,
+  recordCaveMatrixFailure,
+  safeEnvironment,
+  withFixtureDaemon,
 } from '../scripts/phase1-conformance.mjs';
 
 class SynchronousCloseChild extends EventEmitter {
@@ -26,6 +33,28 @@ class SynchronousCloseChild extends EventEmitter {
   };
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
+}
+
+class SynchronousNonZeroCloseChild extends SynchronousCloseChild {
+  override readonly stdin = {
+    write: (line: string) => {
+      const request = JSON.parse(line) as { id: string };
+      this.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result: {} })}\n`);
+      this.exitCode = 7;
+      this.emit('close', 7, null);
+      return true;
+    },
+  };
+}
+
+class NeverCloseChild extends SynchronousCloseChild {
+  override readonly stdin = {
+    write: (line: string) => {
+      const request = JSON.parse(line) as { id: string };
+      this.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result: {} })}\n`);
+      return true;
+    },
+  };
 }
 
 function passingAssertions(): Array<{
@@ -172,5 +201,64 @@ describe('Phase 1 real-authority conformance harness', () => {
     ]);
 
     expect(outcome).toBe('closed');
+  });
+
+  test('rejects a native RPC child that exits unsuccessfully during shutdown', async () => {
+    const client = new NativeRpcClient(new SynchronousNonZeroCloseChild());
+
+    await expect(client.close()).rejects.toThrow(/exit code 7/);
+  });
+
+  test('rejects a native RPC child that crashed before shutdown began', async () => {
+    const child = new SynchronousCloseChild();
+    child.exitCode = 7;
+    const client = new NativeRpcClient(child);
+
+    await expect(client.close()).rejects.toThrow(/exit code 7/);
+  });
+
+  test('bounds native RPC shutdown when the child never closes', async () => {
+    const client = new NativeRpcClient(new NeverCloseChild(), { shutdownTimeoutMs: 10 });
+
+    await expect(client.close()).rejects.toThrow(/shutdown timed out/);
+  });
+
+  test('closes the fixture daemon when native scenario setup fails', async () => {
+    let closed = false;
+    const fixtureDaemon = {
+      close: async () => {
+        closed = true;
+      },
+    };
+
+    await expect(
+      withFixtureDaemon(fixtureDaemon, async () => {
+        throw new Error('native setup failed');
+      }),
+    ).rejects.toThrow(/native setup failed/);
+    expect(closed).toBe(true);
+  });
+
+  test('preserves a failed Cave subprocess as an infrastructure failure', () => {
+    const results = new Map();
+    const failure = new CommandExecutionError('Cave Client v1 conformance', {
+      stdout: ['ok pairing.ttl-poll-expired', 'ok pairing.ttl-exchange-expired'].join('\n'),
+    });
+
+    expect(recordCaveMatrixFailure(results, failure)).toBe(failure);
+    expect(results.get('phase1.pairing.expiry')).toMatchObject({ status: 'failed' });
+  });
+
+  test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
+    const root = mkdtempSync(join(tmpdir(), 'phase1-safe-environment-'));
+    try {
+      const environment = safeEnvironment(root);
+
+      expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
+      expect(environment.RUSTUP_HOME).toBeUndefined();
+      expect(environment.HOME).toBe(resolve(root, 'home'));
+    } finally {
+      rmSync(root, { recursive: true });
+    }
   });
 });

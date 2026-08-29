@@ -46,6 +46,12 @@ directory. Cleanup verifies device, inode, real path, and an unpredictable
 ownership stamp; it never follows symlinks. Only direct `ChildProcess`
 instances started by the harness are terminated and reaped.
 
+`HOME`, XDG directories, temporary directories, the pnpm store, Cargo home,
+Cave home, and Coven home all point inside process-owned roots. The harness
+resolves the locked Rust toolchain binaries before isolation, places those
+binaries first on `PATH`, and does not expose the operator's `RUSTUP_HOME` or
+Cargo credentials to producer builds.
+
 Caller-selected paths are never recursively deleted or overwritten. The only
 retained file is:
 
@@ -116,6 +122,8 @@ node ./scripts/phase1-artifact-secret-scan.mjs \
   the required scenario. The harness does not replace that absence with a mock.
 - `passed` means the packaged path ran against the locked authority and the
   retained evidence scanned clean.
+- A failed or timed-out producer subprocess is an infrastructure failure.
+  Partial stdout is never accepted as passing assertion evidence.
 
 At this revision the exact locked native RPC has no mode that uses the real OS
 keychain and Cave has no release-mode override for API-major or

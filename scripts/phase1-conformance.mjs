@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { devNull } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { delimiter, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
@@ -62,7 +62,7 @@ function defaultSourceRoot(environmentName, repositoryName) {
     : resolve(process.env[environmentName]);
 }
 
-class CommandExecutionError extends Error {
+export class CommandExecutionError extends Error {
   constructor(label, result) {
     super(`${label} failed.`);
     this.label = label;
@@ -238,21 +238,28 @@ function requirePassedAssertions(assertions, ids) {
   return ids.every((id) => assertions.get(id) === 'passed');
 }
 
-function safeEnvironment(rootPath, extra = {}) {
-  const operatorHome = process.env.HOME;
+export function safeEnvironment(rootPath, extra = {}) {
   const home = resolve(rootPath, 'home');
   const temp = resolve(rootPath, 'tmp');
   const cache = resolve(rootPath, 'cache');
   const config = resolve(home, '.config');
   const data = resolve(rootPath, 'data');
   const pnpmStore = resolve(rootPath, 'pnpm-store');
-  for (const path of [home, temp, cache, config, data, pnpmStore]) {
+  const cargoHome = resolve(rootPath, 'cargo-home');
+  const cargoPath = realpathSync(
+    execFileSync('rustup', ['which', 'cargo'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim(),
+  );
+  const rustToolchainBin = dirname(cargoPath);
+  for (const path of [home, temp, cache, config, data, pnpmStore, cargoHome]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
     chmodSync(path, 0o700);
   }
 
   const environment = {
-    PATH: process.env.PATH ?? '',
+    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -266,6 +273,9 @@ function safeEnvironment(rootPath, extra = {}) {
     NPM_CONFIG_PROXY: '',
     NPM_CONFIG_HTTPS_PROXY: '',
     PNPM_STORE_DIR: pnpmStore,
+    CARGO_HOME: cargoHome,
+    RUSTC: resolve(rustToolchainBin, 'rustc'),
+    RUSTDOC: resolve(rustToolchainBin, 'rustdoc'),
     CI: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
@@ -281,10 +291,6 @@ function safeEnvironment(rootPath, extra = {}) {
     all_proxy: '',
     ...extra,
   };
-  if (operatorHome !== undefined) {
-    environment.RUSTUP_HOME = process.env.RUSTUP_HOME ?? resolve(operatorHome, '.rustup');
-    environment.CARGO_HOME = process.env.CARGO_HOME ?? resolve(operatorHome, '.cargo');
-  }
   for (const name of ['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT']) {
     if (process.env[name] !== undefined) {
       environment[name] = process.env[name];
@@ -868,15 +874,39 @@ function writeNativeFixture(caveHome, covenHome, daemonUrl) {
   }
 }
 
-async function triggerAndWaitForChildClose(child, trigger) {
+export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rpcTimeoutMs) {
   const closed = once(child, 'close');
   await trigger();
-  await closed;
+  let timer;
+  try {
+    const [code, signal] = await Promise.race([
+      closed,
+      new Promise((_, rejectTimeout) => {
+        timer = setTimeout(() => rejectTimeout(new Error('child shutdown timed out')), timeoutMs);
+      }),
+    ]);
+    assertSuccessfulChildExit(code, signal);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function assertSuccessfulChildExit(code, signal) {
+  if (code !== 0 || signal !== null) {
+    throw new Error(
+      signal === null
+        ? `child shutdown failed with exit code ${code}`
+        : `child shutdown failed with signal ${signal}`,
+    );
+  }
 }
 
 export class NativeRpcClient {
-  constructor(child) {
+  constructor(child, { shutdownTimeoutMs = rpcTimeoutMs } = {}) {
     this.child = child;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.pending = new Map();
     this.sequence = 0;
     this.buffer = '';
@@ -952,9 +982,23 @@ export class NativeRpcClient {
   }
 
   async close() {
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      await triggerAndWaitForChildClose(this.child, () => this.ok('conformance_shutdown'));
+    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+      assertSuccessfulChildExit(this.child.exitCode, this.child.signalCode);
+      return;
     }
+    await triggerAndWaitForChildClose(
+      this.child,
+      () => this.ok('conformance_shutdown'),
+      this.shutdownTimeoutMs,
+    );
+  }
+}
+
+export async function withFixtureDaemon(fixtureDaemon, action) {
+  try {
+    return await action();
+  } finally {
+    await fixtureDaemon.close();
   }
 }
 
@@ -1066,33 +1110,34 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       description: 'Synthetic roster entry.',
     },
   ]);
-  writeNativeFixture(caveHome, covenHome, fixtureDaemon.url);
-  const portServer = createServer();
-  portServer.listen(0, '127.0.0.1');
-  await once(portServer, 'listening');
-  const port = portServer.address().port;
-  await new Promise((resolveClose, rejectClose) =>
-    portServer.close((error) => (error ? rejectClose(error) : resolveClose())),
-  );
-  const origin = `http://127.0.0.1:${port}`;
-  const adminToken = `phase1-${randomUUID()}`;
-  const rpcEnvironment = {
-    ...environment,
-    COVEN_HOME: covenHome,
-    COVEN_CAVE_HOME: caveHome,
-    COVEN_CAVE_PORT: String(port),
-    COVEN_CAVE_AUTH_TOKEN: adminToken,
-    COVEN_CAVE_CLIENT_V1_AUTHORITY_MODE: 'enforce',
-    COVEN_CAVE_HEAP_MONITOR: '0',
-    OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH: realpathSync(process.execPath),
-    OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH: resolve(roots.caveRoot, 'server.mjs'),
-    NODE_ENV: 'production',
-  };
-  const rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
-
-  let handle;
-  let credentialId;
+  let rpc;
   try {
+    writeNativeFixture(caveHome, covenHome, fixtureDaemon.url);
+    const portServer = createServer();
+    portServer.listen(0, '127.0.0.1');
+    await once(portServer, 'listening');
+    const port = portServer.address().port;
+    await new Promise((resolveClose, rejectClose) =>
+      portServer.close((error) => (error ? rejectClose(error) : resolveClose())),
+    );
+    const origin = `http://127.0.0.1:${port}`;
+    const adminToken = `phase1-${randomUUID()}`;
+    const rpcEnvironment = {
+      ...environment,
+      COVEN_HOME: covenHome,
+      COVEN_CAVE_HOME: caveHome,
+      COVEN_CAVE_PORT: String(port),
+      COVEN_CAVE_AUTH_TOKEN: adminToken,
+      COVEN_CAVE_CLIENT_V1_AUTHORITY_MODE: 'enforce',
+      COVEN_CAVE_HEAP_MONITOR: '0',
+      OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH: realpathSync(process.execPath),
+      OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH: resolve(roots.caveRoot, 'server.mjs'),
+      NODE_ENV: 'production',
+    };
+    rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
+
+    let handle;
+    let credentialId;
     try {
       await rpc.error(
         'cave_read_discovery',
@@ -1202,7 +1247,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       );
     } else {
       try {
-        await rpc.ok('cave_reset_pairing', { handle });
+        await rpc.ok('conformance_reset_native_state');
         const discovery = await waitForDiscovery(rpc);
         handle = discovery.handle;
         await rpc.ok('cave_health', { handle, operation: rpc.operation() });
@@ -1446,8 +1491,11 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       // custody and therefore cannot exercise a missing OS keychain.
     }
   } finally {
-    await rpc.close().catch(() => undefined);
-    await fixtureDaemon.close();
+    await withFixtureDaemon(fixtureDaemon, async () => {
+      if (rpc !== undefined) {
+        await rpc.close();
+      }
+    });
   }
 }
 
@@ -1558,6 +1606,11 @@ function recordCaveBackedAssertions(results, caveAssertions) {
   }
 }
 
+export function recordCaveMatrixFailure(results, error) {
+  recordCaveBackedAssertions(results, new Map());
+  return error;
+}
+
 function fillMissingAssertions(results, status, diagnosticId) {
   for (const id of REQUIRED_PHASE1_ASSERTION_IDS) {
     if (!results.has(id)) {
@@ -1588,8 +1641,7 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       );
       recordCaveBackedAssertions(results, caveAssertions);
     } catch (error) {
-      const output = error instanceof CommandExecutionError ? (error.result?.stdout ?? '') : '';
-      recordCaveBackedAssertions(results, parseCaveConformanceOutput(output));
+      infrastructureFailure ??= recordCaveMatrixFailure(results, error);
     }
 
     await runNativeScenarios({
@@ -1614,19 +1666,17 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       'phase1.producer.native-trust-fixture-unavailable',
     );
 
+    const operatorIsolationValid =
+      environment.HOME !== process.env.HOME &&
+      environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&
+      environment.TMPDIR.startsWith(executionRoot.rootPath) &&
+      environment.CARGO_HOME.startsWith(executionRoot.rootPath) &&
+      environment.RUSTUP_HOME === undefined;
     addAssertion(
       results,
       'phase1.operator.homes-credentials-untouched',
-      environment.HOME !== process.env.HOME &&
-        environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&
-        environment.TMPDIR.startsWith(executionRoot.rootPath)
-        ? 'passed'
-        : 'failed',
-      environment.HOME !== process.env.HOME &&
-        environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&
-        environment.TMPDIR.startsWith(executionRoot.rootPath)
-        ? 'phase1.assertion.passed'
-        : 'phase1.assertion.failed',
+      operatorIsolationValid ? 'passed' : 'failed',
+      operatorIsolationValid ? 'phase1.assertion.passed' : 'phase1.assertion.failed',
     );
   } catch (error) {
     infrastructureFailure = error;
