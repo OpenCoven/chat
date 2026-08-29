@@ -238,6 +238,154 @@ jobs:
       - name: Run contract canary
         run: pnpm test:contract-canary -- --sdk-root .cross-repo/sdk --cave-root .cross-repo/coven-cave
 
+  phase1-conformance:
+    name: Phase 1 real-authority conformance
+    runs-on: macos-15
+    needs: [web, changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: phase1-revisions
+        name: Read Phase 1 reviewed revisions
+        run: |
+          node --input-type=module <<'EOF'
+          import { appendFileSync } from 'node:fs';
+          import { readPhase1ConformanceLock } from './scripts/phase1-conformance-lock.mjs';
+
+          const lock = readPhase1ConformanceLock();
+          const outputPath = process.env.GITHUB_OUTPUT;
+
+          if (!outputPath) {
+            throw new Error('GITHUB_OUTPUT must be set.');
+          }
+
+          for (const repository of ['sdk', 'cave', 'coven']) {
+            appendFileSync(outputPath, `${repository}_repository=${lock[repository].repository}\n`);
+            appendFileSync(outputPath, `${repository}_revision=${lock[repository].revision}\n`);
+          }
+          EOF
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.sdk_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.sdk_revision }}
+          path: .phase1-counterparts/sdk
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.cave_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.cave_revision }}
+          path: .phase1-counterparts/coven-cave
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.coven_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.coven_revision }}
+          path: .phase1-counterparts/coven
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - id: phase1-keychain
+        name: Configure isolated Phase 1 keychain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          security default-keychain -d user | tr -d '"' > "$RUNNER_TEMP/phase1-original-default-keychain"
+          security list-keychains -d user | sed 's/^[[:space:]]*"//; s/"$//' > "$RUNNER_TEMP/phase1-original-keychains"
+
+          keychain="$RUNNER_TEMP/phase1-conformance.keychain-db"
+          password="$(uuidgen)"
+          echo "::add-mask::${password}"
+          security create-keychain -p "${password}" "${keychain}"
+          security set-keychain-settings -lut 2700 "${keychain}"
+          security unlock-keychain -p "${password}" "${keychain}"
+          security default-keychain -d user -s "${keychain}"
+          security list-keychains -d user -s "${keychain}"
+          echo "PHASE1_TEST_KEYCHAIN=${keychain}" >> "$GITHUB_ENV"
+      - id: phase1-run
+        name: Run packaged Phase 1 conformance
+        shell: bash
+        env:
+          OPENCOVEN_CHAT_ROOT: ${{ github.workspace }}
+          OPENCOVEN_SDK_ROOT: ${{ github.workspace }}/.phase1-counterparts/sdk
+          OPENCOVEN_CAVE_ROOT: ${{ github.workspace }}/.phase1-counterparts/coven-cave
+          OPENCOVEN_COVEN_ROOT: ${{ github.workspace }}/.phase1-counterparts/coven
+        run: |
+          set +e
+          pnpm test:phase1-conformance
+          status=$?
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - id: secret-scan
+        name: Re-scan retained Phase 1 report
+        if: always() && hashFiles('test-results/phase1-conformance/report.json') != ''
+        run: node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance
+      - name: Upload sanitized Phase 1 report
+        if: always() && steps.secret-scan.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase1-conformance-report
+          path: test-results/phase1-conformance/report.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove isolated Phase 1 keychain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          if [[ -f "$RUNNER_TEMP/phase1-original-default-keychain" ]]; then
+            original_default="$(cat "$RUNNER_TEMP/phase1-original-default-keychain")"
+            if [[ -n "${original_default}" ]]; then
+              security default-keychain -d user -s "${original_default}"
+            fi
+          fi
+
+          if [[ -f "$RUNNER_TEMP/phase1-original-keychains" ]]; then
+            keychains=()
+            while IFS= read -r keychain; do
+              if [[ -n "${keychain}" ]]; then
+                keychains+=("${keychain}")
+              fi
+            done < "$RUNNER_TEMP/phase1-original-keychains"
+            if [[ "${#keychains[@]}" -gt 0 ]]; then
+              security list-keychains -d user -s "${keychains[@]}"
+            fi
+          fi
+
+          if [[ -n "${PHASE1_TEST_KEYCHAIN:-}" ]]; then
+            security delete-keychain "${PHASE1_TEST_KEYCHAIN}"
+          fi
+      - name: Enforce Phase 1 conformance result
+        if: always()
+        shell: bash
+        run: |
+          test "${{ steps.phase1-run.outputs.exit_code }}" = "0"
+          test "${{ steps.secret-scan.outcome }}" = "success"
+
   desktop:
     name: Desktop build
     runs-on: ubuntu-latest
@@ -286,11 +434,22 @@ jobs:
         with:
           toolchain: 1.95.0
           components: clippy,rustfmt
-      - run: rustup target add x86_64-pc-windows-gnu
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
-      - run: corepack pnpm cargo:check:windows-gnu
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
       - run: corepack pnpm test:native-e2e
+
+  windows-rust:
+    name: Windows Rust
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

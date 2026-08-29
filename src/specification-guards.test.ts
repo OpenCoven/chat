@@ -277,20 +277,19 @@ describe('Phase 1 specification guards', () => {
     expect(nativeSource).not.toContain('take_hook');
   });
 
-  it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
-    const packageManifest = readJson<PackageManifest>('package.json');
+  it('checks every Rust target on a native Windows runner', () => {
     const workflow = readText('.github/workflows/ci.yml');
-    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
-      ?.groups?.job;
+    const windowsRustJob = workflow.match(
+      /\n {2}windows-rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
+    )?.groups?.job;
 
-    expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
-      'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
-    );
-    expect(rustJob).toContain(
+    expect(windowsRustJob).toContain('name: Windows Rust');
+    expect(windowsRustJob).toContain('runs-on: windows-latest');
+    expect(windowsRustJob).toContain('toolchain: 1.95.0');
+    expect(windowsRustJob).toContain(
       '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
     );
-    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
-    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+    expect(windowsRustJob).not.toContain('rustup target add');
   });
 
   it('keeps the capability schema resolvable from a fresh checkout', () => {
@@ -640,6 +639,16 @@ describe('Phase 1 specification guards', () => {
     );
   });
 
+  it('allows the isolated Phase 1 build and secure cleanup to finish on a cold runner', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const phase1Job = workflow.slice(
+      workflow.indexOf('  phase1-conformance:'),
+      workflow.indexOf('\n  desktop:'),
+    );
+
+    expect(phase1Job).toContain('timeout-minutes: 120');
+  });
+
   it('skips the expensive jobs for a branch that changed only prose', () => {
     // A documentation branch spent two twenty-minute E2E timeouts proving
     // nothing about documentation.
@@ -650,7 +659,10 @@ describe('Phase 1 specification guards', () => {
 
     const gated = workflow.match(/if: needs\.changes\.outputs\.docs_only != 'true'/g) ?? [];
 
-    expect(gated, 'E2E, Desktop build and Rust are the jobs worth skipping').toHaveLength(3);
+    expect(
+      gated,
+      'E2E, Desktop build, macOS Rust, Windows Rust, and Phase 1 conformance are the jobs worth skipping',
+    ).toHaveLength(5);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
@@ -760,7 +772,7 @@ describe('Phase 1 specification guards', () => {
       /token: \$\{\{ secrets\.CANARY_TOKEN \|\| github\.token \}\}/g,
     );
 
-    expect(tokenLines, 'both cross-repository checkouts need the token').toHaveLength(2);
+    expect(tokenLines, 'all cross-repository checkouts need the token').toHaveLength(5);
   });
 
   it('proves the packed harness installs with no network access', () => {
@@ -849,5 +861,99 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toMatch(/pnpm\/action-setup@[0-9a-f]{40}\s+# v4\.4\.0/);
     expect(workflow).toMatch(/actions\/setup-node@[0-9a-f]{40}\s+# v4\.4\.0/);
     expect(workflow).toMatch(/dtolnay\/rust-toolchain@[0-9a-f]{40}\s+# stable/);
+  });
+
+  it('defines the packaged Phase 1 real-authority gate and sanitized evidence upload', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const phase1Job = workflow.slice(
+      workflow.indexOf('  phase1-conformance:'),
+      workflow.indexOf('\n  desktop:'),
+    );
+
+    expect(packageManifest.scripts?.['test:phase1-conformance']).toBe(
+      'node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all',
+    );
+    expect(workflow).toMatch(/^ {2}phase1-conformance:$/m);
+    expect(workflow).toMatch(/name:\s*Phase 1 real-authority conformance/);
+    expect(workflow).toContain('runs-on: macos-15');
+    expect(workflow).toContain(
+      "import { readPhase1ConformanceLock } from './scripts/phase1-conformance-lock.mjs';",
+    );
+    for (const repository of ['sdk', 'cave', 'coven']) {
+      expect(workflow).toContain(
+        `repository: \${{ steps.phase1-revisions.outputs.${repository}_repository }}`,
+      );
+      expect(workflow).toContain(
+        `ref: \${{ steps.phase1-revisions.outputs.${repository}_revision }}`,
+      );
+      expect(workflow).toContain(
+        `path: .phase1-counterparts/${repository === 'cave' ? 'coven-cave' : repository}`,
+      );
+    }
+    expect(workflow).toContain('security create-keychain');
+    expect(workflow).toContain('security unlock-keychain');
+    expect(phase1Job).toMatch(/toolchain: 1\.95\.0\s+components: clippy,rustfmt/);
+    expect(workflow).toMatch(/name:\s*Remove isolated Phase 1 keychain[\s\S]*?if:\s*always\(\)/);
+    expect(workflow).toContain('pnpm test:phase1-conformance');
+    expect(workflow).toContain(
+      'node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance',
+    );
+    expect(workflow).toContain(
+      'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    );
+    expect(workflow).toContain('path: test-results/phase1-conformance/report.json');
+  });
+
+  it('does not persist checkout credentials into the Phase 1 execution workspace', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const phase1Job = workflow.slice(workflow.indexOf('  phase1-conformance:'));
+
+    expect(phase1Job.match(/persist-credentials: false/g)).toHaveLength(4);
+    expect(phase1Job).toContain('pnpm install --frozen-lockfile --ignore-scripts');
+  });
+
+  it('packages the Cave compatibility controls only for the Phase 1 harness', () => {
+    const script = readText('scripts/phase1-conformance.mjs');
+    const packageStart = script.indexOf('async function packageLockedArtifacts');
+    const packageEnd = script.indexOf('\nasync function runCaveAuthorityMatrix', packageStart);
+    const packageBody = script.slice(packageStart, packageEnd);
+
+    expect(packageStart).toBeGreaterThanOrEqual(0);
+    expect(packageEnd).toBeGreaterThan(packageStart);
+    expect(packageBody.match(/'Cave conformance package'/g)).toHaveLength(1);
+    expect(packageBody.match(/'build:conformance'/g)).toHaveLength(1);
+    expect(packageBody).not.toContain('retryCaveConformancePackage');
+    expect(packageBody).not.toContain("resolve(roots.caveRoot, '.next')");
+    for (const laterPackage of [
+      "'Chat web package'",
+      "'SDK package build'",
+      "'Chat native RPC package'",
+    ]) {
+      expect(packageBody.indexOf("'Cave conformance package'")).toBeLessThan(
+        packageBody.indexOf(laterPackage),
+      );
+    }
+  });
+
+  it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
+    const readme = readText('README.md');
+    const toolchains = readText('docs/developer-toolchains.md');
+    const guide = readText('docs/phase1-conformance.md');
+    const tracker = readText(
+      'docs/superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md',
+    );
+
+    for (const document of [readme, toolchains, guide]) {
+      expect(document).toContain('phase1-conformance.lock.json');
+      expect(document).toContain('test:phase1-conformance');
+    }
+    expect(guide).toContain('phase1.operator.homes-credentials-untouched');
+    expect(guide).toContain('secret scan');
+    expect(guide).toContain('completed');
+    expect(tracker).not.toContain(
+      '/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking',
+    );
+    expect(tracker).toContain('/Users/buns/Documents/GitHub/OpenCoven/coven-cave');
   });
 });

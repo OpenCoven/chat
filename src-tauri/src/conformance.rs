@@ -452,6 +452,18 @@ impl RpcRuntime {
         }
     }
 
+    #[cfg(test)]
+    fn with_coven_health(coven_health: Arc<dyn crate::coven::CovenHealth>) -> Self {
+        let custody: Arc<dyn CredentialCustody> = Arc::new(SharedMemoryCredentialCustody::new());
+        let operations = Arc::new(NativeOperationRegistry::default());
+        let mutations = Arc::new(NativeMutationQueue::default());
+        Self {
+            state: state_with_custody(Arc::clone(&custody), operations, mutations)
+                .using_test_coven_health(coven_health),
+            custody,
+        }
+    }
+
     fn from_environment() -> Result<Self, NativeDiagnostic> {
         match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
@@ -1221,7 +1233,7 @@ fn reap_rpc_workers(workers: &mut Vec<std::thread::JoinHandle<io::Result<()>>>) 
 mod tests {
     use std::{
         env,
-        sync::{Mutex, OnceLock},
+        sync::{Arc, Mutex, OnceLock},
     };
 
     use super::{
@@ -1230,7 +1242,8 @@ mod tests {
         CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
-        cave::CaveLauncher,
+        cave::{CaveLauncher, NativeDiagnostic, NativeResult},
+        coven::{CovenHealth, CovenHealthResult},
         keyring::{Credential, CredentialCustody, CredentialSlot, KeyringError},
     };
     use serde_json::json;
@@ -1260,16 +1273,15 @@ mod tests {
 
     #[test]
     fn dispatches_coven_health_through_the_bounded_rpc_operation() {
-        let _environment = ENVIRONMENT_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original = env::var_os("COVEN_HOME");
-        env::set_var(
-            "COVEN_HOME",
-            env::current_dir().unwrap().join("missing-coven-health"),
-        );
-        let mut runtime = RpcRuntime::new();
+        struct ReconcileRequiredCovenHealth;
+
+        impl CovenHealth for ReconcileRequiredCovenHealth {
+            fn health(&self) -> NativeResult<CovenHealthResult> {
+                Err(NativeDiagnostic::new("reconcile_required", false))
+            }
+        }
+
+        let mut runtime = RpcRuntime::with_coven_health(Arc::new(ReconcileRequiredCovenHealth));
 
         let response = runtime.process_line(
             format!(
@@ -1289,10 +1301,6 @@ mod tests {
                 }
             })
         );
-        match original {
-            Some(value) => env::set_var("COVEN_HOME", value),
-            None => env::remove_var("COVEN_HOME"),
-        }
     }
 
     struct ScopedCaveHome(Option<std::ffi::OsString>);

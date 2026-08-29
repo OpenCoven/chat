@@ -47,11 +47,16 @@ write-oriented design exploration.
   closed. There is no pathname, naming, shell, PowerShell, or process-list
   fallback.
 
-### Current native-host limitation
+### Phase 1 conformance status
 
-The HPKE-bound Client v1 Cave path and producer-backed Coven native health path
-are implemented. Release evidence still requires complete real-authority runs
-on the frozen platform matrix.
+The native host now uses the reviewed `hpke-bound-v1` request and response
+binding, and production Coven health uses the producer-backed native adapter.
+The immutable runtime gate is documented in
+[`docs/phase1-conformance.md`](docs/phase1-conformance.md). It deliberately
+reports `blocked` rather than substituting mocks when a locked producer does
+not expose a required compatibility or real-keychain fault fixture. Release
+evidence still requires complete real-authority runs on the frozen platform
+matrix.
 
 ## Prerequisites
 
@@ -84,9 +89,9 @@ pnpm exec playwright install chromium
 | `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
 | `pnpm test:native-e2e` | Run the feature-gated native RPC subprocess integration tests |
 | `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
+| `pnpm test:phase1-conformance` | Package the revisions in `phase1-conformance.lock.json`, run the real Cave/native/Coven matrix, and retain one secret-scanned JSON report |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
-| `pnpm cargo:check:windows-gnu` | Check all Rust targets for `x86_64-pc-windows-gnu` |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
 | `pnpm cargo:test` | Run Rust smoke tests |
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |
@@ -167,6 +172,10 @@ Local explicit-root canary runs still use
 and the script rejects staged, unstaged, or untracked changes before it
 verifies that the checked-out HEADs match the tracked lock.
 
+`phase1-conformance.lock.json` independently pins Chat, SDK, Cave, and Coven
+for the packaged real-authority gate. It does not replace or loosen the Phase 0
+canary lock.
+
 ## CI coverage
 
 `.github/workflows/ci.yml` runs:
@@ -178,6 +187,9 @@ verifies that the checked-out HEADs match the tracked lock.
 - Playwright smoke coverage
 - `pnpm app:build` on Ubuntu with the Linux Tauri system dependencies installed
 - the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts pinned by `contract-canary.lock.json`
+- the macOS packaged real-authority matrix with exact counterpart checkouts
+  pinned by `phase1-conformance.lock.json`, an isolated keychain, and a
+  secret-scanned JSON report
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

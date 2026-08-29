@@ -83,6 +83,36 @@ function ensureOwnedChildDirectories(rootPath, childSegments) {
   return currentPath;
 }
 
+function createOwnedTempDirectoryIn(parentPath, { prefix, childSegments = [] }) {
+  assertSafePrefix(prefix);
+
+  const rootPath = mkdtempSync(resolve(parentPath, `${prefix}-`));
+  chmodSync(rootPath, 0o700);
+
+  const rootStats = lstatSync(rootPath);
+
+  if (rootStats.isSymbolicLink()) {
+    throw new Error(`Owned temp root must not be a symlink: ${rootPath}`);
+  }
+
+  if (!rootStats.isDirectory()) {
+    throw new Error(`Owned temp root must be a directory: ${rootPath}`);
+  }
+
+  const rootStamp = randomUUID();
+  writeFileSync(resolve(rootPath, ownershipStampName), rootStamp, { mode: 0o600 });
+
+  return {
+    parentPath,
+    rootPath,
+    rootRealPath: realpathSync(rootPath),
+    rootDevice: rootStats.dev,
+    rootInode: rootStats.ino,
+    rootStamp,
+    path: ensureOwnedChildDirectories(rootPath, childSegments),
+  };
+}
+
 /**
  * Read the ownership stamp out of a directory.
  *
@@ -157,36 +187,13 @@ function removePathWithoutFollowingSymlinks(path) {
 }
 
 export function createOwnedTempDirectory({ prefix, childSegments = [] } = {}) {
-  assertSafePrefix(prefix);
-
   const parentPath = realpathSync(tmpdir());
-  const rootPath = mkdtempSync(resolve(parentPath, `${prefix}-`));
-  chmodSync(rootPath, 0o700);
+  return createOwnedTempDirectoryIn(parentPath, { prefix, childSegments });
+}
 
-  const rootStats = lstatSync(rootPath);
-
-  if (rootStats.isSymbolicLink()) {
-    throw new Error(`Owned temp root must not be a symlink: ${rootPath}`);
-  }
-
-  if (!rootStats.isDirectory()) {
-    throw new Error(`Owned temp root must be a directory: ${rootPath}`);
-  }
-
-  // Written before any child directory exists, so a root is never observable
-  // in a state where it looks owned and is not.
-  const rootStamp = randomUUID();
-  writeFileSync(resolve(rootPath, ownershipStampName), rootStamp, { mode: 0o600 });
-
-  return {
-    parentPath,
-    rootPath,
-    rootRealPath: realpathSync(rootPath),
-    rootDevice: rootStats.dev,
-    rootInode: rootStats.ino,
-    rootStamp,
-    path: ensureOwnedChildDirectories(rootPath, childSegments),
-  };
+export function createOwnedShortTempDirectory({ prefix, childSegments = [] } = {}) {
+  const parentPath = process.platform === 'win32' ? realpathSync(tmpdir()) : realpathSync('/tmp');
+  return createOwnedTempDirectoryIn(parentPath, { prefix, childSegments });
 }
 
 export function cleanupOwnedTempRoot(context) {
