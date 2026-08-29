@@ -52,6 +52,12 @@
   cancelled while queued never acquires the keyring lock; once an irreversible
   mutation starts, concurrent retries fail with non-retryable
   `credential_update_in_progress` until the authoritative result is coherent.
+- Credential records use binary secret-store APIs and zeroizing transient
+  buffers. Windows entries require Local persistence and migrate prior
+  Enterprise values plus legacy UTF-16 password encoding; mutation locking
+  uses a current-user-only `Global\` mutex with verified ownership/DACL and the
+  shipped session-local mutex during the compatibility window. Unix lock
+  acquisition is owner-private and bounded.
 - Packed tarballs are verified by the cross-repository canary against the
   exact canonical release manifest, package paths, sizes, and digests in a
   temporary install copy rather than by a source-relative or absolute path

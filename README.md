@@ -19,11 +19,17 @@ write-oriented design exploration.
   non-retryable `credential_update_in_progress` ambiguity until custody is
   coherent.
 - Pairing secrets, bearer credentials, headers, and keychain values remain in
-  Rust. A random canonical UUID v4 pairing identity is stored per installation
-  in the native keyring; browser results are bounded non-secret DTOs and diagnostics.
+  Rust and their transient owners zeroize secret bytes on drop. A random
+  canonical UUID v4 pairing identity is stored per installation in the native
+  keyring; browser results are bounded non-secret DTOs and diagnostics.
 - On Windows, native discovery accepts only the current token's canonical
   `.coven/cave` record after handle-based owner, ACL, identity, and reparse
-  validation. Native keyring mutations use a current-user named mutex.
+  validation. Credentials use binary Local persistence, migrate prior
+  Enterprise entries and legacy UTF-16 password values, and serialize through
+  a bounded current-user-only `Global\` mutex whose owner and DACL are verified
+  after creation. During the compatibility window it also acquires the shipped
+  session-local mutex in a fixed order. Unix credential mutations use
+  owner-private lock files with bounded acquisition.
 - No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
 - The webview uses frozen packed `@opencoven/cave-client/managed` and
   `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
@@ -31,11 +37,9 @@ write-oriented design exploration.
 
 ### Current native-host limitation
 
-Client v1 cannot atomically bind a health proof to the later pairing-secret or
-bearer request. Production release evidence therefore remains blocked on
-[coven-cave#4996](https://github.com/OpenCoven/coven-cave/issues/4996).
-This bead does not implement Coven Unix connected-peer or Windows named-pipe
-trust adapters; those adapters are deferred to the next reviewed native wave.
+The HPKE-bound Client v1 Cave path is implemented. Release evidence still
+requires the Coven Unix connected-peer and Windows named-pipe identity adapters
+plus complete real-authority runs on the frozen platform matrix.
 
 ## Prerequisites
 

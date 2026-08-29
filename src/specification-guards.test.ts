@@ -449,6 +449,45 @@ describe('Phase 1 specification guards', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps native credential custody zeroizing, bounded, and cross-session safe', () => {
+    const keyring = readText('src-tauri/src/keyring.rs');
+
+    expect(keyring).toContain('Zeroizing');
+    expect(keyring).toContain('get_secret');
+    expect(keyring).toContain('set_secret');
+    expect(keyring).not.toContain('.get_password()');
+    expect(keyring).not.toContain('.set_password(');
+    expect(keyring).toContain('CREDENTIAL_LOCK_TIMEOUT');
+    expect(keyring).toContain('try_lock_exclusive');
+    expect(keyring).not.toContain('.lock_exclusive()');
+    expect(keyring).toContain('Global\\\\OpenCoven.Chat.');
+    expect(keyring).toContain('Local\\\\');
+    expect(keyring).toContain('LegacyWindowsMutexApi');
+    expect(keyring).toContain('"persistence", "Local"');
+    expect(keyring).toContain('SetEntriesInAclW');
+    expect(keyring).toContain('GetSecurityInfo');
+    expect(keyring).toContain('EqualSid');
+    expect(keyring).not.toContain('entry.Trustee.TrusteeType');
+    expect(keyring).toContain('STORE_INITIALIZED.get().is_none()');
+    expect(keyring).not.toContain('STORE_AVAILABILITY');
+
+    const transport = readText('src-tauri/src/transport.rs');
+    const connection = readText('src-tauri/src/connection.rs');
+    const hpke = readText('src-tauri/src/hpke_bound.rs');
+    expect(transport).toContain('impl Drop for NativePairingCreated');
+    expect(transport).toContain('impl Drop for NativePairingExchange');
+    expect(transport).toContain('take_secret_string(&mut data, "secret")');
+    expect(transport).toContain('take_secret_string(&mut data, "bearer")');
+    expect(transport).toContain('let mut body = Zeroizing::new(Vec::new())');
+    expect(connection).toContain('impl Drop for PendingPairing');
+    expect(hpke).toContain('pub(crate) body: Zeroizing<Vec<u8>>');
+    expect(hpke).toContain('let plaintext = Zeroizing::new(');
+    expect(hpke).toContain('impl Drop for ResponsePlaintext');
+    expect(hpke).toContain('base64url_decode_secret');
+    expect(hpke).toContain('OneShotKeyMaterialRng');
+    expect(hpke).toContain('response_ikm.zeroize()');
+  });
+
   it('uses only frozen packed SDK artifacts at the browser boundary', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
     const boundary = readText('src/lib/sdk/native-boundary.ts');

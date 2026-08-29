@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     cave::{NativeDiagnostic, NativeResult, PinnedCaveAuthority},
@@ -24,10 +25,22 @@ pub(crate) struct NativePairingCreated {
     pub response: Value,
 }
 
+impl Drop for NativePairingCreated {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
 pub(crate) struct NativePairingExchange {
     pub bearer: String,
     pub credential_id: String,
     pub response: Value,
+}
+
+impl Drop for NativePairingExchange {
+    fn drop(&mut self) {
+        self.bearer.zeroize();
+    }
 }
 
 #[async_trait]
@@ -251,7 +264,7 @@ impl ConstrainedTransport {
             }
             let response = request.send().await.map_err(request_error)?;
             let opened = bound.open(response, MAX_JSON_BODY_BYTES).await?;
-            let payload: Value = serde_json::from_slice(&opened.body)
+            let payload = serde_json::from_slice(opened.body.as_slice())
                 .map_err(|_| NativeDiagnostic::new("invalid_response", false))?;
             return Ok(NativeHttpResponse {
                 status_code: opened.status_code,
@@ -305,7 +318,10 @@ impl NativeCaveTransport for ConstrainedTransport {
         )
         .await?;
         if !(200..300).contains(&response.status_code) {
-            return Err(response_diagnostic(&response));
+            let diagnostic = response_diagnostic(&response);
+            let mut payload = response.payload;
+            zeroize_json_value(&mut payload);
+            return Err(diagnostic);
         }
         let (secret, response) = managed_pairing_created(response.payload)?;
         Ok(NativePairingCreated { secret, response })
@@ -353,7 +369,10 @@ impl NativeCaveTransport for ConstrainedTransport {
         )
         .await?;
         if !(200..300).contains(&response.status_code) {
-            return Err(response_diagnostic(&response));
+            let diagnostic = response_diagnostic(&response);
+            let mut payload = response.payload;
+            zeroize_json_value(&mut payload);
+            return Err(diagnostic);
         }
         let (bearer, credential_id, response) = managed_pairing_exchange(response.payload)?;
         Ok(NativePairingExchange {
@@ -492,14 +511,14 @@ async fn read_response(mut response: reqwest::Response) -> NativeResult<NativeHt
         return Err(NativeDiagnostic::new("body_limit", false));
     }
     let status_code = response.status().as_u16();
-    let mut body = Vec::new();
+    let mut body = Zeroizing::new(Vec::new());
     while let Some(chunk) = response.chunk().await.map_err(request_error)? {
         if body.len().saturating_add(chunk.len()) > MAX_JSON_BODY_BYTES {
             return Err(NativeDiagnostic::new("body_limit", false));
         }
         body.extend_from_slice(&chunk);
     }
-    let payload = serde_json::from_slice(&body)
+    let payload = serde_json::from_slice(body.as_slice())
         .map_err(|_| NativeDiagnostic::new("invalid_native_response", false))?;
     Ok(NativeHttpResponse {
         status_code,
@@ -507,43 +526,82 @@ async fn read_response(mut response: reqwest::Response) -> NativeResult<NativeHt
     })
 }
 
+fn zeroize_json_value(value: &mut Value) {
+    match value {
+        Value::String(value) => value.zeroize(),
+        Value::Array(values) => values.iter_mut().for_each(zeroize_json_value),
+        Value::Object(values) => values.values_mut().for_each(zeroize_json_value),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn zeroize_json_map(values: &mut serde_json::Map<String, Value>) {
+    values.values_mut().for_each(zeroize_json_value);
+}
+
 fn response_data(value: Value) -> NativeResult<serde_json::Map<String, Value>> {
-    let candidate = value
-        .as_object()
-        .and_then(|root| root.get("data"))
-        .cloned()
-        .unwrap_or(value);
-    candidate
-        .as_object()
-        .cloned()
-        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))
+    match value {
+        Value::Object(mut root) => match root.remove("data") {
+            Some(Value::Object(data)) => {
+                zeroize_json_map(&mut root);
+                Ok(data)
+            }
+            Some(mut invalid) => {
+                zeroize_json_value(&mut invalid);
+                zeroize_json_map(&mut root);
+                Err(NativeDiagnostic::new("invalid_native_response", false))
+            }
+            None => Ok(root),
+        },
+        mut invalid => {
+            zeroize_json_value(&mut invalid);
+            Err(NativeDiagnostic::new("invalid_native_response", false))
+        }
+    }
+}
+
+fn take_secret_string(
+    data: &mut serde_json::Map<String, Value>,
+    key: &str,
+) -> NativeResult<String> {
+    match data.remove(key) {
+        Some(Value::String(value)) if !value.is_empty() => Ok(value),
+        Some(mut invalid) => {
+            zeroize_json_value(&mut invalid);
+            Err(NativeDiagnostic::new("invalid_native_response", false))
+        }
+        None => Err(NativeDiagnostic::new("invalid_native_response", false)),
+    }
 }
 
 pub(crate) fn managed_pairing_created(value: Value) -> NativeResult<(String, Value)> {
     let mut data = response_data(value)?;
-    let secret = data
-        .remove("secret")
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))?;
+    let secret = take_secret_string(&mut data, "secret").inspect_err(|_| {
+        zeroize_json_map(&mut data);
+    })?;
     Ok((secret, Value::Object(data)))
 }
 
 fn managed_pairing_exchange(value: Value) -> NativeResult<(String, String, Value)> {
     let mut data = response_data(value)?;
-    let bearer = data
-        .remove("bearer")
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))?;
-    let credential_id = data
+    let mut bearer = take_secret_string(&mut data, "bearer").inspect_err(|_| {
+        zeroize_json_map(&mut data);
+    })?;
+    let credential_id = match data
         .get("credential")
         .and_then(Value::as_object)
         .and_then(|credential| credential.get("id"))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| NativeDiagnostic::new("invalid_native_response", false))?;
+    {
+        Some(credential_id) => credential_id,
+        None => {
+            bearer.zeroize();
+            zeroize_json_map(&mut data);
+            return Err(NativeDiagnostic::new("invalid_native_response", false));
+        }
+    };
     Ok((bearer, credential_id, Value::Object(data)))
 }
 

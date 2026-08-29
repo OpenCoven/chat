@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     cave::{
@@ -63,6 +64,12 @@ struct PendingPairing {
     exchange_committed: bool,
     exchange_ambiguous: bool,
     poll_in_flight: bool,
+}
+
+impl Drop for PendingPairing {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
 }
 
 struct ManagedLaunch {
@@ -702,7 +709,7 @@ impl NativeConnectionState {
         let handle = handle.to_owned();
         let attempt = attempt.clone();
         let expected_credential = expected_credential.clone();
-        let bearer = exchanged.bearer.clone();
+        let bearer = Zeroizing::new(exchanged.bearer.clone());
         let credential_id = exchanged.credential_id.clone();
         let commit = move || {
             commit_pairing_exchange_now(
@@ -712,7 +719,7 @@ impl NativeConnectionState {
                 &handle,
                 &attempt,
                 &expected_credential,
-                &bearer,
+                bearer.as_str(),
                 &credential_id,
             )
         };
@@ -792,11 +799,11 @@ impl NativeConnectionState {
         };
         let result = self.transport.pairing_create(&authority, request).await;
         let mut runtime = self.runtime()?;
-        let created = result?;
+        let mut created = result?;
         runtime.require_current(generation, &handle, &authority)?;
         runtime.pairing = Some(PendingPairing {
             request_id: pairing_request_id(&created.response)?,
-            secret: created.secret,
+            secret: std::mem::take(&mut created.secret),
             authority,
             instance_id,
             generation,
@@ -804,7 +811,7 @@ impl NativeConnectionState {
             exchange_ambiguous: false,
             poll_in_flight: false,
         });
-        Ok(created.response)
+        Ok(std::mem::take(&mut created.response))
     }
 
     pub(crate) async fn cave_pairing_poll(
@@ -828,7 +835,7 @@ impl NativeConnectionState {
             }
             let generation = pairing.generation;
             let authority = pairing.authority.clone();
-            let secret = pairing.secret.clone();
+            let secret = Zeroizing::new(pairing.secret.clone());
             runtime.require_current(generation, &handle, &authority)?;
             if pairing.poll_in_flight {
                 return Err(NativeDiagnostic::new("pairing_in_progress", true));
@@ -845,7 +852,7 @@ impl NativeConnectionState {
         };
         let result = self
             .transport
-            .pairing_poll(&authority, &request_id, &secret)
+            .pairing_poll(&authority, &request_id, secret.as_str())
             .await;
         let runtime = self.runtime()?;
         let is_current = runtime.generation == generation
@@ -965,9 +972,9 @@ impl NativeConnectionState {
                 })
                 .ok_or_else(|| NativeDiagnostic::new("stale_connection_attempt", true))?;
             current.exchange_ambiguous = true;
-            current.secret.clear();
+            current.secret.zeroize();
         }
-        let exchanged = match self
+        let mut exchanged = match self
             .transport
             .pairing_exchange(&pairing.authority, &request_id, &pairing.secret)
             .await
@@ -1000,7 +1007,7 @@ impl NativeConnectionState {
                 false,
             ));
         }
-        Ok(exchanged.response)
+        Ok(std::mem::take(&mut exchanged.response))
     }
 
     pub(crate) fn cave_reset_pairing(&self, handle: String) -> NativeResult<Value> {
