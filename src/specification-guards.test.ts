@@ -866,6 +866,10 @@ describe('Phase 1 specification guards', () => {
   it('defines the packaged Phase 1 real-authority gate and sanitized evidence upload', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const packageManifest = readJson<PackageManifest>('package.json');
+    const phase1Job = workflow.slice(
+      workflow.indexOf('  phase1-conformance:'),
+      workflow.indexOf('\n  desktop:'),
+    );
 
     expect(packageManifest.scripts?.['test:phase1-conformance']).toBe(
       'node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all',
@@ -889,6 +893,7 @@ describe('Phase 1 specification guards', () => {
     }
     expect(workflow).toContain('security create-keychain');
     expect(workflow).toContain('security unlock-keychain');
+    expect(phase1Job).toMatch(/toolchain: 1\.95\.0\s+components: clippy,rustfmt/);
     expect(workflow).toMatch(/name:\s*Remove isolated Phase 1 keychain[\s\S]*?if:\s*always\(\)/);
     expect(workflow).toContain('pnpm test:phase1-conformance');
     expect(workflow).toContain(
