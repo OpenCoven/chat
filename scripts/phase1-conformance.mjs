@@ -65,7 +65,15 @@ function defaultSourceRoot(environmentName, repositoryName) {
 
 export class CommandExecutionError extends Error {
   constructor(label, result) {
-    super(`${label} failed.`);
+    const approvedReasons = new Set([
+      'spawn',
+      'tracking',
+      'stdout-limit',
+      'stderr-limit',
+      'timeout',
+    ]);
+    const reason = approvedReasons.has(result?.reason) ? ` (${result.reason})` : '';
+    super(`${label} failed${reason}.`);
     this.label = label;
     this.result = result;
   }
@@ -1767,8 +1775,9 @@ async function main(argv = process.argv.slice(2)) {
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    const label = error instanceof CommandExecutionError ? error.label : 'Phase 1 conformance';
-    process.stderr.write(`phase1-conformance: ${label} failed\n`);
+    const message =
+      error instanceof CommandExecutionError ? error.message : 'Phase 1 conformance failed.';
+    process.stderr.write(`phase1-conformance: ${message}\n`);
     process.exitCode = 1;
   });
 }

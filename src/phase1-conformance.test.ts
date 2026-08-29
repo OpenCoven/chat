@@ -250,6 +250,16 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(results.get('phase1.pairing.expiry')).toMatchObject({ status: 'failed' });
   });
 
+  test('classifies subprocess failures without exposing captured output', () => {
+    const timeout = new CommandExecutionError('Chat native RPC package', {
+      reason: 'timeout',
+      stderr: 'private compiler output',
+    });
+
+    expect(timeout.message).toBe('Chat native RPC package failed (timeout).');
+    expect(timeout.message).not.toContain('private compiler output');
+  });
+
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-safe-environment-'));
     try {
