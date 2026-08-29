@@ -8,7 +8,7 @@ export type ProcessOwnedArtifactRoot = {
   ownerPid: number;
   cleanedChildren: number[];
   reapedChildren: number[];
-  trackChild(child: ChildProcess): ChildProcess;
+  trackChild(child: ChildProcess, options?: { processGroup?: boolean }): ChildProcess;
   retainSanitizedJsonReport(options: {
     reportPath: string;
     destinationPath: string;

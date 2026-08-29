@@ -54,6 +54,7 @@ const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
+const ownedProcessGroupsSupported = process.platform !== 'win32';
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
@@ -363,6 +364,7 @@ function runCommand(
     const child = spawn(command, args, {
       cwd,
       env,
+      detached: ownedProcessGroupsSupported,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const stdout = [];
@@ -385,7 +387,7 @@ function runCommand(
 
     child.once('spawn', () => {
       try {
-        artifactRoot.trackChild(child);
+        artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
       } catch {
         child.kill('SIGKILL');
         fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'tracking' });
@@ -842,10 +844,11 @@ async function startCompatibilityCave({ artifactRoot, roots, environment, preset
       COVEN_CAVE_HEAP_MONITOR: '0',
       NODE_ENV: 'production',
     },
+    detached: ownedProcessGroupsSupported,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   try {
-    artifactRoot.trackChild(child);
+    artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
   } catch (error) {
     child.kill('SIGKILL');
     throw error;
@@ -1241,10 +1244,11 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   const child = spawn(binaryPath, [], {
     cwd,
     env: environment,
+    detached: ownedProcessGroupsSupported,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   await once(child, 'spawn');
-  artifactRoot.trackChild(child);
+  artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
   child.stderr.resume();
   return new NativeRpcClient(child);
 }
@@ -1269,10 +1273,11 @@ async function runNativeMissingKeychainTrustScenario(
       COVEN_CAVE_AUTH_TOKEN: canary,
       OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'missing-keychain-trust',
     },
+    detached: ownedProcessGroupsSupported,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   await once(child, 'spawn');
-  artifactRoot.trackChild(child);
+  artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
   const stdout = [];
   const stderr = [];
   let stdoutBytes = 0;
@@ -1880,10 +1885,11 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
     mkdirSync(covenHome, { recursive: true, mode: 0o700 });
     const child = spawn(covenBinaryPath, ['daemon', 'serve'], {
       env: { ...environment, COVEN_HOME: covenHome },
+      detached: ownedProcessGroupsSupported,
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     await once(child, 'spawn');
-    covenRoot.trackChild(child);
+    covenRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
     try {
       let running = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {

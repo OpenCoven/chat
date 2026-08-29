@@ -171,6 +171,56 @@ describe('process-owned artifact root', () => {
     },
   );
 
+  test.skipIf(process.platform === 'win32')(
+    'terminates descendants in an owned process group',
+    async () => {
+      const root = createRoot();
+      const parent = spawn(
+        process.execPath,
+        [
+          '-e',
+          [
+            "const { spawn } = require('node:child_process');",
+            "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
+            'process.stdout.write(String(child.pid));',
+            'setInterval(() => {}, 1_000);',
+          ].join(' '),
+        ],
+        {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      activeChildren.add(parent);
+      const grandchildPid = await new Promise<number>((resolvePid, rejectPid) => {
+        if (parent.stdout === null) {
+          rejectPid(new Error('tracked parent stdout was not piped'));
+          return;
+        }
+        parent.stdout.once('data', (chunk) => resolvePid(Number(String(chunk))));
+        parent.once('error', rejectPid);
+      });
+
+      root.trackChild(parent, { processGroup: true });
+      await root.cleanup();
+      activeRoots.delete(root);
+
+      let grandchildAlive = true;
+      try {
+        process.kill(grandchildPid, 0);
+      } catch {
+        grandchildAlive = false;
+      }
+      try {
+        expect(grandchildAlive).toBe(false);
+      } finally {
+        if (grandchildAlive) {
+          process.kill(grandchildPid, 'SIGKILL');
+        }
+      }
+    },
+  );
+
   test('requires a direct ChildProcess object instead of accepting an arbitrary PID', () => {
     const root = createRoot();
     expect(() => root.trackChild(999_999_999 as never)).toThrow(/spawned ChildProcess/);

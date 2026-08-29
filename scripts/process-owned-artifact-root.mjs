@@ -231,26 +231,95 @@ function waitForChildClose(child, timeoutMs) {
   });
 }
 
-async function terminateAndReapChild(child, terminationGraceMs) {
+function processGroupExists(pid) {
+  if (process.platform === 'win32') {
+    return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
+      return false;
+    }
+    if (error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return true;
+    }
+    throw error;
+  }
+}
+
+function signalOwnedChild(child, signal, processGroup) {
+  if (processGroup && process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
+        return false;
+      }
+      throw error;
+    }
+  }
+  return child.kill(signal);
+}
+
+function waitForOwnedExecutionClose(child, processGroup, timeoutMs) {
+  if (!processGroup || process.platform === 'win32') {
+    return waitForChildClose(child, timeoutMs);
+  }
+  const pid = child.pid;
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolveWait) => {
+    const check = () => {
+      const childClosed = child.exitCode !== null || child.signalCode !== null;
+      if (childClosed && !processGroupExists(pid)) {
+        resolveWait(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolveWait(false);
+        return;
+      }
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+async function terminateAndReapChild(child, terminationGraceMs, processGroup) {
   const pid = child.pid;
 
-  if (child.exitCode === null && child.signalCode === null) {
-    const signaled = child.kill('SIGTERM');
-    if (!signaled && child.exitCode === null && child.signalCode === null) {
+  if (
+    (child.exitCode === null && child.signalCode === null) ||
+    (processGroup && processGroupExists(pid))
+  ) {
+    const signaled = signalOwnedChild(child, 'SIGTERM', processGroup);
+    if (
+      !signaled &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      (!processGroup || !processGroupExists(pid))
+    ) {
       throw new Error(`Tracked child ${pid} could not be terminated.`);
     }
   }
 
-  if (await waitForChildClose(child, terminationGraceMs)) {
+  if (await waitForOwnedExecutionClose(child, processGroup, terminationGraceMs)) {
     return;
   }
 
-  const killed = child.kill('SIGKILL');
-  if (!killed && child.exitCode === null && child.signalCode === null) {
+  const killed = signalOwnedChild(child, 'SIGKILL', processGroup);
+  if (
+    !killed &&
+    child.exitCode === null &&
+    child.signalCode === null &&
+    (!processGroup || !processGroupExists(pid))
+  ) {
     throw new Error(`Tracked child ${pid} could not be killed.`);
   }
 
-  if (!(await waitForChildClose(child, terminationGraceMs))) {
+  if (!(await waitForOwnedExecutionClose(child, processGroup, terminationGraceMs))) {
     throw new Error(`Tracked child ${pid} could not be reaped.`);
   }
 }
@@ -272,16 +341,29 @@ export function createProcessOwnedArtifactRoot(options) {
     ownerPid: process.pid,
     cleanedChildren,
     reapedChildren,
-    trackChild(child) {
+    trackChild(child, options = {}) {
       if (!(child instanceof ChildProcess) || !Number.isInteger(child.pid) || child.pid <= 0) {
         throw new Error('trackChild requires a spawned ChildProcess with a positive PID.');
       }
+      if (
+        options === null ||
+        typeof options !== 'object' ||
+        Array.isArray(options) ||
+        Object.keys(options).some((key) => key !== 'processGroup') ||
+        (options.processGroup !== undefined && typeof options.processGroup !== 'boolean')
+      ) {
+        throw new Error('trackChild options may contain only a boolean processGroup.');
+      }
+      const processGroup = options.processGroup ?? false;
+      if (processGroup && process.platform === 'win32') {
+        throw new Error('Owned process groups are unavailable on Windows.');
+      }
 
       const existing = trackedChildren.get(child.pid);
-      if (existing !== undefined && existing !== child) {
+      if (existing !== undefined && existing.child !== child) {
         throw new Error(`A different child is already tracked for PID ${child.pid}.`);
       }
-      trackedChildren.set(child.pid, child);
+      trackedChildren.set(child.pid, { child, processGroup });
       return child;
     },
     async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan }) {
@@ -321,8 +403,8 @@ export function createProcessOwnedArtifactRoot(options) {
         return;
       }
 
-      for (const [pid, child] of trackedChildren) {
-        await terminateAndReapChild(child, terminationGraceMs);
+      for (const [pid, tracked] of trackedChildren) {
+        await terminateAndReapChild(tracked.child, terminationGraceMs, tracked.processGroup);
         cleanedChildren.push(pid);
         reapedChildren.push(pid);
       }
