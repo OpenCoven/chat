@@ -49,6 +49,7 @@ const defaultRetainedReport = resolve(
   'report.json',
 );
 const commandOutputLimit = 16 * 1024 * 1024;
+const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
@@ -848,8 +849,15 @@ function writeNativeFixture(caveHome, covenHome, daemonUrl) {
           text: 'synthetic alternate',
           createdAt: '2026-03-02T00:02:00.000Z',
         },
+        {
+          id: 'b-active-tail',
+          parentId: 'b-active',
+          role: 'user',
+          text: 'synthetic active continuation',
+          createdAt: '2026-03-02T00:03:00.000Z',
+        },
       ],
-      activeLeafId: 'b-active',
+      activeLeafId: 'b-active-tail',
     },
   ]) {
     writeFileSync(
@@ -1309,7 +1317,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         const firstPage = await rpc.ok('cave_list_conversation_messages', {
           handle,
           conversationId: 'branched',
-          page: { limit: 1 },
+          page: { limit: 2 },
           operation: rpc.operation(),
         });
         const cursor = firstPage.cursor?.next;
@@ -1371,17 +1379,27 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         await adminMutation(origin, adminToken, 'DELETE', `/admin/credentials/${credentialId}`, {
           reason: 'phase1-conformance',
         });
-        let status;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          status = await rpc.ok('cave_credential_status', {
-            handle,
-            operation: rpc.operation(),
-          });
-          if (['revoked', 'missing'].includes(status.status)) {
-            break;
-          }
+        const initialStatus = await rpc.ok('cave_credential_status', {
+          handle,
+          operation: rpc.operation(),
+        });
+        if (
+          initialStatus.status !== 'disconnected' ||
+          initialStatus.reason !== 'reconcile_required'
+        ) {
+          throw new Error('native credential did not request revocation reconciliation');
         }
-        if (!['revoked', 'missing'].includes(status?.status)) {
+        await new Promise((resolveWait) =>
+          setTimeout(resolveWait, revocationConfirmationDelayMs),
+        );
+        const rediscovery = await waitForDiscovery(rpc);
+        handle = rediscovery.handle;
+        await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+        const status = await rpc.ok('cave_credential_status', {
+          handle,
+          operation: rpc.operation(),
+        });
+        if (!['revoked', 'missing'].includes(status.status)) {
           throw new Error('native credential did not converge to revoked');
         }
         const repaired = await pairNative(
