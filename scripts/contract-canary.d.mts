@@ -1,5 +1,9 @@
 export type ContractCanaryArtifact<PackageName extends string = string> = {
   packageName: PackageName;
+  version: string;
+  releaseFile: string;
+  vendorFile: string;
+  size: number;
   sha256: string;
 };
 export type ContractCanarySdkArtifacts = {
@@ -11,6 +15,11 @@ export type ContractCanarySdkArtifacts = {
 export type ContractCanarySdkLockEntry = {
   repository: string;
   revision: string;
+  releaseManifest: {
+    file: 'release-manifest.json';
+    version: string;
+    sha256: string;
+  };
   artifacts: ContractCanarySdkArtifacts;
 };
 export type ContractCanaryCaveLockEntry = {
@@ -62,6 +71,22 @@ export function assertPackedPackageContentsMatch(
   reviewedTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
   frozenTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
   comparisonRoot: string,
+): void;
+export type GeneratedReleaseManifest = {
+  schemaVersion: number;
+  version: string;
+  packages: Array<{
+    name: string;
+    version: string;
+    file: string;
+    size: number;
+    sha256: string;
+  }>;
+};
+export function assertGeneratedReleaseManifestMatchesLock(
+  lock: ContractCanaryLock,
+  manifest: GeneratedReleaseManifest,
+  tarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
 ): void;
 export function assertPackedFixtureMatchesCaveCheckout(
   lock: ContractCanaryPackedFixtureLock,

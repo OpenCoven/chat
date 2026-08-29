@@ -52,13 +52,18 @@
   cancelled while queued never acquires the keyring lock; once an irreversible
   mutation starts, concurrent retries fail with non-retryable
   `credential_update_in_progress` until the authoritative result is coherent.
-- Packed tarballs are verified by the cross-repository canary in a temporary
-  install copy rather than by a source-relative or absolute path dependency.
+- Packed tarballs are verified by the cross-repository canary against the
+  exact canonical release manifest, package paths, sizes, and digests in a
+  temporary install copy rather than by a source-relative or absolute path
+  dependency.
 - Run the local canary with
   `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
-  checked-out HEADs before the canary runs. The lock also pins the Cave
+  checked-out HEADs before the canary runs. The SDK lock targets canonical
+  `main` commit `acc38488f00860d246c3c553375634d64806eabb` and manifest digest
+  `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`.
+  The lock also pins the Cave
   producer's Client v1 contract fixture and `hpke-bound-v1` vector digests;
   the canary proves packed vector byte identity and the ancestry of the SDK's
   historical contract fixture provenance.

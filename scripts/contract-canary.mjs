@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
 
@@ -21,22 +22,27 @@ const defaultCaveRoot = resolve(root, '.cross-repo', 'coven-cave');
 const defaultLockPath = resolve(root, 'contract-canary.lock.json');
 const reviewedRevisionPattern = /^[0-9a-f]{40}$/i;
 const sha256Pattern = /^[0-9a-f]{64}$/i;
+const packageVersionPattern = /^\d+\.\d+\.\d+$/;
 const SDK_ARTIFACTS = Object.freeze({
   core: {
     packageName: '@opencoven/sdk-core',
     fileName: 'sdk-core-0.1.0.tgz',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
   },
   cave: {
     packageName: '@opencoven/cave-client',
     fileName: 'cave-client-0.1.0.tgz',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
   },
   coven: {
     packageName: '@opencoven/coven-client',
     fileName: 'coven-client-0.1.0.tgz',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
   },
   sdk: {
     packageName: '@opencoven/sdk',
     fileName: 'sdk-0.1.0.tgz',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
   },
 });
 const CAVE_PRODUCER_ARTIFACTS = Object.freeze({
@@ -80,7 +86,10 @@ function validateLockEntry(lockData, key, expectedRepository) {
       `contract-canary.lock.json ${key}.revision must be an immutable 40-character commit SHA.`,
     );
   }
-  const expectedKeys = ['repository', 'revision', 'artifacts'];
+  const expectedKeys =
+    key === 'sdk'
+      ? ['repository', 'revision', 'releaseManifest', 'artifacts']
+      : ['repository', 'revision', 'artifacts'];
   if (
     Object.keys(entry).length !== expectedKeys.length ||
     expectedKeys.some((expectedKey) => !Object.hasOwn(entry, expectedKey))
@@ -92,9 +101,29 @@ function validateLockEntry(lockData, key, expectedRepository) {
     repository: entry.repository,
     revision: entry.revision,
     ...(key === 'sdk'
-      ? { artifacts: validateSdkArtifacts(entry.artifacts) }
+      ? {
+          releaseManifest: validateReleaseManifest(entry.releaseManifest),
+          artifacts: validateSdkArtifacts(entry.artifacts),
+        }
       : { artifacts: validateCaveProducerArtifacts(entry.artifacts) }),
   };
+}
+
+function validateReleaseManifest(manifest) {
+  if (
+    manifest === null ||
+    typeof manifest !== 'object' ||
+    Array.isArray(manifest) ||
+    Object.keys(manifest).length !== 3 ||
+    manifest.file !== 'release-manifest.json' ||
+    typeof manifest.version !== 'string' ||
+    !packageVersionPattern.test(manifest.version) ||
+    typeof manifest.sha256 !== 'string' ||
+    !sha256Pattern.test(manifest.sha256)
+  ) {
+    throw new Error('contract-canary.lock.json sdk.releaseManifest is invalid.');
+  }
+  return manifest;
 }
 
 function validateSdkArtifacts(artifacts) {
@@ -117,10 +146,19 @@ function validateSdkArtifacts(artifacts) {
       artifact === null ||
       typeof artifact !== 'object' ||
       Array.isArray(artifact) ||
-      Object.keys(artifact).length !== 2 ||
+      Object.keys(artifact).length !== 6 ||
       !Object.hasOwn(artifact, 'packageName') ||
+      !Object.hasOwn(artifact, 'version') ||
+      !Object.hasOwn(artifact, 'releaseFile') ||
+      !Object.hasOwn(artifact, 'vendorFile') ||
+      !Object.hasOwn(artifact, 'size') ||
       !Object.hasOwn(artifact, 'sha256') ||
       artifact.packageName !== expected.packageName ||
+      artifact.version !== '0.1.0' ||
+      artifact.releaseFile !== expected.releaseFile ||
+      artifact.vendorFile !== expected.fileName ||
+      !Number.isSafeInteger(artifact.size) ||
+      artifact.size <= 0 ||
       typeof artifact.sha256 !== 'string' ||
       !sha256Pattern.test(artifact.sha256)
     ) {
@@ -166,8 +204,8 @@ export function readContractCanaryLock(lockPath = defaultLockPath) {
 
   const lockData = JSON.parse(readFileSync(lockPath, 'utf8'));
 
-  if (lockData.version !== 3) {
-    throw new Error('contract-canary.lock.json version must be 3.');
+  if (lockData.version !== 4) {
+    throw new Error('contract-canary.lock.json version must be 4.');
   }
 
   return {
@@ -405,11 +443,18 @@ function assertFrozenArtifactDigests(lock, tarballs) {
   for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
     const locked = lock.sdk.artifacts[key];
     const tarball = tarballs[key];
+    const stats = typeof tarball === 'string' ? lstatSync(tarball) : undefined;
     if (
       locked?.packageName !== artifact.packageName ||
+      locked.version !== lock.sdk.releaseManifest.version ||
+      locked.releaseFile !== artifact.releaseFile ||
+      locked.vendorFile !== artifact.fileName ||
+      !Number.isSafeInteger(locked.size) ||
       typeof locked.sha256 !== 'string' ||
       !sha256Pattern.test(locked.sha256) ||
       typeof tarball !== 'string' ||
+      !stats?.isFile() ||
+      stats.size !== locked.size ||
       sha256(tarball) !== locked.sha256
     ) {
       throw new Error(
@@ -422,7 +467,7 @@ function assertFrozenArtifactDigests(lock, tarballs) {
 function frozenTarballs(lock) {
   const tarballs = {};
   for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
-    const path = resolve(root, 'vendor', 'opencoven-sdk', artifact.fileName);
+    const path = resolve(root, 'vendor', 'opencoven-sdk', lock.sdk.artifacts[key].vendorFile);
     requirePath(path, `Frozen ${artifact.packageName} artifact`);
     tarballs[key] = path;
   }
@@ -479,6 +524,54 @@ function packageTree(rootPath, currentPath = rootPath) {
   return entries;
 }
 
+function gzipHeaderLength(bytes) {
+  if (
+    bytes.length < 18 ||
+    bytes[0] !== 0x1f ||
+    bytes[1] !== 0x8b ||
+    bytes[2] !== 8 ||
+    (bytes[3] & 0xe0) !== 0
+  ) {
+    throw new Error('invalid gzip header');
+  }
+  const flags = bytes[3];
+  let offset = 10;
+  if ((flags & 0x04) !== 0) {
+    if (offset + 2 > bytes.length) {
+      throw new Error('truncated gzip extra length');
+    }
+    const extraLength = bytes.readUInt16LE(offset);
+    offset += 2 + extraLength;
+  }
+  for (const flag of [0x08, 0x10]) {
+    if ((flags & flag) === 0) {
+      continue;
+    }
+    const terminator = bytes.indexOf(0, offset);
+    if (terminator === -1) {
+      throw new Error('unterminated gzip header field');
+    }
+    offset = terminator + 1;
+  }
+  if ((flags & 0x02) !== 0) {
+    offset += 2;
+  }
+  if (offset + 8 > bytes.length) {
+    throw new Error('truncated gzip member');
+  }
+  return offset;
+}
+
+function gunzipSingleMember(tarball) {
+  const bytes = readFileSync(tarball);
+  const headerLength = gzipHeaderLength(bytes);
+  const inflated = inflateRawSync(bytes.subarray(headerLength), { info: true });
+  if (headerLength + inflated.engine.bytesWritten + 8 !== bytes.length) {
+    throw new Error('gzip archive contained trailing data or additional members');
+  }
+  return gunzipSync(bytes);
+}
+
 export function assertPackedPackageContentsMatch(
   reviewedTarballs,
   frozenTarballsByPackage,
@@ -490,6 +583,17 @@ export function assertPackedPackageContentsMatch(
     const frozen = frozenTarballsByPackage[key];
     if (typeof reviewed !== 'string' || typeof frozen !== 'string') {
       throw new Error(`Packed SDK ${artifact.packageName} artifact was missing.`);
+    }
+    let reviewedTar;
+    let frozenTar;
+    try {
+      reviewedTar = gunzipSingleMember(reviewed);
+      frozenTar = gunzipSingleMember(frozen);
+    } catch {
+      throw new Error(`Packed SDK ${artifact.packageName} was not a complete gzip archive.`);
+    }
+    if (!reviewedTar.equals(frozenTar)) {
+      throw new Error(`Packed SDK ${artifact.packageName} tar payload did not match.`);
     }
     const reviewedEntries = safeTarEntries(reviewed);
     const frozenEntries = safeTarEntries(frozen);
@@ -509,25 +613,99 @@ export function assertPackedPackageContentsMatch(
   }
 }
 
-function packReviewedSdkTarballs(sdkRoot, destinationRoot, manifestPath) {
-  const packageArtifactsModule = resolve(sdkRoot, 'scripts', 'package-artifacts.mjs');
+function reviewedReleaseManifest(lock) {
+  return {
+    schemaVersion: 1,
+    version: lock.sdk.releaseManifest.version,
+    packages: Object.values(lock.sdk.artifacts).map(
+      ({ packageName: name, version, releaseFile: file, size, sha256: digest }) => ({
+        name,
+        version,
+        file,
+        size,
+        sha256: digest,
+      }),
+    ),
+  };
+}
 
-  requirePath(packageArtifactsModule, 'SDK package-artifacts script');
-  mkdirSync(destinationRoot, { recursive: true });
+export function assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs) {
+  const reviewedManifest = reviewedReleaseManifest(lock);
+  const reviewedBytes = `${JSON.stringify(reviewedManifest, null, 2)}\n`;
+  const reviewedDigest = createHash('sha256').update(reviewedBytes).digest('hex');
+  if (reviewedDigest !== lock.sdk.releaseManifest.sha256) {
+    throw new Error('Reviewed SDK release manifest lock was internally inconsistent.');
+  }
 
-  const evaluator = [
-    "import { writeFileSync } from 'node:fs';",
-    `import { packPublicPackages } from ${JSON.stringify(pathToFileURL(packageArtifactsModule).href)};`,
-    `const tarballs = packPublicPackages({`,
-    `  root: ${JSON.stringify(sdkRoot)},`,
-    `  destinationRoot: ${JSON.stringify(destinationRoot)},`,
-    `});`,
-    `writeFileSync(${JSON.stringify(manifestPath)}, JSON.stringify(tarballs, null, 2) + '\\n');`,
-  ].join('\n');
+  const expectedPackages = reviewedManifest.packages.map(({ name, version, file }) => ({
+    name,
+    version,
+    file,
+  }));
+  const generatedPackages = Array.isArray(manifest?.packages)
+    ? manifest.packages.map(({ name, version, file }) => ({ name, version, file }))
+    : undefined;
+  const exactTopLevelKeys =
+    manifest !== null &&
+    typeof manifest === 'object' &&
+    !Array.isArray(manifest) &&
+    JSON.stringify(Object.keys(manifest).sort()) ===
+      JSON.stringify(['packages', 'schemaVersion', 'version']);
+  const exactPackageKeys =
+    Array.isArray(manifest?.packages) &&
+    manifest.packages.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        JSON.stringify(Object.keys(entry).sort()) ===
+          JSON.stringify(['file', 'name', 'sha256', 'size', 'version']),
+    );
+  if (
+    !exactTopLevelKeys ||
+    !exactPackageKeys ||
+    manifest?.schemaVersion !== 1 ||
+    manifest?.version !== lock.sdk.releaseManifest.version ||
+    JSON.stringify(generatedPackages) !== JSON.stringify(expectedPackages)
+  ) {
+    throw new Error('Generated SDK release manifest contents did not match the reviewed lock.');
+  }
 
-  run(process.execPath, ['--input-type=module', '--eval', evaluator], sdkRoot);
+  for (const [index, [key, artifact]] of Object.entries(SDK_ARTIFACTS).entries()) {
+    const generated = manifest.packages[index];
+    const tarball = tarballs[key];
+    const stats = typeof tarball === 'string' ? lstatSync(tarball) : undefined;
+    if (
+      generated?.name !== artifact.packageName ||
+      !Number.isSafeInteger(generated.size) ||
+      generated.size <= 0 ||
+      typeof generated.sha256 !== 'string' ||
+      !sha256Pattern.test(generated.sha256) ||
+      !stats?.isFile() ||
+      stats.size !== generated.size ||
+      sha256(tarball) !== generated.sha256
+    ) {
+      throw new Error(`Generated SDK ${artifact.packageName} manifest entry was inconsistent.`);
+    }
+  }
+}
 
-  return JSON.parse(readFileSync(manifestPath, 'utf8'));
+function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
+  const createReleaseArtifacts = resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs');
+  requirePath(createReleaseArtifacts, 'SDK create-release-artifacts script');
+  run(process.execPath, [createReleaseArtifacts, '--output', artifactRoot], sdkRoot);
+
+  const manifestPath = resolve(artifactRoot, lock.sdk.releaseManifest.file);
+  requirePath(manifestPath, 'SDK release manifest');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const tarballs = Object.fromEntries(
+    Object.entries(lock.sdk.artifacts).map(([key, artifact]) => [
+      key,
+      resolve(artifactRoot, artifact.releaseFile),
+    ]),
+  );
+  assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs);
+  return tarballs;
 }
 
 export function createContractCanaryVerifier() {
@@ -889,14 +1067,13 @@ export function main(argv = process.argv.slice(2)) {
     });
 
     const artifactRoot = artifactContext.rootPath;
-    const tarballManifestPath = resolve(artifactRoot, 'sdk-tarballs.json');
-    const tarballRoot = resolve(artifactRoot, 'sdk-tarballs');
+    const sdkArtifactRoot = resolve(artifactRoot, 'sdk-release');
     const comparisonRoot = resolve(artifactRoot, 'sdk-package-comparison');
     const harnessRoot = resolve(artifactRoot, 'chat-harness');
 
     run(process.execPath, [sdkVerifyContracts], options.sdkRoot);
 
-    const tarballs = packReviewedSdkTarballs(options.sdkRoot, tarballRoot, tarballManifestPath);
+    const tarballs = createReviewedSdkReleaseArtifacts(lock, options.sdkRoot, sdkArtifactRoot);
     const frozen = frozenTarballs(lock);
     assertPackedPackageContentsMatch(tarballs, frozen, comparisonRoot);
 

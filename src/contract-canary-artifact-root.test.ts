@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   copyFileSync,
@@ -13,12 +14,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
 import {
   assertCleanGitCheckout,
   type assertContractCanaryCheckoutHeads,
+  assertGeneratedReleaseManifestMatchesLock,
   assertPackedFixtureMatchesCaveCheckout,
   assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
@@ -84,6 +87,7 @@ function createGitWorktreeFixture(prefix: string) {
   runGit(['init', '--initial-branch=main'], repoRoot);
   runGit(['config', 'user.name', 'OpenCoven Test'], repoRoot);
   runGit(['config', 'user.email', 'opencoven-test@example.com'], repoRoot);
+  runGit(['config', 'commit.gpgsign', 'false'], repoRoot);
   writeFileSync(resolve(repoRoot, 'tracked.txt'), 'baseline\n');
   runGit(['add', 'tracked.txt'], repoRoot);
   runGit(['commit', '-m', 'baseline'], repoRoot);
@@ -113,6 +117,7 @@ describe('contract canary temp directory safety', () => {
       prefix: 'opencoven-chat-contract-canary-test',
       childSegments: ['harness'],
     });
+
     createdTempDirectories.push(artifactDirectory);
 
     expect(realpathSync(artifactDirectory.rootPath).startsWith(realpathSync(tmpdir()))).toBe(true);
@@ -210,16 +215,29 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('163961f4e59cfdef51d2271fa98e7c514977203f');
+    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
+    expect(lock.sdk.releaseManifest).toEqual({
+      file: 'release-manifest.json',
+      version: '0.1.0',
+      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+    });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
+      version: '0.1.0',
+      releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+      vendorFile: 'sdk-core-0.1.0.tgz',
+      size: 33284,
       sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
     });
 
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
-      sha256: '79b3c276af384c3e380b5a259dec83870cef309c5284823fb6cf685c968b1e35',
+      version: '0.1.0',
+      releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+      vendorFile: 'cave-client-0.1.0.tgz',
+      size: 81543,
+      sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
@@ -245,6 +263,9 @@ describe('contract canary temp directory safety', () => {
     const reviewed = resolve(scratchRoot, 'reviewed.tgz');
     const frozen = resolve(scratchRoot, 'frozen.tgz');
     const changed = resolve(scratchRoot, 'changed.tgz');
+    const trailed = resolve(scratchRoot, 'trailed.tgz');
+    const zeroPadded = resolve(scratchRoot, 'zero-padded.tgz');
+    const concatenated = resolve(scratchRoot, 'concatenated.tgz');
 
     mkdirSync(packageRoot, { recursive: true });
     writeFileSync(resolve(packageRoot, 'package.json'), '{"name":"fixture"}\n');
@@ -287,7 +308,37 @@ describe('contract canary temp directory safety', () => {
         },
         resolve(scratchRoot, 'changed'),
       ),
-    ).toThrow(/contents did not match/);
+    ).toThrow(/(?:tar payload|contents) did not match/);
+
+    copyFileSync(reviewed, trailed);
+    appendFileSync(trailed, 'UNREVIEWED-TRAILER');
+    expect(() =>
+      assertPackedPackageContentsMatch(
+        reviewedTarballs,
+        {
+          ...frozenTarballs,
+          core: trailed,
+        },
+        resolve(scratchRoot, 'trailed'),
+      ),
+    ).toThrow(/complete gzip archive/);
+
+    copyFileSync(reviewed, zeroPadded);
+    appendFileSync(zeroPadded, Buffer.alloc(4));
+    copyFileSync(reviewed, concatenated);
+    appendFileSync(concatenated, gzipSync(Buffer.alloc(0)));
+    for (const invalid of [zeroPadded, concatenated]) {
+      expect(() =>
+        assertPackedPackageContentsMatch(
+          reviewedTarballs,
+          {
+            ...frozenTarballs,
+            core: invalid,
+          },
+          resolve(scratchRoot, `invalid-${invalid === zeroPadded ? 'padding' : 'member'}`),
+        ),
+      ).toThrow(/complete gzip archive/);
+    }
   });
 
   test('declares canary helper inputs at their consumed shapes', () => {
@@ -297,7 +348,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
+        revision: 'acc38488f00860d246c3c553375634d64806eabb',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -325,7 +376,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '163961f4e59cfdef51d2271fa98e7c514977203f',
+        revision: 'acc38488f00860d246c3c553375634d64806eabb',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
@@ -401,6 +452,60 @@ describe('contract canary temp directory safety', () => {
     },
     15_000,
   );
+});
+
+describe('generated SDK release manifest validation', () => {
+  test('accepts platform-specific archive bytes when package identity and manifest integrity hold', () => {
+    const lock = readContractCanaryLock();
+    const scratchRoot = createRepoLocalScratchRoot('generated-manifest');
+    const tarballs = {} as Record<'core' | 'cave' | 'coven' | 'sdk', string>;
+    const packages = Object.entries(lock.sdk.artifacts).map(([key, artifact]) => {
+      const tarball = resolve(scratchRoot, `${key}.tgz`);
+      const bytes = Buffer.from(`platform-specific-${key}`);
+      writeFileSync(tarball, bytes);
+      tarballs[key as keyof typeof tarballs] = tarball;
+      return {
+        name: artifact.packageName,
+        version: artifact.version,
+        file: artifact.releaseFile,
+        size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      };
+    });
+    const manifest = {
+      schemaVersion: 1,
+      version: lock.sdk.releaseManifest.version,
+      packages,
+    };
+
+    expect(() => assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs)).not.toThrow();
+
+    const invalidManifest = {
+      ...manifest,
+      packages: manifest.packages.map((entry, index) => ({
+        ...entry,
+        name: index === 0 ? '@opencoven/not-reviewed' : entry.name,
+      })),
+    };
+    expect(() =>
+      assertGeneratedReleaseManifestMatchesLock(lock, invalidManifest, tarballs),
+    ).toThrow(/contents did not match/);
+
+    const extraTopLevel = { ...manifest, unreviewed: true };
+    expect(() => assertGeneratedReleaseManifestMatchesLock(lock, extraTopLevel, tarballs)).toThrow(
+      /contents did not match/,
+    );
+
+    const extraPackageField = {
+      ...manifest,
+      packages: manifest.packages.map((entry, index) =>
+        index === 0 ? { ...entry, unreviewed: true } : entry,
+      ),
+    };
+    expect(() =>
+      assertGeneratedReleaseManifestMatchesLock(lock, extraPackageField, tarballs),
+    ).toThrow(/contents did not match/);
+  });
 });
 
 describe('contract canary checkout cleanliness', () => {
