@@ -65,6 +65,7 @@ export class NativeRpcClient {
 export function safeEnvironment(
   rootPath: string,
   extra?: Record<string, string>,
+  resolvedCargoPath?: string,
 ): Record<string, string>;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },

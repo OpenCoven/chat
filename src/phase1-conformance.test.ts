@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, test } from 'vitest';
@@ -325,13 +325,25 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-safe-environment-'));
+    const toolchainBin = join(root, 'toolchain', 'bin');
+    const cargoPath = join(toolchainBin, 'cargo');
+    const originalPath = process.env.PATH;
     try {
-      const environment = safeEnvironment(root);
+      mkdirSync(toolchainBin, { recursive: true });
+      writeFileSync(cargoPath, '');
+      process.env.PATH = '';
+
+      const environment = safeEnvironment(root, {}, cargoPath);
+      const resolvedToolchainBin = dirname(realpathSync(cargoPath));
 
       expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
       expect(environment.RUSTUP_HOME).toBeUndefined();
       expect(environment.HOME).toBe(resolve(root, 'home'));
+      expect(environment.PATH).toBe(resolvedToolchainBin);
+      expect(environment.RUSTC).toBe(join(resolvedToolchainBin, 'rustc'));
+      expect(environment.RUSTDOC).toBe(join(resolvedToolchainBin, 'rustdoc'));
     } finally {
+      process.env.PATH = originalPath;
       rmSync(root, { recursive: true });
     }
   });

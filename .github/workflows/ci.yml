@@ -433,11 +433,22 @@ jobs:
         with:
           toolchain: 1.95.0
           components: clippy,rustfmt
-      - run: rustup target add x86_64-pc-windows-gnu
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
-      - run: corepack pnpm cargo:check:windows-gnu
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
       - run: corepack pnpm test:native-e2e
+
+  windows-rust:
+    name: Windows Rust
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

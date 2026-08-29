@@ -92,7 +92,6 @@ pnpm exec playwright install chromium
 | `pnpm test:phase1-conformance` | Package the revisions in `phase1-conformance.lock.json`, run the real Cave/native/Coven matrix, and retain one secret-scanned JSON report |
 | `pnpm cargo:fmt` | Verify Rust formatting |
 | `pnpm cargo:check` | Run Rust compile checks |
-| `pnpm cargo:check:windows-gnu` | Check all Rust targets for `x86_64-pc-windows-gnu` |
 | `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
 | `pnpm cargo:test` | Run Rust smoke tests |
 | `pnpm app:dev` | Start the Tauri desktop scaffold in development |

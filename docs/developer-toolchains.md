@@ -105,8 +105,9 @@
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
 - Run its subprocess integration gate with `pnpm test:native-e2e`; normal
   `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
-- Run the persisted Windows GNU cross-target compile gate with
-  `pnpm cargo:check:windows-gnu`.
+- CI compiles every Rust target on a native Windows runner in addition to the
+  macOS Rust checks, so Tauri's Windows resource build is validated with the
+  platform toolchain it requires.
 - The Phase 1 harness creates mode-`0700` process-owned roots under the real OS
   temporary directory, reaps only tracked child processes, scans the completed
   report for secrets and private content, and retains only

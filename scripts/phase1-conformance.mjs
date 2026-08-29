@@ -304,7 +304,7 @@ function requirePassedAssertions(assertions, ids) {
   return ids.every((id) => assertions.get(id) === 'passed');
 }
 
-export function safeEnvironment(rootPath, extra = {}) {
+export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
   const home = resolve(rootPath, 'home');
   const temp = resolve(rootPath, 'tmp');
   const cache = resolve(rootPath, 'cache');
@@ -313,10 +313,11 @@ export function safeEnvironment(rootPath, extra = {}) {
   const pnpmStore = resolve(rootPath, 'pnpm-store');
   const cargoHome = resolve(rootPath, 'cargo-home');
   const cargoPath = realpathSync(
-    execFileSync('rustup', ['which', 'cargo'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim(),
+    resolvedCargoPath ??
+      execFileSync('rustup', ['which', 'cargo'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim(),
   );
   const rustToolchainBin = dirname(cargoPath);
   for (const path of [home, temp, cache, config, data, pnpmStore, cargoHome]) {
@@ -324,8 +325,9 @@ export function safeEnvironment(rootPath, extra = {}) {
     chmodSync(path, 0o700);
   }
 
+  const inheritedPath = process.env.PATH ?? '';
   const environment = {
-    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,

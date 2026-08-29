@@ -277,20 +277,19 @@ describe('Phase 1 specification guards', () => {
     expect(nativeSource).not.toContain('take_hook');
   });
 
-  it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
-    const packageManifest = readJson<PackageManifest>('package.json');
+  it('checks every Rust target on a native Windows runner', () => {
     const workflow = readText('.github/workflows/ci.yml');
-    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
-      ?.groups?.job;
+    const windowsRustJob = workflow.match(
+      /\n {2}windows-rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
+    )?.groups?.job;
 
-    expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
-      'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
-    );
-    expect(rustJob).toContain(
+    expect(windowsRustJob).toContain('name: Windows Rust');
+    expect(windowsRustJob).toContain('runs-on: windows-latest');
+    expect(windowsRustJob).toContain('toolchain: 1.95.0');
+    expect(windowsRustJob).toContain(
       '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
     );
-    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
-    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+    expect(windowsRustJob).not.toContain('rustup target add');
   });
 
   it('keeps the capability schema resolvable from a fresh checkout', () => {
@@ -662,8 +661,8 @@ describe('Phase 1 specification guards', () => {
 
     expect(
       gated,
-      'E2E, Desktop build, Rust, and Phase 1 conformance are the jobs worth skipping',
-    ).toHaveLength(4);
+      'E2E, Desktop build, macOS Rust, Windows Rust, and Phase 1 conformance are the jobs worth skipping',
+    ).toHaveLength(5);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
