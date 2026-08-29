@@ -40,8 +40,12 @@ write-oriented design exploration.
   `COVEN_HOME` when set, otherwise the current account's platform home plus
   `.coven`; the client validates the live connected Unix peer credentials or
   Windows named-pipe ownership and connected identity before health succeeds.
-  Missing native trust fails closed. There is no pathname, naming, shell,
-  PowerShell, or process-list fallback.
+  The direct producer probe runs in the same trusted executable behind one
+  fixed internal argument, with null standard streams and an independent
+  absolute parent timeout that terminates and reaps only that child. The parent
+  consumes only its success or failure status. Missing native trust fails
+  closed. There is no pathname, naming, shell, PowerShell, or process-list
+  fallback.
 
 ### Current native-host limitation
 

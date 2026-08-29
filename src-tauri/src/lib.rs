@@ -36,6 +36,10 @@ pub use coven::CovenHealthResult;
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
 pub use operation::{NativeCancelReason, NativeCancelResult, NativeOperationInput};
 
+pub fn exit_if_internal_coven_health_probe_requested() {
+    coven::exit_if_internal_coven_health_probe_requested();
+}
+
 #[derive(Clone)]
 pub struct NativeConnectionState {
     runtime: Arc<Mutex<ConnectionRuntime>>,
@@ -274,7 +278,6 @@ pub fn run() {
 
 #[cfg(test)]
 mod smoke_tests {
-    use std::process::Command as TestProcess;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Condvar, Mutex,
@@ -299,20 +302,6 @@ mod smoke_tests {
 
     impl CovenHealth for HealthyCoven {
         fn health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
-            Ok(CovenHealthResult { status: "ok" })
-        }
-    }
-
-    #[derive(Default)]
-    struct PanicOnceCoven {
-        calls: AtomicUsize,
-    }
-
-    impl CovenHealth for PanicOnceCoven {
-        fn health(&self) -> Result<CovenHealthResult, NativeDiagnostic> {
-            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                panic!("secret producer panic");
-            }
             Ok(CovenHealthResult { status: "ok" })
         }
     }
@@ -487,54 +476,6 @@ mod smoke_tests {
             serde_json::to_value(CovenHealthResult { status: "ok" }).unwrap(),
             json!({ "status": "ok" })
         );
-    }
-
-    #[test]
-    fn coven_health_recovers_worker_capacity_after_a_producer_panic() {
-        const CHILD_PROCESS: &str = "OPENCOVEN_COVEN_PANIC_BOUNDARY_CHILD";
-        const PRODUCER_SECRET: &str = "secret producer panic";
-        const RESTORED_HOOK_SENTINEL: &str = "restored panic hook sentinel";
-
-        if std::env::var_os(CHILD_PROCESS).is_none() {
-            let output = TestProcess::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "smoke_tests::coven_health_recovers_worker_capacity_after_a_producer_panic",
-                    "--nocapture",
-                ])
-                .env(CHILD_PROCESS, "1")
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            let stderr = String::from_utf8(output.stderr).unwrap();
-            assert!(!stderr.contains(PRODUCER_SECRET), "{stderr}");
-            assert_eq!(stderr, format!("{RESTORED_HOOK_SENTINEL}\n"));
-            return;
-        }
-
-        let original_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| eprintln!("{RESTORED_HOOK_SENTINEL}")));
-
-        let health = Arc::new(PanicOnceCoven::default());
-        let state = NativeConnectionState::with_test_coven_health(health.clone());
-
-        let diagnostic = tauri::async_runtime::block_on(state.coven_health()).unwrap_err();
-        assert_eq!(
-            serde_json::to_value(diagnostic).unwrap(),
-            json!({
-                "code": "service_unavailable",
-                "retryable": true,
-            })
-        );
-        assert_eq!(
-            tauri::async_runtime::block_on(state.coven_health()),
-            Ok(CovenHealthResult { status: "ok" })
-        );
-        assert_eq!(health.calls.load(Ordering::SeqCst), 2);
-
-        let _ = std::panic::catch_unwind(|| panic!("{RESTORED_HOOK_SENTINEL}"));
-        let _restored_hook = std::panic::take_hook();
-        std::panic::set_hook(original_hook);
     }
 
     #[test]

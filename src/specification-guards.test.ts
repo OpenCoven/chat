@@ -249,7 +249,7 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
-  it('pins Coven health to the producer client without fallback trust mechanisms', () => {
+  it('pins Coven health to an isolated producer-client self probe without fallback trust', () => {
     const manifest = readText('src-tauri/Cargo.toml');
     const covenSource =
       readText('src-tauri/src/coven.rs').split('\n#[cfg(test)]\nmod tests')[0] ?? '';
@@ -264,9 +264,17 @@ describe('Phase 1 specification guards', () => {
     );
     expect(nativeSource).toContain('DaemonEndpoint::discover');
     expect(nativeSource).toContain('.health()');
+    expect(nativeSource).toContain('std::env::current_exe()');
+    expect(nativeSource).toContain('COVEN_HEALTH_PROBE_ARGUMENT');
+    expect(nativeSource).toContain('Command::new(&request.executable)');
+    expect(nativeSource).toContain('.stdin(Stdio::null())');
+    expect(nativeSource).toContain('.stdout(Stdio::null())');
+    expect(nativeSource).toContain('.stderr(Stdio::null())');
     expect(nativeSource).not.toMatch(
-      /\b(?:Command::new|powershell|pwsh|lsof|netstat|Get-NamedPipe|coven\.sock|\\\\\.\\pipe\\)\b/iu,
+      /\b(?:powershell|pwsh|lsof|netstat|Get-NamedPipe|coven\.sock|\\\\\.\\pipe\\)\b/iu,
     );
+    expect(nativeSource).not.toContain('set_hook');
+    expect(nativeSource).not.toContain('take_hook');
   });
 
   it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {

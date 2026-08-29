@@ -1,12 +1,15 @@
 use std::{
     env,
-    ffi::OsString,
-    panic::{self, AssertUnwindSafe},
+    ffi::{OsStr, OsString},
+    io,
     path::PathBuf,
+    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
+    thread,
+    time::{Duration, Instant},
 };
 
 use coven_client::{ClientError, DaemonClient, DaemonEndpoint};
@@ -23,42 +26,199 @@ pub(crate) trait CovenHealth: Send + Sync {
     fn health(&self) -> NativeResult<CovenHealthResult>;
 }
 
-static COVEN_HEALTH_PANIC_HOOK_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) const COVEN_HEALTH_PROBE_ARGUMENT: &str = "--opencoven-internal-coven-health-probe-v1";
+const COVEN_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const COVEN_HEALTH_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const COVEN_HEALTH_PROBE_SUCCESS: i32 = 0;
+const COVEN_HEALTH_PROBE_FAILURE: i32 = 1;
 
-type PanicHook = Box<dyn Fn(&panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
-
-struct ScopedRedactingPanicHook {
-    previous: Option<PanicHook>,
-}
-
-impl ScopedRedactingPanicHook {
-    fn install() -> Self {
-        let previous = panic::take_hook();
-        panic::set_hook(Box::new(|_| {}));
-        Self {
-            previous: Some(previous),
-        }
+pub(crate) fn exit_if_internal_coven_health_probe_requested() {
+    if !internal_coven_health_probe_requested(env::args_os()) {
+        return;
     }
-}
 
-impl Drop for ScopedRedactingPanicHook {
-    fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            panic::set_hook(previous);
-        }
-    }
-}
-
-fn call_health_with_redacted_panic(health: &dyn CovenHealth) -> NativeResult<CovenHealthResult> {
-    let result = {
-        let _hook_lock = COVEN_HEALTH_PANIC_HOOK_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _hook = ScopedRedactingPanicHook::install();
-        panic::catch_unwind(AssertUnwindSafe(|| health.health()))
+    let status = if DirectCovenHealth::default().health().is_ok() {
+        COVEN_HEALTH_PROBE_SUCCESS
+    } else {
+        COVEN_HEALTH_PROBE_FAILURE
     };
+    std::process::exit(status);
+}
 
-    result.unwrap_or_else(|_| Err(NativeDiagnostic::new("service_unavailable", true)))
+fn internal_coven_health_probe_requested<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut args = args.into_iter();
+    if args.next().is_none() {
+        return false;
+    }
+    matches!(
+        (args.next(), args.next()),
+        (Some(argument), None) if argument.as_ref() == OsStr::new(COVEN_HEALTH_PROBE_ARGUMENT)
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeStdio {
+    Null,
+}
+
+struct CovenProbeLaunchRequest {
+    executable: PathBuf,
+    arguments: [&'static str; 1],
+    stdin: ProbeStdio,
+    stdout: ProbeStdio,
+    stderr: ProbeStdio,
+}
+
+trait CovenProbeChild: Send {
+    fn try_wait(&mut self) -> io::Result<Option<bool>>;
+    fn terminate(&mut self) -> io::Result<()>;
+    fn wait(&mut self) -> io::Result<()>;
+}
+
+trait CovenProbeLauncher: Send + Sync {
+    fn launch(&self, request: &CovenProbeLaunchRequest) -> io::Result<Box<dyn CovenProbeChild>>;
+}
+
+struct NativeCovenProbeLauncher;
+
+struct NativeCovenProbeChild {
+    child: Child,
+    reaped: bool,
+}
+
+impl CovenProbeChild for NativeCovenProbeChild {
+    fn try_wait(&mut self) -> io::Result<Option<bool>> {
+        if self.reaped {
+            return Ok(Some(false));
+        }
+        self.child.try_wait().map(|status| {
+            status.map(|status| {
+                self.reaped = true;
+                status.success()
+            })
+        })
+    }
+
+    fn terminate(&mut self) -> io::Result<()> {
+        if self.reaped {
+            return Ok(());
+        }
+        self.child.kill()
+    }
+
+    fn wait(&mut self) -> io::Result<()> {
+        if self.reaped {
+            return Ok(());
+        }
+        self.child.wait().map(|_| {
+            self.reaped = true;
+        })
+    }
+}
+
+impl Drop for NativeCovenProbeChild {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+    }
+}
+
+impl CovenProbeLauncher for NativeCovenProbeLauncher {
+    fn launch(&self, request: &CovenProbeLaunchRequest) -> io::Result<Box<dyn CovenProbeChild>> {
+        debug_assert_eq!(request.arguments, [COVEN_HEALTH_PROBE_ARGUMENT]);
+        debug_assert_eq!(request.stdin, ProbeStdio::Null);
+        debug_assert_eq!(request.stdout, ProbeStdio::Null);
+        debug_assert_eq!(request.stderr, ProbeStdio::Null);
+
+        Command::new(&request.executable)
+            .args(request.arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|child| {
+                Box::new(NativeCovenProbeChild {
+                    child,
+                    reaped: false,
+                }) as Box<dyn CovenProbeChild>
+            })
+    }
+}
+
+pub(crate) struct NativeCovenHealth {
+    launcher: Arc<dyn CovenProbeLauncher>,
+    timeout: Duration,
+}
+
+impl Default for NativeCovenHealth {
+    fn default() -> Self {
+        Self {
+            launcher: Arc::new(NativeCovenProbeLauncher),
+            timeout: COVEN_HEALTH_PROBE_TIMEOUT,
+        }
+    }
+}
+
+impl NativeCovenHealth {
+    #[cfg(test)]
+    fn with_launcher(launcher: Arc<dyn CovenProbeLauncher>, timeout: Duration) -> Self {
+        Self { launcher, timeout }
+    }
+}
+
+impl CovenHealth for NativeCovenHealth {
+    fn health(&self) -> NativeResult<CovenHealthResult> {
+        let request = CovenProbeLaunchRequest {
+            executable: std::env::current_exe()
+                .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?,
+            arguments: [COVEN_HEALTH_PROBE_ARGUMENT],
+            stdin: ProbeStdio::Null,
+            stdout: ProbeStdio::Null,
+            stderr: ProbeStdio::Null,
+        };
+        let mut child = self
+            .launcher
+            .launch(&request)
+            .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?;
+        let deadline = Instant::now() + self.timeout;
+
+        loop {
+            match child.try_wait() {
+                Ok(Some(true)) => return Ok(CovenHealthResult { status: "ok" }),
+                Ok(Some(false)) => {
+                    return Err(NativeDiagnostic::new("service_unavailable", true));
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    terminate_and_reap(child.as_mut());
+                    return Err(NativeDiagnostic::new("service_unavailable", true));
+                }
+            }
+
+            let now = Instant::now();
+            if now >= deadline {
+                terminate_and_reap(child.as_mut());
+                return Err(NativeDiagnostic::new("service_unavailable", true));
+            }
+            thread::sleep(
+                deadline
+                    .saturating_duration_since(now)
+                    .min(COVEN_HEALTH_PROBE_POLL_INTERVAL),
+            );
+        }
+    }
+}
+
+fn terminate_and_reap(child: &mut dyn CovenProbeChild) {
+    let _ = child.terminate();
+    let _ = child.wait();
 }
 
 #[derive(Default)]
@@ -90,7 +250,7 @@ impl NativeCovenHealthExecutor {
             }
 
             let _busy = BusyReset(Arc::clone(&executor.busy));
-            call_health_with_redacted_panic(health.as_ref())
+            health.health()
         })
         .await
         .map_err(|_| NativeDiagnostic::new("service_unavailable", true))?
@@ -99,11 +259,11 @@ impl NativeCovenHealthExecutor {
 
 type CovenHomeResolver = dyn Fn() -> NativeResult<PathBuf> + Send + Sync;
 
-pub(crate) struct NativeCovenHealth {
+struct DirectCovenHealth {
     home: Arc<CovenHomeResolver>,
 }
 
-impl Default for NativeCovenHealth {
+impl Default for DirectCovenHealth {
     fn default() -> Self {
         Self {
             home: Arc::new(resolve_coven_home),
@@ -111,14 +271,14 @@ impl Default for NativeCovenHealth {
     }
 }
 
-impl NativeCovenHealth {
+impl DirectCovenHealth {
     #[cfg(all(test, unix))]
     fn with_home(home: Arc<CovenHomeResolver>) -> Self {
         Self { home }
     }
 }
 
-impl CovenHealth for NativeCovenHealth {
+impl CovenHealth for DirectCovenHealth {
     fn health(&self) -> NativeResult<CovenHealthResult> {
         let home = (self.home)()?;
         let endpoint = DaemonEndpoint::discover(home).map_err(map_client_error)?;
@@ -267,16 +427,183 @@ fn map_client_error(error: ClientError) -> NativeDiagnostic {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    #[cfg(unix)]
-    use std::sync::Arc;
+    use std::{
+        collections::VecDeque,
+        io,
+        path::PathBuf,
+        process::{Child, Command, Stdio},
+        sync::{Arc, Condvar, Mutex},
+        time::{Duration, Instant},
+    };
 
     use coven_client::{ClientError, DaemonError};
     use serde_json::json;
 
-    use super::{map_client_error, resolve_coven_home_with};
     #[cfg(unix)]
-    use super::{CovenHealth, CovenHealthResult, NativeCovenHealth};
+    use super::DirectCovenHealth;
+    use super::{
+        internal_coven_health_probe_requested, map_client_error, resolve_coven_home_with,
+        CovenHealth, CovenHealthResult, CovenProbeChild, CovenProbeLaunchRequest,
+        CovenProbeLauncher, NativeCovenHealth, NativeCovenHealthExecutor, ProbeStdio,
+        COVEN_HEALTH_PROBE_ARGUMENT,
+    };
+
+    struct CompletedChild(bool);
+
+    impl CovenProbeChild for CompletedChild {
+        fn try_wait(&mut self) -> io::Result<Option<bool>> {
+            Ok(Some(self.0))
+        }
+
+        fn terminate(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn wait(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct RecordedLaunch {
+        executable: PathBuf,
+        arguments: Vec<&'static str>,
+        stdin: ProbeStdio,
+        stdout: ProbeStdio,
+        stderr: ProbeStdio,
+    }
+
+    #[derive(Default)]
+    struct RecordingLauncher {
+        requests: Mutex<Vec<RecordedLaunch>>,
+    }
+
+    impl CovenProbeLauncher for RecordingLauncher {
+        fn launch(
+            &self,
+            request: &CovenProbeLaunchRequest,
+        ) -> io::Result<Box<dyn CovenProbeChild>> {
+            self.requests.lock().unwrap().push(RecordedLaunch {
+                executable: request.executable.clone(),
+                arguments: request.arguments.to_vec(),
+                stdin: request.stdin,
+                stdout: request.stdout,
+                stderr: request.stderr,
+            });
+            Ok(Box::new(CompletedChild(true)))
+        }
+    }
+
+    struct ProcessChild(Child);
+
+    impl CovenProbeChild for ProcessChild {
+        fn try_wait(&mut self) -> io::Result<Option<bool>> {
+            self.0
+                .try_wait()
+                .map(|status| status.map(|status| status.success()))
+        }
+
+        fn terminate(&mut self) -> io::Result<()> {
+            self.0.kill()
+        }
+
+        fn wait(&mut self) -> io::Result<()> {
+            self.0.wait().map(|_| ())
+        }
+    }
+
+    struct PanickingProcessLauncher;
+
+    impl CovenProbeLauncher for PanickingProcessLauncher {
+        fn launch(
+            &self,
+            _request: &CovenProbeLaunchRequest,
+        ) -> io::Result<Box<dyn CovenProbeChild>> {
+            Command::new(std::env::current_exe()?)
+                .args([
+                    "--exact",
+                    "coven::tests::child_probe_panic_is_redacted_and_bounded",
+                    "--nocapture",
+                ])
+                .env("OPENCOVEN_TEST_COVEN_PROBE_PANIC", "1")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|child| Box::new(ProcessChild(child)) as Box<dyn CovenProbeChild>)
+        }
+    }
+
+    #[derive(Default)]
+    struct HangingChildState {
+        terminated: bool,
+        wait_started: bool,
+        allow_reap: bool,
+        terminate_calls: usize,
+        wait_calls: usize,
+    }
+
+    struct HangingChild {
+        state: Arc<(Mutex<HangingChildState>, Condvar)>,
+    }
+
+    impl CovenProbeChild for HangingChild {
+        fn try_wait(&mut self) -> io::Result<Option<bool>> {
+            Ok(None)
+        }
+
+        fn terminate(&mut self) -> io::Result<()> {
+            let mut state = self.state.0.lock().unwrap();
+            state.terminated = true;
+            state.terminate_calls += 1;
+            self.state.1.notify_all();
+            Ok(())
+        }
+
+        fn wait(&mut self) -> io::Result<()> {
+            let mut state = self.state.0.lock().unwrap();
+            state.wait_started = true;
+            state.wait_calls += 1;
+            self.state.1.notify_all();
+            while !state.allow_reap {
+                state = self.state.1.wait(state).unwrap();
+            }
+            Ok(())
+        }
+    }
+
+    struct SequencedLauncher {
+        launches: Mutex<VecDeque<Box<dyn CovenProbeChild>>>,
+    }
+
+    impl CovenProbeLauncher for SequencedLauncher {
+        fn launch(
+            &self,
+            _request: &CovenProbeLaunchRequest,
+        ) -> io::Result<Box<dyn CovenProbeChild>> {
+            self.launches
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| io::Error::other("unexpected Coven probe launch"))
+        }
+    }
+
+    fn wait_for_child_state(
+        state: &Arc<(Mutex<HangingChildState>, Condvar)>,
+        predicate: impl Fn(&HangingChildState) -> bool,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut child = state.0.lock().unwrap();
+        while !predicate(&child) {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("child state transition timed out");
+            let (next, timeout) = state.1.wait_timeout(child, remaining).unwrap();
+            assert!(!timeout.timed_out(), "child state transition timed out");
+            child = next;
+        }
+    }
 
     #[test]
     fn maps_client_failures_to_bounded_diagnostics_without_leaking_details() {
@@ -349,6 +676,147 @@ mod tests {
         );
     }
 
+    #[test]
+    fn internal_probe_mode_requires_the_exact_fixed_argv() {
+        assert!(internal_coven_health_probe_requested([
+            "trusted-app",
+            COVEN_HEALTH_PROBE_ARGUMENT,
+        ]));
+        assert!(!internal_coven_health_probe_requested(["trusted-app"]));
+        assert!(!internal_coven_health_probe_requested([
+            "trusted-app",
+            COVEN_HEALTH_PROBE_ARGUMENT,
+            "extra",
+        ]));
+        assert!(!internal_coven_health_probe_requested([
+            "trusted-app",
+            "--other-mode",
+        ]));
+    }
+
+    #[test]
+    fn successful_native_probe_uses_fixed_launch_and_releases_capacity() {
+        let launcher = Arc::new(RecordingLauncher::default());
+        let health: Arc<dyn CovenHealth> = Arc::new(NativeCovenHealth::with_launcher(
+            launcher.clone(),
+            Duration::from_millis(100),
+        ));
+        let executor = Arc::new(NativeCovenHealthExecutor::default());
+
+        for _ in 0..2 {
+            let result =
+                tauri::async_runtime::block_on(executor.execute(Arc::clone(&health))).unwrap();
+            assert_eq!(result, CovenHealthResult { status: "ok" });
+            assert_eq!(
+                serde_json::to_value(result).unwrap(),
+                json!({"status": "ok"})
+            );
+        }
+
+        let requests = launcher.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in requests.iter() {
+            assert_eq!(
+                request,
+                &RecordedLaunch {
+                    executable: std::env::current_exe().unwrap(),
+                    arguments: vec![COVEN_HEALTH_PROBE_ARGUMENT],
+                    stdin: ProbeStdio::Null,
+                    stdout: ProbeStdio::Null,
+                    stderr: ProbeStdio::Null,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn child_probe_panic_is_redacted_and_bounded() {
+        const OUTER_PROCESS: &str = "OPENCOVEN_TEST_COVEN_PROBE_OUTER";
+        const PANIC_PROCESS: &str = "OPENCOVEN_TEST_COVEN_PROBE_PANIC";
+        const SECRET: &str = "secret child probe panic marker";
+
+        if std::env::var_os(PANIC_PROCESS).is_some() {
+            panic!("{SECRET}");
+        }
+        if std::env::var_os(OUTER_PROCESS).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "coven::tests::child_probe_panic_is_redacted_and_bounded",
+                    "--nocapture",
+                ])
+                .env(OUTER_PROCESS, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(SECRET));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(SECRET));
+            return;
+        }
+
+        let health = NativeCovenHealth::with_launcher(
+            Arc::new(PanickingProcessLauncher),
+            Duration::from_secs(1),
+        );
+        let started = Instant::now();
+        assert_eq!(
+            health.health(),
+            Err(super::NativeDiagnostic::new("service_unavailable", true))
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn timeout_terminates_and_reaps_the_spawned_child_before_releasing_capacity() {
+        let child_state = Arc::new((Mutex::new(HangingChildState::default()), Condvar::new()));
+        let launcher = Arc::new(SequencedLauncher {
+            launches: Mutex::new(VecDeque::from([
+                Box::new(HangingChild {
+                    state: child_state.clone(),
+                }) as Box<dyn CovenProbeChild>,
+                Box::new(CompletedChild(true)) as Box<dyn CovenProbeChild>,
+            ])),
+        });
+        let health = Arc::new(NativeCovenHealth::with_launcher(
+            launcher.clone(),
+            Duration::from_millis(10),
+        ));
+        let executor = Arc::new(NativeCovenHealthExecutor::default());
+        let first_executor = executor.clone();
+        let first_health: Arc<dyn CovenHealth> = health.clone();
+        let first =
+            tauri::async_runtime::spawn(async move { first_executor.execute(first_health).await });
+
+        wait_for_child_state(&child_state, |state| state.wait_started);
+        assert_eq!(
+            tauri::async_runtime::block_on(executor.execute(health.clone())),
+            Err(super::NativeDiagnostic::new("service_unavailable", true))
+        );
+        assert_eq!(launcher.launches.lock().unwrap().len(), 1);
+
+        {
+            let mut state = child_state.0.lock().unwrap();
+            state.allow_reap = true;
+            child_state.1.notify_all();
+        }
+        assert_eq!(
+            tauri::async_runtime::block_on(first).unwrap(),
+            Err(super::NativeDiagnostic::new("service_unavailable", true))
+        );
+        {
+            let state = child_state.0.lock().unwrap();
+            assert!(state.terminated);
+            assert_eq!(state.terminate_calls, 1);
+            assert_eq!(state.wait_calls, 1);
+        }
+
+        assert_eq!(
+            tauri::async_runtime::block_on(executor.execute(health)),
+            Ok(CovenHealthResult { status: "ok" })
+        );
+        assert!(launcher.launches.lock().unwrap().is_empty());
+    }
+
     #[cfg(unix)]
     #[test]
     fn owner_current_connected_socket_health_succeeds() {
@@ -384,7 +852,7 @@ mod tests {
         });
 
         let resolver_root = root.clone();
-        let health = NativeCovenHealth::with_home(Arc::new(move || Ok(resolver_root.clone())));
+        let health = DirectCovenHealth::with_home(Arc::new(move || Ok(resolver_root.clone())));
         assert_eq!(health.health().unwrap(), CovenHealthResult { status: "ok" });
         server.join().unwrap();
         fs::remove_dir_all(&root).unwrap();

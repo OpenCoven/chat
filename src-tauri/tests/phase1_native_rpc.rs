@@ -11,6 +11,19 @@ const INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
 #[test]
+fn internal_coven_probe_failure_exits_silently_before_rpc_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .arg("--opencoven-internal-coven-health-probe-v1")
+        .env("COVEN_HOME", "")
+        .output()
+        .expect("phase1-native-rpc probe child must exit");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
         .stdin(Stdio::piped())
