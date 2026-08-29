@@ -1234,11 +1234,7 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original = env::var_os("COVEN_HOME");
-        env::set_var(
-            "COVEN_HOME",
-            env::current_dir().unwrap().join("missing-coven-health"),
-        );
+        let _coven_home = ScopedCovenHome::missing();
         let mut runtime = RpcRuntime::new();
 
         let response = runtime.process_line(
@@ -1254,14 +1250,34 @@ mod tests {
                 "id": "coven",
                 "ok": false,
                 "error": {
-                    "code": "reconcile_required",
-                    "retryable": false
+                    "code": "service_unavailable",
+                    "retryable": true
                 }
             })
         );
-        match original {
-            Some(value) => env::set_var("COVEN_HOME", value),
-            None => env::remove_var("COVEN_HOME"),
+    }
+
+    struct ScopedCovenHome(Option<std::ffi::OsString>);
+
+    impl ScopedCovenHome {
+        fn missing() -> Self {
+            let original = env::var_os("COVEN_HOME");
+            let missing = env::temp_dir().join(format!(
+                "opencoven-missing-coven-health-{}",
+                uuid::Uuid::new_v4()
+            ));
+            assert!(!missing.exists(), "temporary Coven home must be missing");
+            env::set_var("COVEN_HOME", missing);
+            Self(original)
+        }
+    }
+
+    impl Drop for ScopedCovenHome {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => env::set_var("COVEN_HOME", value),
+                None => env::remove_var("COVEN_HOME"),
+            }
         }
     }
 
