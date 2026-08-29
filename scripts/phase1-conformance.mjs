@@ -920,14 +920,14 @@ async function runCompatibilityScenarios({ artifactRoot, roots, environment, res
       results,
       'phase1.compat.api-major-min-client',
       'passed',
-      'phase1.compat.incompatible-version',
+      'phase1.assertion.passed',
     );
   } catch {
     addAssertion(
       results,
       'phase1.compat.api-major-min-client',
       'failed',
-      'phase1.compat.incompatible-version',
+      'phase1.assertion.failed',
     );
   }
 }
@@ -2049,7 +2049,7 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       results,
       'phase1.compat.api-major-min-client',
       'failed',
-      'phase1.compat.incompatible-version',
+      'phase1.assertion.failed',
     );
   }
   fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');
