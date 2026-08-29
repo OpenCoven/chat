@@ -1,3 +1,6 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+
 import { describe, expect, test } from 'vitest';
 
 import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
@@ -5,9 +8,25 @@ import {
   assertExactAssertionResults,
   assertPairingStatus,
   buildPhase1Report,
+  NativeRpcClient,
   parseArgs,
   parseCaveConformanceOutput,
 } from '../scripts/phase1-conformance.mjs';
+
+class SynchronousCloseChild extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly stdin = {
+    write: (line: string) => {
+      const request = JSON.parse(line) as { id: string };
+      this.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result: {} })}\n`);
+      this.exitCode = 0;
+      this.emit('close', 0, null);
+      return true;
+    },
+  };
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+}
 
 function passingAssertions(): Array<{
   id: string;
@@ -140,5 +159,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(() => assertPairingStatus({ status: 'pending' }, 'denied')).toThrow(
       /pairing status was pending instead of denied/,
     );
+  });
+
+  test('observes a native RPC child that closes synchronously during shutdown', async () => {
+    const client = new NativeRpcClient(new SynchronousCloseChild());
+
+    const outcome = await Promise.race([
+      client.close().then(() => 'closed'),
+      new Promise<'timed-out'>((resolveTimeout) =>
+        setTimeout(() => resolveTimeout('timed-out'), 50),
+      ),
+    ]);
+
+    expect(outcome).toBe('closed');
   });
 });

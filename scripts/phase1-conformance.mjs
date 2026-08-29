@@ -868,7 +868,13 @@ function writeNativeFixture(caveHome, covenHome, daemonUrl) {
   }
 }
 
-class NativeRpcClient {
+async function triggerAndWaitForChildClose(child, trigger) {
+  const closed = once(child, 'close');
+  await trigger();
+  await closed;
+}
+
+export class NativeRpcClient {
   constructor(child) {
     this.child = child;
     this.pending = new Map();
@@ -947,8 +953,7 @@ class NativeRpcClient {
 
   async close() {
     if (this.child.exitCode === null && this.child.signalCode === null) {
-      await this.ok('conformance_shutdown');
-      await once(this.child, 'close');
+      await triggerAndWaitForChildClose(this.child, () => this.ok('conformance_shutdown'));
     }
   }
 }
@@ -1345,7 +1350,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         await rpc.error(
           'cave_health',
           { handle: staleHandle, operation: rpc.operation() },
-          'stale_discovery_handle',
+          'invalid_discovery_handle',
         );
         await rpc.ok('cave_health', { handle, operation: rpc.operation() });
         addAssertion(
@@ -1491,17 +1496,20 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
     if (!running) {
       throw new Error('Coven daemon did not authenticate its same-user transport');
     }
-    await runCommand(
-      artifactRoot,
-      'Coven daemon authenticated stop',
-      covenBinaryPath,
-      ['daemon', 'stop'],
-      {
-        env: { ...environment, COVEN_HOME: covenHome },
-        timeoutMs: 10_000,
-      },
+    await triggerAndWaitForChildClose(
+      child,
+      () =>
+        runCommand(
+          artifactRoot,
+          'Coven daemon authenticated stop',
+          covenBinaryPath,
+          ['daemon', 'stop'],
+          {
+            env: { ...environment, COVEN_HOME: covenHome },
+            timeoutMs: 10_000,
+          },
+        ),
     );
-    await once(child, 'close');
     addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
   } catch (error) {
     process.stderr.write(

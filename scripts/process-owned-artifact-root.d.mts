@@ -20,4 +20,5 @@ export type ProcessOwnedArtifactRoot = {
 export function createProcessOwnedArtifactRoot(options: {
   prefix: string;
   terminationGraceMs?: number;
+  shortPath?: boolean;
 }): ProcessOwnedArtifactRoot;

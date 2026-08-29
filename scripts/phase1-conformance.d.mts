@@ -43,4 +43,12 @@ export function buildPhase1Report(options: {
   diagnosticIds: string[];
 };
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
+export function assertPairingStatus(
+  value: { status?: string } | null | undefined,
+  expectedStatus: string,
+): { status?: string };
+export class NativeRpcClient {
+  constructor(child: unknown);
+  close(): Promise<void>;
+}
 export function runPhase1Conformance(options?: ReturnType<typeof parseArgs>): Promise<unknown>;
