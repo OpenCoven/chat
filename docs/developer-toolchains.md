@@ -103,9 +103,12 @@
 - Credential bytes and parsed bearer strings enter zeroizing owners before
   validation. Invalid JSON, metadata, encoding, and oversized-record paths
   zero the owned allocations before returning.
-- Retryable lock contention preserves native staged state. The web controller
-  never replays a commit after an ambiguous result; after confirmed commit,
-  retries are limited to health/status confirmation.
+- Retryable lock contention preserves externally reachable staged state.
+  Managed exchange consumes an unreachable pre-write commit token immediately;
+  if an exact rollback remains contended, status recovery retains only one
+  active credential copy for that authority before accepting another exchange.
+  The web controller never replays an ambiguous mutation and retries only
+  health/status confirmation.
 - A potentially partial write whose rollback is contended enters an explicit
   rollback-needed state retaining the zeroized exact expected credential.
   Commit retry or discard must finish compare-and-delete before the handle can
@@ -120,9 +123,10 @@
 - Expired and terminal pairing state is consumed eagerly. Active native and
   managed pairing maps retain at most 64 oldest-first entries, and the webview
   wrapper applies the same expiry and count bound without exposing secrets.
-- Managed exchange drops its committed in-memory credential copy immediately
-  after persistence. Staged rollback tokens needed for late exact discard are
-  retained for at most five minutes and 64 terminal entries.
+- Managed exchange drops committed and safely discarded in-memory credential
+  copies immediately. Staged rollback tokens needed for late exact discard
+  remain reachable through credential status cleanup; terminal copies are
+  retained for at most five minutes and 64 entries.
 - Authority replacement and close cleanup are generation-scoped. Interleaved
   transitions cannot clear newer pairing or staged-credential state, and an
   open superseded before completion returns `reconcile_required`.

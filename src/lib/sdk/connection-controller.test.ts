@@ -352,6 +352,65 @@ describe('connection controller', () => {
     expect(controller.canRetry()).toBe(false);
   });
 
+  it('retries status only after managed credential contention', async () => {
+    const boundary = makeBoundary({
+      health: vi.fn().mockResolvedValue({
+        status: 'ok',
+        apiVersion: '1.0',
+        minimumClientVersion: '0.1.0',
+        capabilities: ['health'],
+        operations: ['health.read'],
+        instanceId: INSTANCE_ID,
+        pairingRequired: true,
+        releaseVersion: '0.1.0',
+      }),
+      credentialState: vi
+        .fn()
+        .mockResolvedValueOnce('missing')
+        .mockResolvedValueOnce('update_in_progress')
+        .mockResolvedValue('missing'),
+      pairingPoll: vi.fn().mockResolvedValue({
+        id: '00000000-0000-4000-8000-000000000031',
+        status: 'approved',
+        expiresAt: 10_000,
+      }),
+      pairingExchange: vi
+        .fn()
+        .mockRejectedValue(
+          new NativeBoundaryError('credential_update_in_progress', true, DIAGNOSTIC_ID),
+        ),
+    });
+    const controller = createConnectionController(boundary, {
+      now: () => 1_000,
+      requestId: () => 'request:1',
+    });
+
+    await controller.connect();
+    await controller.beginPairing();
+    await controller.pollApproval();
+    await controller.completePairing();
+
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(controller.canRetry()).toBe(true);
+    await controller.retry();
+
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(controller.getState()).toEqual({
+      state: 'error',
+      code: 'credential_update_in_progress',
+      diagnosticId: 'credential-update',
+    });
+    expect(controller.canRetry()).toBe(true);
+    await controller.retry();
+
+    expect(boundary.pairingExchange).toHaveBeenCalledTimes(1);
+    expect(boundary.credentialState).toHaveBeenCalledTimes(3);
+    expect(controller.getState()).toEqual({
+      state: 'pairing_required',
+      caveInstanceId: INSTANCE_ID,
+    });
+  });
+
   it('retries confirmation only after commit succeeded', async () => {
     const health = vi
       .fn()

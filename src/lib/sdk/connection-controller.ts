@@ -339,24 +339,6 @@ class DefaultConnectionController implements ConnectionController {
     }
     const generation = this.#generation;
     this.#retryOperation = null;
-    try {
-      await this.#boundary.pairingExchange(authority, this.#requestId(), pairing.handle);
-      if (
-        !this.#isCurrent(generation) ||
-        !this.#authorityIsCurrent(authority) ||
-        this.#pairing !== pairing
-      ) {
-        return;
-      }
-    } catch (error) {
-      if (this.#isCurrent(generation)) {
-        this.#pairing = null;
-        this.#setFailure(error);
-        this.#retryOperation = null;
-      }
-      return;
-    }
-
     const confirm = async () => {
       try {
         await this.#confirmReady(authority, generation);
@@ -372,6 +354,27 @@ class DefaultConnectionController implements ConnectionController {
         this.#setFailure(error);
       }
     };
+    try {
+      await this.#boundary.pairingExchange(authority, this.#requestId(), pairing.handle);
+      if (
+        !this.#isCurrent(generation) ||
+        !this.#authorityIsCurrent(authority) ||
+        this.#pairing !== pairing
+      ) {
+        return;
+      }
+    } catch (error) {
+      if (this.#isCurrent(generation)) {
+        this.#pairing = null;
+        this.#setFailure(error);
+        this.#retryOperation =
+          error instanceof NativeBoundaryError && error.code === 'credential_update_in_progress'
+            ? confirm
+            : null;
+      }
+      return;
+    }
+
     this.#pairing = null;
     await confirm();
   }
@@ -499,6 +502,9 @@ class DefaultConnectionController implements ConnectionController {
     }
     this.#instanceId = health.instanceId;
     this.#lastHealthyAt = this.#now();
+    if (credential === 'update_in_progress') {
+      throw new NativeBoundaryError('credential_update_in_progress', true, 'credential-update');
+    }
     if (credential !== 'present') {
       this.#setState({ state: 'pairing_required', caveInstanceId: health.instanceId });
       return;

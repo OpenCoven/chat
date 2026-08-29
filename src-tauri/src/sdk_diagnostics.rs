@@ -156,14 +156,15 @@ impl NativeResponse {
         }
         let mut payload = payload;
         let mut budget = SnapshotBudget::default();
-        sanitize_snapshot(
-            &mut payload,
+        validate_snapshot(
+            &payload,
             SnapshotLocation::Root,
             false,
             false,
             SnapshotPolicy::CanonicalResponse,
             &mut budget,
         )?;
+        project_snapshot(&mut payload, false);
         Ok(Self {
             status_code,
             payload,
@@ -177,8 +178,8 @@ struct SnapshotBudget {
     string_characters: usize,
 }
 
-fn sanitize_snapshot(
-    value: &mut Value,
+fn validate_snapshot(
+    value: &Value,
     location: SnapshotLocation,
     inside_error: bool,
     error_object: bool,
@@ -217,7 +218,7 @@ fn sanitize_snapshot(
             }
             let entry_location = location.array_entry();
             for entry in entries {
-                sanitize_snapshot(entry, entry_location, inside_error, false, policy, budget)?;
+                validate_snapshot(entry, entry_location, inside_error, false, policy, budget)?;
             }
             Ok(())
         }
@@ -225,39 +226,30 @@ fn sanitize_snapshot(
             if object.len() > 256 {
                 return Err(NativeError::new(DiagnosticCode::BodyLimit, false));
             }
-            let keys = object.keys().cloned().collect::<Vec<_>>();
-            for key in keys {
+            for (key, entry) in object {
                 budget.string_characters = budget
                     .string_characters
                     .checked_add(key.chars().count())
                     .ok_or_else(NativeError::invalid_response)?;
                 if budget.string_characters > MAX_SNAPSHOT_STRING_CHARACTERS
-                    || forbidden_snapshot_key(&key)
+                    || forbidden_snapshot_key(key)
                 {
                     return Err(NativeError::invalid_response());
                 }
-                if error_object && key == "details" {
-                    object.remove(&key);
-                    continue;
-                }
-                let Some(entry) = object.get_mut(&key) else {
+                if error_object && key == "message" && !entry.is_string() {
                     return Err(NativeError::invalid_response());
-                };
-                if error_object && key == "message" {
-                    if !entry.is_string() {
-                        return Err(NativeError::invalid_response());
-                    }
-                    *entry = Value::String(SAFE_ERROR_MESSAGE.into());
-                    continue;
                 }
                 let child_is_error = key == "error";
+                if child_is_error && !entry.is_object() {
+                    return Err(NativeError::invalid_response());
+                }
                 let child_inside_error = inside_error || child_is_error;
                 let child_location = if child_inside_error {
                     SnapshotLocation::Other
                 } else {
-                    location.object_child(&key)
+                    location.object_child(key)
                 };
-                sanitize_snapshot(
+                validate_snapshot(
                     entry,
                     child_location,
                     child_inside_error,
@@ -268,6 +260,28 @@ fn sanitize_snapshot(
             }
             Ok(())
         }
+    }
+}
+
+fn project_snapshot(value: &mut Value, error_object: bool) {
+    match value {
+        Value::Array(entries) => {
+            for entry in entries {
+                project_snapshot(entry, false);
+            }
+        }
+        Value::Object(object) => {
+            if error_object {
+                object.remove("details");
+                if let Some(message) = object.get_mut("message") {
+                    *message = Value::String(SAFE_ERROR_MESSAGE.into());
+                }
+            }
+            for (key, entry) in object {
+                project_snapshot(entry, key == "error");
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 
@@ -297,14 +311,15 @@ fn secret_shaped_value(value: &str) -> bool {
 pub fn validate_public_snapshot(value: Value) -> Result<Value, NativeError> {
     let mut value = value;
     let mut budget = SnapshotBudget::default();
-    sanitize_snapshot(
-        &mut value,
+    validate_snapshot(
+        &value,
         SnapshotLocation::Other,
         false,
         false,
         SnapshotPolicy::Strict,
         &mut budget,
     )?;
+    project_snapshot(&mut value, false);
     Ok(value)
 }
 
@@ -466,6 +481,76 @@ mod tests {
                 }),
             )
             .expect_err("error metadata must reject secret-shaped material")
+            .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn snapshots_reject_secret_shaped_original_error_messages() {
+        assert_eq!(
+            NativeResponse::snapshot(
+                500,
+                json!({
+                    "error": {
+                        "code": "internal_error",
+                        "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    }
+                }),
+            )
+            .expect_err("the original error message must be validated before redaction")
+            .code,
+            DiagnosticCode::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn snapshots_validate_nested_error_details_before_redaction() {
+        for details in [
+            json!({
+                "context": {
+                    "credentials": {
+                        "authorization": "credential"
+                    }
+                }
+            }),
+            json!({
+                "context": {
+                    "traceValue": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                }
+            }),
+        ] {
+            assert_eq!(
+                NativeResponse::snapshot(
+                    500,
+                    json!({
+                        "error": {
+                            "code": "internal_error",
+                            "message": "safe",
+                            "details": details
+                        }
+                    }),
+                )
+                .expect_err("nested error details must be validated before redaction")
+                .code,
+                DiagnosticCode::InvalidResponse
+            );
+        }
+    }
+
+    #[test]
+    fn snapshots_reject_non_object_error_values() {
+        assert_eq!(
+            NativeResponse::snapshot(
+                500,
+                json!({
+                    "error": [{
+                        "message": "failed at /Users/private/.opencoven/cave.json",
+                        "details": {"path": "/Users/private"}
+                    }]
+                }),
+            )
+            .expect_err("error output must have a redactable object shape")
             .code,
             DiagnosticCode::InvalidResponse
         );

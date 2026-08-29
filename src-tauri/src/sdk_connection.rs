@@ -1505,6 +1505,18 @@ impl TransientState {
         }
         Ok(())
     }
+
+    fn credential_update_in_progress(
+        &self,
+        authority: &AuthorityReference,
+    ) -> Result<bool, NativeError> {
+        self.credentials
+            .values()
+            .filter(|credential| credential.authority == *authority)
+            .try_fold(false, |in_progress, credential| {
+                Ok(in_progress || credential.update_in_progress()?)
+            })
+    }
 }
 
 fn current_time_millis() -> u64 {
@@ -1994,7 +2006,24 @@ impl NativeSdkBoundary {
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
-        let authority = self.lifecycle.descriptor(&input.authority)?;
+        let authority = match self.lifecycle.descriptor(&input.authority) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        self.pairing_exchange_with_request(input, request, authority, false)
+            .await
+    }
+
+    async fn pairing_exchange_with_request(
+        &self,
+        input: PairingHandleCommandInput,
+        request: RequestLease,
+        authority: AuthorityDescriptor,
+        managed: bool,
+    ) -> Result<OperationResult<PairingExchangeOutput>, NativeError> {
         let pending = {
             let mut transient = match self.transient.lock() {
                 Ok(transient) => transient,
@@ -2016,9 +2045,11 @@ impl NativeSdkBoundary {
                 self.lifecycle.cancel_request(&request);
                 return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
             }
-            transient
-                .remove_pairing(&input.pairing_handle)
-                .ok_or_else(NativeError::reconcile_required)?
+            let Some(pending) = transient.remove_pairing(&input.pairing_handle) else {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::reconcile_required());
+            };
+            pending
         };
         let exchanged = match self
             .provider
@@ -2035,7 +2066,13 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        let public_credential = validate_public_snapshot(exchanged.credential)?;
+        let public_credential = match validate_public_snapshot(exchanged.credential) {
+            Ok(credential) => credential,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
         self.lifecycle.finish_request(&request)?;
         let commit_handle = format!("commit:{}", Uuid::new_v4());
         let credential = CredentialRecord {
@@ -2050,6 +2087,9 @@ impl NativeSdkBoundary {
             .lock()
             .map_err(|_| NativeError::service_unavailable())?;
         transient.prune_terminal_credentials(now)?;
+        if managed && transient.credential_update_in_progress(&input.authority)? {
+            return Err(NativeError::credential_update_in_progress());
+        }
         let sequence = transient.allocate_sequence()?;
         transient.credentials.insert(
             commit_handle.clone(),
@@ -2107,24 +2147,68 @@ impl NativeSdkBoundary {
         input: ManagedPairingCommandInput,
     ) -> Result<OperationResult<ManagedPairingExchangeOutput>, NativeError> {
         validate_remote_request_id(&input.pairing_request_id)?;
-        let pairing_handle = {
-            let mut transient = self
-                .transient
-                .lock()
-                .map_err(|_| NativeError::service_unavailable())?;
-            transient.prune_pairings(current_time_millis());
-            transient
-                .managed_pairings
-                .get(&input.pairing_request_id)
-                .cloned()
-                .ok_or_else(NativeError::reconcile_required)?
+        let request = self
+            .lifecycle
+            .begin_request(&input.authority, &input.request_id)?;
+        let authority = match self.lifecycle.descriptor(&input.authority) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
         };
+        let pairing_handle = match self.transient.lock() {
+            Ok(mut transient) => {
+                transient.prune_pairings(current_time_millis());
+                transient
+                    .managed_pairings
+                    .get(&input.pairing_request_id)
+                    .cloned()
+            }
+            Err(_) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::service_unavailable());
+            }
+        };
+        let Some(pairing_handle) = pairing_handle else {
+            self.lifecycle.cancel_request(&request);
+            return Err(NativeError::reconcile_required());
+        };
+        if let Err(error) = validate_opaque_handle(&pairing_handle, "pairing:") {
+            self.lifecycle.cancel_request(&request);
+            return Err(error);
+        }
+        let boundary = Arc::clone(self);
+        let cleanup = tauri::async_runtime::spawn_blocking(move || {
+            boundary.cleanup_recoverable_credentials()
+        })
+        .await;
+        let cleanup_pending = match cleanup {
+            Ok(Ok(cleanup_pending)) => cleanup_pending,
+            Ok(Err(error)) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+            Err(_) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(NativeError::service_unavailable());
+            }
+        };
+        if cleanup_pending {
+            self.lifecycle.cancel_request(&request);
+            return Err(NativeError::credential_update_in_progress());
+        }
         let exchanged_result = self
-            .pairing_exchange(PairingHandleCommandInput {
-                authority: input.authority.clone(),
-                request_id: input.request_id.clone(),
-                pairing_handle: pairing_handle.clone(),
-            })
+            .pairing_exchange_with_request(
+                PairingHandleCommandInput {
+                    authority: input.authority.clone(),
+                    request_id: input.request_id.clone(),
+                    pairing_handle: pairing_handle.clone(),
+                },
+                request,
+                authority,
+                true,
+            )
             .await;
         let exchanged = exchanged_result?;
         let commit_handle = exchanged.result.commit_handle;
@@ -2135,12 +2219,32 @@ impl NativeSdkBoundary {
             request_id: input.request_id.clone(),
             commit_handle: commit_handle.clone(),
         };
-        tauri::async_runtime::spawn_blocking(move || boundary.pairing_commit(commit))
+        let commit_result =
+            match tauri::async_runtime::spawn_blocking(move || boundary.pairing_commit(commit))
+                .await
+            {
+                Ok(result) => result.map(|_| ()),
+                Err(_) => Err(NativeError::service_unavailable()),
+            };
+        if let Err(commit_error) = commit_result {
+            let boundary = Arc::clone(self);
+            let cleanup_handle = commit_handle.clone();
+            let cleanup_authority = input.authority.clone();
+            let cleanup_result = tauri::async_runtime::spawn_blocking(move || {
+                boundary.cleanup_managed_commit_failure(&cleanup_handle, &cleanup_authority)
+            })
             .await
-            .map_err(|_| NativeError::service_unavailable())??;
-        if let Ok(mut transient) = self.transient.lock() {
-            transient.credentials.remove(&commit_handle);
+            .map_err(|_| NativeError::service_unavailable())?;
+            return match cleanup_result {
+                Ok(()) => Err(commit_error),
+                Err(cleanup_error) => Err(cleanup_error),
+            };
         }
+        self.transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?
+            .credentials
+            .remove(&commit_handle);
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -2200,6 +2304,53 @@ impl NativeSdkBoundary {
             request_id: input.request_id,
             result: (),
         })
+    }
+
+    fn cleanup_managed_commit_failure(
+        &self,
+        commit_handle: &str,
+        authority: &AuthorityReference,
+    ) -> Result<(), NativeError> {
+        let staged = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?
+            .credentials
+            .get(commit_handle)
+            .cloned();
+        let Some(staged) = staged else {
+            return Ok(());
+        };
+        if staged.authority != *authority {
+            return Err(NativeError::reconcile_required());
+        }
+        match staged.discard(self.custody.as_ref()) {
+            Ok(_) => self.remove_staged_credential_if_same(commit_handle, &staged),
+            Err(error) if error.code == DiagnosticCode::CredentialUpdateInProgress => Err(error),
+            Err(error) => {
+                self.remove_staged_credential_if_same(commit_handle, &staged)?;
+                Err(error)
+            }
+        }
+    }
+
+    fn remove_staged_credential_if_same(
+        &self,
+        commit_handle: &str,
+        staged: &Arc<StagedCredential>,
+    ) -> Result<(), NativeError> {
+        let mut transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        if transient
+            .credentials
+            .get(commit_handle)
+            .is_some_and(|current| Arc::ptr_eq(current, staged))
+        {
+            transient.credentials.remove(commit_handle);
+        }
+        Ok(())
     }
 
     pub fn pairing_discard(
@@ -2286,13 +2437,7 @@ impl NativeSdkBoundary {
                     return Err(NativeError::service_unavailable());
                 }
             };
-            transient
-                .credentials
-                .values()
-                .filter(|credential| credential.authority == input.authority)
-                .try_fold(false, |in_progress, credential| {
-                    Ok::<_, NativeError>(in_progress || credential.update_in_progress()?)
-                })
+            transient.credential_update_in_progress(&input.authority)
         };
         let update_in_progress = match update_in_progress {
             Ok(update_in_progress) => update_in_progress,
@@ -4052,6 +4197,175 @@ mod tests {
                     commit_handle,
                 })
                 .expect("same commit handle should retry successfully");
+        });
+    }
+
+    #[test]
+    fn managed_write_contention_drops_unreachable_commit_handles() {
+        tauri::async_runtime::block_on(async {
+            let attempts = 65;
+            let custody = Arc::new(ContentionCustody::new(attempts, 0));
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody,
+                Arc::new(SequencedPairingProvider::new(2_000_000_000_000, "approved")),
+            ));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+
+            for index in 0..attempts {
+                let created = boundary
+                    .managed_pairing_create(PairingCreateCommandInput {
+                        authority: authority.clone(),
+                        request_id: format!("request-create-contention-{index}"),
+                        request: PairingRequest {
+                            app_name: "OpenCoven Chat".into(),
+                            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                            scopes: vec!["chat:read".into()],
+                        },
+                    })
+                    .await
+                    .expect("managed pairing should be created");
+                assert_eq!(
+                    boundary
+                        .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                            authority: authority.clone(),
+                            request_id: format!("request-exchange-contention-{index}"),
+                            pairing_request_id: created.result.request_id,
+                        })
+                        .await
+                        .expect_err("managed persistence should report retryable contention")
+                        .code,
+                    DiagnosticCode::CredentialUpdateInProgress
+                );
+                assert!(
+                    boundary
+                        .transient
+                        .lock()
+                        .expect("transient lock")
+                        .credentials
+                        .is_empty(),
+                    "unreachable managed commit handles must be consumed"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn managed_rollback_contention_is_bounded_and_status_reachable() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(100));
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(SequencedPairingProvider::new(2_000_000_000_000, "approved")),
+            ));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+
+            for index in 0..8 {
+                let created = boundary
+                    .managed_pairing_create(PairingCreateCommandInput {
+                        authority: authority.clone(),
+                        request_id: format!("request-create-rollback-{index}"),
+                        request: PairingRequest {
+                            app_name: "OpenCoven Chat".into(),
+                            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                            scopes: vec!["chat:read".into()],
+                        },
+                    })
+                    .await
+                    .expect("managed pairing should be created");
+                assert_eq!(
+                    boundary
+                        .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                            authority: authority.clone(),
+                            request_id: format!("request-exchange-rollback-{index}"),
+                            pairing_request_id: created.result.request_id,
+                        })
+                        .await
+                        .expect_err("rollback contention should remain retryable")
+                        .code,
+                    DiagnosticCode::CredentialUpdateInProgress
+                );
+                assert!(
+                    boundary
+                        .transient
+                        .lock()
+                        .expect("transient lock")
+                        .credentials
+                        .len()
+                        <= 1,
+                    "managed rollback retries must not accumulate credential copies"
+                );
+            }
+            assert_eq!(
+                custody.writes.load(Ordering::Relaxed),
+                1,
+                "status recovery must not replay the ambiguous write"
+            );
+
+            custody.rollback_contentions.store(0, Ordering::Relaxed);
+            let status = boundary
+                .credential_state(CredentialCommandInput {
+                    authority,
+                    request_id: "request-status-cleanup".into(),
+                })
+                .expect("credential status should finish exact rollback");
+            assert!(matches!(
+                status.result.status,
+                super::CredentialState::Missing
+            ));
+            assert!(boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .credentials
+                .is_empty());
+        });
+    }
+
+    #[test]
+    fn stale_managed_exchange_does_not_run_credential_cleanup() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(2));
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(FakeProvider),
+            ));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle,
+                    })
+                    .expect_err("initial rollback should contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(custody.rollback_contentions.load(Ordering::Relaxed), 1);
+
+            let mut stale_authority = authority;
+            stale_authority.generation += 1;
+            assert_eq!(
+                boundary
+                    .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                        authority: stale_authority,
+                        request_id: "request-stale-managed-exchange".into(),
+                        pairing_request_id: "11111111-1111-4111-8111-111111111111".into(),
+                    })
+                    .await
+                    .expect_err("stale authority must fail before cleanup")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert_eq!(
+                custody.rollback_contentions.load(Ordering::Relaxed),
+                1,
+                "unauthorized stale commands must not advance credential cleanup"
+            );
         });
     }
 
