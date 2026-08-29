@@ -9,6 +9,126 @@ use serde_json::{json, Value};
 
 const INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 const MAX_LINE_BYTES: usize = 64 * 1024;
+const NATIVE_PROVIDER_PRESET_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+
+#[test]
+fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_mutating_home() {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    let canary = "native-keychain-canary-must-not-escape";
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock must follow Unix epoch")
+        .as_nanos();
+    let home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!(".phase1-native-trust-home-{nonce}"));
+    struct HomeCleanup(PathBuf);
+
+    impl Drop for HomeCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fs::create_dir(&home).expect("isolated home must be created");
+    let _home_cleanup = HomeCleanup(home.clone());
+    let before = fs::read_dir(&home)
+        .expect("isolated home must be readable")
+        .count();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "missing-keychain-trust")
+        .env("HOME", &home)
+        .env("COVEN_CAVE_AUTH_TOKEN", canary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc must start");
+    {
+        let mut stdin = child.stdin.take().expect("child stdin must be piped");
+        writeln!(
+            stdin,
+            r#"{{"id":"installation","command":"app_installation_id"}}"#
+        )
+        .expect("installation request must be written");
+        writeln!(
+            stdin,
+            r#"{{"id":"shutdown","command":"conformance_shutdown"}}"#
+        )
+        .expect("shutdown request must be written");
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("phase1-native-rpc must exit after shutdown");
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    assert!(output.status.success());
+    let responses = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("response must be JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        responses,
+        vec![
+            json!({
+                "id": "installation",
+                "ok": false,
+                "error": {"code": "secure_store_unavailable", "retryable": true}
+            }),
+            json!({
+                "id": "shutdown",
+                "ok": true,
+                "result": {"status": "shutting_down"}
+            }),
+        ]
+    );
+    assert!(!stdout.contains(canary));
+    assert!(!stderr.contains(canary));
+    assert_eq!(
+        fs::read_dir(&home)
+            .expect("isolated home must remain readable")
+            .count(),
+        before
+    );
+}
+
+#[test]
+fn subprocess_rejects_unknown_native_provider_preset_without_falling_back() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "not-a-supported-preset")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc must start");
+    drop(child.stdin.take().expect("child stdin must be piped"));
+
+    let output = child
+        .wait_with_output()
+        .expect("phase1-native-rpc must exit on invalid configuration");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be UTF-8");
+    assert_eq!(
+        stdout
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("response must be JSON"))
+            .collect::<Vec<_>>(),
+        vec![json!({
+            "id": "invalid-request",
+            "ok": false,
+            "error": {"code": "invalid_native_input", "retryable": false}
+        })]
+    );
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr must be UTF-8")
+        .is_empty());
+}
 
 #[test]
 fn internal_coven_probe_failure_exits_silently_before_rpc_startup() {

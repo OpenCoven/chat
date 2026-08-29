@@ -1033,6 +1033,81 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   return new NativeRpcClient(child);
 }
 
+async function runNativeMissingKeychainTrustScenario(
+  artifactRoot,
+  nativeRpcPath,
+  environment,
+  results,
+) {
+  const trustHome = resolve(artifactRoot.rootPath, 'native-missing-keychain-trust-home');
+  mkdirSync(trustHome, { recursive: true, mode: 0o700 });
+  const beforeEntries = readdirSync(trustHome);
+  const canary = 'native-keychain-canary-must-not-escape';
+  const child = spawn(nativeRpcPath, [], {
+    cwd: artifactRoot.rootPath,
+    env: {
+      ...environment,
+      HOME: trustHome,
+      COVEN_HOME: resolve(trustHome, 'coven'),
+      COVEN_CAVE_HOME: resolve(trustHome, 'coven', 'cave'),
+      COVEN_CAVE_AUTH_TOKEN: canary,
+      OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'missing-keychain-trust',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  await once(child, 'spawn');
+  artifactRoot.trackChild(child);
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  child.stdin.end(
+    `${JSON.stringify({ id: 'installation', command: 'app_installation_id' })}\n` +
+      `${JSON.stringify({ id: 'shutdown', command: 'conformance_shutdown' })}\n`,
+  );
+  const [code, signal] = await once(child, 'close');
+  const responses = stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const unchanged = JSON.stringify(readdirSync(trustHome)) === JSON.stringify(beforeEntries);
+  if (
+    code !== 0 ||
+    signal !== null ||
+    stderr.includes(canary) ||
+    stdout.includes(canary) ||
+    !unchanged ||
+    JSON.stringify(responses) !==
+      JSON.stringify([
+        {
+          id: 'installation',
+          ok: false,
+          error: { code: 'secure_store_unavailable', retryable: true },
+        },
+        {
+          id: 'shutdown',
+          ok: true,
+          result: { status: 'shutting_down' },
+        },
+      ])
+  ) {
+    throw new Error('native missing-keychain-trust preset returned an unsafe result');
+  }
+  addAssertion(
+    results,
+    'phase1.native.missing-keychain-trust',
+    'passed',
+    'phase1.assertion.passed',
+  );
+}
+
 async function waitForDiscovery(rpc) {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
@@ -1517,6 +1592,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       }
     });
   }
+  await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
 }
 
 async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environment, results) {
@@ -1692,13 +1768,6 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       'blocked',
       'phase1.producer.compatibility-control-unavailable',
     );
-    addAssertion(
-      results,
-      'phase1.native.missing-keychain-trust',
-      'blocked',
-      'phase1.producer.native-trust-fixture-unavailable',
-    );
-
     const operatorIsolationValid =
       environment.HOME !== process.env.HOME &&
       environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&

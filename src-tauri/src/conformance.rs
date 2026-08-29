@@ -17,6 +17,7 @@ use crate::{
     },
     keyring::{
         validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
+        NativeKeyring, NativeProviderPreset,
     },
     operation::{
         NativeCancelReason, NativeMutationQueue, NativeOperationInput, NativeOperationRegistry,
@@ -36,6 +37,9 @@ const INVALID_REQUEST_ID: &str = "invalid-request";
 pub const CONFORMANCE_INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH";
 pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
+pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
+    "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -430,18 +434,35 @@ impl CaveLauncher for ConformanceCaveLauncher {
 
 #[derive(Clone)]
 pub struct RpcRuntime {
-    custody: SharedMemoryCredentialCustody,
+    custody: Arc<dyn CredentialCustody>,
     state: NativeConnectionState,
 }
 
 impl RpcRuntime {
     pub fn new() -> Self {
-        let custody = SharedMemoryCredentialCustody::new();
+        Self::with_custody(Arc::new(SharedMemoryCredentialCustody::new()))
+    }
+
+    fn with_custody(custody: Arc<dyn CredentialCustody>) -> Self {
         let operations = Arc::new(NativeOperationRegistry::default());
         let mutations = Arc::new(NativeMutationQueue::default());
         Self {
-            state: state_with_custody(&custody, operations, mutations),
+            state: state_with_custody(Arc::clone(&custody), operations, mutations),
             custody,
+        }
+    }
+
+    fn from_environment() -> Result<Self, NativeDiagnostic> {
+        match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
+            Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
+                Ok(Self::with_custody(Arc::new(
+                    NativeKeyring::with_provider_preset(NativeProviderPreset::MissingKeychainTrust),
+                )))
+            }
+            Ok(_) | Err(env::VarError::NotUnicode(_)) => {
+                Err(NativeDiagnostic::new("invalid_native_input", false))
+            }
+            Err(env::VarError::NotPresent) => Ok(Self::new()),
         }
     }
 
@@ -450,7 +471,7 @@ impl RpcRuntime {
             .cancel_all_operations(NativeCancelReason::Aborted);
         let operations = self.state.operation_registry();
         let mutations = self.state.mutation_queue();
-        self.state = state_with_custody(&self.custody, operations, mutations);
+        self.state = state_with_custody(Arc::clone(&self.custody), operations, mutations);
     }
 
     pub fn process_line(&mut self, line: &[u8]) -> Value {
@@ -661,13 +682,13 @@ impl Default for RpcRuntime {
 }
 
 fn state_with_custody(
-    custody: &SharedMemoryCredentialCustody,
+    custody: Arc<dyn CredentialCustody>,
     operations: Arc<NativeOperationRegistry>,
     mutations: Arc<NativeMutationQueue>,
 ) -> NativeConnectionState {
     NativeConnectionState::with_test_launch_collaborators(
         Arc::new(ConstrainedTransport) as Arc<dyn NativeCaveTransport>,
-        Arc::new(custody.clone()) as Arc<dyn CredentialCustody>,
+        custody,
         Arc::new(NativeCaveDiscoveryReader),
         Arc::new(ConformanceCaveLauncher),
         Arc::new(NativeCaveClock::default()),
@@ -1093,10 +1114,19 @@ fn read_bounded_line(reader: &mut impl BufRead) -> io::Result<Option<BoundedLine
 }
 
 pub fn run_stdio() -> io::Result<()> {
-    let mut runtime = RpcRuntime::new();
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = Arc::new(Mutex::new(io::BufWriter::new(io::stdout())));
+    let mut runtime = match RpcRuntime::from_environment() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            write_rpc_response(
+                &stdout,
+                &failure_response(INVALID_REQUEST_ID, error.code, error.retryable),
+            )?;
+            return Ok(());
+        }
+    };
     let mut workers = Vec::new();
     while let Some(line) = read_bounded_line(&mut stdin)? {
         reap_rpc_workers(&mut workers)?;

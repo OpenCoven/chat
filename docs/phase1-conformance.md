@@ -91,6 +91,13 @@ credential reuse, revocation, and bounded reads. The locked Coven CLI runs a
 real foreground daemon and authenticates its same-user Unix-socket or Windows
 named-pipe status probe.
 
+The native trust assertion launches a separate `phase1-native-rpc` subprocess
+with `OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET=missing-keychain-trust`.
+This finite, feature-gated preset selects the production `NativeKeyring`
+credential-custody boundary and rejects provider access as
+`secure_store_unavailable`; omitting the variable preserves the shared-memory
+conformance custody used by all other Phase 1 scenarios.
+
 ## Secret scan and report schema
 
 The scanner rejects pairing secrets, bearers, authorization headers, raw
