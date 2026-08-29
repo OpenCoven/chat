@@ -4,6 +4,7 @@ export type Phase1Assertion = {
   diagnosticIds: string[];
 };
 
+export const cargoBuildTimeoutMs: number;
 export function parseArgs(argv: string[]): {
   lockPath: string;
   scenario: 'all';

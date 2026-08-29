@@ -12,6 +12,7 @@ import {
   assertPairingStatus,
   buildPhase1Report,
   CommandExecutionError,
+  cargoBuildTimeoutMs,
   NativeRpcClient,
   parseArgs,
   parseCaveConformanceOutput,
@@ -260,5 +261,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     } finally {
       rmSync(root, { recursive: true });
     }
+  });
+
+  test('allows cold isolated Cargo builds to exceed the general command deadline', () => {
+    expect(cargoBuildTimeoutMs).toBeGreaterThan(20 * 60_000);
   });
 });

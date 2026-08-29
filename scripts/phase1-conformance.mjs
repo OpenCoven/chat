@@ -51,6 +51,7 @@ const defaultRetainedReport = resolve(
 const commandOutputLimit = 16 * 1024 * 1024;
 const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
+export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
@@ -551,6 +552,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
     {
       cwd: roots.chatRoot,
       env: { ...environment, CARGO_TARGET_DIR: chatTarget },
+      timeoutMs: cargoBuildTimeoutMs,
     },
   );
 
@@ -635,6 +637,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
     {
       cwd: roots.covenRoot,
       env: { ...environment, CARGO_TARGET_DIR: covenTarget },
+      timeoutMs: cargoBuildTimeoutMs,
     },
   );
 

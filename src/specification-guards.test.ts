@@ -591,6 +591,16 @@ describe('Phase 1 specification guards', () => {
     );
   });
 
+  it('allows the isolated Phase 1 build and secure cleanup to finish on a cold runner', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const phase1Job = workflow.slice(
+      workflow.indexOf('  phase1-conformance:'),
+      workflow.indexOf('\n  desktop:'),
+    );
+
+    expect(phase1Job).toContain('timeout-minutes: 90');
+  });
+
   it('skips the expensive jobs for a branch that changed only prose', () => {
     // A documentation branch spent two twenty-minute E2E timeouts proving
     // nothing about documentation.
