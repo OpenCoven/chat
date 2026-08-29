@@ -25,9 +25,13 @@ export function createManualPageWalk(): ManualPageWalk {
       return false;
     }
 
-    const current = page.cursor?.current;
+    const current: unknown = page.cursor?.current;
     const matchesRequestedCursor =
-      requestedCursor.kind === 'root' ? current === undefined : current === requestedCursor.value;
+      requestedCursor.kind === 'root'
+        ? current === undefined ||
+          current === null ||
+          (typeof current === 'string' && current.length > 0)
+        : current === requestedCursor.value;
     if (!matchesRequestedCursor) {
       return false;
     }

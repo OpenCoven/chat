@@ -472,33 +472,166 @@ describe('ChatShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('rejects a root response with a non-root current cursor', async () => {
-    const listConversations = vi.fn().mockResolvedValue(
-      okPage([conversation('conversation-1', 'First thread')], {
-        current: 'cursor-unrequested',
-        hasMore: false,
-      }),
-    );
-
-    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
-
-    await expectInvalidPaginationWithoutCursor('cursor-unrequested');
-    expect(listConversations).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('option', { name: /First thread/ })).not.toBeInTheDocument();
-  });
-
-  it('rejects a response current cursor that does not match the requested message cursor', async () => {
+  it('keeps all four pager happy paths usable with server-issued root current cursors', async () => {
+    const listFamiliars = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([{ id: 'familiar-1', displayName: 'Mara', role: 'Guide' }], {
+          current: 'ZmFtaWxpYXJzLXJvb3Q',
+          next: 'ZmFtaWxpYXJzLXBhZ2UtMg',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([{ id: 'familiar-2', displayName: 'Sable', role: 'Archivist' }], {
+          current: 'ZmFtaWxpYXJzLXBhZ2UtMg',
+          hasMore: false,
+        }),
+      );
+    const listProjects = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage(
+          [
+            {
+              id: 'project-1',
+              name: 'OpenCoven Chat',
+              root: '/workspace/chat',
+              createdAt: '2026-08-25T00:00:00.000Z',
+              updatedAt: '2026-08-25T00:00:00.000Z',
+            },
+          ],
+          {
+            current: 'cHJvamVjdHMtcm9vdA',
+            next: 'cHJvamVjdHMtcGFnZS0y',
+            hasMore: true,
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        okPage(
+          [
+            {
+              id: 'project-2',
+              name: 'Cave Console',
+              root: '/workspace/cave',
+              createdAt: '2026-08-25T00:00:00.000Z',
+              updatedAt: '2026-08-25T00:00:00.000Z',
+            },
+          ],
+          {
+            current: 'cHJvamVjdHMtcGFnZS0y',
+            hasMore: false,
+          },
+        ),
+      );
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          current: 'Y29udmVyc2F0aW9ucy1yb290',
+          next: 'Y29udmVyc2F0aW9ucy1wYWdlLTI',
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: 'Y29udmVyc2F0aW9ucy1wYWdlLTI',
+          hasMore: false,
+        }),
+      );
     const listMessages = vi
       .fn()
       .mockResolvedValueOnce(
         okPage([message('message-1', 'conversation-1', 'First reply')], {
-          next: 'messages-a',
+          current: 'bWVzc2FnZXMtcm9vdA',
+          next: 'bWVzc2FnZXMtcGFnZS0y',
           hasMore: true,
         }),
       )
       .mockResolvedValueOnce(
         okPage([message('message-2', 'conversation-1', 'Second reply')], {
-          current: 'messages-b',
+          current: 'bWVzc2FnZXMtcGFnZS0y',
+          hasMore: false,
+        }),
+      );
+
+    render(
+      <ChatShell
+        queryAdapter={makeQueryAdapter({
+          listFamiliars,
+          listProjects,
+          listConversations,
+          listMessages,
+        })}
+      />,
+    );
+
+    await screen.findByText('First reply');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more familiars' }));
+    expect(await screen.findByRole('option', { name: /Sable/ })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more projects' }));
+    expect(await screen.findByText('Cave Console')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+    expect(await screen.findByRole('option', { name: /Second thread/ })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more messages' }));
+    expect(await screen.findByText('Second reply')).toBeVisible();
+
+    expect(screen.queryByText('Cave returned invalid response.')).not.toBeInTheDocument();
+  });
+
+  it('rejects a cursor that cycles back to a server-issued root current cursor', async () => {
+    const rootCursor = 'cm9vdC1jdXJyZW50';
+    const nextCursor = 'cGFnZS10d28';
+    const listConversations = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-1', 'First thread')], {
+          current: rootCursor,
+          next: nextCursor,
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([conversation('conversation-2', 'Second thread')], {
+          current: nextCursor,
+          next: rootCursor,
+          hasMore: true,
+        }),
+      );
+
+    render(<ChatShell queryAdapter={makeQueryAdapter({ listConversations })} />);
+
+    await screen.findByRole('option', { name: /First thread/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+
+    await expectInvalidPaginationWithoutCursor(rootCursor, nextCursor);
+    expect(listConversations).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole('button', { name: 'Load more conversations' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a response current cursor that does not match the requested message cursor', async () => {
+    const rootCursor = 'cm9vdC1jdXJyZW50';
+    const requestedCursor = 'cGFnZS10d28';
+    const mismatchedCursor = 'd3JvbmctY3VycmVudA';
+    const listMessages = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okPage([message('message-1', 'conversation-1', 'First reply')], {
+          current: rootCursor,
+          next: requestedCursor,
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        okPage([message('message-2', 'conversation-1', 'Second reply')], {
+          current: mismatchedCursor,
           hasMore: false,
         }),
       );
@@ -508,7 +641,7 @@ describe('ChatShell', () => {
     await screen.findByText('First reply');
     fireEvent.click(await screen.findByRole('button', { name: 'Load more messages' }));
 
-    await expectInvalidPaginationWithoutCursor('messages-a', 'messages-b');
+    await expectInvalidPaginationWithoutCursor(rootCursor, requestedCursor, mismatchedCursor);
     expect(listMessages).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button', { name: 'Load more messages' })).not.toBeInTheDocument();
   });
