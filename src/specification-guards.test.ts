@@ -272,9 +272,8 @@ describe('Phase 1 specification guards', () => {
   it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
     const workflow = readText('.github/workflows/ci.yml');
-    const rustJob = workflow.match(
-      /\n  rust:\n(?<job>[\s\S]*?)(?=\n  [a-z][\w-]*:\n|$)/,
-    )?.groups?.job;
+    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
+      ?.groups?.job;
 
     expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
       'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',

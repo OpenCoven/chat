@@ -269,17 +269,13 @@ async function invokeNativeOperation(
       return await cancellation;
     }
     return await Promise.race([
-      invokeRawNative(
-        invoke,
-        command,
-        {
-          ...args,
-          operation: {
-            attemptId,
-            timeoutMs,
-          },
+      invokeRawNative(invoke, command, {
+        ...args,
+        operation: {
+          attemptId,
+          timeoutMs,
         },
-      ).then(validateRawResult),
+      }).then(validateRawResult),
       cancellation,
     ]);
   } finally {
@@ -322,17 +318,8 @@ export async function invokeCovenHealth(
   invoke: NativeSdkInvoke,
   options: OperationOptions = {},
 ): Promise<CovenHealthResult> {
-  return await runOperation(
-    { system: 'coven', operation: 'health' },
-    options,
-    (context) =>
-      invokeNativeOperation(
-        invoke,
-        'coven_health',
-        undefined,
-        context,
-        validateRawCovenHealthResult,
-      ),
+  return await runOperation({ system: 'coven', operation: 'health' }, options, (context) =>
+    invokeNativeOperation(invoke, 'coven_health', undefined, context, validateRawCovenHealthResult),
   );
 }
 

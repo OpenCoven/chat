@@ -8,9 +8,9 @@ import type { OperationOptions } from '@opencoven/sdk-core/browser';
 
 import { nativeUnavailable } from './diagnostics';
 import {
+  type CovenHealthResult,
   createCaveManagedCredentialTransport,
   createCaveManagedDiscoveryBinding,
-  type CovenHealthResult,
   invokeCovenHealth,
   invokeNative,
   type NativeSdkInvoke,

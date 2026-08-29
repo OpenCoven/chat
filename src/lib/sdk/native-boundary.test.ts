@@ -74,14 +74,17 @@ describe('Cave managed native boundary', () => {
     expect(Object.isFrozen(valid)).toBe(true);
   });
 
-  it.each(invalidCovenHealthResults)('rejects a raw Coven health %s', async (_name, createValue) => {
-    await expect(
-      invokeCovenHealth(vi.fn<NativeSdkInvoke>().mockResolvedValue(createValue())),
-    ).rejects.toMatchObject({
-      code: 'invalid_response',
-      retryable: false,
-    });
-  });
+  it.each(invalidCovenHealthResults)(
+    'rejects a raw Coven health %s',
+    async (_name, createValue) => {
+      await expect(
+        invokeCovenHealth(vi.fn<NativeSdkInvoke>().mockResolvedValue(createValue())),
+      ).rejects.toMatchObject({
+        code: 'invalid_response',
+        retryable: false,
+      });
+    },
+  );
 
   it('maps each SDK-managed operation to its narrow native command', async () => {
     const invoke = vi.fn<NativeSdkInvoke>().mockResolvedValue(opaqueResponse);

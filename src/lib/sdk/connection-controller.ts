@@ -277,11 +277,7 @@ function failureFrom(error: unknown): SafeFailure {
 
 function nativeFailureFrom(error: unknown): SafeFailure {
   try {
-    if (
-      typeof error !== 'object' ||
-      error === null ||
-      Array.isArray(error)
-    ) {
+    if (typeof error !== 'object' || error === null || Array.isArray(error)) {
       return failureFrom(error);
     }
     const descriptors = Object.getOwnPropertyDescriptors(error);
