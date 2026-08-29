@@ -72,6 +72,22 @@ export function assertPackedPackageContentsMatch(
   frozenTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
   comparisonRoot: string,
 ): void;
+export type GeneratedReleaseManifest = {
+  schemaVersion: number;
+  version: string;
+  packages: Array<{
+    name: string;
+    version: string;
+    file: string;
+    size: number;
+    sha256: string;
+  }>;
+};
+export function assertGeneratedReleaseManifestMatchesLock(
+  lock: ContractCanaryLock,
+  manifest: GeneratedReleaseManifest,
+  tarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
+): void;
 export function assertPackedFixtureMatchesCaveCheckout(
   lock: ContractCanaryPackedFixtureLock,
   harnessRoot: string,

@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
 
@@ -523,6 +524,54 @@ function packageTree(rootPath, currentPath = rootPath) {
   return entries;
 }
 
+function gzipHeaderLength(bytes) {
+  if (
+    bytes.length < 18 ||
+    bytes[0] !== 0x1f ||
+    bytes[1] !== 0x8b ||
+    bytes[2] !== 8 ||
+    (bytes[3] & 0xe0) !== 0
+  ) {
+    throw new Error('invalid gzip header');
+  }
+  const flags = bytes[3];
+  let offset = 10;
+  if ((flags & 0x04) !== 0) {
+    if (offset + 2 > bytes.length) {
+      throw new Error('truncated gzip extra length');
+    }
+    const extraLength = bytes.readUInt16LE(offset);
+    offset += 2 + extraLength;
+  }
+  for (const flag of [0x08, 0x10]) {
+    if ((flags & flag) === 0) {
+      continue;
+    }
+    const terminator = bytes.indexOf(0, offset);
+    if (terminator === -1) {
+      throw new Error('unterminated gzip header field');
+    }
+    offset = terminator + 1;
+  }
+  if ((flags & 0x02) !== 0) {
+    offset += 2;
+  }
+  if (offset + 8 > bytes.length) {
+    throw new Error('truncated gzip member');
+  }
+  return offset;
+}
+
+function gunzipSingleMember(tarball) {
+  const bytes = readFileSync(tarball);
+  const headerLength = gzipHeaderLength(bytes);
+  const inflated = inflateRawSync(bytes.subarray(headerLength), { info: true });
+  if (headerLength + inflated.engine.bytesWritten + 8 !== bytes.length) {
+    throw new Error('gzip archive contained trailing data or additional members');
+  }
+  return gunzipSync(bytes);
+}
+
 export function assertPackedPackageContentsMatch(
   reviewedTarballs,
   frozenTarballsByPackage,
@@ -540,6 +589,17 @@ export function assertPackedPackageContentsMatch(
     if (JSON.stringify(reviewedEntries) !== JSON.stringify(frozenEntries)) {
       throw new Error(`Packed SDK ${artifact.packageName} file list did not match.`);
     }
+    let reviewedTar;
+    let frozenTar;
+    try {
+      reviewedTar = gunzipSingleMember(reviewed);
+      frozenTar = gunzipSingleMember(frozen);
+    } catch {
+      throw new Error(`Packed SDK ${artifact.packageName} was not a complete gzip archive.`);
+    }
+    if (!reviewedTar.equals(frozenTar)) {
+      throw new Error(`Packed SDK ${artifact.packageName} tar payload did not match.`);
+    }
     const packageRoot = resolve(comparisonRoot, key);
     const reviewedRoot = resolve(packageRoot, 'reviewed');
     const frozenRoot = resolve(packageRoot, 'frozen');
@@ -553,6 +613,83 @@ export function assertPackedPackageContentsMatch(
   }
 }
 
+function reviewedReleaseManifest(lock) {
+  return {
+    schemaVersion: 1,
+    version: lock.sdk.releaseManifest.version,
+    packages: Object.values(lock.sdk.artifacts).map(
+      ({ packageName: name, version, releaseFile: file, size, sha256: digest }) => ({
+        name,
+        version,
+        file,
+        size,
+        sha256: digest,
+      }),
+    ),
+  };
+}
+
+export function assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs) {
+  const reviewedManifest = reviewedReleaseManifest(lock);
+  const reviewedBytes = `${JSON.stringify(reviewedManifest, null, 2)}\n`;
+  const reviewedDigest = createHash('sha256').update(reviewedBytes).digest('hex');
+  if (reviewedDigest !== lock.sdk.releaseManifest.sha256) {
+    throw new Error('Reviewed SDK release manifest lock was internally inconsistent.');
+  }
+
+  const expectedPackages = reviewedManifest.packages.map(({ name, version, file }) => ({
+    name,
+    version,
+    file,
+  }));
+  const generatedPackages = Array.isArray(manifest?.packages)
+    ? manifest.packages.map(({ name, version, file }) => ({ name, version, file }))
+    : undefined;
+  const exactTopLevelKeys =
+    manifest !== null &&
+    typeof manifest === 'object' &&
+    !Array.isArray(manifest) &&
+    JSON.stringify(Object.keys(manifest).sort()) ===
+      JSON.stringify(['packages', 'schemaVersion', 'version']);
+  const exactPackageKeys =
+    Array.isArray(manifest?.packages) &&
+    manifest.packages.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        JSON.stringify(Object.keys(entry).sort()) ===
+          JSON.stringify(['file', 'name', 'sha256', 'size', 'version']),
+    );
+  if (
+    !exactTopLevelKeys ||
+    !exactPackageKeys ||
+    manifest?.schemaVersion !== 1 ||
+    manifest?.version !== lock.sdk.releaseManifest.version ||
+    JSON.stringify(generatedPackages) !== JSON.stringify(expectedPackages)
+  ) {
+    throw new Error('Generated SDK release manifest contents did not match the reviewed lock.');
+  }
+
+  for (const [index, [key, artifact]] of Object.entries(SDK_ARTIFACTS).entries()) {
+    const generated = manifest.packages[index];
+    const tarball = tarballs[key];
+    const stats = typeof tarball === 'string' ? lstatSync(tarball) : undefined;
+    if (
+      generated?.name !== artifact.packageName ||
+      !Number.isSafeInteger(generated.size) ||
+      generated.size <= 0 ||
+      typeof generated.sha256 !== 'string' ||
+      !sha256Pattern.test(generated.sha256) ||
+      !stats?.isFile() ||
+      stats.size !== generated.size ||
+      sha256(tarball) !== generated.sha256
+    ) {
+      throw new Error(`Generated SDK ${artifact.packageName} manifest entry was inconsistent.`);
+    }
+  }
+}
+
 function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
   const createReleaseArtifacts = resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs');
   requirePath(createReleaseArtifacts, 'SDK create-release-artifacts script');
@@ -560,35 +697,14 @@ function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
 
   const manifestPath = resolve(artifactRoot, lock.sdk.releaseManifest.file);
   requirePath(manifestPath, 'SDK release manifest');
-  if (sha256(manifestPath) !== lock.sdk.releaseManifest.sha256) {
-    throw new Error('Generated SDK release manifest did not match the locked reviewed manifest.');
-  }
-
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const expectedPackages = Object.values(lock.sdk.artifacts).map(
-    ({ packageName: name, version, releaseFile: file, size, sha256: digest }) => ({
-      name,
-      version,
-      file,
-      size,
-      sha256: digest,
-    }),
-  );
-  if (
-    manifest?.schemaVersion !== 1 ||
-    manifest?.version !== lock.sdk.releaseManifest.version ||
-    JSON.stringify(manifest.packages) !== JSON.stringify(expectedPackages)
-  ) {
-    throw new Error('Generated SDK release manifest contents did not match the reviewed lock.');
-  }
-
   const tarballs = Object.fromEntries(
     Object.entries(lock.sdk.artifacts).map(([key, artifact]) => [
       key,
       resolve(artifactRoot, artifact.releaseFile),
     ]),
   );
-  assertFrozenArtifactDigests(lock, tarballs);
+  assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs);
   return tarballs;
 }
 

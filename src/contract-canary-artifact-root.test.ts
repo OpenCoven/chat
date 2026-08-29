@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   copyFileSync,
@@ -13,12 +14,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
 import {
   assertCleanGitCheckout,
   type assertContractCanaryCheckoutHeads,
+  assertGeneratedReleaseManifestMatchesLock,
   assertPackedFixtureMatchesCaveCheckout,
   assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
@@ -114,6 +117,7 @@ describe('contract canary temp directory safety', () => {
       prefix: 'opencoven-chat-contract-canary-test',
       childSegments: ['harness'],
     });
+
     createdTempDirectories.push(artifactDirectory);
 
     expect(realpathSync(artifactDirectory.rootPath).startsWith(realpathSync(tmpdir()))).toBe(true);
@@ -259,6 +263,9 @@ describe('contract canary temp directory safety', () => {
     const reviewed = resolve(scratchRoot, 'reviewed.tgz');
     const frozen = resolve(scratchRoot, 'frozen.tgz');
     const changed = resolve(scratchRoot, 'changed.tgz');
+    const trailed = resolve(scratchRoot, 'trailed.tgz');
+    const zeroPadded = resolve(scratchRoot, 'zero-padded.tgz');
+    const concatenated = resolve(scratchRoot, 'concatenated.tgz');
 
     mkdirSync(packageRoot, { recursive: true });
     writeFileSync(resolve(packageRoot, 'package.json'), '{"name":"fixture"}\n');
@@ -301,7 +308,37 @@ describe('contract canary temp directory safety', () => {
         },
         resolve(scratchRoot, 'changed'),
       ),
-    ).toThrow(/contents did not match/);
+    ).toThrow(/(?:tar payload|contents) did not match/);
+
+    copyFileSync(reviewed, trailed);
+    appendFileSync(trailed, 'UNREVIEWED-TRAILER');
+    expect(() =>
+      assertPackedPackageContentsMatch(
+        reviewedTarballs,
+        {
+          ...frozenTarballs,
+          core: trailed,
+        },
+        resolve(scratchRoot, 'trailed'),
+      ),
+    ).toThrow(/complete gzip archive/);
+
+    copyFileSync(reviewed, zeroPadded);
+    appendFileSync(zeroPadded, Buffer.alloc(4));
+    copyFileSync(reviewed, concatenated);
+    appendFileSync(concatenated, gzipSync(Buffer.alloc(0)));
+    for (const invalid of [zeroPadded, concatenated]) {
+      expect(() =>
+        assertPackedPackageContentsMatch(
+          reviewedTarballs,
+          {
+            ...frozenTarballs,
+            core: invalid,
+          },
+          resolve(scratchRoot, `invalid-${invalid === zeroPadded ? 'padding' : 'member'}`),
+        ),
+      ).toThrow(/complete gzip archive/);
+    }
   });
 
   test('declares canary helper inputs at their consumed shapes', () => {
@@ -415,6 +452,60 @@ describe('contract canary temp directory safety', () => {
     },
     15_000,
   );
+});
+
+describe('generated SDK release manifest validation', () => {
+  test('accepts platform-specific archive bytes when package identity and manifest integrity hold', () => {
+    const lock = readContractCanaryLock();
+    const scratchRoot = createRepoLocalScratchRoot('generated-manifest');
+    const tarballs = {} as Record<'core' | 'cave' | 'coven' | 'sdk', string>;
+    const packages = Object.entries(lock.sdk.artifacts).map(([key, artifact]) => {
+      const tarball = resolve(scratchRoot, `${key}.tgz`);
+      const bytes = Buffer.from(`platform-specific-${key}`);
+      writeFileSync(tarball, bytes);
+      tarballs[key as keyof typeof tarballs] = tarball;
+      return {
+        name: artifact.packageName,
+        version: artifact.version,
+        file: artifact.releaseFile,
+        size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      };
+    });
+    const manifest = {
+      schemaVersion: 1,
+      version: lock.sdk.releaseManifest.version,
+      packages,
+    };
+
+    expect(() => assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarballs)).not.toThrow();
+
+    const invalidManifest = {
+      ...manifest,
+      packages: manifest.packages.map((entry, index) => ({
+        ...entry,
+        name: index === 0 ? '@opencoven/not-reviewed' : entry.name,
+      })),
+    };
+    expect(() =>
+      assertGeneratedReleaseManifestMatchesLock(lock, invalidManifest, tarballs),
+    ).toThrow(/contents did not match/);
+
+    const extraTopLevel = { ...manifest, unreviewed: true };
+    expect(() => assertGeneratedReleaseManifestMatchesLock(lock, extraTopLevel, tarballs)).toThrow(
+      /contents did not match/,
+    );
+
+    const extraPackageField = {
+      ...manifest,
+      packages: manifest.packages.map((entry, index) =>
+        index === 0 ? { ...entry, unreviewed: true } : entry,
+      ),
+    };
+    expect(() =>
+      assertGeneratedReleaseManifestMatchesLock(lock, extraPackageField, tarballs),
+    ).toThrow(/contents did not match/);
+  });
 });
 
 describe('contract canary checkout cleanliness', () => {
