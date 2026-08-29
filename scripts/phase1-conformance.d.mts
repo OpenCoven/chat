@@ -67,10 +67,6 @@ export function safeEnvironment(
   extra?: Record<string, string>,
   resolvedCargoPath?: string,
 ): Record<string, string>;
-export function retryCaveConformancePackage(
-  runAttempt: () => Promise<void>,
-  cleanBuildOutput: () => void,
-): Promise<void>;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,

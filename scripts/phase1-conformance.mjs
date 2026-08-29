@@ -634,24 +634,6 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   );
 }
 
-export async function retryCaveConformancePackage(runAttempt, cleanBuildOutput) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await runAttempt();
-      return;
-    } catch (error) {
-      const exitedUnsuccessfully =
-        error instanceof CommandExecutionError &&
-        Number.isInteger(error.result?.code) &&
-        error.result.code !== 0;
-      if (!exitedUnsuccessfully || attempt === 3) {
-        throw error;
-      }
-      cleanBuildOutput();
-    }
-  }
-}
-
 async function packageLockedArtifacts(artifactRoot, roots, environment) {
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
   await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
@@ -747,19 +729,15 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
   );
 
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await retryCaveConformancePackage(
-    () =>
-      runCommand(
-        artifactRoot,
-        'Cave conformance package',
-        'corepack',
-        ['pnpm@10.34.0', 'build:conformance'],
-        {
-          cwd: roots.caveRoot,
-          env: environment,
-        },
-      ),
-    () => rmSync(resolve(roots.caveRoot, '.next'), { recursive: true, force: true }),
+  await runCommand(
+    artifactRoot,
+    'Cave conformance package',
+    'corepack',
+    ['pnpm@10.34.0', 'build:conformance'],
+    {
+      cwd: roots.caveRoot,
+      env: environment,
+    },
   );
 
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
