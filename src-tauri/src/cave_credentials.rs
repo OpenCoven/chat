@@ -203,7 +203,6 @@ pub trait CredentialCustody: Send + Sync {
         &self,
         expected: &PreparedCredential,
     ) -> Result<CredentialDeleteResult, NativeError>;
-    fn delete_credential(&self, installation_id: &str) -> Result<bool, NativeError>;
 }
 
 pub struct UnavailableCredentialCustody {
@@ -253,10 +252,6 @@ impl CredentialCustody for UnavailableCredentialCustody {
         &self,
         _expected: &PreparedCredential,
     ) -> Result<CredentialDeleteResult, NativeError> {
-        Err(self.error.clone())
-    }
-
-    fn delete_credential(&self, _installation_id: &str) -> Result<bool, NativeError> {
         Err(self.error.clone())
     }
 }
@@ -741,17 +736,6 @@ impl CredentialCustody for KeyringCredentialCustody {
                 KeyringError::NoEntry => Ok(CredentialDeleteResult::Absent),
                 error => Err(map_keyring_error(&error, StoreOperation::Delete)),
             })
-    }
-
-    fn delete_credential(&self, installation_id: &str) -> Result<bool, NativeError> {
-        let account = Self::credential_account(installation_id)?;
-        let _lock = CredentialMutationLock::acquire(self.service, &account)?;
-        let entry = self.entry(&account, StoreOperation::Delete)?;
-        match entry.delete_credential() {
-            Ok(()) => Ok(true),
-            Err(KeyringError::NoEntry) => Ok(false),
-            Err(error) => Err(map_keyring_error(&error, StoreOperation::Delete)),
-        }
     }
 }
 

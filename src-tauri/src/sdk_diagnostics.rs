@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 const MAX_SNAPSHOT_NODES: usize = 4_096;
 const MAX_SNAPSHOT_STRING_CHARACTERS: usize = 64 * 1024;
+const SECRET_SHAPED_BASE64URL_RUN: usize = 43;
 const SAFE_ERROR_MESSAGE: &str = "Cave operation failed.";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -302,6 +303,7 @@ fn validate_snapshot(
                     .ok_or_else(NativeError::invalid_response)?;
                 if budget.string_characters > MAX_SNAPSHOT_STRING_CHARACTERS
                     || forbidden_snapshot_key(key)
+                    || secret_shaped_value(key)
                 {
                     return Err(NativeError::invalid_response());
                 }
@@ -381,14 +383,14 @@ fn secret_shaped_value(value: &str) -> bool {
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
             run += 1;
-        } else {
-            if run == 43 {
+            if run >= SECRET_SHAPED_BASE64URL_RUN {
                 return true;
             }
+        } else {
             run = 0;
         }
     }
-    run == 43
+    false
 }
 
 pub fn validate_public_snapshot(value: Value) -> Result<Value, NativeError> {
@@ -678,6 +680,25 @@ mod tests {
     }
 
     #[test]
+    fn strict_public_keys_reject_wrapped_and_adjacent_secret_shaped_material() {
+        let bearer = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        for key in [
+            bearer.to_owned(),
+            format!("({bearer})"),
+            format!("x{bearer}"),
+            format!("{bearer}x"),
+            "A".repeat(96),
+        ] {
+            assert_eq!(
+                validate_public_snapshot(json!({key: true}))
+                    .expect_err("public object keys must reject secret-shaped material")
+                    .code,
+                DiagnosticCode::InvalidResponse
+            );
+        }
+    }
+
+    #[test]
     fn snapshots_sanitize_error_copy_without_parsing_protocol_dtos() {
         let response = NativeResponse::snapshot(
             NativeResponseOperation::Health,
@@ -780,22 +801,33 @@ mod tests {
 
     #[test]
     fn snapshots_reject_wrapped_secret_shaped_values_outside_allowed_content() {
-        assert_eq!(
-            NativeResponse::snapshot(
-                NativeResponseOperation::ListConversationMessages,
-                200,
-                json!({
-                    "data": {
-                        "metadata": {
-                            "trace": "prefix AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA suffix"
+        let bearer = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        for trace in [
+            format!("({bearer})"),
+            format!("prefix: {bearer}; suffix"),
+            format!("\t{bearer}\n"),
+            format!("x{bearer}"),
+            format!("{bearer}x"),
+            format!("x{bearer}y"),
+            "A".repeat(96),
+        ] {
+            assert_eq!(
+                NativeResponse::snapshot(
+                    NativeResponseOperation::ListConversationMessages,
+                    200,
+                    json!({
+                        "data": {
+                            "metadata": {
+                                "trace": trace
+                            }
                         }
-                    }
-                }),
-            )
-            .expect_err("wrapped bearer-shaped material must not bypass strict fields")
-            .code,
-            DiagnosticCode::InvalidResponse
-        );
+                    }),
+                )
+                .expect_err("wrapped bearer-shaped material must not bypass strict fields")
+                .code,
+                DiagnosticCode::InvalidResponse
+            );
+        }
     }
 
     #[test]
@@ -818,6 +850,33 @@ mod tests {
         let rendered = serde_json::to_value(response).expect("snapshot should serialize");
 
         assert_eq!(rendered["payload"]["data"]["messages"][0]["text"], text);
+    }
+
+    #[test]
+    fn correct_operation_allows_wrapped_and_adjacent_credential_shaped_user_text() {
+        let bearer = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        for text in [
+            format!("A user pasted ({bearer}) into the chat."),
+            format!("A user pasted x{bearer}y into the chat."),
+            format!("A user pasted {} into the chat.", "A".repeat(96)),
+        ] {
+            let response = NativeResponse::snapshot(
+                NativeResponseOperation::ListConversationMessages,
+                200,
+                json!({
+                    "data": {
+                        "messages": [{
+                            "id": "message-1",
+                            "text": text
+                        }]
+                    }
+                }),
+            )
+            .expect("actual message text remains arbitrary user content");
+            let rendered = serde_json::to_value(response).expect("snapshot should serialize");
+
+            assert_eq!(rendered["payload"]["data"]["messages"][0]["text"], text);
+        }
     }
 
     #[test]

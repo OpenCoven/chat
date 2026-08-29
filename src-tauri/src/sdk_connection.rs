@@ -34,8 +34,9 @@ const MAX_REQUEST_ID_CHARACTERS: usize = 128;
 const MAX_HANDLE_CHARACTERS: usize = 128;
 const MAX_RETAINED_DISCOVERIES: usize = 64;
 const MAX_RETAINED_PAIRINGS: usize = 64;
-const MAX_RETAINED_TERMINAL_CREDENTIALS: usize = 64;
+const MAX_RETAINED_CREDENTIALS: usize = 64;
 const DISCOVERY_TTL_MILLIS: u64 = 30 * 1_000;
+const PENDING_CREDENTIAL_TTL_MILLIS: u64 = 5 * 60 * 1_000;
 const TERMINAL_CREDENTIAL_TTL_MILLIS: u64 = 5 * 60 * 1_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -413,6 +414,13 @@ impl AuthorityLifecycle {
             .state
             .lock()
             .map_err(|_| NativeError::service_unavailable())?;
+        Self::replace_locked(&mut state, descriptor)
+    }
+
+    fn replace_locked(
+        state: &mut LifecycleState,
+        descriptor: AuthorityDescriptor,
+    ) -> Result<AuthorityReference, NativeError> {
         state.generation = state
             .generation
             .checked_add(1)
@@ -442,20 +450,7 @@ impl AuthorityLifecycle {
         if state.context() != *expected {
             return Err(NativeError::reconcile_required());
         }
-        state.generation = state
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| NativeError::new(DiagnosticCode::Conflict, false))?;
-        let reference = AuthorityReference {
-            handle: format!("authority:{}", Uuid::new_v4()),
-            generation: state.generation,
-        };
-        state.active = Some(ActiveAuthority {
-            reference: reference.clone(),
-            descriptor,
-        });
-        state.requests.clear();
-        Ok(reference)
+        Self::replace_locked(&mut state, descriptor)
     }
 
     fn context(&self) -> Result<AuthorityContext, NativeError> {
@@ -481,6 +476,20 @@ impl AuthorityLifecycle {
         state.active = None;
         state.requests.clear();
         Ok(true)
+    }
+
+    fn validate_request(&self, request: &RequestLease) -> Result<(), NativeError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        let key = (request.authority.generation, request.request_id.clone());
+        if state.active.as_ref().map(|active| &active.reference) != Some(&request.authority)
+            || !state.requests.contains(&key)
+        {
+            return Err(NativeError::reconcile_required());
+        }
+        Ok(())
     }
 
     pub fn begin_request(
@@ -547,15 +556,6 @@ impl AuthorityLifecycle {
             Some(active) if active.reference == *authority => Ok(active.descriptor.clone()),
             _ => Err(NativeError::reconcile_required()),
         }
-    }
-
-    fn is_current(&self, authority: &AuthorityReference) -> Result<bool, NativeError> {
-        authority.validate()?;
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
-        Ok(state.active.as_ref().map(|active| &active.reference) == Some(authority))
     }
 }
 
@@ -1109,22 +1109,34 @@ enum RecoverableCleanup {
     Completed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecoverableCleanupMode {
+    Observe,
+    Invalidate,
+}
+
+enum StagedCredentialRetention {
+    Pending(u64),
+    Protected,
+    Terminal(u64),
+}
+
 struct StagedCredential {
     authority: AuthorityReference,
     credential: PreparedCredential,
+    staged_at: AtomicU64,
     terminal_at: AtomicU64,
-    sequence: u64,
     state: Mutex<StagedCredentialState>,
     completed: Condvar,
 }
 
 impl StagedCredential {
-    fn new(authority: AuthorityReference, credential: PreparedCredential, sequence: u64) -> Self {
+    fn new(authority: AuthorityReference, credential: PreparedCredential, staged_at: u64) -> Self {
         Self {
             authority,
             credential,
+            staged_at: AtomicU64::new(staged_at),
             terminal_at: AtomicU64::new(0),
-            sequence,
             state: Mutex::new(StagedCredentialState::Pending),
             completed: Condvar::new(),
         }
@@ -1192,7 +1204,7 @@ impl StagedCredential {
                 .state
                 .lock()
                 .map_err(|_| NativeError::service_unavailable())?;
-            match &*state {
+            match &mut *state {
                 StagedCredentialState::RollbackNeeded {
                     expected,
                     completion_error,
@@ -1256,6 +1268,8 @@ impl StagedCredential {
                         StagedCredentialState::Finished(CredentialDeleteResult::Absent),
                     );
                 } else {
+                    self.staged_at
+                        .store(current_time_millis(), AtomicOrdering::Release);
                     *state = StagedCredentialState::Pending;
                 }
                 self.completed.notify_all();
@@ -1493,29 +1507,37 @@ impl StagedCredential {
         ))
     }
 
-    fn is_terminal_retained(&self) -> Result<bool, NativeError> {
+    fn retention(&self) -> Result<StagedCredentialRetention, NativeError> {
         let state = self
             .state
             .lock()
             .map_err(|_| NativeError::service_unavailable())?;
-        Ok(matches!(
-            *state,
+        Ok(match &*state {
+            StagedCredentialState::Pending => {
+                StagedCredentialRetention::Pending(self.staged_at.load(AtomicOrdering::Acquire))
+            }
+            StagedCredentialState::Writing { .. }
+            | StagedCredentialState::RollbackNeeded { .. }
+            | StagedCredentialState::Discarding => StagedCredentialRetention::Protected,
             StagedCredentialState::Committed
-                | StagedCredentialState::Finished(_)
-                | StagedCredentialState::Failed(_)
-        ))
+            | StagedCredentialState::Finished(_)
+            | StagedCredentialState::Failed(_) => {
+                StagedCredentialRetention::Terminal(self.terminal_retained_at())
+            }
+        })
     }
 
-    fn cleanup_for_invalidation(
+    fn cleanup_recoverable(
         &self,
         custody: &dyn CredentialCustody,
+        mode: RecoverableCleanupMode,
     ) -> Result<RecoverableCleanup, NativeError> {
         let rollback = {
             let mut state = self
                 .state
                 .lock()
                 .map_err(|_| NativeError::service_unavailable())?;
-            match &*state {
+            match &mut *state {
                 StagedCredentialState::RollbackNeeded {
                     expected,
                     completion_error,
@@ -1524,7 +1546,13 @@ impl StagedCredential {
                     *state = StagedCredentialState::Discarding;
                     Some(rollback)
                 }
-                StagedCredentialState::Writing { .. } | StagedCredentialState::Discarding => {
+                StagedCredentialState::Writing { discard_requested } => {
+                    if mode == RecoverableCleanupMode::Invalidate {
+                        *discard_requested = true;
+                    }
+                    return Ok(RecoverableCleanup::Pending);
+                }
+                StagedCredentialState::Discarding => {
                     return Ok(RecoverableCleanup::Pending);
                 }
                 StagedCredentialState::Finished(_) => {
@@ -1575,11 +1603,17 @@ struct PendingDiscovery {
     sequence: u64,
 }
 
+struct CredentialReservation {
+    authority: AuthorityReference,
+    expires_at: u64,
+}
+
 #[derive(Default)]
 struct TransientState {
     discoveries: std::collections::HashMap<String, PendingDiscovery>,
     pairings: std::collections::HashMap<String, PendingPairing>,
     managed_pairings: std::collections::HashMap<String, String>,
+    credential_reservations: std::collections::HashMap<String, CredentialReservation>,
     credentials: std::collections::HashMap<String, Arc<StagedCredential>>,
     next_sequence: u64,
 }
@@ -1647,13 +1681,21 @@ impl TransientState {
         }
     }
 
-    fn prune_terminal_credentials(&mut self, now: u64) -> Result<(), NativeError> {
+    fn prune_credentials(&mut self, now: u64) -> Result<(), NativeError> {
+        self.credential_reservations
+            .retain(|_, reservation| reservation.expires_at > now);
         let mut expired = Vec::new();
         for (handle, credential) in &self.credentials {
-            if credential.is_terminal_retained()?
-                && now.saturating_sub(credential.terminal_retained_at())
-                    >= TERMINAL_CREDENTIAL_TTL_MILLIS
-            {
+            let expired_at = match credential.retention()? {
+                StagedCredentialRetention::Pending(staged_at) => {
+                    now.saturating_sub(staged_at) >= PENDING_CREDENTIAL_TTL_MILLIS
+                }
+                StagedCredentialRetention::Protected => false,
+                StagedCredentialRetention::Terminal(terminal_at) => {
+                    now.saturating_sub(terminal_at) >= TERMINAL_CREDENTIAL_TTL_MILLIS
+                }
+            };
+            if expired_at && Arc::strong_count(credential) == 1 {
                 expired.push(handle.clone());
             }
         }
@@ -1661,21 +1703,18 @@ impl TransientState {
             self.credentials.remove(&handle);
         }
 
-        loop {
-            let mut terminal = Vec::new();
-            for (handle, credential) in &self.credentials {
-                if credential.is_terminal_retained()? {
-                    terminal.push((handle.clone(), credential.sequence));
-                }
-            }
-            if terminal.len() <= MAX_RETAINED_TERMINAL_CREDENTIALS {
-                break;
-            }
-            let Some((handle, _)) = terminal.into_iter().min_by_key(|(_, sequence)| *sequence)
-            else {
-                break;
-            };
-            self.credentials.remove(&handle);
+        Ok(())
+    }
+
+    fn ensure_credential_slot(&mut self, now: u64) -> Result<(), NativeError> {
+        self.prune_credentials(now)?;
+        if self
+            .credentials
+            .len()
+            .saturating_add(self.credential_reservations.len())
+            >= MAX_RETAINED_CREDENTIALS
+        {
+            return Err(NativeError::credential_update_in_progress());
         }
         Ok(())
     }
@@ -1684,12 +1723,32 @@ impl TransientState {
         &self,
         authority: &AuthorityReference,
     ) -> Result<bool, NativeError> {
-        self.credentials
+        let staged = self
+            .credentials
             .values()
             .filter(|credential| credential.authority == *authority)
             .try_fold(false, |in_progress, credential| {
                 Ok(in_progress || credential.update_in_progress()?)
-            })
+            })?;
+        Ok(staged
+            || self
+                .credential_reservations
+                .values()
+                .any(|reservation| reservation.authority == *authority))
+    }
+
+    fn credential_mutation_in_progress_except(
+        &self,
+        staged: &Arc<StagedCredential>,
+    ) -> Result<bool, NativeError> {
+        let staged = self
+            .credentials
+            .values()
+            .filter(|credential| !Arc::ptr_eq(credential, staged))
+            .try_fold(false, |in_progress, credential| {
+                Ok(in_progress || credential.requires_recoverable_cleanup()?)
+            })?;
+        Ok(staged || !self.credential_reservations.is_empty())
     }
 }
 
@@ -1713,6 +1772,7 @@ pub struct NativeSdkBoundary {
     lifecycle: AuthorityLifecycle,
     custody: Arc<dyn CredentialCustody>,
     provider: Arc<dyn ManagedNativeAuthorityProvider>,
+    authority_mutation: Mutex<()>,
     transient: Mutex<TransientState>,
 }
 
@@ -1725,8 +1785,15 @@ impl NativeSdkBoundary {
             lifecycle: AuthorityLifecycle::default(),
             custody,
             provider,
+            authority_mutation: Mutex::new(()),
             transient: Mutex::new(TransientState::default()),
         }
+    }
+
+    fn lock_authority_mutation(&self) -> Result<std::sync::MutexGuard<'_, ()>, NativeError> {
+        self.authority_mutation
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())
     }
 
     pub fn with_provider(provider: Arc<dyn ManagedNativeAuthorityProvider>) -> Self {
@@ -1822,8 +1889,12 @@ impl NativeSdkBoundary {
         authority: AuthorityDescriptor,
         after_replace: impl FnOnce(&AuthorityReference),
     ) -> Result<AuthorityReference, NativeError> {
-        self.cleanup_recoverable_credentials()?;
-        let reference = self.lifecycle.replace(authority)?;
+        authority.validate()?;
+        let reference = {
+            let _mutation = self.lock_authority_mutation()?;
+            self.cleanup_recoverable_credentials(|_| true, RecoverableCleanupMode::Invalidate)?;
+            self.lifecycle.replace(authority)?
+        };
         self.finish_authority_open(reference, after_replace)
     }
 
@@ -1832,8 +1903,15 @@ impl NativeSdkBoundary {
         authority: AuthorityDescriptor,
         context: &AuthorityContext,
     ) -> Result<AuthorityReference, NativeError> {
-        self.cleanup_recoverable_credentials()?;
-        let reference = self.lifecycle.replace_if_context(authority, context)?;
+        authority.validate()?;
+        let reference = {
+            let _mutation = self.lock_authority_mutation()?;
+            if self.lifecycle.context()? != *context {
+                return Err(NativeError::reconcile_required());
+            }
+            self.cleanup_recoverable_credentials(|_| true, RecoverableCleanupMode::Invalidate)?;
+            self.lifecycle.replace_if_context(authority, context)?
+        };
         self.finish_authority_open(reference, |_| {})
     }
 
@@ -1843,10 +1921,10 @@ impl NativeSdkBoundary {
         after_replace: impl FnOnce(&AuthorityReference),
     ) -> Result<AuthorityReference, NativeError> {
         after_replace(&reference);
-        self.invalidate_transients_before(reference.generation)?;
-        self.cleanup_recoverable_credentials()?;
-        if !self.lifecycle.is_current(&reference)? {
-            return Err(NativeError::reconcile_required());
+        {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.descriptor(&reference)?;
+            self.invalidate_transients_before(reference.generation)?;
         }
         Ok(reference)
     }
@@ -1863,12 +1941,32 @@ impl NativeSdkBoundary {
         input: CloseAuthorityInput,
         after_close: impl FnOnce(),
     ) -> Result<AuthorityCloseResult, NativeError> {
-        self.cleanup_recoverable_credentials()?;
-        let closed = self.lifecycle.close(&input.authority)?;
+        input.authority.validate()?;
+        let generation = input.authority.generation;
+        let closed = {
+            let _mutation = self.lock_authority_mutation()?;
+            let context = self.lifecycle.context()?;
+            match context.active.as_ref() {
+                None => false,
+                Some(active) if active != &input.authority => {
+                    return Err(NativeError::reconcile_required());
+                }
+                Some(_) => {
+                    self.cleanup_recoverable_credentials(
+                        |credential| credential.authority.generation <= generation,
+                        RecoverableCleanupMode::Invalidate,
+                    )?;
+                    let closed = self.lifecycle.close(&input.authority)?;
+                    if !closed {
+                        return Err(NativeError::reconcile_required());
+                    }
+                    self.invalidate_transients_through(generation)?;
+                    true
+                }
+            }
+        };
         if closed {
             after_close();
-            self.invalidate_transients_through(input.authority.generation)?;
-            self.cleanup_recoverable_credentials()?;
         }
         Ok(AuthorityCloseResult { closed })
     }
@@ -1880,10 +1978,13 @@ impl NativeSdkBoundary {
             .map_err(|_| NativeError::service_unavailable())?;
         let now = current_time_millis();
         transient.prune_pairings(now);
-        transient.prune_terminal_credentials(now)?;
+        transient.prune_credentials(now)?;
         transient
             .pairings
             .retain(|_, pairing| pairing.authority.generation >= minimum_generation);
+        transient
+            .credential_reservations
+            .retain(|_, reservation| reservation.authority.generation >= minimum_generation);
         transient.discoveries.clear();
         transient.retain_managed_pairings();
         let mut remove = Vec::new();
@@ -1907,10 +2008,13 @@ impl NativeSdkBoundary {
             .map_err(|_| NativeError::service_unavailable())?;
         let now = current_time_millis();
         transient.prune_pairings(now);
-        transient.prune_terminal_credentials(now)?;
+        transient.prune_credentials(now)?;
         transient
             .pairings
             .retain(|_, pairing| pairing.authority.generation > generation);
+        transient
+            .credential_reservations
+            .retain(|_, reservation| reservation.authority.generation > generation);
         transient.discoveries.clear();
         transient.retain_managed_pairings();
         let mut remove = Vec::new();
@@ -1927,7 +2031,11 @@ impl NativeSdkBoundary {
         Ok(())
     }
 
-    fn cleanup_recoverable_credentials(&self) -> Result<bool, NativeError> {
+    fn cleanup_recoverable_credentials(
+        &self,
+        include: impl Fn(&StagedCredential) -> bool,
+        mode: RecoverableCleanupMode,
+    ) -> Result<bool, NativeError> {
         let candidates = {
             let transient = self
                 .transient
@@ -1936,12 +2044,13 @@ impl NativeSdkBoundary {
             transient
                 .credentials
                 .iter()
+                .filter(|(_, credential)| include(credential))
                 .map(|(handle, credential)| (handle.clone(), Arc::clone(credential)))
                 .collect::<Vec<_>>()
         };
         let mut pending = false;
         for (handle, credential) in candidates {
-            match credential.cleanup_for_invalidation(self.custody.as_ref())? {
+            match credential.cleanup_recoverable(self.custody.as_ref(), mode)? {
                 RecoverableCleanup::NotNeeded => {}
                 RecoverableCleanup::Pending => pending = true,
                 RecoverableCleanup::Completed => {
@@ -1959,11 +2068,20 @@ impl NativeSdkBoundary {
                 }
             }
         }
-        self.transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?
-            .prune_terminal_credentials(current_time_millis())?;
         Ok(pending)
+    }
+
+    fn recoverable_cleanup_pending(&self) -> Result<bool, NativeError> {
+        let transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        transient
+            .credentials
+            .values()
+            .try_fold(false, |pending, credential| {
+                Ok(pending || credential.requires_recoverable_cleanup()?)
+            })
     }
 
     #[cfg(test)]
@@ -2000,15 +2118,12 @@ impl NativeSdkBoundary {
                 .expect("test bearer"),
         };
         let mut transient = self.transient.lock().expect("test transient lock");
-        let sequence = transient
-            .allocate_sequence()
-            .expect("test credential sequence");
         transient.credentials.insert(
             handle.into(),
             Arc::new(StagedCredential::new(
                 authority.clone(),
                 PreparedCredential::from_record(&credential).expect("test credential"),
-                sequence,
+                current_time_millis(),
             )),
         );
     }
@@ -2071,34 +2186,38 @@ impl NativeSdkBoundary {
             self.lifecycle.cancel_request(&request);
             return Err(NativeError::invalid_response());
         }
-        self.lifecycle.finish_request(&request)?;
         let handle = format!("pairing:{}", Uuid::new_v4());
         let remote_request_id = created.remote_request_id;
         let now = current_time_millis();
-        let mut transient = self
-            .transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
-        transient.prune_pairings(now);
-        let sequence = transient.allocate_sequence()?;
-        let pending = PendingPairing {
-            authority: input.authority.clone(),
-            app_name,
-            installation_id,
-            scopes,
-            remote_request_id: remote_request_id.clone(),
-            pairing_secret: created.pairing_secret,
-            expires_at: created.expires_at,
-            sequence,
-            status: PendingPairingStatus::Ready,
-        };
-        transient.pairings.insert(handle.clone(), pending);
-        transient.prune_pairings(now);
-        drop(transient);
-        if let Err(error) = self.lifecycle.descriptor(&input.authority) {
-            if let Ok(mut transient) = self.transient.lock() {
-                transient.remove_pairing(&handle);
-            }
+        let stage_result = (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            self.lifecycle.finish_request(&request)?;
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            transient.prune_pairings(now);
+            let sequence = transient.allocate_sequence()?;
+            transient.pairings.insert(
+                handle.clone(),
+                PendingPairing {
+                    authority: input.authority.clone(),
+                    app_name,
+                    installation_id,
+                    scopes,
+                    remote_request_id: remote_request_id.clone(),
+                    pairing_secret: created.pairing_secret,
+                    expires_at: created.expires_at,
+                    sequence,
+                    status: PendingPairingStatus::Ready,
+                },
+            );
+            transient.prune_pairings(now);
+            Ok(())
+        })();
+        if let Err(error) = stage_result {
+            self.lifecycle.cancel_request(&request);
             return Err(error);
         }
 
@@ -2120,6 +2239,8 @@ impl NativeSdkBoundary {
         let created = self.pairing_create(input).await?;
         let pairing_handle = created.result.handle;
         let pairing_request_id = created.result.request_id;
+        let _mutation = self.lock_authority_mutation()?;
+        self.lifecycle.descriptor(&created.authority)?;
         let mut transient = self
             .transient
             .lock()
@@ -2163,30 +2284,43 @@ impl NativeSdkBoundary {
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
-        let authority = self.lifecycle.descriptor(&input.authority)?;
-        let (remote_request_id, pairing_secret) = {
+        let authority = match self.lifecycle.descriptor(&input.authority) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let pending = (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
             let mut transient = self
                 .transient
                 .lock()
                 .map_err(|_| NativeError::service_unavailable())?;
             transient.prune_pairings(current_time_millis());
-            let Some(pending) = transient.pairings.get_mut(&input.pairing_handle) else {
-                self.lifecycle.cancel_request(&request);
-                return Err(NativeError::reconcile_required());
-            };
+            let pending = transient
+                .pairings
+                .get_mut(&input.pairing_handle)
+                .ok_or_else(NativeError::reconcile_required)?;
             if pending.authority != input.authority {
-                self.lifecycle.cancel_request(&request);
                 return Err(NativeError::reconcile_required());
             }
             if pending.status != PendingPairingStatus::Ready {
-                self.lifecycle.cancel_request(&request);
                 return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
             }
             pending.status = PendingPairingStatus::Polling;
-            (
+            Ok((
                 pending.remote_request_id.clone(),
                 pending.pairing_secret.clone(),
-            )
+            ))
+        })();
+        let (remote_request_id, pairing_secret) = match pending {
+            Ok(pending) => pending,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
         };
         let status = match self
             .provider
@@ -2255,32 +2389,58 @@ impl NativeSdkBoundary {
         authority: AuthorityDescriptor,
         managed: bool,
     ) -> Result<OperationResult<PairingExchangeOutput>, NativeError> {
-        let pending = {
-            let mut transient = match self.transient.lock() {
-                Ok(transient) => transient,
-                Err(_) => {
-                    self.lifecycle.cancel_request(&request);
-                    return Err(NativeError::service_unavailable());
+        let commit_handle = format!("commit:{}", Uuid::new_v4());
+        let pending = match (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let now = current_time_millis();
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            transient.prune_pairings(now);
+            transient.prune_credentials(now)?;
+            if managed && transient.credential_update_in_progress(&input.authority)? {
+                return Err(NativeError::credential_update_in_progress());
+            }
+            let reservation_expires_at = {
+                let pending = transient
+                    .pairings
+                    .get(&input.pairing_handle)
+                    .ok_or_else(NativeError::reconcile_required)?;
+                if pending.authority != input.authority {
+                    return Err(NativeError::reconcile_required());
                 }
+                if pending.status != PendingPairingStatus::Ready {
+                    return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
+                }
+                pending.expires_at
             };
-            transient.prune_pairings(current_time_millis());
-            let Some(pending) = transient.pairings.get(&input.pairing_handle) else {
-                self.lifecycle.cancel_request(&request);
-                return Err(NativeError::reconcile_required());
-            };
-            if pending.authority != input.authority {
-                self.lifecycle.cancel_request(&request);
-                return Err(NativeError::reconcile_required());
+            transient.ensure_credential_slot(now)?;
+            if transient.credentials.contains_key(&commit_handle)
+                || transient
+                    .credential_reservations
+                    .contains_key(&commit_handle)
+            {
+                return Err(NativeError::new(DiagnosticCode::Conflict, false));
             }
-            if pending.status != PendingPairingStatus::Ready {
+            let pending = transient
+                .remove_pairing(&input.pairing_handle)
+                .ok_or_else(NativeError::reconcile_required)?;
+            transient.credential_reservations.insert(
+                commit_handle.clone(),
+                CredentialReservation {
+                    authority: input.authority.clone(),
+                    expires_at: reservation_expires_at,
+                },
+            );
+            Ok(pending)
+        })() {
+            Ok(pending) => pending,
+            Err(error) => {
                 self.lifecycle.cancel_request(&request);
-                return Err(NativeError::new(DiagnosticCode::OperationInProgress, true));
+                return Err(error);
             }
-            let Some(pending) = transient.remove_pairing(&input.pairing_handle) else {
-                self.lifecycle.cancel_request(&request);
-                return Err(NativeError::reconcile_required());
-            };
-            pending
         };
         let app_name = pending.app_name;
         let installation_id = pending.installation_id;
@@ -2297,6 +2457,7 @@ impl NativeSdkBoundary {
             Ok(exchanged) => exchanged,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
+                self.remove_credential_reservation(&commit_handle, &input.authority)?;
                 return Err(error);
             }
         };
@@ -2309,40 +2470,75 @@ impl NativeSdkBoundary {
             Ok(credential) => credential,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
+                self.remove_credential_reservation(&commit_handle, &input.authority)?;
                 return Err(error);
             }
         };
-        self.lifecycle.finish_request(&request)?;
-        let commit_handle = format!("commit:{}", Uuid::new_v4());
+        let authority_fingerprint = match authority.fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                self.remove_credential_reservation(&commit_handle, &input.authority)?;
+                return Err(error);
+            }
+        };
         let credential = CredentialRecord {
             installation_id,
-            authority_fingerprint: authority.fingerprint()?,
+            authority_fingerprint,
             bearer: exchanged.bearer,
         };
-        let credential = PreparedCredential::from_record(&credential)?;
-        let now = current_time_millis();
-        let mut transient = self
-            .transient
-            .lock()
-            .map_err(|_| NativeError::service_unavailable())?;
-        transient.prune_terminal_credentials(now)?;
-        if managed && transient.credential_update_in_progress(&input.authority)? {
-            return Err(NativeError::credential_update_in_progress());
-        }
-        let sequence = transient.allocate_sequence()?;
-        transient.credentials.insert(
-            commit_handle.clone(),
-            Arc::new(StagedCredential::new(
-                input.authority.clone(),
-                credential,
-                sequence,
-            )),
-        );
-        drop(transient);
-        if let Err(error) = self.lifecycle.descriptor(&input.authority) {
-            if let Ok(mut transient) = self.transient.lock() {
-                transient.credentials.remove(&commit_handle);
+        let credential = match PreparedCredential::from_record(&credential) {
+            Ok(credential) => credential,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                self.remove_credential_reservation(&commit_handle, &input.authority)?;
+                return Err(error);
             }
+        };
+        let now = current_time_millis();
+        let stage_result = (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            {
+                let mut transient = self
+                    .transient
+                    .lock()
+                    .map_err(|_| NativeError::service_unavailable())?;
+                transient.prune_credentials(now)?;
+                let reserved = transient
+                    .credential_reservations
+                    .get(&commit_handle)
+                    .is_some_and(|reservation| reservation.authority == input.authority);
+                if !reserved {
+                    return Err(NativeError::reconcile_required());
+                }
+            }
+            self.lifecycle.finish_request(&request)?;
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            let reserved = transient
+                .credential_reservations
+                .get(&commit_handle)
+                .is_some_and(|reservation| reservation.authority == input.authority);
+            if !reserved {
+                return Err(NativeError::reconcile_required());
+            }
+            transient.credential_reservations.remove(&commit_handle);
+            transient.credentials.insert(
+                commit_handle.clone(),
+                Arc::new(StagedCredential::new(
+                    input.authority.clone(),
+                    credential,
+                    now,
+                )),
+            );
+            Ok(())
+        })();
+        if let Err(error) = stage_result {
+            self.lifecycle.cancel_request(&request);
+            self.remove_credential_reservation(&commit_handle, &input.authority)?;
             return Err(error);
         }
         Ok(OperationResult {
@@ -2362,6 +2558,8 @@ impl NativeSdkBoundary {
     ) -> Result<OperationResult<Value>, NativeError> {
         validate_remote_request_id(&input.pairing_request_id)?;
         let pairing_handle = {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.descriptor(&input.authority)?;
             let mut transient = self
                 .transient
                 .lock()
@@ -2396,17 +2594,25 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        let pairing_handle = match self.transient.lock() {
-            Ok(mut transient) => {
+        let pairing_handle = match (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            Ok({
                 transient.prune_pairings(current_time_millis());
                 transient
                     .managed_pairings
                     .get(&input.pairing_request_id)
                     .cloned()
-            }
-            Err(_) => {
+            })
+        })() {
+            Ok(pairing_handle) => pairing_handle,
+            Err(error) => {
                 self.lifecycle.cancel_request(&request);
-                return Err(NativeError::service_unavailable());
+                return Err(error);
             }
         };
         let Some(pairing_handle) = pairing_handle else {
@@ -2418,8 +2624,20 @@ impl NativeSdkBoundary {
             return Err(error);
         }
         let boundary = Arc::clone(self);
+        let cleanup_request = request.clone();
+        let cleanup_authority = input.authority.clone();
         let cleanup = tauri::async_runtime::spawn_blocking(move || {
-            boundary.cleanup_recoverable_credentials()
+            let _mutation = boundary.lock_authority_mutation()?;
+            boundary.lifecycle.validate_request(&cleanup_request)?;
+            let prior_cleanup_pending = boundary.cleanup_recoverable_credentials(
+                |credential| credential.authority.generation < cleanup_authority.generation,
+                RecoverableCleanupMode::Invalidate,
+            )?;
+            let current_cleanup_pending = boundary.cleanup_recoverable_credentials(
+                |credential| credential.authority == cleanup_authority,
+                RecoverableCleanupMode::Observe,
+            )?;
+            Ok(prior_cleanup_pending || current_cleanup_pending)
         })
         .await;
         let cleanup_pending = match cleanup {
@@ -2495,15 +2713,32 @@ impl NativeSdkBoundary {
         &self,
         input: CommitHandleCommandInput,
     ) -> Result<OperationResult<()>, NativeError> {
+        self.pairing_commit_with_transition(input, || {})
+    }
+
+    fn pairing_commit_with_transition(
+        &self,
+        input: CommitHandleCommandInput,
+        after_lookup: impl FnOnce(),
+    ) -> Result<OperationResult<()>, NativeError> {
         validate_opaque_handle(&input.commit_handle, "commit:")?;
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
-        let staged = match self.transient.lock() {
-            Ok(transient) => transient.credentials.get(&input.commit_handle).cloned(),
-            Err(_) => {
+        let staged = match (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            transient.prune_credentials(current_time_millis())?;
+            Ok(transient.credentials.get(&input.commit_handle).cloned())
+        })() {
+            Ok(staged) => staged,
+            Err(error) => {
                 self.lifecycle.cancel_request(&request);
-                return Err(NativeError::service_unavailable());
+                return Err(error);
             }
         };
         let Some(staged) = staged else {
@@ -2514,6 +2749,7 @@ impl NativeSdkBoundary {
             self.lifecycle.cancel_request(&request);
             return Err(NativeError::reconcile_required());
         }
+        after_lookup();
         match staged.resolve_rollback_before_commit(self.custody.as_ref()) {
             Ok(Some(completion_error)) => {
                 let lifecycle_error = self.lifecycle.finish_request(&request).err();
@@ -2525,7 +2761,38 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         }
-        let credential = match staged.begin_write() {
+        let credential = match (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let prior_cleanup_pending = self.cleanup_recoverable_credentials(
+                |credential| credential.authority.generation < input.authority.generation,
+                RecoverableCleanupMode::Invalidate,
+            )?;
+            if prior_cleanup_pending {
+                return Err(NativeError::credential_update_in_progress());
+            }
+            let (is_attached, competing_mutation) = {
+                let mut transient = self
+                    .transient
+                    .lock()
+                    .map_err(|_| NativeError::service_unavailable())?;
+                transient.prune_credentials(current_time_millis())?;
+                (
+                    transient
+                        .credentials
+                        .get(&input.commit_handle)
+                        .is_some_and(|current| Arc::ptr_eq(current, &staged)),
+                    transient.credential_mutation_in_progress_except(&staged)?,
+                )
+            };
+            if !is_attached {
+                return Err(NativeError::reconcile_required());
+            }
+            if competing_mutation {
+                return Err(NativeError::credential_update_in_progress());
+            }
+            staged.begin_write()
+        })() {
             Ok(credential) => credential,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
@@ -2534,9 +2801,15 @@ impl NativeSdkBoundary {
         };
         let write_result = self.custody.write_credential(&credential);
         let lifecycle_error = self.lifecycle.finish_request(&request).err();
-        staged.finish_write(self.custody.as_ref(), write_result, lifecycle_error)?;
+        let request_became_stale = lifecycle_error.is_some();
+        let finish_result =
+            staged.finish_write(self.custody.as_ref(), write_result, lifecycle_error);
+        if request_became_stale && !staged.requires_recoverable_cleanup()? {
+            self.remove_staged_credential_if_same(&input.commit_handle, &staged)?;
+        }
+        finish_result?;
         if let Ok(mut transient) = self.transient.lock() {
-            let _ = transient.prune_terminal_credentials(current_time_millis());
+            let _ = transient.prune_credentials(current_time_millis());
         }
         Ok(OperationResult {
             authority: input.authority,
@@ -2592,6 +2865,25 @@ impl NativeSdkBoundary {
         Ok(())
     }
 
+    fn remove_credential_reservation(
+        &self,
+        commit_handle: &str,
+        authority: &AuthorityReference,
+    ) -> Result<(), NativeError> {
+        let mut transient = self
+            .transient
+            .lock()
+            .map_err(|_| NativeError::service_unavailable())?;
+        let is_same = transient
+            .credential_reservations
+            .get(commit_handle)
+            .is_some_and(|reservation| reservation.authority == *authority);
+        if is_same {
+            transient.credential_reservations.remove(commit_handle);
+        }
+        Ok(())
+    }
+
     pub fn pairing_discard(
         &self,
         input: CommitHandleCommandInput,
@@ -2600,19 +2892,20 @@ impl NativeSdkBoundary {
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
-        let staged = match self.transient.lock() {
-            Ok(mut transient) => {
-                match transient.prune_terminal_credentials(current_time_millis()) {
-                    Ok(()) => transient.credentials.get(&input.commit_handle).cloned(),
-                    Err(error) => {
-                        self.lifecycle.cancel_request(&request);
-                        return Err(error);
-                    }
-                }
-            }
-            Err(_) => {
+        let staged = match (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let mut transient = self
+                .transient
+                .lock()
+                .map_err(|_| NativeError::service_unavailable())?;
+            transient.prune_credentials(current_time_millis())?;
+            Ok(transient.credentials.get(&input.commit_handle).cloned())
+        })() {
+            Ok(staged) => staged,
+            Err(error) => {
                 self.lifecycle.cancel_request(&request);
-                return Err(NativeError::service_unavailable());
+                return Err(error);
             }
         };
         let result = match staged {
@@ -2626,15 +2919,7 @@ impl NativeSdkBoundary {
                         return Err(error);
                     }
                 };
-                match self.transient.lock() {
-                    Ok(mut transient) => {
-                        transient.credentials.remove(&input.commit_handle);
-                    }
-                    Err(_) => {
-                        self.lifecycle.cancel_request(&request);
-                        return Err(NativeError::service_unavailable());
-                    }
-                }
+                self.remove_staged_credential_if_same(&input.commit_handle, &staged)?;
                 result.into()
             }
         };
@@ -2650,7 +2935,6 @@ impl NativeSdkBoundary {
         &self,
         input: CredentialCommandInput,
     ) -> Result<OperationResult<CredentialStateOutput>, NativeError> {
-        let cleanup_pending = self.cleanup_recoverable_credentials()?;
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
@@ -2668,18 +2952,32 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        let update_in_progress = {
-            let transient = match self.transient.lock() {
-                Ok(transient) => transient,
-                Err(_) => {
-                    self.lifecycle.cancel_request(&request);
-                    return Err(NativeError::service_unavailable());
-                }
+        let cleanup = (|| {
+            let _mutation = self.lock_authority_mutation()?;
+            self.lifecycle.validate_request(&request)?;
+            let prior_cleanup_pending = self.cleanup_recoverable_credentials(
+                |credential| credential.authority.generation < input.authority.generation,
+                RecoverableCleanupMode::Invalidate,
+            )?;
+            let current_cleanup_pending = self.cleanup_recoverable_credentials(
+                |credential| credential.authority == input.authority,
+                RecoverableCleanupMode::Observe,
+            )?;
+            let update_in_progress = {
+                let mut transient = self
+                    .transient
+                    .lock()
+                    .map_err(|_| NativeError::service_unavailable())?;
+                transient.prune_credentials(current_time_millis())?;
+                transient.credential_update_in_progress(&input.authority)?
             };
-            transient.credential_update_in_progress(&input.authority)
-        };
-        let update_in_progress = match update_in_progress {
-            Ok(update_in_progress) => update_in_progress,
+            Ok((
+                prior_cleanup_pending || current_cleanup_pending,
+                update_in_progress,
+            ))
+        })();
+        let (cleanup_pending, update_in_progress) = match cleanup {
+            Ok(cleanup) => cleanup,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
                 return Err(error);
@@ -2728,6 +3026,20 @@ impl NativeSdkBoundary {
         let request = self
             .lifecycle
             .begin_request(&input.authority, &input.request_id)?;
+        let authority = match self.lifecycle.descriptor(&input.authority) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
+        let authority_fingerprint = match authority.fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                self.lifecycle.cancel_request(&request);
+                return Err(error);
+            }
+        };
         let installation_id = match self.custody.installation_id() {
             Ok(installation_id) => installation_id,
             Err(error) => {
@@ -2735,14 +3047,65 @@ impl NativeSdkBoundary {
                 return Err(error);
             }
         };
-        let deleted = match self.custody.delete_credential(&installation_id) {
-            Ok(deleted) => deleted,
+        let lookup = match self.custody.read_credential(&installation_id) {
+            Ok(lookup) => lookup,
             Err(error) => {
                 self.lifecycle.cancel_request(&request);
                 return Err(error);
             }
         };
-        self.lifecycle.finish_request(&request)?;
+        let expected = match lookup {
+            CredentialLookup::Present(credential)
+                if credential.authority_fingerprint == authority_fingerprint =>
+            {
+                match PreparedCredential::from_record(&credential) {
+                    Ok(expected) => Some(expected),
+                    Err(error) => {
+                        self.lifecycle.cancel_request(&request);
+                        return Err(error);
+                    }
+                }
+            }
+            CredentialLookup::Missing => None,
+            CredentialLookup::Invalid | CredentialLookup::Present(_) => {
+                self.lifecycle.finish_request(&request)?;
+                return Err(NativeError::new(DiagnosticCode::StaleRecord, false));
+            }
+        };
+        let deleted = match expected {
+            Some(expected) => {
+                let _mutation = match self.lock_authority_mutation() {
+                    Ok(mutation) => mutation,
+                    Err(error) => {
+                        self.lifecycle.cancel_request(&request);
+                        return Err(error);
+                    }
+                };
+                if let Err(error) = self.lifecycle.validate_request(&request) {
+                    self.lifecycle.cancel_request(&request);
+                    return Err(error);
+                }
+                let outcome = match self.custody.compare_delete_credential(&expected) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.lifecycle.cancel_request(&request);
+                        return Err(error);
+                    }
+                };
+                self.lifecycle.finish_request(&request)?;
+                match outcome {
+                    CredentialDeleteResult::Deleted => true,
+                    CredentialDeleteResult::Absent => false,
+                    CredentialDeleteResult::Changed => {
+                        return Err(NativeError::credential_update_in_progress());
+                    }
+                }
+            }
+            None => {
+                self.lifecycle.finish_request(&request)?;
+                false
+            }
+        };
         Ok(OperationResult {
             authority: input.authority,
             request_id: input.request_id,
@@ -2967,8 +3330,8 @@ impl NativeSdkBoundary {
     }
 
     pub fn diagnostics(&self) -> NativeDiagnostics {
-        let cleanup = self.cleanup_recoverable_credentials();
-        let custody = match cleanup {
+        let cleanup_pending = self.recoverable_cleanup_pending();
+        let custody = match cleanup_pending {
             Err(error) => SecurityCheck {
                 component: SecurityComponent::CaveCredentialCustody,
                 status: SecurityStatus::Unavailable,
@@ -3302,8 +3665,8 @@ mod tests {
         ProviderPairingCreated, ProviderPairingExchange,
     };
     use crate::cave_credentials::{
-        CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialStoreAvailability,
-        PreparedCredential, SecretValue,
+        CredentialCustody, CredentialDeleteResult, CredentialLookup, CredentialRecord,
+        CredentialStoreAvailability, PreparedCredential, SecretValue,
     };
     use crate::sdk_diagnostics::{DiagnosticCode, NativeResponseOperation};
 
@@ -3505,10 +3868,6 @@ mod tests {
             self.present.store(false, Ordering::Relaxed);
             Ok(CredentialDeleteResult::Deleted)
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(self.present.swap(false, Ordering::Relaxed))
-        }
     }
 
     impl CredentialCustody for FakeCustody {
@@ -3540,10 +3899,6 @@ mod tests {
             _expected: &PreparedCredential,
         ) -> Result<CredentialDeleteResult, crate::NativeError> {
             Ok(CredentialDeleteResult::Absent)
-        }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(false)
         }
     }
 
@@ -3730,10 +4085,6 @@ mod tests {
             self.present.store(false, Ordering::Relaxed);
             Ok(CredentialDeleteResult::Deleted)
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(self.present.swap(false, Ordering::Relaxed))
-        }
     }
 
     impl ManagedNativeAuthorityProvider for FakeProvider {
@@ -3898,6 +4249,144 @@ mod tests {
         writes: AtomicUsize,
     }
 
+    #[derive(Clone)]
+    struct StoredCredentialFixture {
+        authority_fingerprint: String,
+        bearer: Vec<u8>,
+        encoded: Vec<u8>,
+    }
+
+    struct ForgetRaceCustody {
+        stored: Mutex<Option<StoredCredentialFixture>>,
+        gate: Mutex<(bool, bool)>,
+        changed: Condvar,
+    }
+
+    impl ForgetRaceCustody {
+        fn blocking(authority_fingerprint: String, bearer: &[u8]) -> Self {
+            Self::new(authority_fingerprint, bearer, false)
+        }
+
+        fn ready(authority_fingerprint: String, bearer: &[u8]) -> Self {
+            Self::new(authority_fingerprint, bearer, true)
+        }
+
+        fn new(authority_fingerprint: String, bearer: &[u8], released: bool) -> Self {
+            Self {
+                stored: Mutex::new(Some(Self::fixture(authority_fingerprint, bearer))),
+                gate: Mutex::new((false, released)),
+                changed: Condvar::new(),
+            }
+        }
+
+        fn fixture(authority_fingerprint: String, bearer: &[u8]) -> StoredCredentialFixture {
+            let credential = CredentialRecord {
+                installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                authority_fingerprint: authority_fingerprint.clone(),
+                bearer: SecretValue::bearer(bearer.to_vec()).expect("test bearer"),
+            };
+            let encoded = PreparedCredential::from_record(&credential)
+                .expect("test credential")
+                .exact_value()
+                .to_vec();
+            StoredCredentialFixture {
+                authority_fingerprint,
+                bearer: bearer.to_vec(),
+                encoded,
+            }
+        }
+
+        fn block_until_released(&self) {
+            let mut gate = self.gate.lock().expect("forget gate lock");
+            gate.0 = true;
+            self.changed.notify_all();
+            while !gate.1 {
+                gate = self.changed.wait(gate).expect("forget gate wait");
+            }
+        }
+
+        fn wait_until_operation_starts(&self) {
+            let mut gate = self.gate.lock().expect("forget gate lock");
+            while !gate.0 {
+                gate = self.changed.wait(gate).expect("forget gate wait");
+            }
+        }
+
+        fn release(&self) {
+            let mut gate = self.gate.lock().expect("forget gate lock");
+            gate.1 = true;
+            self.changed.notify_all();
+        }
+
+        fn replace(&self, authority_fingerprint: String, bearer: &[u8]) {
+            *self.stored.lock().expect("forget store lock") =
+                Some(Self::fixture(authority_fingerprint, bearer));
+        }
+
+        fn stored(&self) -> Option<Vec<u8>> {
+            self.stored
+                .lock()
+                .expect("forget store lock")
+                .as_ref()
+                .map(|credential| credential.encoded.clone())
+        }
+    }
+
+    impl CredentialCustody for ForgetRaceCustody {
+        fn availability(&self) -> CredentialStoreAvailability {
+            CredentialStoreAvailability::Available
+        }
+
+        fn installation_id(&self) -> Result<String, crate::NativeError> {
+            Ok("00000000-0000-4000-8000-000000000010".into())
+        }
+
+        fn read_credential(
+            &self,
+            _installation_id: &str,
+        ) -> Result<CredentialLookup, crate::NativeError> {
+            let credential = self.stored.lock().expect("forget store lock").clone();
+            self.block_until_released();
+            let Some(credential) = credential else {
+                return Ok(CredentialLookup::Missing);
+            };
+            Ok(CredentialLookup::Present(CredentialRecord {
+                installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                authority_fingerprint: credential.authority_fingerprint,
+                bearer: SecretValue::bearer(credential.bearer)?,
+            }))
+        }
+
+        fn write_credential(
+            &self,
+            credential: &PreparedCredential,
+        ) -> Result<(), crate::NativeError> {
+            let mut stored = self.stored.lock().expect("forget store lock");
+            let Some(current) = stored.as_mut() else {
+                return Err(crate::NativeError::invalid_response());
+            };
+            current.encoded = credential.exact_value().to_vec();
+            Ok(())
+        }
+
+        fn compare_delete_credential(
+            &self,
+            expected: &PreparedCredential,
+        ) -> Result<CredentialDeleteResult, crate::NativeError> {
+            let mut stored = self.stored.lock().expect("forget store lock");
+            match stored.as_ref() {
+                None => Ok(CredentialDeleteResult::Absent),
+                Some(current) if current.encoded.as_slice() != expected.exact_value() => {
+                    Ok(CredentialDeleteResult::Changed)
+                }
+                Some(_) => {
+                    *stored = None;
+                    Ok(CredentialDeleteResult::Deleted)
+                }
+            }
+        }
+    }
+
     impl RaceCustody {
         fn new(fail_after_write: bool) -> Self {
             Self {
@@ -3960,21 +4449,13 @@ mod tests {
                 }
             }
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(self
-                .stored
-                .lock()
-                .expect("test store lock")
-                .take()
-                .is_some())
-        }
     }
 
     struct BlockingCustody {
         stored: Mutex<Option<Vec<u8>>>,
         gate: Mutex<(bool, bool)>,
         changed: Condvar,
+        writes: AtomicUsize,
     }
 
     struct ContentionCustody {
@@ -4062,10 +4543,6 @@ mod tests {
                 }
             }
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(false)
-        }
     }
 
     impl ContentionCustody {
@@ -4137,14 +4614,107 @@ mod tests {
                 }
             }
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(false)
-        }
     }
 
     struct BlockingPollProvider {
         gate: Arc<(Mutex<(bool, bool)>, Condvar)>,
+    }
+
+    struct BlockingExchangeProvider {
+        gate: Arc<(Mutex<(bool, bool)>, Condvar)>,
+        next_pairing: AtomicUsize,
+        exchanges: AtomicUsize,
+    }
+
+    impl BlockingExchangeProvider {
+        fn new() -> Self {
+            Self {
+                gate: Arc::new((Mutex::new((false, false)), Condvar::new())),
+                next_pairing: AtomicUsize::new(1),
+                exchanges: AtomicUsize::new(0),
+            }
+        }
+
+        fn wait_until_exchanging(&self) {
+            let (lock, changed) = &*self.gate;
+            let mut state = lock.lock().expect("exchange gate");
+            while !state.0 {
+                state = changed.wait(state).expect("exchange wait");
+            }
+        }
+
+        fn release_exchange(&self) {
+            let (lock, changed) = &*self.gate;
+            let mut state = lock.lock().expect("exchange gate");
+            state.1 = true;
+            changed.notify_all();
+        }
+    }
+
+    impl ManagedNativeAuthorityProvider for BlockingExchangeProvider {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn health(&self, authority: AuthorityDescriptor) -> ProviderFuture<crate::NativeResponse> {
+            FakeProvider.health(authority)
+        }
+
+        fn pairing_create(
+            &self,
+            _authority: AuthorityDescriptor,
+            _request: PairingRequest,
+        ) -> ProviderFuture<ProviderPairingCreated> {
+            let next = self.next_pairing.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async move {
+                Ok(ProviderPairingCreated {
+                    remote_request_id: format!("00000000-0000-4000-8000-{next:012x}"),
+                    expires_at: 2_000_000_000_000,
+                    pairing_secret: SecretValue::pairing(
+                        b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_vec(),
+                    )?,
+                })
+            })
+        }
+
+        fn pairing_poll(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<Value> {
+            FakeProvider.pairing_poll(authority, remote_request_id, pairing_secret)
+        }
+
+        fn pairing_exchange(
+            &self,
+            authority: AuthorityDescriptor,
+            remote_request_id: String,
+            pairing_secret: SecretValue,
+        ) -> ProviderFuture<ProviderPairingExchange> {
+            if self.exchanges.fetch_add(1, Ordering::Relaxed) == 0 {
+                let (lock, changed) = &*self.gate;
+                let mut state = match lock.lock() {
+                    Ok(state) => state,
+                    Err(_) => {
+                        return Box::pin(async { Err(crate::NativeError::service_unavailable()) });
+                    }
+                };
+                state.0 = true;
+                changed.notify_all();
+                while !state.1 {
+                    state = match changed.wait(state) {
+                        Ok(state) => state,
+                        Err(_) => {
+                            return Box::pin(async {
+                                Err(crate::NativeError::service_unavailable())
+                            });
+                        }
+                    };
+                }
+            }
+            FakeProvider.pairing_exchange(authority, remote_request_id, pairing_secret)
+        }
     }
 
     impl BlockingPollProvider {
@@ -4290,10 +4860,6 @@ mod tests {
         ) -> Result<CredentialDeleteResult, crate::NativeError> {
             Ok(CredentialDeleteResult::Absent)
         }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(false)
-        }
     }
 
     impl BlockingCustody {
@@ -4302,6 +4868,7 @@ mod tests {
                 stored: Mutex::new(None),
                 gate: Mutex::new((false, false)),
                 changed: Condvar::new(),
+                writes: AtomicUsize::new(0),
             }
         }
 
@@ -4343,13 +4910,14 @@ mod tests {
             &self,
             credential: &PreparedCredential,
         ) -> Result<(), crate::NativeError> {
-            let mut gate = self.gate.lock().expect("test gate lock");
-            gate.0 = true;
-            self.changed.notify_all();
-            while !gate.1 {
-                gate = self.changed.wait(gate).expect("test gate wait");
+            if self.writes.fetch_add(1, Ordering::Relaxed) == 0 {
+                let mut gate = self.gate.lock().expect("test gate lock");
+                gate.0 = true;
+                self.changed.notify_all();
+                while !gate.1 {
+                    gate = self.changed.wait(gate).expect("test gate wait");
+                }
             }
-            drop(gate);
             *self.stored.lock().expect("test store lock") = Some(credential.exact_value().to_vec());
             Ok(())
         }
@@ -4369,15 +4937,6 @@ mod tests {
                     Ok(CredentialDeleteResult::Deleted)
                 }
             }
-        }
-
-        fn delete_credential(&self, _installation_id: &str) -> Result<bool, crate::NativeError> {
-            Ok(self
-                .stored
-                .lock()
-                .expect("test store lock")
-                .take()
-                .is_some())
         }
     }
 
@@ -4790,6 +5349,137 @@ mod tests {
     }
 
     #[test]
+    fn forget_never_deletes_a_same_authority_replacement_credential() {
+        let descriptor = authority("00000000-0000-4000-8000-000000000001");
+        let custody = Arc::new(ForgetRaceCustody::blocking(
+            descriptor.fingerprint().expect("fixture fingerprint"),
+            b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        ));
+        let boundary = Arc::new(NativeSdkBoundary::new(
+            custody.clone(),
+            Arc::new(FakeProvider),
+        ));
+        let authority = boundary
+            .authority_open(descriptor.clone())
+            .expect("authority should open");
+        let forget_boundary = Arc::clone(&boundary);
+        let forget = std::thread::spawn(move || {
+            forget_boundary.forget_credential(CredentialCommandInput {
+                authority,
+                request_id: "request-forget".into(),
+            })
+        });
+
+        custody.wait_until_operation_starts();
+        custody.replace(
+            descriptor.fingerprint().expect("replacement fingerprint"),
+            b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        );
+        let replacement = custody.stored();
+        custody.release();
+
+        let error = forget
+            .join()
+            .expect("forget thread")
+            .expect_err("replacement-aware forget must surface contention");
+        assert_eq!(error.code, DiagnosticCode::CredentialUpdateInProgress);
+        assert!(error.retryable);
+        assert_eq!(custody.stored(), replacement);
+    }
+
+    #[test]
+    fn stale_forget_never_deletes_a_replacement_authority_credential() {
+        let first_descriptor = authority("00000000-0000-4000-8000-000000000001");
+        let second_descriptor = authority("00000000-0000-4000-8000-000000000002");
+        let custody = Arc::new(ForgetRaceCustody::blocking(
+            first_descriptor
+                .fingerprint()
+                .expect("first fixture fingerprint"),
+            b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        ));
+        let boundary = Arc::new(NativeSdkBoundary::new(
+            custody.clone(),
+            Arc::new(FakeProvider),
+        ));
+        let first = boundary
+            .authority_open(first_descriptor)
+            .expect("first authority should open");
+        let forget_boundary = Arc::clone(&boundary);
+        let forget = std::thread::spawn(move || {
+            forget_boundary.forget_credential(CredentialCommandInput {
+                authority: first,
+                request_id: "request-stale-forget".into(),
+            })
+        });
+
+        custody.wait_until_operation_starts();
+        let second = boundary
+            .authority_open(second_descriptor.clone())
+            .expect("replacement authority should open");
+        custody.replace(
+            second_descriptor
+                .fingerprint()
+                .expect("replacement fixture fingerprint"),
+            b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        );
+        let replacement = custody.stored();
+        custody.release();
+
+        assert_eq!(
+            forget
+                .join()
+                .expect("forget thread")
+                .expect_err("stale forget must fail before deletion")
+                .code,
+            DiagnosticCode::ReconcileRequired
+        );
+        assert_eq!(custody.stored(), replacement);
+        assert!(boundary.lifecycle.descriptor(&second).is_ok());
+    }
+
+    #[test]
+    fn wrong_authority_forget_does_not_delete_the_current_credential() {
+        let descriptor = authority("00000000-0000-4000-8000-000000000001");
+        let custody = Arc::new(ForgetRaceCustody::ready(
+            format!("sha256:{}", "b".repeat(64)),
+            b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        ));
+        let expected = custody.stored();
+        let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+        let authority = boundary
+            .authority_open(descriptor)
+            .expect("authority should open");
+
+        let error = boundary
+            .forget_credential(CredentialCommandInput {
+                authority,
+                request_id: "request-wrong-authority-forget".into(),
+            })
+            .expect_err("wrong-authority credential must not be reported as missing");
+
+        assert_eq!(error.code, DiagnosticCode::StaleRecord);
+        assert_eq!(custody.stored(), expected);
+    }
+
+    #[test]
+    fn forget_reports_false_only_for_confirmed_absence() {
+        let boundary =
+            NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+        let authority = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("authority should open");
+
+        let forgotten = boundary
+            .forget_credential(CredentialCommandInput {
+                authority,
+                request_id: "request-forget-missing".into(),
+            })
+            .expect("confirmed absence should complete");
+
+        assert!(!forgotten.result);
+    }
+
+    #[test]
     fn commit_handle_can_retry_after_lock_contention() {
         tauri::async_runtime::block_on(async {
             let custody = Arc::new(ContentionCustody::new(1, 0));
@@ -4813,6 +5503,129 @@ mod tests {
                     commit_handle,
                 })
                 .expect("same commit handle should retry successfully");
+        });
+    }
+
+    #[test]
+    fn retryable_write_contention_refreshes_pending_credential_retention() {
+        let authority = super::AuthorityReference {
+            handle: "authority:00000000-0000-4000-8000-000000000001".into(),
+            generation: 1,
+        };
+        let credential = CredentialRecord {
+            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+            authority_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            bearer: SecretValue::bearer(b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_vec())
+                .expect("test bearer"),
+        };
+        let staged = super::StagedCredential::new(
+            authority,
+            PreparedCredential::from_record(&credential).expect("test credential"),
+            0,
+        );
+        let _credential = staged.begin_write().expect("write should begin");
+
+        assert_eq!(
+            staged
+                .finish_write(
+                    &FakeCustody {
+                        writes: AtomicUsize::new(0),
+                    },
+                    Err(crate::NativeError::credential_update_in_progress()),
+                    None,
+                )
+                .expect_err("retryable contention should preserve the handle")
+                .code,
+            DiagnosticCode::CredentialUpdateInProgress
+        );
+        assert!(matches!(
+            staged.retention().expect("retention should remain readable"),
+            super::StagedCredentialRetention::Pending(staged_at) if staged_at > 0
+        ));
+    }
+
+    #[test]
+    fn managed_exchange_reserves_capacity_before_consuming_pairing_state() {
+        tauri::async_runtime::block_on(async {
+            let provider = Arc::new(BlockingExchangeProvider::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                Arc::new(RaceCustody::new(false)),
+                provider.clone(),
+            ));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let first = boundary
+                .managed_pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-first-create".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("first managed pairing should be created");
+            let second = boundary
+                .managed_pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-second-create".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("second managed pairing should be created");
+            let first_request_id = first.result.request_id;
+            let second_request_id = second.result.request_id;
+            let first_boundary = Arc::clone(&boundary);
+            let first_authority = authority.clone();
+            let first_exchange = std::thread::spawn(move || {
+                tauri::async_runtime::block_on(first_boundary.managed_pairing_exchange(
+                    super::ManagedPairingCommandInput {
+                        authority: first_authority,
+                        request_id: "request-first-exchange".into(),
+                        pairing_request_id: first_request_id,
+                    },
+                ))
+            });
+            provider.wait_until_exchanging();
+            assert_eq!(
+                boundary
+                    .transient
+                    .lock()
+                    .expect("transient lock")
+                    .credential_reservations
+                    .len(),
+                1
+            );
+
+            let second_result = boundary
+                .managed_pairing_exchange(super::ManagedPairingCommandInput {
+                    authority,
+                    request_id: "request-second-exchange".into(),
+                    pairing_request_id: second_request_id.clone(),
+                })
+                .await;
+            provider.release_exchange();
+            first_exchange
+                .join()
+                .expect("first exchange thread")
+                .expect("first exchange should complete");
+
+            assert_eq!(
+                second_result
+                    .expect_err("second exchange must wait for the active reservation")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(provider.exchanges.load(Ordering::Relaxed), 1);
+            let transient = boundary.transient.lock().expect("transient lock");
+            assert!(transient.managed_pairings.contains_key(&second_request_id));
+            assert!(transient.credential_reservations.is_empty());
         });
     }
 
@@ -4982,6 +5795,159 @@ mod tests {
                 1,
                 "unauthorized stale commands must not advance credential cleanup"
             );
+        });
+    }
+
+    #[test]
+    fn stale_authority_close_does_not_run_credential_cleanup() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(2));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle,
+                    })
+                    .expect_err("initial rollback should contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(custody.rollback_contentions.load(Ordering::Relaxed), 1);
+
+            let mut stale_authority = authority;
+            stale_authority.generation += 1;
+            assert_eq!(
+                boundary
+                    .authority_close(super::CloseAuthorityInput {
+                        authority: stale_authority,
+                    })
+                    .expect_err("stale close must fail before cleanup")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert_eq!(
+                custody.rollback_contentions.load(Ordering::Relaxed),
+                1,
+                "stale close must not advance credential cleanup"
+            );
+            assert!(custody.stored().is_some());
+        });
+    }
+
+    #[test]
+    fn stale_credential_state_does_not_run_credential_cleanup() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(2));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-commit".into(),
+                        commit_handle,
+                    })
+                    .expect_err("initial rollback should contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(custody.rollback_contentions.load(Ordering::Relaxed), 1);
+
+            let mut stale_authority = authority;
+            stale_authority.generation += 1;
+            assert_eq!(
+                boundary
+                    .credential_state(CredentialCommandInput {
+                        authority: stale_authority,
+                        request_id: "request-stale-state".into(),
+                    })
+                    .expect_err("stale state must fail before cleanup")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert_eq!(
+                custody.rollback_contentions.load(Ordering::Relaxed),
+                1,
+                "stale state must not advance credential cleanup"
+            );
+            assert!(custody.stored().is_some());
+        });
+    }
+
+    #[test]
+    fn credential_state_does_not_abort_an_active_credential_write() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(BlockingCustody::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(FakeProvider),
+            ));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            let commit_boundary = Arc::clone(&boundary);
+            let commit_authority = authority.clone();
+            let commit = std::thread::spawn(move || {
+                commit_boundary.pairing_commit(super::CommitHandleCommandInput {
+                    authority: commit_authority,
+                    request_id: "request-commit".into(),
+                    commit_handle,
+                })
+            });
+            custody.wait_until_write_starts();
+
+            let state = boundary
+                .credential_state(CredentialCommandInput {
+                    authority,
+                    request_id: "request-state-during-write".into(),
+                })
+                .expect("status should observe an active write");
+            assert!(matches!(
+                state.result.status,
+                super::CredentialState::UpdateInProgress
+            ));
+            custody.release_write();
+
+            commit
+                .join()
+                .expect("commit thread")
+                .expect("status must not abort the active write");
+            assert!(custody.stored().is_some());
+        });
+    }
+
+    #[test]
+    fn diagnostics_does_not_advance_recoverable_credential_cleanup() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(2));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority, commit_handle) = stage_test_credential(&boundary).await;
+            assert_eq!(
+                boundary
+                    .pairing_commit(super::CommitHandleCommandInput {
+                        authority,
+                        request_id: "request-commit".into(),
+                        commit_handle,
+                    })
+                    .expect_err("initial rollback should contend")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            assert_eq!(custody.rollback_contentions.load(Ordering::Relaxed), 1);
+
+            let diagnostics = boundary.diagnostics();
+
+            assert_eq!(
+                custody.rollback_contentions.load(Ordering::Relaxed),
+                1,
+                "passive diagnostics must not advance credential cleanup"
+            );
+            assert!(custody.stored().is_some());
+            assert!(diagnostics
+                .checks
+                .iter()
+                .any(|check| { check.code == Some(DiagnosticCode::CredentialUpdateInProgress) }));
         });
     }
 
@@ -5389,6 +6355,119 @@ mod tests {
     }
 
     #[test]
+    fn authority_replacement_before_write_keeps_rollback_state_attached() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(PartialWriteCustody::with_contentions(1));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let (authority_reference, commit_handle) = stage_test_credential(&boundary).await;
+            let commit_handle_for_assertion = commit_handle.clone();
+
+            assert_eq!(
+                boundary
+                    .pairing_commit_with_transition(
+                        super::CommitHandleCommandInput {
+                            authority: authority_reference,
+                            request_id: "request-commit".into(),
+                            commit_handle,
+                        },
+                        || {
+                            boundary
+                                .authority_open(authority("00000000-0000-4000-8000-000000000002"))
+                                .expect("replacement authority should open");
+                        },
+                    )
+                    .expect_err("stale commit must fail before writing")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+            assert_eq!(custody.writes.load(Ordering::Relaxed), 0);
+            assert!(custody.stored().is_none());
+            assert!(!boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .credentials
+                .contains_key(&commit_handle_for_assertion));
+        });
+    }
+
+    #[test]
+    fn replacement_credential_waits_for_prior_generation_write_disposition() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(BlockingCustody::new());
+            let boundary = Arc::new(NativeSdkBoundary::new(
+                custody.clone(),
+                Arc::new(FakeProvider),
+            ));
+            let (first_authority, first_commit_handle) = stage_test_credential(&boundary).await;
+            let first_boundary = Arc::clone(&boundary);
+            let first_commit = std::thread::spawn(move || {
+                first_boundary.pairing_commit(super::CommitHandleCommandInput {
+                    authority: first_authority,
+                    request_id: "request-first-commit".into(),
+                    commit_handle: first_commit_handle,
+                })
+            });
+            custody.wait_until_write_starts();
+
+            let second_authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000002"))
+                .expect("replacement authority should open");
+            let created = boundary
+                .pairing_create(PairingCreateCommandInput {
+                    authority: second_authority.clone(),
+                    request_id: "request-second-create".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("replacement pairing should be created");
+            let exchanged = boundary
+                .pairing_exchange(PairingHandleCommandInput {
+                    authority: second_authority.clone(),
+                    request_id: "request-second-exchange".into(),
+                    pairing_handle: created.result.handle,
+                })
+                .await
+                .expect("replacement pairing should exchange");
+            let second_commit_handle = exchanged.result.commit_handle;
+
+            let second_result = boundary.pairing_commit(super::CommitHandleCommandInput {
+                authority: second_authority.clone(),
+                request_id: "request-second-commit".into(),
+                commit_handle: second_commit_handle.clone(),
+            });
+            custody.release_write();
+            assert_eq!(
+                first_commit
+                    .join()
+                    .expect("first commit thread")
+                    .expect_err("prior generation write should roll back")
+                    .code,
+                DiagnosticCode::ReconcileRequired
+            );
+
+            assert_eq!(
+                second_result
+                    .expect_err("replacement write must wait for prior disposition")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority: second_authority,
+                    request_id: "request-second-commit-retry".into(),
+                    commit_handle: second_commit_handle,
+                })
+                .expect("replacement write should succeed after prior rollback");
+            assert!(custody.stored().is_some());
+        });
+    }
+
+    #[test]
     fn authority_replacement_rolls_back_a_late_write() {
         tauri::async_runtime::block_on(async {
             let custody = Arc::new(BlockingCustody::new());
@@ -5632,6 +6711,58 @@ mod tests {
     }
 
     #[test]
+    fn blocked_authority_transition_does_not_hold_the_lifecycle_lock() {
+        let boundary = Arc::new(NativeSdkBoundary::new(
+            Arc::new(RaceCustody::new(false)),
+            Arc::new(FakeProvider),
+        ));
+        let authority = boundary
+            .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+            .expect("authority should open");
+        let transient = boundary.transient.lock().expect("hold transient lock");
+        let close_boundary = Arc::clone(&boundary);
+        let close = std::thread::spawn(move || {
+            close_boundary.authority_close(super::CloseAuthorityInput { authority })
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match boundary.authority_mutation.try_lock() {
+                Err(std::sync::TryLockError::WouldBlock) => break,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    panic!("authority mutation lock poisoned")
+                }
+                Ok(mutation) => drop(mutation),
+            }
+            assert!(
+                Instant::now() < deadline,
+                "close did not begin its guarded transition"
+            );
+            std::thread::yield_now();
+        }
+
+        let lifecycle = Arc::clone(&boundary);
+        let (sent, received) = std::sync::mpsc::channel();
+        let context = std::thread::spawn(move || {
+            sent.send(lifecycle.lifecycle.context())
+                .expect("send lifecycle result");
+        });
+        let responsive = received.recv_timeout(Duration::from_secs(1));
+        drop(transient);
+
+        let closed = close
+            .join()
+            .expect("close thread")
+            .expect("close should complete");
+        context.join().expect("context thread");
+        assert!(
+            responsive.is_ok(),
+            "transition waiting on transient state must not retain the lifecycle lock"
+        );
+        assert!(closed.closed);
+    }
+
+    #[test]
     fn terminal_managed_pairing_status_consumes_native_state() {
         tauri::async_runtime::block_on(async {
             let boundary = NativeSdkBoundary::new(
@@ -5747,7 +6878,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_credential_retention_is_count_and_ttl_bounded() {
+    fn committed_credential_retention_rejects_new_stages_at_the_count_bound() {
         tauri::async_runtime::block_on(async {
             let boundary =
                 NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
@@ -5755,7 +6886,7 @@ mod tests {
                 .authority_open(authority("00000000-0000-4000-8000-000000000001"))
                 .expect("authority should open");
             let mut first_commit_handle = None;
-            for index in 0..65 {
+            for index in 0..super::MAX_RETAINED_CREDENTIALS {
                 let created = boundary
                     .pairing_create(PairingCreateCommandInput {
                         authority: authority.clone(),
@@ -5787,16 +6918,191 @@ mod tests {
                     .expect("credential should commit");
             }
 
+            let rejected = boundary
+                .pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-credential-overflow".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("overflow pairing should be created");
+            assert_eq!(
+                boundary
+                    .pairing_exchange(PairingHandleCommandInput {
+                        authority,
+                        request_id: "request-exchange-credential-overflow".into(),
+                        pairing_handle: rejected.result.handle,
+                    })
+                    .await
+                    .expect_err("live committed handles must not be evicted")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+
             let mut transient = boundary.transient.lock().expect("transient lock");
-            assert_eq!(transient.credentials.len(), 64);
-            assert!(!transient
+            assert_eq!(transient.credentials.len(), super::MAX_RETAINED_CREDENTIALS);
+            assert!(transient
                 .credentials
                 .contains_key(first_commit_handle.as_deref().expect("first commit handle")));
             transient
-                .prune_terminal_credentials(u64::MAX)
+                .prune_credentials(u64::MAX)
                 .expect("terminal TTL cleanup should succeed");
             assert!(transient.credentials.is_empty());
         });
+    }
+
+    #[test]
+    fn abandoned_direct_stages_reject_overflow_without_evicting_reachable_handles() {
+        tauri::async_runtime::block_on(async {
+            let custody = Arc::new(RaceCustody::new(false));
+            let boundary = NativeSdkBoundary::new(custody.clone(), Arc::new(FakeProvider));
+            let authority = boundary
+                .authority_open(authority("00000000-0000-4000-8000-000000000001"))
+                .expect("authority should open");
+            let mut first_commit_handle = None;
+            let mut first_staged = None;
+            let mut latest_commit_handle = None;
+            for index in 0..super::MAX_RETAINED_CREDENTIALS {
+                let created = boundary
+                    .pairing_create(PairingCreateCommandInput {
+                        authority: authority.clone(),
+                        request_id: format!("request-create-abandoned-{index}"),
+                        request: PairingRequest {
+                            app_name: "OpenCoven Chat".into(),
+                            installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                            scopes: vec!["chat:read".into()],
+                        },
+                    })
+                    .await
+                    .expect("pairing should be created");
+                let exchanged = boundary
+                    .pairing_exchange(PairingHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: format!("request-exchange-abandoned-{index}"),
+                        pairing_handle: created.result.handle,
+                    })
+                    .await
+                    .expect("pairing should exchange");
+                let commit_handle = exchanged.result.commit_handle;
+                if first_commit_handle.is_none() {
+                    first_staged = boundary
+                        .transient
+                        .lock()
+                        .expect("transient lock")
+                        .credentials
+                        .get(&commit_handle)
+                        .map(Arc::downgrade);
+                    first_commit_handle = Some(commit_handle.clone());
+                }
+                latest_commit_handle = Some(commit_handle);
+            }
+
+            let rejected = boundary
+                .pairing_create(PairingCreateCommandInput {
+                    authority: authority.clone(),
+                    request_id: "request-create-abandoned-overflow".into(),
+                    request: PairingRequest {
+                        app_name: "OpenCoven Chat".into(),
+                        installation_id: "00000000-0000-4000-8000-000000000010".into(),
+                        scopes: vec!["chat:read".into()],
+                    },
+                })
+                .await
+                .expect("overflow pairing should be created");
+            assert_eq!(
+                boundary
+                    .pairing_exchange(PairingHandleCommandInput {
+                        authority: authority.clone(),
+                        request_id: "request-exchange-abandoned-overflow".into(),
+                        pairing_handle: rejected.result.handle,
+                    })
+                    .await
+                    .expect_err("live pending handles must not be evicted")
+                    .code,
+                DiagnosticCode::CredentialUpdateInProgress
+            );
+
+            let latest_commit_handle = latest_commit_handle.expect("latest commit handle");
+            {
+                let transient = boundary.transient.lock().expect("transient lock");
+                assert_eq!(transient.credentials.len(), super::MAX_RETAINED_CREDENTIALS);
+                assert!(transient
+                    .credentials
+                    .contains_key(first_commit_handle.as_deref().expect("first commit handle")));
+                assert!(transient.credentials.contains_key(&latest_commit_handle));
+            }
+            assert!(first_staged
+                .expect("first staged credential")
+                .upgrade()
+                .is_some());
+
+            boundary
+                .pairing_commit(super::CommitHandleCommandInput {
+                    authority,
+                    request_id: "request-commit-latest".into(),
+                    commit_handle: latest_commit_handle,
+                })
+                .expect("latest reachable confirmation should still commit");
+            assert_eq!(custody.writes.load(Ordering::Relaxed), 1);
+        });
+    }
+
+    #[test]
+    fn abandoned_direct_staged_credentials_are_ttl_pruned_and_dropped() {
+        tauri::async_runtime::block_on(async {
+            let boundary =
+                NativeSdkBoundary::new(Arc::new(RaceCustody::new(false)), Arc::new(FakeProvider));
+            let (_authority, commit_handle) = stage_test_credential(&boundary).await;
+            let staged = {
+                let transient = boundary.transient.lock().expect("transient lock");
+                Arc::downgrade(
+                    transient
+                        .credentials
+                        .get(&commit_handle)
+                        .expect("staged credential"),
+                )
+            };
+
+            boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .prune_credentials(u64::MAX)
+                .expect("staged TTL cleanup should succeed");
+
+            assert!(!boundary
+                .transient
+                .lock()
+                .expect("transient lock")
+                .credentials
+                .contains_key(&commit_handle));
+            assert!(staged.upgrade().is_none());
+        });
+    }
+
+    #[test]
+    fn credential_reservations_are_ttl_pruned() {
+        let mut transient = super::TransientState::default();
+        transient.credential_reservations.insert(
+            "commit:00000000-0000-4000-8000-000000000001".into(),
+            super::CredentialReservation {
+                authority: super::AuthorityReference {
+                    handle: "authority:00000000-0000-4000-8000-000000000001".into(),
+                    generation: 1,
+                },
+                expires_at: 10,
+            },
+        );
+
+        transient
+            .prune_credentials(10)
+            .expect("reservation TTL cleanup should succeed");
+
+        assert!(transient.credential_reservations.is_empty());
     }
 
     #[test]

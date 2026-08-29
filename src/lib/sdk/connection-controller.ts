@@ -440,6 +440,10 @@ class DefaultConnectionController implements ConnectionController {
     if (!(error instanceof NativeBoundaryError)) {
       return;
     }
+    if (error.code === 'incompatible_version') {
+      this.#setState({ state: 'incompatible', diagnosticId: error.diagnosticId });
+      return;
+    }
     if (error.code === 'unauthorized') {
       this.#setState({ state: 'revoked', diagnosticId: error.diagnosticId });
       return;

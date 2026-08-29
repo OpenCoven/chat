@@ -243,6 +243,32 @@ describe('connection controller', () => {
     );
   });
 
+  it('maps canonical-read incompatibility to the incompatible state', async () => {
+    const controller = createConnectionController(makeBoundary());
+    await controller.connect();
+
+    controller.markAuthorityFailure(
+      new NativeBoundaryError('incompatible_version', false, DIAGNOSTIC_ID),
+    );
+
+    expect(controller.getState()).toEqual({
+      state: 'incompatible',
+      diagnosticId: DIAGNOSTIC_ID,
+    });
+  });
+
+  it('keeps canonical-read reconcile failures query-local', async () => {
+    const controller = createConnectionController(makeBoundary());
+    await controller.connect();
+    const ready = controller.getState();
+
+    controller.markAuthorityFailure(
+      new NativeBoundaryError('reconcile_required', false, DIAGNOSTIC_ID),
+    );
+
+    expect(controller.getState()).toBe(ready);
+  });
+
   it.each([
     ['denied', 'pairing_denied'],
     ['expired', 'pairing_expired'],

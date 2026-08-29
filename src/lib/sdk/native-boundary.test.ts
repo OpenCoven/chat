@@ -280,6 +280,28 @@ describe('native boundary with packed managed SDK', () => {
     });
   });
 
+  it('preserves credential replacement contention when forgetting', async () => {
+    const boundary = createNativeBoundary({
+      invoke: routedInvoke({
+        [NATIVE_COMMANDS.discoveryRead]: discoveryOutput(),
+        [NATIVE_COMMANDS.forgetCredential]: () => {
+          throw {
+            code: 'credential_update_in_progress',
+            retryable: true,
+            diagnosticId: DIAGNOSTIC_ID,
+          };
+        },
+      }),
+      requestId: () => REQUEST_ID,
+    });
+    const authority = await boundary.discover();
+
+    await expect(boundary.forgetCredential(authority, 'ignored')).rejects.toMatchObject({
+      code: 'credential_update_in_progress',
+      retryable: true,
+    });
+  });
+
   it('rejects hostile error-status declarations without evaluating accessors', async () => {
     let getterRead = false;
     const capabilities: unknown[] = [];
