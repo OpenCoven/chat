@@ -209,6 +209,20 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.packaging-proof.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
+  'phase1.native-scenarios.fixture-daemon',
+  'phase1.native-scenarios.fixture',
+  'phase1.native-scenarios.rpc-start',
+  'phase1.native-scenarios.launch',
+  'phase1.native-scenarios.pairing',
+  'phase1.native-scenarios.restart',
+  'phase1.native-scenarios.reads',
+  'phase1.native-scenarios.reconciliation',
+  'phase1.native-scenarios.revocation',
+  'phase1.native-scenarios.credential-cleanup',
+  'phase1.native-scenarios.stale-discovery',
+  'phase1.native-scenarios.cleanup',
+  'phase1.native-scenarios.missing-keychain',
+  'phase1.native-scenarios.isolation-proof',
   'phase1.stage.coven-identity.failed',
   'phase1.stage.runtime-assertions.failed',
   'phase1.stage.isolation.failed',
@@ -2821,14 +2835,20 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   const isolatedHome = resolve(artifactRoot.rootPath, 'native-authority-home');
   const covenHome = resolve(isolatedHome, 'coven');
   const caveHome = resolve(covenHome, 'cave');
-  const fixtureDaemon = await startFixtureDaemon([
-    {
-      id: 'archivist',
-      display_name: 'Archivist',
-      role: 'Keeper',
-      description: 'Synthetic roster entry.',
-    },
-  ]);
+  let activeNativeStage = 'fixture-daemon';
+  let fixtureDaemon;
+  try {
+    fixtureDaemon = await startFixtureDaemon([
+      {
+        id: 'archivist',
+        display_name: 'Archivist',
+        role: 'Keeper',
+        description: 'Synthetic roster entry.',
+      },
+    ]);
+  } catch (error) {
+    throw new Error('phase1.native-scenarios.fixture-daemon', { cause: error });
+  }
   let rpc;
   let nativeCredentialStoreBefore;
   let nativeCredentialStoreAfter;
@@ -2843,6 +2863,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   let credentialMayExist = false;
   let scenarioFailure;
   try {
+    activeNativeStage = 'fixture';
     writeNativeFixture(caveHome, covenHome, fixtureDaemon.url);
     const portServer = createServer();
     portServer.listen(0, '127.0.0.1');
@@ -2866,8 +2887,10 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'production-keyring',
       NODE_ENV: 'production',
     };
+    activeNativeStage = 'rpc-start';
     rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
 
+    activeNativeStage = 'launch';
     try {
       await rpc.error(
         'cave_read_discovery',
@@ -2911,6 +2934,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       throw new Error('Validated Cave launch failed before cleanup reservation.');
     }
 
+    activeNativeStage = 'pairing';
     await runNativeScenarioOrchestrator({
       runPairing: () =>
         runReservedNativePairing({
@@ -2944,6 +2968,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           'phase1.assertion.passed',
         );
 
+        activeNativeStage = 'restart';
         try {
           const created = await rpc.ok('cave_pairing_create', {
             handle,
@@ -2973,6 +2998,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           addAssertion(results, 'phase1.pairing.denial', 'failed', 'phase1.assertion.failed');
         }
 
+        activeNativeStage = 'reads';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3059,6 +3085,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
+        activeNativeStage = 'reconciliation';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3132,6 +3159,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
+        activeNativeStage = 'revocation';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3261,6 +3289,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
+        activeNativeStage = 'credential-cleanup';
         if (typeof credentialId === 'string' && typeof handle === 'string') {
           const cleanupHealth = await rpc.ok('cave_health', {
             handle,
@@ -3293,6 +3322,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             .digest('hex');
         }
 
+        activeNativeStage = 'stale-discovery';
         const discoveryPath = resolve(caveHome, 'client-v1-discovery.json');
         const discovery = JSON.parse(readFileSync(discoveryPath, 'utf8'));
         discovery.endpoint = 'http://127.0.0.1:1';
@@ -3380,13 +3410,26 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   if (credentialMayExist && cleanupFailure === undefined) {
     cleanupFailure = new Error('Native credential remained after failure cleanup.');
   }
-  throwNativeScenarioFailures({
-    scenarioFailure,
-    cleanupFailure,
-    rpcCleanupFailure,
-    daemonCloseFailure,
-  });
-  await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
+  try {
+    throwNativeScenarioFailures({
+      scenarioFailure,
+      cleanupFailure,
+      rpcCleanupFailure,
+      daemonCloseFailure,
+    });
+  } catch (error) {
+    throw new Error(
+      scenarioFailure === undefined
+        ? 'phase1.native-scenarios.cleanup'
+        : `phase1.native-scenarios.${activeNativeStage}`,
+      { cause: error },
+    );
+  }
+  try {
+    await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
+  } catch (error) {
+    throw new Error('phase1.native-scenarios.missing-keychain', { cause: error });
+  }
   if (
     nativeCredentialStoreBefore === undefined ||
     nativeCredentialStoreAfter === undefined ||
@@ -3394,7 +3437,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     finalNativeCredentialInstanceId === undefined ||
     nativeCredentialAccount === undefined
   ) {
-    throw new Error('Native credential-store isolation proof was incomplete.');
+    throw new Error('phase1.native-scenarios.isolation-proof');
   }
   return {
     beforeSha256: nativeCredentialStoreBefore,

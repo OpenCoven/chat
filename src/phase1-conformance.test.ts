@@ -1384,6 +1384,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(
       publicPhase1FailureDiagnostic(new Error('phase1.environment.rust-toolchain.failed')),
     ).toBe('phase1.environment.rust-toolchain.failed');
+    expect(publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart'))).toBe(
+      'phase1.native-scenarios.restart',
+    );
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
   });
 
