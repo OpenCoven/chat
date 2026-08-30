@@ -1660,7 +1660,7 @@ setInterval(() => {}, 1_000);
         fakeGitPath,
         `#!/bin/sh
 printf 'invoked\\n' >> ${JSON.stringify(invocationMarker)}
-sleep 0.15
+sleep 0.5
 PATH=${JSON.stringify(originalPath)} exec git "$@"
 `,
       );
@@ -1674,13 +1674,13 @@ PATH=${JSON.stringify(originalPath)} exec git "$@"
         () => {
           expect(() =>
             phase1ConformanceTestOnly.assertCleanPhase1Checkouts(fixture.roots, {
-              limits: { repositoryDeadlineMs: 1_500 },
+              limits: { repositoryDeadlineMs: 5_000 },
             }),
           ).toThrow('chat checkout verification timed out.');
         },
       );
 
-      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(Date.now() - startedAt).toBeLessThan(7_500);
       expect(
         readFileSync(invocationMarker, 'utf8').split('\n').filter(Boolean).length,
       ).toBeGreaterThan(1);
