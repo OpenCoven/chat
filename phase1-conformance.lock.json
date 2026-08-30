@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "5f78781f5bd55997e3d7517d540cf1b7808eb71d"
+    "revision": "d84f129e6cc2d59315c22a2d05629cf9dc1d43b2"
   },
   "harnessAuthority": {
-    "revision": "5f78781f5bd55997e3d7517d540cf1b7808eb71d",
-    "tree": "d52de7d70e569f5be8d06984b883bf7e120a3522",
+    "revision": "d84f129e6cc2d59315c22a2d05629cf9dc1d43b2",
+    "tree": "13d19d0af23ec5c6b4dc26101e7e7814c43d5b58",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,13 +81,13 @@
       },
       {
         "path": "scripts/phase1-artifact-secret-scan.mjs",
-        "blob": "1a13a03415b0c6e3df4c2df058d42c5352cdfc95",
-        "sha256": "4cba8f44851145724cc51a4582f75fcf4e0b52207c26bad8a9ad16af6e062a2d"
+        "blob": "7e9879c3a60aa0234bcdce59155a1df6051b9645",
+        "sha256": "165ee596b555f3872bca900f15153ca58f5687e8a6ea9addc87d2669968eb974"
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "730180ff235295cd10a17458f8d096053f792542",
-        "sha256": "9162d88010e9e9df8570dcb00a60240ed8039893e49647e9e8554858e6a4e84b"
+        "blob": "735ac374b96659fadeb06372b8592822489d36b9",
+        "sha256": "784aef7a3f0be0978dae500db9cdcb0af29bdee06be13610f4f2ed27c9f50f37"
       }
     ],
     "productionDeltas": [
