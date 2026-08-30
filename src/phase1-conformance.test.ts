@@ -66,6 +66,7 @@ import {
   scrubEvidenceAuthorizationEnvironment,
   snapshotOperatorState,
   throwNativeScenarioFailures,
+  unixProducerBindingEnvironment,
   validateSupervisorArtifactFile,
   windowsJobBindingEnvironment,
   withFixtureDaemon,
@@ -284,6 +285,68 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow(/system PowerShell/u);
   });
 
+  test('requires a distinct Unix producer UID and native containment binding', () => {
+    const common = {
+      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+      OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'linux-x64',
+      OPENCOVEN_UNIX_PRODUCER_UID: '1977',
+      OPENCOVEN_UNIX_BROKER_UID: '1001',
+      OPENCOVEN_UNIX_CONTAINMENT: 'linux-cgroup-v2',
+      OPENCOVEN_UNIX_CGROUP_PATH: '/opencoven-chat-0123456789abcdef',
+    };
+
+    expect(
+      unixProducerBindingEnvironment(
+        common,
+        'linux',
+        'x64',
+        1977,
+        '0::/opencoven-chat-0123456789abcdef\n',
+      ),
+    ).toEqual(common);
+    expect(
+      unixProducerBindingEnvironment(
+        {
+          ...common,
+          OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'darwin-arm64',
+          OPENCOVEN_UNIX_CONTAINMENT: 'macos-uid',
+          OPENCOVEN_UNIX_CGROUP_PATH: undefined,
+        },
+        'darwin',
+        'arm64',
+        1977,
+        '',
+      ),
+    ).toEqual({
+      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+      OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'darwin-arm64',
+      OPENCOVEN_UNIX_PRODUCER_UID: '1977',
+      OPENCOVEN_UNIX_BROKER_UID: '1001',
+      OPENCOVEN_UNIX_CONTAINMENT: 'macos-uid',
+    });
+    expect(unixProducerBindingEnvironment(common, 'win32', 'x64', undefined, '')).toEqual({});
+
+    for (const invalid of [
+      { ...common, OPENCOVEN_UNIX_PRODUCER_REQUIRED: '0' },
+      { ...common, OPENCOVEN_UNIX_PRODUCER_UID: '1001' },
+      { ...common, OPENCOVEN_UNIX_BROKER_UID: '1977' },
+      { ...common, OPENCOVEN_UNIX_BROKER_UID: '0' },
+      { ...common, OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'linux-arm64' },
+      { ...common, OPENCOVEN_UNIX_CONTAINMENT: 'process-group' },
+      { ...common, OPENCOVEN_UNIX_CGROUP_PATH: '/other' },
+    ]) {
+      expect(() =>
+        unixProducerBindingEnvironment(
+          invalid,
+          'linux',
+          'x64',
+          1977,
+          '0::/opencoven-chat-0123456789abcdef\n',
+        ),
+      ).toThrow(/Unix schema-v2 evidence/u);
+    }
+  });
+
   test('has no module-scope subprocess and makes Windows membership the first schema-v2 subprocess', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
@@ -295,6 +358,9 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(source.slice(0, firstExport)).not.toContain('execFileSync(');
     expect(runSource.indexOf('scrubEvidenceAuthorizationEnvironment()')).toBeLessThan(
+      runSource.indexOf('unixProducerBindingEnvironment(process.env)'),
+    );
+    expect(runSource.indexOf('unixProducerBindingEnvironment(process.env)')).toBeLessThan(
       runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)'),
     );
     expect(runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)')).toBeLessThan(
@@ -2121,9 +2187,11 @@ describe('Phase 1 real-authority conformance harness', () => {
   test.skipIf(process.platform === 'win32')(
     'fingerprints the Coven Unix socket as metadata without reading it',
     async () => {
-      const scratchParent = resolve(projectRoot, 'test-results');
-      mkdirSync(scratchParent, { recursive: true });
-      const home = mkdtempSync(resolve(scratchParent, 'fp-'));
+      const owned = createProcessOwnedArtifactRoot({
+        prefix: 'fp',
+        shortPath: true,
+      });
+      const home = owned.rootPath;
       const covenHome = resolve(home, '.coven');
       const socketPath = resolve(covenHome, 'coven.sock');
       mkdirSync(covenHome, { recursive: true });
@@ -2139,7 +2207,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         if (server.listening) {
           await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
         }
-        rmSync(home, { force: true, recursive: true });
+        await owned.cleanup();
       }
     },
   );

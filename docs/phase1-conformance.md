@@ -141,7 +141,9 @@ not committed into `phase1-conformance.lock.json`: the protected input avoids
 a circular producer/validator pin while every cloned source, validator tree,
 contract, registry, schema, and final canonical record is verified at runtime.
 
-Run one platform only with its canonical output path:
+A schema-v2 platform run is accepted only inside the protected native
+producer supervisor. The supervisor supplies the exact output path and a
+distinct-UID containment binding:
 
 ```bash
 node scripts/phase1-conformance.mjs \
@@ -150,6 +152,13 @@ node scripts/phase1-conformance.mjs \
   --output .artifacts/client-v1-conformance-darwin-arm64.json
 ```
 
+Replace the platform with `linux-x64` or `win32-x64` on the matching native
+host. This inner command is documentation for the restricted producer, not a
+supported broker-identity invocation. A direct macOS/Linux schema-v2 launch
+without the supervisor UID and native cgroup/UID binding fails before authority
+work. Platform and host OS/architecture mismatches also fail before authority
+work.
+
 The producer records only assertions that its package, native, Cave, Coven,
 and exact observation suites actually passed; missing, duplicate, skipped, or
 failed results block publication. The selected validator parses the final
@@ -157,10 +166,11 @@ canonical bytes before retention and the local redaction scan runs before the
 validator callback, so no OIDC/GitHub token, keyring material, private path,
 command output, prompt, message, or socket handle is retained.
 
-Linux schema-v2 execution receives only a fresh, owned Secret Service D-Bus
-session and its curated runtime environment. macOS uses an owned disposable
-keychain. All lanes use the production native adapter with an isolated
-conformance namespace. The producer proves that namespace is empty, performs
+Linux schema-v2 execution receives only a fresh Secret Service D-Bus session
+inside a runtime root owned by the ephemeral producer UID and its curated
+environment. macOS uses an owned disposable keychain below the producer
+user's isolated home. All lanes use the production native adapter with an
+isolated conformance namespace. The producer proves that namespace is empty, performs
 the real installation ID and credential round trip, then asks native code to
 issue a cryptographically random 256-bit cleanup grant for the exact sorted,
 deduplicated set of observed Cave instance accounts plus the installation
@@ -237,6 +247,96 @@ that exact absolute path and digest before its first Git, pnpm, Cargo, build, or
 tool command. The local frozen artifact is retained outside Git at
 `files/phase1-process-supervisor-ff415b6/win32-x64/phase1-process-supervisor.exe`
 in this implementation session's artifact area.
+
+### Unix producer supervisor and descriptor handoff
+
+The `darwin-arm64` and `linux-x64` matrix expansions may use the pinned
+checkout, Node, and pnpm setup actions before restricted execution. That
+trusted setup does not run repository hooks, package lifecycle scripts,
+candidate code, validators, authorities, builds, or dependency installation.
+The Linux-only system package step is inline reviewed workflow shell. The
+workflow verifies exact byte counts and SHA-256 digests for the entrypoint,
+`phase1-schema-v2-producer.mjs`, Secret Service wrapper, Unix supervisor,
+restricted command, and C handoff helper, then compiles the helper with the
+native system C compiler.
+
+The trusted root supervisor creates a random local account and primary group
+whose numeric UID and GID differ from the original GitHub runner. The account
+has no administrator membership or usable password. Its `HOME`, artifact
+workspace, temporary directory, XDG roots, writable `node_modules`,
+Corepack/pnpm caches, Cargo home, rustup home, and package store are fresh
+mode-`0700` directories below one ephemeral root. The copied checkout and its
+tracked harness/validator launch sources are root-owned and recursively
+non-writable; Git receives only the exact source path as `safe.directory`.
+The trusted command is a root-owned, non-writable sibling of that producer
+root. It receives an allowlisted environment with no GitHub token, OIDC
+request value, credential helper, operator home, ambient package cache, or
+proxy setting.
+
+Dependency installation, the isolated Rust toolchain installation, all
+candidate/validator/Chat/Cave/Coven checkouts and builds, native RPC work,
+authority execution, schema-v2 construction, scanning, and the producer-side
+canonical check run as that one restricted UID. The schema-v2 producer module
+independently requires `OPENCOVEN_UNIX_PRODUCER_REQUIRED=1`, the exact native
+platform, `getuid()` equal to the bound producer UID, a different broker UID,
+and the native containment kind before its first subprocess. Linux
+additionally requires its own `/proc/self/cgroup` membership to equal the
+nonce-bound cgroup-v2 path.
+
+On Linux, the trusted supervisor requires a writable unified cgroup v2 mount.
+It creates a dedicated child cgroup, starts only a trusted UID-dropping wrapper
+in a stopped state, moves that PID into `cgroup.procs`, verifies membership,
+and then resumes it. Every later `setsid`, fork, and double-fork descendant
+inherits that cgroup. On root exit, failure, or timeout, the supervisor writes
+`1` to `cgroup.kill`, repeatedly reads `cgroup.events` until it observes
+`populated 0`, and removes the cgroup. Missing or unwritable controls, failed
+assignment, failed kill, a nonempty cgroup, or failed removal produces no
+handoff.
+
+On macOS, the supervisor creates the local user and groups with the
+preinstalled Directory Services tools and launches the entire command tree as
+that exact UID. The account is disabled from creation. After the restricted
+root exits, the supervisor reapplies the disabled authentication authority and
+non-login shell, repeatedly enumerates `ps` by exact numeric UID, sends
+`SIGKILL` only to those PIDs, and requires three consecutive zero-process
+observations. It then deletes the user and primary group and proves both that
+the UID has no processes and that Directory Services no longer maps it. Any
+lock, kill, zero-process, account, group, or UID cleanup failure fails closed.
+
+Only after the Linux cgroup or macOS UID is proved empty does the trusted
+supervisor begin handoff. A root-only preparation pass opens the producer
+root, workspace, artifact directory, and record with directory-relative
+`openat`, `O_DIRECTORY`, and `O_NOFOLLOW`; checks the pre-execution device and
+inode of every producer-owned parent. The trusted outer shell has retained
+open descriptors for those three directories since before restricted
+execution, preventing a removed parent inode from being recycled into a false
+identity match. The preparation pass requires a regular, bounded,
+mode-`0600`, single-link record owned by the exact deleted producer UID with no
+extended ACL. It changes only those pinned descriptors to a temporary private
+handoff group and exact `0750`/`0640` modes.
+
+A fresh process running as the original GitHub runner UID, with only that
+temporary group added, repeats the no-follow descriptor walk and all identity,
+owner, link, mode, ACL, and size checks. It reads the source descriptor once,
+rejects any device, inode, size, link, ownership, mode, mtime, or ctime change,
+and creates the final runner-owned artifact with `O_CREAT|O_EXCL` at mode
+`0600`. It writes the same in-memory bytes, fsyncs the file and destination
+directory, reopens no-follow, and verifies byte equality and stable identity.
+Symlinks, hardlinks, parent replacement, destination overwrite, and in-place
+rewrite therefore fail without path-copying attacker-controlled bytes. The
+workflow then applies the committed scanner and canonical schema-v2/platform
+check to the stable broker-owned file before the one official upload action.
+
+`scripts/unix-producer-supervisor.test.sh` compiles and exercises the real
+handoff implementation on both native CI operating systems. Its privileged
+cases launch a restricted C fixture that calls `setsid`, double-forks, and
+tries to replace the record after its root exits. Ubuntu proves cgroup-v2
+drain and macOS proves exact-UID process/account cleanup; both verify that the
+escaped PID is dead and the original bytes were handed off. Native cases also
+reject a record symlink, second hardlink, replaced artifact parent, and a
+synchronized in-place rewrite. Local runs without passwordless `sudo` still
+compile and run the descriptor handoff/rewrite cases but explicitly skip, and
+must not claim, the privileged UID/cgroup runtime results.
 
 ### Windows pre-bootstrap trust boundary
 
@@ -467,21 +567,23 @@ code rejects a missing, malformed, or unequal pair before validator execution
 and again before attestation. The workflow has three unprivileged production
 matrix expansions, one fresh unprivileged `ubuntu-24.04` validation job, one
 fresh OIDC attestation job, and one permissionless aggregation-confirmation
-job. macOS and Linux production use the pinned official checkout, Node, and
-pnpm setup actions. Windows routes around those actions through the
-pre-bootstrap Job root. Production preserves the existing native behavior and
-uses the pinned official artifact upload exactly once per matrix expansion.
+job. macOS and Linux use the pinned official checkout, Node, and pnpm setup
+actions only for trusted pre-bootstrap work, then run all dependency,
+candidate, validator, and authority work under the native restricted producer
+supervisor. Windows routes around those actions through the pre-bootstrap Job
+root. Production preserves the existing native behavior and uses the pinned
+official artifact upload exactly once per matrix expansion.
 
 The producer and fresh-validation jobs have only `contents: read`; they have no
 `id-token` or `attestations` permission. The harness and all candidate
-subprocesses receive a curated environment that does not forward GitHub
-tokens, OIDC request variables, Git credentials, operator Cargo credentials,
-or ambient proxy configuration. After upload, the fresh validation runner
-downloads each immutable artifact by its exact static name, checks out the SDK
-at the protected validator revision, validates the exact SDK frozen schema
-binding, executable parser, canonical serializer, and retained-evidence
-scanner over one in-memory byte snapshot, then exports only the three SHA-256
-digests.
+subprocesses receive a curated environment under a UID distinct from the
+runner/broker that does not forward GitHub tokens, OIDC request variables, Git
+credentials, operator Cargo credentials, or ambient proxy configuration. After
+upload, the fresh validation runner downloads each immutable artifact by its
+exact static name, checks out the SDK at the protected validator revision,
+validates the exact SDK frozen schema binding, executable parser, canonical
+serializer, and retained-evidence scanner over one in-memory byte snapshot,
+then exports only the three SHA-256 digests.
 
 The separate attestation job checks out no repository and runs no candidate,
 validator, Node, pnpm, Rust, Cargo, harness, or downloaded artifact content. It
@@ -560,12 +662,14 @@ The only retained file is:
 test-results/phase1-conformance/report.json
 ```
 
-The destination must not exist. Publication occurs only after SDK validation
-and the local secret scan. CI restores and deletes its isolated keychain before
-uploading the record, and cleanup failure blocks upload and the gate. The
-record contains no operator paths, credentials, bearers, pairing secrets,
-prompts, message bodies, attachments, command output, socket handles, or
-private causes.
+The destination must not exist. Windows publishes only handle-captured bytes;
+macOS and Linux publish only after native zero-process proof and a no-follow
+descriptor read whose identity and timestamps remain stable. Publication
+occurs only after SDK validation and the local secret scan. CI restores and
+deletes its isolated keychain before uploading the record, and cleanup failure
+blocks upload and the gate. The record contains no operator paths, credentials,
+bearers, pairing secrets, prompts, message bodies, attachments, command output,
+socket handles, or private causes.
 
 Re-scan retained evidence with:
 
@@ -583,17 +687,25 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 263,770 | `6d94e67b65188ed18ca847a232ed251f4811029cf958f301116a76e0cc193914` |
-| `scripts/phase1-conformance.mjs` | 187,069 | `1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70` |
+| `.github/workflows/client-v1-conformance.yml` | 266,717 | `6f926fde4689d0d751f0507cd42011ed999d1323538ec61ce641610707ce6e1d` |
+| `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
+| `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
+| `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
+| `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
+| `scripts/unix-producer-command.sh` | 2,663 | `a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1` |
+| `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
+| `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
+| `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
 | `scripts/windows-job-supervisor.cs` | 164,613 | `94340862f991355263f931b7963f5ad288b53b40bf797464a421d40ccb53f9ca` |
 | `scripts/windows-job-supervisor.test.ps1` | 57,864 | `73bfdb047c64e6a0ffe062cb8a626518b835cd7fd87c8d116844adf551feda90` |
 
-The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Its production
-job remains `platform-conformance`; the fresh validation, OIDC attestation, and
-terminal confirmation jobs remain `validate-conformance-artifacts`,
-`attest-conformance-artifacts`, and `aggregate-conformance`. The Chat producer
-commit and tree are recorded only after this commit is created; no SDK
-validator SHA is committed into Chat.
+The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
+production Unix source files by the sizes and digests above before compiling or
+executing them. Its production job remains `platform-conformance`; the fresh
+validation, OIDC attestation, and terminal confirmation jobs remain
+`validate-conformance-artifacts`, `attest-conformance-artifacts`, and
+`aggregate-conformance`. The Chat producer commit and tree are recorded only
+after this commit is created; no SDK validator SHA is committed into Chat.
 
 ## Non-cyclic SDK handoff
 

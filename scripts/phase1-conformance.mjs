@@ -43,7 +43,10 @@ import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mj
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
-export { windowsJobBindingEnvironment } from './phase1-schema-v2-producer.mjs';
+export {
+  unixProducerBindingEnvironment,
+  windowsJobBindingEnvironment,
+} from './phase1-schema-v2-producer.mjs';
 export { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');

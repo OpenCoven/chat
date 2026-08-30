@@ -3,6 +3,13 @@ export function windowsJobBindingEnvironment(
   environment?: NodeJS.ProcessEnv,
   platform?: NodeJS.Platform,
 ): Record<string, string>;
+export function unixProducerBindingEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+  architecture?: string,
+  currentUid?: number,
+  cgroupMembership?: string,
+): Record<string, string>;
 export function parseArgs(argv: string[]): {
   lockPath: string;
   scenario: 'all';

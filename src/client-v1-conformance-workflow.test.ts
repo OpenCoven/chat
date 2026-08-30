@@ -633,13 +633,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
 
     for (const name of [
-      'Install frozen dependencies',
-      'Set up frozen Rust',
       'Install frozen Linux Secret Service',
-      'Require frozen toolchain',
-      'Verify frozen harness bytes',
-      'Produce platform evidence',
-      'Validate canonical platform record',
+      'Prepare trusted Unix supervisor',
+      'Run supervised Unix production and handoff',
+      'Validate broker-owned Unix platform record',
     ]) {
       expect(workflowStep(workflow, name)).toContain("if: matrix.platform != 'win32-x64'");
     }
@@ -1045,11 +1042,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
-  test('documents the exact committed workflow and Windows harness metadata', () => {
+  test('documents the exact committed workflow and native supervisor metadata', () => {
     const guide = readFileSync(resolve(projectRoot, 'docs', 'phase1-conformance.md'), 'utf8');
     for (const relativePath of [
       '.github/workflows/client-v1-conformance.yml',
       'scripts/phase1-conformance.mjs',
+      'scripts/phase1-schema-v2-producer.mjs',
+      'scripts/phase1-linux-secret-service.sh',
+      'scripts/unix-artifact-handoff.c',
+      'scripts/unix-producer-command.sh',
+      'scripts/unix-producer-supervisor.sh',
+      'scripts/unix-producer-supervisor-attack.c',
+      'scripts/unix-producer-supervisor.test.sh',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
     ]) {
@@ -1057,6 +1061,134 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(guide).toContain(
         `| \`${relativePath}\` | ${bytes.byteLength.toLocaleString('en-US')} | \`${sha256(bytes)}\` |`,
       );
+    }
+  });
+
+  test('runs all Unix production under a distinct ephemeral UID before descriptor handoff', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
+    const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
+    const supervisor = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
+      'utf8',
+    );
+    const command = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-command.sh'),
+      'utf8',
+    );
+    const handoff = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-artifact-handoff.c'),
+      'utf8',
+    );
+    const producerHarness = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    expect(unixStep).toContain("if: matrix.platform != 'win32-x64'");
+    expect(unixStep).toContain('sudo --non-interactive');
+    expect(unixStep).toContain('scripts/unix-producer-supervisor.sh');
+    expect(unixStep).toContain('--command scripts/unix-producer-command.sh');
+    expect(unixStep).toContain(
+      '--handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff"',
+    );
+    expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
+    expect(trustedSetup).toContain('cc -std=c11');
+    expect(trustedSetup).toContain('unix-artifact-handoff.c');
+    expect(trustedSetup).toContain('createHash');
+    for (const relativePath of [
+      'scripts/phase1-conformance.mjs',
+      'scripts/phase1-schema-v2-producer.mjs',
+      'scripts/phase1-linux-secret-service.sh',
+      'scripts/unix-artifact-handoff.c',
+      'scripts/unix-producer-command.sh',
+      'scripts/unix-producer-supervisor.sh',
+    ]) {
+      const bytes = readFileSync(resolve(projectRoot, relativePath));
+      expect(trustedSetup).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
+    }
+    expect(validation).toContain('phase1-artifact-secret-scan.mjs');
+    expect(validation).toContain('scanPhase1ArtifactText');
+    expect(validation).toContain('schemaVersion !== 2');
+
+    for (const forbiddenStep of [
+      'Install frozen dependencies',
+      'Set up frozen Rust',
+      'Produce platform evidence',
+      'Validate canonical platform record',
+    ]) {
+      expect(workflow).not.toContain(`      - name: ${forbiddenStep}\n`);
+    }
+    for (const required of [
+      'pnpm install --frozen-lockfile --ignore-scripts',
+      'rustup toolchain install 1.95.0 --profile minimal',
+      'phase1-linux-secret-service.sh',
+      'phase1-conformance.mjs',
+      'OPENCOVEN_UNIX_PRODUCER_REQUIRED',
+    ]) {
+      expect(command).toContain(required);
+      expect(workflow).not.toContain(`run: ${required}`);
+    }
+    for (const required of [
+      'useradd',
+      'userdel',
+      'setpriv',
+      'cgroup.kill',
+      'cgroup.events',
+      'populated 0',
+      'dscl',
+      'dseditgroup',
+      'AuthenticationAuthority',
+      'ps -axo uid=,pid=',
+      'kill -KILL',
+      'unix-artifact-handoff',
+      'chown -R -h root:0 "$workspace"',
+      'chmod -R a-w "$workspace"',
+      '"$workspace/node_modules"',
+    ]) {
+      expect(supervisor).toContain(required);
+    }
+    expect(producerHarness).toContain('`safe.directory=$' + '{localSource}`');
+    for (const required of [
+      'openat',
+      'O_NOFOLLOW',
+      'O_DIRECTORY',
+      'O_EXCL',
+      'S_ISREG',
+      'st_nlink != 1',
+      'fchown',
+      'fchmod',
+      'fsync',
+      'source identity changed during handoff',
+    ]) {
+      expect(handoff).toContain(required);
+    }
+  });
+
+  test('runs native Linux and macOS escape and artifact-race tests in CI', () => {
+    const workflow = readFileSync(resolve(projectRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const job = workflowJob(workflow, 'unix-supervisor');
+    expect(job).toContain('runs-on: $' + '{{ matrix.runner }}');
+    expect(job).toContain('runner: ubuntu-24.04');
+    expect(job).toContain('runner: macos-14');
+    expect(job).toContain('bash scripts/unix-producer-supervisor.test.sh');
+
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.test.sh'),
+      'utf8',
+    );
+    for (const requiredCase of [
+      'setsid/double-fork descendant survived containment cleanup',
+      'escaped descendant replaced the handed-off record',
+      'symlink artifact handoff unexpectedly succeeded',
+      'hardlink artifact handoff unexpectedly succeeded',
+      'parent replacement artifact handoff unexpectedly succeeded',
+      'in-place rewrite artifact handoff unexpectedly succeeded',
+      'ephemeral producer UID was reused or not deleted',
+      'producer and broker UIDs were not distinct',
+    ]) {
+      expect(runtimeTest).toContain(requiredCase);
     }
   });
 

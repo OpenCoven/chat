@@ -965,8 +965,8 @@ describe('Phase 1 specification guards', () => {
 
     expect(
       gated,
-      'E2E, Desktop build, Rust, and Phase 1 conformance are the jobs worth skipping',
-    ).toHaveLength(4);
+      'E2E, Desktop build, Rust, Phase 1 conformance, and Unix supervisor tests are the jobs worth skipping',
+    ).toHaveLength(5);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.

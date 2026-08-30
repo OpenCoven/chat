@@ -164,6 +164,70 @@ export function windowsJobBindingEnvironment(
   };
 }
 
+export function unixProducerBindingEnvironment(
+  environment = process.env,
+  platform = process.platform,
+  architecture = process.arch,
+  currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+  cgroupMembership = platform === 'linux' ? readFileSync('/proc/self/cgroup', 'utf8') : '',
+) {
+  if (platform === 'win32') {
+    return {};
+  }
+  const fail = () => {
+    throw new Error('Unix schema-v2 evidence requires trusted distinct-UID containment.');
+  };
+  if ((platform !== 'linux' && platform !== 'darwin') || currentUid === undefined) {
+    fail();
+  }
+  const required = environment.OPENCOVEN_UNIX_PRODUCER_REQUIRED;
+  const evidencePlatform = environment.OPENCOVEN_UNIX_PRODUCER_PLATFORM;
+  const producerUidText = environment.OPENCOVEN_UNIX_PRODUCER_UID;
+  const brokerUidText = environment.OPENCOVEN_UNIX_BROKER_UID;
+  const containment = environment.OPENCOVEN_UNIX_CONTAINMENT;
+  const cgroupPath = environment.OPENCOVEN_UNIX_CGROUP_PATH;
+  const canonicalUid = /^(?:0|[1-9][0-9]{0,9})$/u;
+  if (
+    required !== '1' ||
+    typeof producerUidText !== 'string' ||
+    typeof brokerUidText !== 'string' ||
+    !canonicalUid.test(producerUidText) ||
+    !canonicalUid.test(brokerUidText) ||
+    Number(producerUidText) !== currentUid ||
+    producerUidText === brokerUidText ||
+    Number(producerUidText) === 0 ||
+    Number(brokerUidText) === 0 ||
+    evidencePlatform !== `${platform}-${architecture}`
+  ) {
+    fail();
+  }
+  const binding = {
+    OPENCOVEN_UNIX_PRODUCER_REQUIRED: required,
+    OPENCOVEN_UNIX_PRODUCER_PLATFORM: evidencePlatform,
+    OPENCOVEN_UNIX_PRODUCER_UID: producerUidText,
+    OPENCOVEN_UNIX_BROKER_UID: brokerUidText,
+    OPENCOVEN_UNIX_CONTAINMENT: containment,
+  };
+  if (platform === 'linux') {
+    if (
+      containment !== 'linux-cgroup-v2' ||
+      typeof cgroupPath !== 'string' ||
+      !/^\/(?:[A-Za-z0-9_.-]+\/)*opencoven-chat-[0-9a-f]{16}$/u.test(cgroupPath) ||
+      !cgroupMembership.split(/\r?\n/u).includes(`0::${cgroupPath}`)
+    ) {
+      fail();
+    }
+    return {
+      ...binding,
+      OPENCOVEN_UNIX_CGROUP_PATH: cgroupPath,
+    };
+  }
+  if (containment !== 'macos-uid' || cgroupPath !== undefined) {
+    fail();
+  }
+  return binding;
+}
+
 function assertWindowsJobMembership(binding) {
   if (Object.keys(binding).length === 0) {
     return;
@@ -268,7 +332,7 @@ function configuredSourceRoot(environmentName) {
 function resolveRepositoryLayout() {
   const gitCommonDirectory = resolve(
     projectRoot,
-    execFileSync('git', ['rev-parse', '--git-common-dir'], {
+    execFileSync('git', ['-c', `safe.directory=${projectRoot}`, 'rev-parse', '--git-common-dir'], {
       cwd: projectRoot,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
@@ -1160,6 +1224,8 @@ export async function cloneExactCheckout({
       [
         '-c',
         `core.hooksPath=${devNull}`,
+        '-c',
+        `safe.directory=${localSource}`,
         'clone',
         '--local',
         '--no-hardlinks',
@@ -1252,14 +1318,18 @@ export async function cloneExactCheckout({
 function currentProducerIdentity() {
   const environment = createGitEnvironment(process.env);
   const run = (value) =>
-    execFileSync('git', ['-C', projectRoot, 'rev-parse', value], {
-      encoding: 'utf8',
-      env: environment,
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    }).trim();
+    execFileSync(
+      'git',
+      ['-c', `safe.directory=${projectRoot}`, '-C', projectRoot, 'rev-parse', value],
+      {
+        encoding: 'utf8',
+        env: environment,
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+      },
+    ).trim();
   return {
     revision: run('HEAD'),
     tree: run('HEAD^{tree}'),
@@ -3606,6 +3676,8 @@ export async function runSchemaV2Conformance(options) {
   }
   const windowsJobBinding =
     schemaV2 && process.platform === 'win32' ? windowsJobBindingEnvironment(process.env) : {};
+  const unixProducerBinding =
+    schemaV2 && process.platform !== 'win32' ? unixProducerBindingEnvironment(process.env) : {};
   assertWindowsJobMembership(windowsJobBinding);
   options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
   const startedAt = new Date().toISOString();
@@ -3624,6 +3696,7 @@ export async function runSchemaV2Conformance(options) {
   const environment = safeEnvironment(executionRoot.rootPath, {
     ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
     ...linuxSessionEnvironment,
+    ...unixProducerBinding,
     ...windowsJobBinding,
   });
   const results = new Map();

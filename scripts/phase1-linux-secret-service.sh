@@ -7,9 +7,20 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GH_TOKEN GITHUB_TOKEN
+: "${OPENCOVEN_UNIX_PRODUCER_REQUIRED:?}"
+: "${OPENCOVEN_UNIX_PRODUCER_UID:?}"
+: "${OPENCOVEN_UNIX_BROKER_UID:?}"
+: "${OPENCOVEN_UNIX_CONTAINMENT:?}"
+: "${OPENCOVEN_UNIX_CGROUP_PATH:?}"
+: "${RUNNER_TEMP:?}"
+[[ "$OPENCOVEN_UNIX_PRODUCER_REQUIRED" == "1" ]]
+[[ "$OPENCOVEN_UNIX_PRODUCER_UID" == "$(id -u)" ]]
+[[ "$OPENCOVEN_UNIX_PRODUCER_UID" != "$OPENCOVEN_UNIX_BROKER_UID" ]]
+[[ "$OPENCOVEN_UNIX_CONTAINMENT" == "linux-cgroup-v2" ]]
+grep -qx "0::$OPENCOVEN_UNIX_CGROUP_PATH" /proc/self/cgroup
 
 if [[ "${OPENCOVEN_PHASE1_SECRET_SERVICE_INSIDE:-}" != "1" ]]; then
-  runtime_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/opencoven-dbus.XXXXXXXX")"
+  runtime_root="$(mktemp -d "$RUNNER_TEMP/opencoven-dbus.XXXXXXXX")"
   chmod 700 "$runtime_root"
   root_identity="$(stat -c '%d:%i' "$runtime_root")"
   root_stamp="$(openssl rand -hex 32)"
@@ -29,6 +40,7 @@ root_identity="${OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:?}"
 root_stamp="${OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:?}"
 [[ "$(realpath "$XDG_RUNTIME_DIR")" == "$(realpath "$runtime_root")" ]]
 [[ "$(stat -c '%a' "$runtime_root")" == "700" ]]
+[[ "$(stat -c '%u' "$runtime_root")" == "$OPENCOVEN_UNIX_PRODUCER_UID" ]]
 [[ "$(stat -c '%d:%i' "$runtime_root")" == "$root_identity" ]]
 [[ "$(cat "$runtime_root/.opencoven-owned-temp")" == "$root_stamp" ]]
 [[ "${DBUS_SESSION_BUS_ADDRESS:-}" == unix:* ]]

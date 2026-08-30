@@ -5303,30 +5303,147 @@ jobs:
         if: matrix.platform != 'win32-x64'
         with:
           version: 10.34.0
-      - name: Install frozen dependencies
-        if: matrix.platform != 'win32-x64'
-        run: corepack pnpm@10.34.0 install --frozen-lockfile --ignore-scripts
-      - name: Set up frozen Rust
-        if: matrix.platform != 'win32-x64'
-        run: rustup toolchain install 1.95.0 --profile minimal && rustup default 1.95.0
       - name: Install frozen Linux Secret Service
         if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'
-        run: node scripts/phase1-linux-secret-service.mjs --install
-      - name: Require frozen toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20
+          for package in \
+            dbus-daemon=1.14.10-4ubuntu4.1 \
+            gnome-keyring=46.1-2ubuntu0.2 \
+            libsecret-tools=0.21.4-1build3; do
+            name="${package%%=*}"
+            version="${package#*=}"
+            [[ "$(apt-cache policy "$name" | awk '/Candidate:/ { print $2 }')" == "$version" ]]
+          done
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-daemon=1.14.10-4ubuntu4.1 \
+            gnome-keyring=46.1-2ubuntu0.2 \
+            libsecret-tools=0.21.4-1build3
+          [[ "$(dpkg-query -W -f='${Version}' dbus-daemon)" == "1.14.10-4ubuntu4.1" ]]
+          [[ "$(dpkg-query -W -f='${Version}' gnome-keyring)" == "46.1-2ubuntu0.2" ]]
+          [[ "$(dpkg-query -W -f='${Version}' libsecret-tools)" == "0.21.4-1build3" ]]
+      - name: Prepare trusted Unix supervisor
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; const run = (command, args) => execFileSync(command, args, { encoding: ''utf8'' }).trim(); if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
-      - name: Verify frozen harness bytes
-        if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 187069 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70'') throw new Error(''Frozen harness bytes do not match'');"'
-      - name: Produce platform evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'EOF'
+          import { createHash } from 'node:crypto';
+          import { lstatSync, readFileSync } from 'node:fs';
+          const expected = new Map([
+            [
+              'scripts/phase1-conformance.mjs',
+              [187106, '652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981'],
+            ],
+            [
+              'scripts/phase1-schema-v2-producer.mjs',
+              [130161, '20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc'],
+            ],
+            [
+              'scripts/phase1-linux-secret-service.sh',
+              [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476'],
+            ],
+            [
+              'scripts/unix-artifact-handoff.c',
+              [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc'],
+            ],
+            [
+              'scripts/unix-producer-command.sh',
+              [2663, 'a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1'],
+            ],
+            [
+              'scripts/unix-producer-supervisor.sh',
+              [25087, '9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d'],
+            ],
+          ]);
+          for (const [path, [size, digest]] of expected) {
+            const stats = lstatSync(path);
+            const bytes = readFileSync(path);
+            if (
+              !stats.isFile() ||
+              stats.isSymbolicLink() ||
+              stats.nlink !== 1 ||
+              bytes.byteLength !== size ||
+              createHash('sha256').update(bytes).digest('hex') !== digest
+            ) {
+              throw new Error('Trusted Unix supervisor source bytes do not match');
+            }
+          }
+          EOF
+          broker_root="$RUNNER_TEMP/opencoven-unix-broker"
+          (umask 077 && mkdir "$broker_root")
+          cc -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O2 \
+            scripts/unix-artifact-handoff.c \
+            -o "$broker_root/unix-artifact-handoff"
+          chmod 500 "$broker_root/unix-artifact-handoff"
+      - name: Run supervised Unix production and handoff
         if: matrix.platform != 'win32-x64'
         shell: bash
         env:
           OPENCOVEN_VALIDATOR_REVISION: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
-        run: if [[ "${{ matrix.platform }}" == "linux-x64" ]]; then bash scripts/phase1-linux-secret-service.sh --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; else node scripts/phase1-conformance.mjs --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; fi
-      - name: Validate canonical platform record
+        run: |
+          set -euo pipefail
+          mkdir -m 700 .artifacts
+          if [[ "$(uname -s)" == Darwin ]]; then
+            chmod -RN .artifacts
+          fi
+          broker_root="$RUNNER_TEMP/opencoven-unix-broker"
+          cleanup_broker_root() {
+            rm -f -- "$broker_root/unix-artifact-handoff"
+            rmdir "$broker_root" 2>/dev/null || true
+          }
+          trap cleanup_broker_root EXIT
+          sudo --non-interactive scripts/unix-producer-supervisor.sh \
+            --platform "${{ matrix.platform }}" \
+            --source "$GITHUB_WORKSPACE" \
+            --destination "$GITHUB_WORKSPACE/.artifacts/client-v1-conformance-${{ matrix.platform }}.json" \
+            --temp-root "$broker_root" \
+            --handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff" \
+            --command scripts/unix-producer-command.sh \
+            --tool-path "$PATH" \
+            --validator-revision "$OPENCOVEN_VALIDATOR_REVISION"
+      - name: Validate broker-owned Unix platform record
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { lstatSync, readFileSync } from ''node:fs''; const sort = (value) => Array.isArray(value) ? value.map(sort) : value !== null && typeof value === ''object'' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])])) : value; const path = process.argv[1]; const stats = lstatSync(path); const text = readFileSync(path, ''utf8''); const value = JSON.parse(text); if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 || stats.size > 1048576 || value === null || Array.isArray(value) || value.schemaVersion !== 2 || value.platform !== process.argv[2] || JSON.stringify(sort(value), null, 2) + ''\n'' !== text) throw new Error(''Platform record is not canonical'');" ".artifacts/client-v1-conformance-${{ matrix.platform }}.json" "${{ matrix.platform }}"'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module --eval "
+            import { lstatSync, readFileSync } from 'node:fs';
+            import { scanPhase1ArtifactText } from './scripts/phase1-artifact-secret-scan.mjs';
+            const sort = (value) =>
+              Array.isArray(value)
+                ? value.map(sort)
+                : value !== null && typeof value === 'object'
+                  ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])]))
+                  : value;
+            const path = process.argv[1];
+            const expectedPlatform = process.argv[2];
+            const stats = lstatSync(path);
+            const text = readFileSync(path, 'utf8');
+            const value = JSON.parse(text);
+            if (
+              !stats.isFile() ||
+              stats.isSymbolicLink() ||
+              stats.nlink !== 1 ||
+              stats.uid !== process.getuid() ||
+              (stats.mode & 0o777) !== 0o600 ||
+              stats.size < 1 ||
+              stats.size > 1048576 ||
+              value === null ||
+              Array.isArray(value) ||
+              value.schemaVersion !== 2 ||
+              value.platform !== expectedPlatform ||
+              JSON.stringify(sort(value), null, 2) + '\n' !== text
+            ) {
+              throw new Error('Broker-owned platform record is not canonical');
+            }
+            scanPhase1ArtifactText(text);
+          " ".artifacts/client-v1-conformance-${{ matrix.platform }}.json" "${{ matrix.platform }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: client-v1-conformance-${{ matrix.platform }}

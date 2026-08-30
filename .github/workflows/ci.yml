@@ -579,6 +579,29 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
       - run: corepack pnpm test:native-e2e
 
+  unix-supervisor:
+    name: Unix producer supervisor (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: darwin-arm64
+            runner: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Test native Unix producer containment and handoff
+        run: bash scripts/unix-producer-supervisor.test.sh
+
   windows-supervisor-behavior:
     name: Windows supervisor behavior
     runs-on: windows-2025

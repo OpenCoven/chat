@@ -195,6 +195,13 @@ the complete producer tree suspended with `CreateProcessWithLogonW`, and
 assigns it to the query-only nonce-bound Job before resuming it. Every exit
 terminates the Job and verifies removal of the ephemeral account, Windows
 profile, and bootstrap root.
+The macOS and Linux lanes likewise place dependency installation, builds,
+candidate/validator/authority execution, and evidence production under a fresh
+non-admin UID with isolated home/workspace/temp/tool caches. Linux uses a
+trusted cgroup-v2 supervisor and `cgroup.kill`; macOS disables the ephemeral
+account and drains every process with its exact UID. Only after a native
+zero-process proof does the original runner perform the no-follow,
+descriptor-based, create-new artifact handoff.
 
 ## CI coverage
 
@@ -213,6 +220,9 @@ profile, and bootstrap root.
 - Windows runtime coverage for the cross-user Job supervisor boundary,
   descendant teardown, quotas, membership, and fail-closed account/profile
   cleanup
+- native Ubuntu 24.04 and macOS 14 runtime coverage for `setsid`/double-fork
+  escape cleanup plus symlink, hardlink, parent-swap, and in-place artifact
+  races in the Unix producer supervisor
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
