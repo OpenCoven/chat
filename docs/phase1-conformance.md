@@ -20,7 +20,7 @@ and the exact SDK validator accepts the final bytes.
 - SDK package candidate
   `acc38488f00860d246c3c553375634d64806eabb` and tree;
 - Cave authority
-  `2a0ff9237e94e652e477b22f60fd6d721b9e6451` and tree;
+  `6325fc4c1154c7d7398074a9760a2e2dc323b424` and tree;
 - Coven producer
   `721437b84026c042e431b0882dcd14fdb29ac07d` and tree; and
 - Chat production source

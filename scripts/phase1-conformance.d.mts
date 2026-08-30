@@ -54,6 +54,17 @@ export function buildObservedSchemaV2Assertions(options: Record<string, unknown>
   sdk: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
   chat: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
 };
+export function runSchemaV2ObservationSuites(
+  artifactRoot: unknown,
+  roots: Record<string, string>,
+  environment: NodeJS.ProcessEnv,
+  platform: 'darwin-arm64' | 'linux-x64' | 'win32-x64',
+): Promise<{
+  sdkTests: Set<string>;
+  chatTests: Set<string>;
+  chatRustTests: Set<string>;
+  covenRustTests: Set<string>;
+}>;
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
 export function assertPairingStatus(
   value: { status?: string } | null | undefined,

@@ -341,12 +341,12 @@ describe('contract canary temp directory safety', () => {
       sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -453,17 +453,17 @@ describe('contract canary temp directory safety', () => {
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
-        revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
+        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
       },
     } satisfies CheckoutHeadsInput;
     const packedFixtureInput = {
       cave: {
-        revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
+        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
         artifacts: {
           contractFixture: {
             path: 'src/lib/server/client-v1/contract-fixture.json',
             digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-            sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+            sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
           },
           hpkeVectors: {
             path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -488,7 +488,7 @@ describe('contract canary temp directory safety', () => {
     const missingFixtureRevision: PackedFixtureInput = { cave: {} };
 
     expect(checkoutHeadsInput.sdk.repository).toBe('OpenCoven/sdk');
-    expect(packedFixtureInput.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(packedFixtureInput.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
     expect(missingCheckoutRevision).toBeDefined();
     expect(missingFixtureRevision).toBeDefined();
   });

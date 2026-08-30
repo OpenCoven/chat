@@ -12,8 +12,8 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "2a0ff9237e94e652e477b22f60fd6d721b9e6451",
-    "tree": "5f5a2711552746695ffba6ff7a9e8af81647f194"
+    "revision": "6325fc4c1154c7d7398074a9760a2e2dc323b424",
+    "tree": "9144939792d3dbdd91c208d7e2abc5ecc0eac089"
   },
   "coven": {
     "repository": "OpenCoven/coven",
