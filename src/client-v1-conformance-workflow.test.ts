@@ -27,13 +27,13 @@ const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
   OPENCOVEN_WINDOWS_VS_VERSION: '17.14.37614.0',
   OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
-  OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35211',
+  OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207',
   OPENCOVEN_WINDOWS_CL_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211\\bin\\Hostx64\\x64\\cl.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe',
   OPENCOVEN_WINDOWS_LINK_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211\\bin\\Hostx64\\x64\\link.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe',
   OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0',
   OPENCOVEN_WINDOWS_RC_PATH:
     'C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe',
@@ -616,7 +616,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const environment = workflowStepEnvironment(bootstrap);
     const runBody = workflowRunBody(bootstrap);
 
-    expect(workflow).not.toContain('14.50.35717');
+    for (const rejectedMsvcPathVersion of ['14.50.35717', '14.44.35211']) {
+      expect(workflow).not.toContain(`VC\\Tools\\MSVC\\${rejectedMsvcPathVersion}`);
+    }
     for (const [name, value] of Object.entries(reviewedWindowsPins)) {
       expect(environment).toContain(`${name}: '${value}'`);
       expect(runBody).toContain(`$env:${name}`);

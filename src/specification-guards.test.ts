@@ -1322,6 +1322,12 @@ describe('Phase 1 specification guards', () => {
     expect(guide).toContain('secret scan');
     expect(guide).toContain('darwin-arm64');
     expect(guide).toContain('win32-x64');
+    expect(guide).toContain('completed');
+    expect(guide).toMatch(/VC\.Tools\.x86\.x64` component version\s+`17\.14\.36510\.44/u);
+    expect(guide).toContain('debug runtime version `14.44.35211');
+    expect(guide).toMatch(/compiler toolset directory version is\s+`14\.44\.35207/u);
+    expect(guide).not.toContain('VC\\Tools\\MSVC\\14.50.35717');
+    expect(guide).not.toContain('VC\\Tools\\MSVC\\14.44.35211');
     expect(tracker).not.toContain(
       '/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking',
     );

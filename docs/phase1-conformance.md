@@ -230,9 +230,12 @@ Windows build `26100.33296`, `kernel32.dll` file version
 `10.0.26100.33296`, PowerShell `7.6.5` at
 `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
 `10.0.11`, Visual Studio Enterprise 2022 `17.14.37614.0` at
-`C:\Program Files\Microsoft Visual Studio\2022\Enterprise`, and its v143 MSVC
-tools `14.44.35211` at
-`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35211`.
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise`, and its
+`Microsoft.VisualStudio.Component.VC.Tools.x86.x64` component version
+`17.14.36510.44`. The inventory's debug runtime version `14.44.35211` is not
+the compiler directory version: the v143 compiler toolset directory version is
+`14.44.35207` at
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207`.
 The compiler and linker are pinned respectively to that toolset's
 `bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
 `10.0.26100.0` provides `rc.exe` at
