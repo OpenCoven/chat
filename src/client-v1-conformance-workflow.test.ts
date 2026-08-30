@@ -687,6 +687,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     for (const source of sources) {
       for (const required of [
         'WindowsIsolatedUser',
+        'WindowsValidatedArtifact',
         'NetUserAdd',
         'NetUserDel',
         'LogonUserW',
@@ -729,6 +730,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
         'ActiveProcesses',
+        'CaptureIsolatedArtifact',
+        'RequireCanonicalSchemaV2Artifact',
+        'RunAsUserWithStandardInput',
+        'PublishValidatedArtifact',
+        'FILE_FLAG_OPEN_REPARSE_POINT',
+        'GetFileInformationByHandle',
+        'GetFileType',
+        'NumberOfLinks',
+        'FlushFileBuffers',
         'CloseHandle',
       ]) {
         expect(source).toContain(required);
@@ -743,10 +753,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'DirectoryQuotasExceeded(DirectoryQuotas)',
         finalTeardown,
       );
-      const finalOutputCheck = source.indexOf(
-        'Task.WaitAll(new Task[] { stdoutTask, stderrTask }',
-        finalQuotaCheck,
-      );
+      const finalOutputCheck = source.indexOf('Task.WaitAll(ioTasks.ToArray()', finalQuotaCheck);
       expect(finalTeardown).toBeGreaterThan(-1);
       expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
       expect(finalOutputCheck).toBeGreaterThan(finalQuotaCheck);
@@ -828,6 +835,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Restricted user temporary directory is outside the isolated root.',
       'Restricted user workspace is outside the isolated root.',
       'Restricted identity accessed supervisor-private credential root.',
+      'Symlink replacement artifact handoff unexpectedly succeeded.',
+      'Hardlink artifact handoff unexpectedly succeeded.',
+      'Parent junction artifact handoff unexpectedly succeeded.',
+      'Wrong-owner artifact handoff unexpectedly succeeded.',
+      'Permissive-DACL artifact handoff unexpectedly succeeded.',
+      'Artifact replacement race exposed supervisor-only canary bytes.',
       'Ephemeral local user survived cleanup.',
       'Ephemeral Windows profile survived cleanup.',
       'Ephemeral bootstrap root survived cleanup.',
@@ -863,12 +876,30 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runBody).toContain("NPM_CONFIG_CACHE = (Join-Path $bootstrapRoot 'npm-cache')");
     expect(runBody).toContain('ProtectSupervisorDirectory');
     expect(runBody).toContain('$artifactWorkspace');
-    expect(runBody).toContain('[IO.File]::Copy(');
+    expect(runBody).toContain('$job.CaptureIsolatedArtifact(');
+    expect(runBody).toContain('RequireCanonicalSchemaV2Artifact');
+    expect(runBody).toContain('$job.RunAsUserWithStandardInput(');
+    expect(runBody).toContain('$job.PublishValidatedArtifact(');
+    expect(runBody).toContain('OPENCOVEN_EXPECTED_RECORD_SHA256');
+    expect(runBody).toContain('[Console]::OpenStandardInput()');
+    expect(runBody).not.toContain('[IO.File]::Copy(');
     expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_PID');
     expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE');
     expect(runBody).toContain('RequireRestrictedSupervisorBoundary');
     expect(runBody).toContain('$isolatedUser.Dispose()');
     expect(runBody).not.toContain('$job.Run(');
+
+    const resultCheck = runBody.indexOf('Supervised Windows production failed with exit code');
+    const capture = runBody.indexOf('$job.CaptureIsolatedArtifact(', resultCheck);
+    const freshValidation = runBody.indexOf('$job.RunAsUserWithStandardInput(', capture);
+    const publish = runBody.indexOf('$job.PublishValidatedArtifact(', freshValidation);
+    expect(resultCheck).toBeGreaterThan(-1);
+    expect(capture).toBeGreaterThan(resultCheck);
+    expect(freshValidation).toBeGreaterThan(capture);
+    expect(publish).toBeGreaterThan(freshValidation);
+    expect(runBody.slice(capture, publish)).not.toMatch(
+      /\[IO\.File\]::ReadAll(?:Bytes|Text)\(\s*\$isolatedRecord/u,
+    );
   });
 
   test('documents the exact committed workflow and Windows harness metadata', () => {

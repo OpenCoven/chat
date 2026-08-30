@@ -9,6 +9,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
@@ -555,6 +557,40 @@ namespace OpenCoven
         public string Stderr { get; internal set; }
     }
 
+    public sealed class WindowsValidatedArtifact
+    {
+        private readonly byte[] bytes;
+
+        internal WindowsValidatedArtifact(byte[] value, string sha256)
+        {
+            bytes = value;
+            Sha256 = sha256;
+        }
+
+        public byte[] Bytes
+        {
+            get
+            {
+                return (byte[])bytes.Clone();
+            }
+        }
+
+        public int Size
+        {
+            get
+            {
+                return bytes.Length;
+            }
+        }
+
+        public string Sha256 { get; private set; }
+
+        internal byte[] GetTrustedBytes()
+        {
+            return bytes;
+        }
+    }
+
     public sealed class WindowsDirectoryQuota
     {
         public string Label { get; private set; }
@@ -618,9 +654,14 @@ namespace OpenCoven
         private const uint WRITE_DAC = 0x00040000;
         private const uint WRITE_OWNER = 0x00080000;
         private const uint SYNCHRONIZE = 0x00100000;
+        private const uint GENERIC_READ = 0x80000000;
+        private const uint GENERIC_WRITE = 0x40000000;
         private const uint PROCESS_ALL_ACCESS = 0x001fffff;
         private const uint FILE_ALL_ACCESS = 0x001f01ff;
         private const uint FILE_MODIFY_ACCESS = 0x001301bf;
+        private const uint FILE_READ_ATTRIBUTES = 0x00000080;
+        private const uint FILE_SHARE_READ = 0x00000001;
+        private const uint FILE_SHARE_WRITE = 0x00000002;
         private const uint OWNER_SECURITY_INFORMATION = 0x00000001;
         private const uint DACL_SECURITY_INFORMATION = 0x00000004;
         private const uint PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000;
@@ -628,14 +669,21 @@ namespace OpenCoven
         private const byte ACCESS_ALLOWED_ACE_TYPE = 0x00;
         private const byte OBJECT_INHERIT_ACE = 0x01;
         private const byte CONTAINER_INHERIT_ACE = 0x02;
+        private const byte NO_PROPAGATE_INHERIT_ACE = 0x04;
+        private const byte INHERIT_ONLY_ACE = 0x08;
+        private const byte INHERITED_ACE = 0x10;
         private const int SE_KERNEL_OBJECT = 6;
         private const int SE_FILE_OBJECT = 1;
         private const int AclSizeInformation = 2;
         private const uint SDDL_REVISION_1 = 1;
         private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+        private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
         private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
         private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
         private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+        private const uint CREATE_NEW = 1;
+        private const uint OPEN_EXISTING = 3;
+        private const uint FILE_TYPE_DISK = 0x0001;
         private const uint WAIT_OBJECT_0 = 0x00000000;
         private const uint WAIT_TIMEOUT = 0x00000102;
         private const uint INFINITE = 0xffffffff;
@@ -1744,6 +1792,1118 @@ namespace OpenCoven
             return new WindowsPinnedDirectory(handle);
         }
 
+        public WindowsValidatedArtifact CaptureIsolatedArtifact(
+            WindowsIsolatedUser isolatedUser,
+            string sourceRoot,
+            string sourcePath,
+            int maximumBytes)
+        {
+            ThrowIfDisposed();
+            RequireJobHasZeroActiveProcesses();
+            if (isolatedUser == null)
+            {
+                throw new ArgumentNullException("isolatedUser");
+            }
+            isolatedUser.ThrowIfDisposed();
+            if (!String.Equals(
+                    isolatedUser.Sid,
+                    supervisedSid,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Artifact owner identity does not match the supervised identity.");
+            }
+            if (maximumBytes < 1 || maximumBytes > 16 * 1024 * 1024)
+            {
+                throw new ArgumentOutOfRangeException("maximumBytes");
+            }
+
+            string fullRoot = Path.GetFullPath(sourceRoot);
+            if (!String.Equals(
+                    TrimDirectorySeparator(fullRoot),
+                    TrimDirectorySeparator(
+                        Path.GetFullPath(isolatedUser.WorkspacePath)),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Artifact source root is not the isolated workspace.");
+            }
+            string fullSource;
+            string[] segments = GetStrictDescendantSegments(
+                fullRoot,
+                sourcePath,
+                out fullSource);
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Supervisor Windows user SID is unavailable.");
+            }
+
+            List<IntPtr> parentHandles = new List<IntPtr>();
+            IntPtr sourceHandle = IntPtr.Zero;
+            try
+            {
+                string currentPath = TrimDirectorySeparator(fullRoot);
+                uint rootVolume = 0;
+                for (int index = 0; index < segments.Length; index++)
+                {
+                    if (index > 0)
+                    {
+                        currentPath = Path.Combine(
+                            currentPath,
+                            segments[index - 1]);
+                    }
+                    IntPtr directoryHandle = OpenArtifactDirectory(currentPath);
+                    parentHandles.Add(directoryHandle);
+                    ValidateDirectoryHandle(
+                        directoryHandle,
+                        isolatedUser.Sid,
+                        current.Value,
+                        index == 0);
+                    BY_HANDLE_FILE_INFORMATION directoryInformation =
+                        QueryFileInformation(
+                            directoryHandle,
+                            "Artifact parent identity could not be queried.");
+                    if (index == 0)
+                    {
+                        rootVolume = directoryInformation.VolumeSerialNumber;
+                    }
+                    else if (directoryInformation.VolumeSerialNumber != rootVolume)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact parent crossed the isolated workspace volume.");
+                    }
+                }
+
+                SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
+                sourceHandle = CreateFileW(
+                    fullSource,
+                    GENERIC_READ | READ_CONTROL,
+                    FILE_SHARE_READ,
+                    ref attributes,
+                    OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT,
+                    IntPtr.Zero);
+                if (sourceHandle == new IntPtr(-1))
+                {
+                    sourceHandle = IntPtr.Zero;
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Artifact record could not be opened without following links.");
+                }
+                if (GetFileType(sourceHandle) != FILE_TYPE_DISK)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record is not a disk file.");
+                }
+                FILE_ATTRIBUTE_TAG_INFO attributesBefore =
+                    QueryAttributeTag(
+                        sourceHandle,
+                        "Artifact record attributes could not be queried.");
+                if ((attributesBefore.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+                    (attributesBefore.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record is not a non-reparse regular file.");
+                }
+                ValidateIsolatedArtifactHandleSecurity(
+                    sourceHandle,
+                    isolatedUser.Sid,
+                    current.Value,
+                    false,
+                    false);
+                BY_HANDLE_FILE_INFORMATION informationBefore =
+                    QueryFileInformation(
+                        sourceHandle,
+                        "Artifact record identity could not be queried.");
+                if (informationBefore.NumberOfLinks != 1)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record must have exactly one link.");
+                }
+                long length = GetFileLength(informationBefore);
+                if (length < 1 || length > maximumBytes || length > Int32.MaxValue)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record size is outside the trusted bound.");
+                }
+                if (parentHandles.Count == 0 ||
+                    informationBefore.VolumeSerialNumber !=
+                        QueryFileInformation(
+                            parentHandles[0],
+                            "Artifact root identity could not be rechecked.")
+                        .VolumeSerialNumber)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record is outside the isolated workspace volume.");
+                }
+
+                byte[] bytes = new byte[checked((int)length)];
+                SafeFileHandle safeHandle = new SafeFileHandle(sourceHandle, true);
+                sourceHandle = IntPtr.Zero;
+                using (safeHandle)
+                using (FileStream stream = new FileStream(
+                    safeHandle,
+                    FileAccess.Read,
+                    4096,
+                    false))
+                {
+                    int offset = 0;
+                    while (offset < bytes.Length)
+                    {
+                        int read = stream.Read(
+                            bytes,
+                            offset,
+                            bytes.Length - offset);
+                        if (read == 0)
+                        {
+                            throw new EndOfStreamException(
+                                "Artifact record ended before its validated size.");
+                        }
+                        offset += read;
+                    }
+                    if (stream.ReadByte() != -1)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact record exceeded its validated size.");
+                    }
+
+                    IntPtr stableHandle = safeHandle.DangerousGetHandle();
+                    FILE_ATTRIBUTE_TAG_INFO attributesAfter =
+                        QueryAttributeTag(
+                            stableHandle,
+                            "Artifact record attributes changed during capture.");
+                    BY_HANDLE_FILE_INFORMATION informationAfter =
+                        QueryFileInformation(
+                            stableHandle,
+                            "Artifact record identity changed during capture.");
+                    if (!SameFileIdentity(
+                            informationBefore,
+                            informationAfter) ||
+                        informationAfter.NumberOfLinks != 1 ||
+                        GetFileLength(informationAfter) != length ||
+                        attributesAfter.FileAttributes !=
+                            attributesBefore.FileAttributes ||
+                        (attributesAfter.FileAttributes &
+                            (FILE_ATTRIBUTE_DIRECTORY |
+                                FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact record changed during handle capture.");
+                    }
+                }
+
+                return new WindowsValidatedArtifact(
+                    bytes,
+                    ComputeSha256(bytes));
+            }
+            finally
+            {
+                CloseIfValid(sourceHandle);
+                for (int index = parentHandles.Count - 1; index >= 0; index--)
+                {
+                    CloseIfValid(parentHandles[index]);
+                }
+            }
+        }
+
+        public static void RequireCanonicalSchemaV2Artifact(
+            byte[] bytes,
+            string expectedSha256,
+            string expectedPlatform)
+        {
+            if (bytes == null ||
+                bytes.Length < 1 ||
+                bytes.Length > 1024 * 1024 ||
+                String.IsNullOrWhiteSpace(expectedSha256) ||
+                expectedSha256.Length != 64 ||
+                String.IsNullOrWhiteSpace(expectedPlatform) ||
+                !String.Equals(
+                    ComputeSha256(bytes),
+                    expectedSha256,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Handle-captured artifact digest or bound is invalid.");
+            }
+
+            try
+            {
+                string text = new UTF8Encoding(false, true).GetString(bytes);
+                using (JsonDocument document = JsonDocument.Parse(bytes))
+                {
+                    JsonElement root = document.RootElement;
+                    JsonElement schemaVersion;
+                    JsonElement platform;
+                    if (root.ValueKind != JsonValueKind.Object ||
+                        !root.TryGetProperty(
+                            "schemaVersion",
+                            out schemaVersion) ||
+                        schemaVersion.ValueKind != JsonValueKind.Number ||
+                        schemaVersion.GetInt32() != 2 ||
+                        !root.TryGetProperty("platform", out platform) ||
+                        platform.ValueKind != JsonValueKind.String ||
+                        !String.Equals(
+                            platform.GetString(),
+                            expectedPlatform,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException();
+                    }
+                    byte[] canonical = SerializeCanonicalJson(root);
+                    string canonicalText =
+                        new UTF8Encoding(false, true).GetString(canonical) +
+                        "\n";
+                    if (!String.Equals(
+                            text,
+                            canonicalText,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException();
+                    }
+                }
+            }
+            catch
+            {
+                throw new InvalidOperationException(
+                    "Handle-captured artifact is not canonical schema-v2 evidence.");
+            }
+        }
+
+        public void PublishValidatedArtifact(
+            WindowsValidatedArtifact artifact,
+            string destinationRoot,
+            string destinationPath)
+        {
+            ThrowIfDisposed();
+            RequireJobHasZeroActiveProcesses();
+            if (artifact == null)
+            {
+                throw new ArgumentNullException("artifact");
+            }
+            string fullRoot = Path.GetFullPath(destinationRoot);
+            string fullDestination;
+            string[] segments = GetStrictDescendantSegments(
+                fullRoot,
+                destinationPath,
+                out fullDestination);
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Supervisor Windows user SID is unavailable.");
+            }
+
+            List<IntPtr> parentHandles = new List<IntPtr>();
+            IntPtr destinationHandle = IntPtr.Zero;
+            IntPtr securityDescriptor = IntPtr.Zero;
+            try
+            {
+                string currentPath = TrimDirectorySeparator(fullRoot);
+                uint rootVolume = 0;
+                for (int index = 0; index < segments.Length; index++)
+                {
+                    if (index > 0)
+                    {
+                        currentPath = Path.Combine(
+                            currentPath,
+                            segments[index - 1]);
+                    }
+                    IntPtr directoryHandle = OpenArtifactDirectory(currentPath);
+                    parentHandles.Add(directoryHandle);
+                    ValidateSupervisorArtifactHandleSecurity(
+                        directoryHandle,
+                        current.Value,
+                        true);
+                    BY_HANDLE_FILE_INFORMATION directoryInformation =
+                        QueryFileInformation(
+                            directoryHandle,
+                            "Artifact destination parent identity could not be queried.");
+                    if (index == 0)
+                    {
+                        rootVolume = directoryInformation.VolumeSerialNumber;
+                    }
+                    else if (directoryInformation.VolumeSerialNumber != rootVolume)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact destination parent crossed its protected volume.");
+                    }
+                }
+
+                string sddl = "O:" + current.Value + "D:P" +
+                    "(A;;0x001f01ff;;;SY)" +
+                    "(A;;0x001f01ff;;;BA)" +
+                    "(A;;0x001f01ff;;;" + current.Value + ")";
+                uint descriptorLength;
+                if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                        sddl,
+                        SDDL_REVISION_1,
+                        out securityDescriptor,
+                        out descriptorLength))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Protected artifact descriptor creation failed.");
+                }
+                SECURITY_ATTRIBUTES createAttributes =
+                    NonInheritableSecurityAttributes();
+                createAttributes.lpSecurityDescriptor = securityDescriptor;
+                destinationHandle = CreateFileW(
+                    fullDestination,
+                    GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+                    0,
+                    ref createAttributes,
+                    CREATE_NEW,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                    IntPtr.Zero);
+                if (destinationHandle == new IntPtr(-1))
+                {
+                    destinationHandle = IntPtr.Zero;
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Protected artifact could not be created.");
+                }
+                if (GetFileType(destinationHandle) != FILE_TYPE_DISK)
+                {
+                    throw new InvalidOperationException(
+                        "Protected artifact destination is not a disk file.");
+                }
+                ValidateSupervisorArtifactHandleSecurity(
+                    destinationHandle,
+                    current.Value,
+                    false);
+                BY_HANDLE_FILE_INFORMATION before =
+                    QueryFileInformation(
+                        destinationHandle,
+                        "Protected artifact identity could not be queried.");
+                if (before.NumberOfLinks != 1 ||
+                    parentHandles.Count == 0 ||
+                    before.VolumeSerialNumber !=
+                        QueryFileInformation(
+                            parentHandles[0],
+                            "Protected artifact root identity could not be rechecked.")
+                        .VolumeSerialNumber)
+                {
+                    throw new InvalidOperationException(
+                        "Protected artifact destination identity is invalid.");
+                }
+
+                byte[] trustedBytes = artifact.GetTrustedBytes();
+                SafeFileHandle safeHandle =
+                    new SafeFileHandle(destinationHandle, true);
+                destinationHandle = IntPtr.Zero;
+                using (safeHandle)
+                using (FileStream stream = new FileStream(
+                    safeHandle,
+                    FileAccess.ReadWrite,
+                    4096,
+                    false))
+                {
+                    stream.Write(trustedBytes, 0, trustedBytes.Length);
+                    stream.Flush();
+                    if (!FlushFileBuffers(safeHandle.DangerousGetHandle()))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Protected artifact flush failed.");
+                    }
+                    stream.Position = 0;
+                    byte[] verification = new byte[trustedBytes.Length];
+                    int offset = 0;
+                    while (offset < verification.Length)
+                    {
+                        int read = stream.Read(
+                            verification,
+                            offset,
+                            verification.Length - offset);
+                        if (read == 0)
+                        {
+                            throw new EndOfStreamException(
+                                "Protected artifact verification ended early.");
+                        }
+                        offset += read;
+                    }
+                    if (stream.ReadByte() != -1 ||
+                        !BytesEqual(trustedBytes, verification) ||
+                        !String.Equals(
+                            artifact.Sha256,
+                            ComputeSha256(verification),
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Protected artifact verification failed.");
+                    }
+
+                    IntPtr stableHandle = safeHandle.DangerousGetHandle();
+                    FILE_ATTRIBUTE_TAG_INFO attributes =
+                        QueryAttributeTag(
+                            stableHandle,
+                            "Protected artifact attributes could not be queried.");
+                    BY_HANDLE_FILE_INFORMATION after =
+                        QueryFileInformation(
+                            stableHandle,
+                            "Protected artifact identity changed during publication.");
+                    if (!SameFileIdentity(before, after) ||
+                        after.NumberOfLinks != 1 ||
+                        GetFileLength(after) != trustedBytes.Length ||
+                        (attributes.FileAttributes &
+                            (FILE_ATTRIBUTE_DIRECTORY |
+                                FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Protected artifact changed during publication.");
+                    }
+                }
+            }
+            finally
+            {
+                CloseIfValid(destinationHandle);
+                if (securityDescriptor != IntPtr.Zero)
+                {
+                    LocalFree(securityDescriptor);
+                }
+                for (int index = parentHandles.Count - 1; index >= 0; index--)
+                {
+                    CloseIfValid(parentHandles[index]);
+                }
+            }
+        }
+
+        private static SECURITY_ATTRIBUTES NonInheritableSecurityAttributes()
+        {
+            SECURITY_ATTRIBUTES attributes = new SECURITY_ATTRIBUTES();
+            attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+            attributes.bInheritHandle = false;
+            return attributes;
+        }
+
+        private static string[] GetStrictDescendantSegments(
+            string root,
+            string path,
+            out string fullPath)
+        {
+            if (String.IsNullOrWhiteSpace(root) ||
+                String.IsNullOrWhiteSpace(path) ||
+                !Path.IsPathRooted(root) ||
+                !Path.IsPathRooted(path))
+            {
+                throw new ArgumentException(
+                    "Artifact paths must be absolute.");
+            }
+            string fullRoot = TrimDirectorySeparator(Path.GetFullPath(root));
+            fullPath = Path.GetFullPath(path);
+            string prefix = fullRoot + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(
+                    prefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Artifact path is outside its trusted root.");
+            }
+            string relative = fullPath.Substring(prefix.Length);
+            string[] segments = relative.Split(
+                new char[] { '\\', '/' },
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "Artifact path does not name a file.");
+            }
+            foreach (string segment in segments)
+            {
+                if (segment == "." ||
+                    segment == ".." ||
+                    segment.IndexOf(':') >= 0 ||
+                    segment.EndsWith(" ", StringComparison.Ordinal) ||
+                    segment.EndsWith(".", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Artifact path contains an ambiguous segment.");
+                }
+            }
+            string rebuilt = fullRoot;
+            foreach (string segment in segments)
+            {
+                rebuilt = Path.Combine(rebuilt, segment);
+            }
+            if (!String.Equals(
+                    Path.GetFullPath(rebuilt),
+                    fullPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Artifact path canonicalization changed.");
+            }
+            return segments;
+        }
+
+        private static string TrimDirectorySeparator(string path)
+        {
+            string root = Path.GetPathRoot(path);
+            string value = path;
+            while (value.Length > root.Length &&
+                (value.EndsWith("\\", StringComparison.Ordinal) ||
+                    value.EndsWith("/", StringComparison.Ordinal)))
+            {
+                value = value.Substring(0, value.Length - 1);
+            }
+            return value;
+        }
+
+        private static IntPtr OpenArtifactDirectory(string path)
+        {
+            SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
+            IntPtr handle = CreateFileW(
+                path,
+                FILE_READ_ATTRIBUTES | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                ref attributes,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS |
+                    FILE_FLAG_OPEN_REPARSE_POINT,
+                IntPtr.Zero);
+            if (handle == new IntPtr(-1))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Artifact parent could not be opened without following links.");
+            }
+            return handle;
+        }
+
+        private static void ValidateDirectoryHandle(
+            IntPtr handle,
+            string isolatedSid,
+            string supervisorSid,
+            bool requireProtectedDacl)
+        {
+            if (GetFileType(handle) != FILE_TYPE_DISK)
+            {
+                throw new InvalidOperationException(
+                    "Artifact parent is not on disk.");
+            }
+            FILE_ATTRIBUTE_TAG_INFO attributes =
+                QueryAttributeTag(
+                    handle,
+                    "Artifact parent attributes could not be queried.");
+            if ((attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Artifact parent is not a non-reparse directory.");
+            }
+            ValidateIsolatedArtifactHandleSecurity(
+                handle,
+                isolatedSid,
+                supervisorSid,
+                true,
+                requireProtectedDacl);
+        }
+
+        private static void ValidateIsolatedArtifactHandleSecurity(
+            IntPtr handle,
+            string isolatedSid,
+            string supervisorSid,
+            bool directory,
+            bool requireProtectedDacl)
+        {
+            IntPtr expectedOwner = IntPtr.Zero;
+            IntPtr expectedSystem = IntPtr.Zero;
+            IntPtr expectedAdministrators = IntPtr.Zero;
+            IntPtr expectedSupervisor = IntPtr.Zero;
+            IntPtr expectedOwnerRights = IntPtr.Zero;
+            IntPtr owner = IntPtr.Zero;
+            IntPtr dacl = IntPtr.Zero;
+            IntPtr descriptor = IntPtr.Zero;
+            try
+            {
+                expectedOwner = ConvertSid(
+                    isolatedSid,
+                    "Artifact owner SID conversion failed.");
+                expectedSystem = ConvertSid(
+                    "S-1-5-18",
+                    "SYSTEM SID conversion failed.");
+                expectedAdministrators = ConvertSid(
+                    "S-1-5-32-544",
+                    "Administrators SID conversion failed.");
+                expectedSupervisor = ConvertSid(
+                    supervisorSid,
+                    "Supervisor SID conversion failed.");
+                expectedOwnerRights = ConvertSid(
+                    "S-1-3-4",
+                    "Owner Rights SID conversion failed.");
+                uint status = GetSecurityInfo(
+                    handle,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner,
+                    IntPtr.Zero,
+                    out dacl,
+                    IntPtr.Zero,
+                    out descriptor);
+                if (status != 0 ||
+                    owner == IntPtr.Zero ||
+                    dacl == IntPtr.Zero ||
+                    descriptor == IntPtr.Zero ||
+                    !EqualSid(owner, expectedOwner))
+                {
+                    throw new InvalidOperationException(
+                        "Artifact owner or DACL is not exact.");
+                }
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(
+                        descriptor,
+                        out control,
+                        out revision) ||
+                    (requireProtectedDacl &&
+                        (control & SE_DACL_PROTECTED) == 0))
+                {
+                    throw new InvalidOperationException(
+                        "Artifact DACL control is not restrictive.");
+                }
+                ACL_SIZE_INFORMATION aclInformation;
+                if (!GetAclInformation(
+                        dacl,
+                        out aclInformation,
+                        (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
+                        AclSizeInformation) ||
+                    aclInformation.AceCount != 5)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact DACL must contain exactly five ACEs.");
+                }
+
+                bool foundSystem = false;
+                bool foundAdministrators = false;
+                bool foundSupervisor = false;
+                bool foundOwner = false;
+                bool foundOwnerRights = false;
+                for (uint index = 0; index < aclInformation.AceCount; index++)
+                {
+                    IntPtr acePointer;
+                    if (!GetAce(dacl, index, out acePointer) ||
+                        acePointer == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact DACL ACE could not be read.");
+                    }
+                    ACCESS_ALLOWED_ACE ace =
+                        (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
+                            acePointer,
+                            typeof(ACCESS_ALLOWED_ACE));
+                    byte allowedFlags = OBJECT_INHERIT_ACE |
+                        CONTAINER_INHERIT_ACE |
+                        NO_PROPAGATE_INHERIT_ACE |
+                        INHERITED_ACE;
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
+                        (ace.Header.AceFlags & ~allowedFlags) != 0 ||
+                        (ace.Header.AceFlags & INHERIT_ONLY_ACE) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact DACL contains an unexpected ACE.");
+                    }
+                    IntPtr aceSid = new IntPtr(
+                        acePointer.ToInt64() +
+                        Marshal.OffsetOf(
+                            typeof(ACCESS_ALLOWED_ACE),
+                            "SidStart").ToInt64());
+                    if (EqualSid(aceSid, expectedSystem) &&
+                        ace.Mask == FILE_ALL_ACCESS &&
+                        !foundSystem)
+                    {
+                        foundSystem = true;
+                    }
+                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                        ace.Mask == FILE_ALL_ACCESS &&
+                        !foundAdministrators)
+                    {
+                        foundAdministrators = true;
+                    }
+                    else if (EqualSid(aceSid, expectedSupervisor) &&
+                        ace.Mask == FILE_ALL_ACCESS &&
+                        !foundSupervisor)
+                    {
+                        foundSupervisor = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == FILE_MODIFY_ACCESS &&
+                        !foundOwner)
+                    {
+                        foundOwner = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwnerRights) &&
+                        ace.Mask == READ_CONTROL &&
+                        !foundOwnerRights)
+                    {
+                        foundOwnerRights = true;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "Artifact DACL trustee or access mask is not exact.");
+                    }
+                }
+                if (!foundSystem ||
+                    !foundAdministrators ||
+                    !foundSupervisor ||
+                    !foundOwner ||
+                    !foundOwnerRights)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact DACL is incomplete.");
+                }
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero)
+                {
+                    LocalFree(descriptor);
+                }
+                FreeLocalSid(expectedOwnerRights);
+                FreeLocalSid(expectedSupervisor);
+                FreeLocalSid(expectedAdministrators);
+                FreeLocalSid(expectedSystem);
+                FreeLocalSid(expectedOwner);
+            }
+        }
+
+        private static void ValidateSupervisorArtifactHandleSecurity(
+            IntPtr handle,
+            string supervisorSid,
+            bool directory)
+        {
+            IntPtr expectedOwner = IntPtr.Zero;
+            IntPtr expectedSystem = IntPtr.Zero;
+            IntPtr expectedAdministrators = IntPtr.Zero;
+            IntPtr owner = IntPtr.Zero;
+            IntPtr dacl = IntPtr.Zero;
+            IntPtr descriptor = IntPtr.Zero;
+            try
+            {
+                expectedOwner = ConvertSid(
+                    supervisorSid,
+                    "Supervisor owner SID conversion failed.");
+                expectedSystem = ConvertSid(
+                    "S-1-5-18",
+                    "SYSTEM SID conversion failed.");
+                expectedAdministrators = ConvertSid(
+                    "S-1-5-32-544",
+                    "Administrators SID conversion failed.");
+                uint status = GetSecurityInfo(
+                    handle,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner,
+                    IntPtr.Zero,
+                    out dacl,
+                    IntPtr.Zero,
+                    out descriptor);
+                if (status != 0 ||
+                    owner == IntPtr.Zero ||
+                    dacl == IntPtr.Zero ||
+                    descriptor == IntPtr.Zero ||
+                    !EqualSid(owner, expectedOwner))
+                {
+                    throw new InvalidOperationException(
+                        "Protected artifact owner or DACL is not exact.");
+                }
+                ushort control;
+                uint revision;
+                ACL_SIZE_INFORMATION aclInformation;
+                if (!GetSecurityDescriptorControl(
+                        descriptor,
+                        out control,
+                        out revision) ||
+                    (control & SE_DACL_PROTECTED) == 0 ||
+                    !GetAclInformation(
+                        dacl,
+                        out aclInformation,
+                        (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
+                        AclSizeInformation) ||
+                    aclInformation.AceCount != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Protected artifact DACL is not private.");
+                }
+                bool foundSystem = false;
+                bool foundAdministrators = false;
+                bool foundSupervisor = false;
+                for (uint index = 0; index < aclInformation.AceCount; index++)
+                {
+                    IntPtr acePointer;
+                    if (!GetAce(dacl, index, out acePointer) ||
+                        acePointer == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException(
+                            "Protected artifact DACL ACE could not be read.");
+                    }
+                    ACCESS_ALLOWED_ACE ace =
+                        (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
+                            acePointer,
+                            typeof(ACCESS_ALLOWED_ACE));
+                    byte expectedFlags = directory
+                        ? (byte)(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE)
+                        : (byte)0;
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
+                        ace.Header.AceFlags != expectedFlags ||
+                        ace.Mask != FILE_ALL_ACCESS)
+                    {
+                        throw new InvalidOperationException(
+                            "Protected artifact DACL contains an unexpected ACE.");
+                    }
+                    IntPtr aceSid = new IntPtr(
+                        acePointer.ToInt64() +
+                        Marshal.OffsetOf(
+                            typeof(ACCESS_ALLOWED_ACE),
+                            "SidStart").ToInt64());
+                    if (EqualSid(aceSid, expectedSystem) && !foundSystem)
+                    {
+                        foundSystem = true;
+                    }
+                    else if (EqualSid(
+                            aceSid,
+                            expectedAdministrators) &&
+                        !foundAdministrators)
+                    {
+                        foundAdministrators = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwner) &&
+                        !foundSupervisor)
+                    {
+                        foundSupervisor = true;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "Protected artifact DACL trustee is not exact.");
+                    }
+                }
+                if (!foundSystem ||
+                    !foundAdministrators ||
+                    !foundSupervisor)
+                {
+                    throw new InvalidOperationException(
+                        "Protected artifact DACL is incomplete.");
+                }
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero)
+                {
+                    LocalFree(descriptor);
+                }
+                FreeLocalSid(expectedAdministrators);
+                FreeLocalSid(expectedSystem);
+                FreeLocalSid(expectedOwner);
+            }
+        }
+
+        private static FILE_ATTRIBUTE_TAG_INFO QueryAttributeTag(
+            IntPtr handle,
+            string failure)
+        {
+            FILE_ATTRIBUTE_TAG_INFO information;
+            if (!GetFileInformationByHandleEx(
+                    handle,
+                    9,
+                    out information,
+                    (uint)Marshal.SizeOf(typeof(FILE_ATTRIBUTE_TAG_INFO))))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    failure);
+            }
+            return information;
+        }
+
+        private static BY_HANDLE_FILE_INFORMATION QueryFileInformation(
+            IntPtr handle,
+            string failure)
+        {
+            BY_HANDLE_FILE_INFORMATION information;
+            if (!GetFileInformationByHandle(handle, out information))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    failure);
+            }
+            return information;
+        }
+
+        private static bool SameFileIdentity(
+            BY_HANDLE_FILE_INFORMATION left,
+            BY_HANDLE_FILE_INFORMATION right)
+        {
+            return left.VolumeSerialNumber == right.VolumeSerialNumber &&
+                left.FileIndexHigh == right.FileIndexHigh &&
+                left.FileIndexLow == right.FileIndexLow;
+        }
+
+        private static long GetFileLength(
+            BY_HANDLE_FILE_INFORMATION information)
+        {
+            ulong length = ((ulong)information.FileSizeHigh << 32) |
+                information.FileSizeLow;
+            if (length > Int64.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    "Artifact file size is not representable.");
+            }
+            return checked((long)length);
+        }
+
+        private static string ComputeSha256(byte[] bytes)
+        {
+            using (SHA256 hash = SHA256.Create())
+            {
+                return BitConverter.ToString(hash.ComputeHash(bytes))
+                    .Replace("-", String.Empty)
+                    .ToLowerInvariant();
+            }
+        }
+
+        private static byte[] SerializeCanonicalJson(JsonElement root)
+        {
+            using (MemoryStream output = new MemoryStream())
+            {
+                JsonWriterOptions options = new JsonWriterOptions();
+                options.Indented = true;
+                options.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+                using (Utf8JsonWriter writer = new Utf8JsonWriter(
+                    output,
+                    options))
+                {
+                    WriteCanonicalJson(writer, root);
+                    writer.Flush();
+                }
+                return output.ToArray();
+            }
+        }
+
+        private static void WriteCanonicalJson(
+            Utf8JsonWriter writer,
+            JsonElement value)
+        {
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    writer.WriteStartObject();
+                    List<JsonProperty> properties =
+                        new List<JsonProperty>();
+                    HashSet<string> names =
+                        new HashSet<string>(StringComparer.Ordinal);
+                    foreach (JsonProperty property in value.EnumerateObject())
+                    {
+                        if (!names.Add(property.Name))
+                        {
+                            throw new InvalidOperationException();
+                        }
+                        properties.Add(property);
+                    }
+                    properties.Sort(delegate (
+                        JsonProperty left,
+                        JsonProperty right)
+                    {
+                        return StringComparer.Ordinal.Compare(
+                            left.Name,
+                            right.Name);
+                    });
+                    foreach (JsonProperty property in properties)
+                    {
+                        writer.WritePropertyName(property.Name);
+                        WriteCanonicalJson(writer, property.Value);
+                    }
+                    writer.WriteEndObject();
+                    return;
+                case JsonValueKind.Array:
+                    writer.WriteStartArray();
+                    foreach (JsonElement item in value.EnumerateArray())
+                    {
+                        WriteCanonicalJson(writer, item);
+                    }
+                    writer.WriteEndArray();
+                    return;
+                case JsonValueKind.String:
+                    writer.WriteStringValue(value.GetString());
+                    return;
+                case JsonValueKind.Number:
+                    long signed;
+                    ulong unsigned;
+                    decimal decimalValue;
+                    double doubleValue;
+                    if (value.TryGetInt64(out signed))
+                    {
+                        writer.WriteNumberValue(signed);
+                    }
+                    else if (value.TryGetUInt64(out unsigned))
+                    {
+                        writer.WriteNumberValue(unsigned);
+                    }
+                    else if (value.TryGetDecimal(out decimalValue))
+                    {
+                        writer.WriteNumberValue(decimalValue);
+                    }
+                    else if (value.TryGetDouble(out doubleValue))
+                    {
+                        writer.WriteNumberValue(doubleValue);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException();
+                    }
+                    return;
+                case JsonValueKind.True:
+                    writer.WriteBooleanValue(true);
+                    return;
+                case JsonValueKind.False:
+                    writer.WriteBooleanValue(false);
+                    return;
+                case JsonValueKind.Null:
+                    writer.WriteNullValue();
+                    return;
+                default:
+                    throw new InvalidOperationException();
+            }
+        }
+
+        private static bool BytesEqual(byte[] left, byte[] right)
+        {
+            if (left.Length != right.Length)
+            {
+                return false;
+            }
+            int difference = 0;
+            for (int index = 0; index < left.Length; index++)
+            {
+                difference |= left[index] ^ right[index];
+            }
+            return difference == 0;
+        }
+
+        private void RequireJobHasZeroActiveProcesses()
+        {
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+            if (!QueryInformationJobObject(
+                    jobHandle,
+                    JobObjectBasicAccountingInformation,
+                    out accounting,
+                    (uint)Marshal.SizeOf(
+                        typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                    IntPtr.Zero))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Supervised Job Object state could not be queried.");
+            }
+            if (accounting.ActiveProcesses != 0)
+            {
+                throw new InvalidOperationException(
+                    "Artifact handoff requires zero active supervised processes.");
+            }
+        }
+
         public WindowsJobRunResult RunAsUser(
             WindowsIsolatedUser isolatedUser,
             string applicationName,
@@ -1766,6 +2926,34 @@ namespace OpenCoven
                 new WindowsDirectoryQuota[0]);
         }
 
+        public WindowsJobRunResult RunAsUserWithStandardInput(
+            WindowsIsolatedUser isolatedUser,
+            string applicationName,
+            string arguments,
+            string workingDirectory,
+            IDictionary environment,
+            TimeSpan TotalTimeout,
+            int MaxStdoutBytes,
+            int MaxStderrBytes,
+            byte[] StandardInput)
+        {
+            if (StandardInput == null)
+            {
+                throw new ArgumentNullException("StandardInput");
+            }
+            return RunAsUserCore(
+                isolatedUser,
+                applicationName,
+                arguments,
+                workingDirectory,
+                environment,
+                TotalTimeout,
+                MaxStdoutBytes,
+                MaxStderrBytes,
+                new WindowsDirectoryQuota[0],
+                (byte[])StandardInput.Clone());
+        }
+
         public WindowsJobRunResult RunAsUser(
             WindowsIsolatedUser isolatedUser,
             string applicationName,
@@ -1776,6 +2964,31 @@ namespace OpenCoven
             int MaxStdoutBytes,
             int MaxStderrBytes,
             WindowsDirectoryQuota[] DirectoryQuotas)
+        {
+            return RunAsUserCore(
+                isolatedUser,
+                applicationName,
+                arguments,
+                workingDirectory,
+                environment,
+                TotalTimeout,
+                MaxStdoutBytes,
+                MaxStderrBytes,
+                DirectoryQuotas,
+                null);
+        }
+
+        private WindowsJobRunResult RunAsUserCore(
+            WindowsIsolatedUser isolatedUser,
+            string applicationName,
+            string arguments,
+            string workingDirectory,
+            IDictionary environment,
+            TimeSpan TotalTimeout,
+            int MaxStdoutBytes,
+            int MaxStderrBytes,
+            WindowsDirectoryQuota[] DirectoryQuotas,
+            byte[] StandardInput)
         {
             ThrowIfDisposed();
             if (isolatedUser == null)
@@ -1832,11 +3045,13 @@ namespace OpenCoven
             IntPtr stdoutWrite = IntPtr.Zero;
             IntPtr stderrRead = IntPtr.Zero;
             IntPtr stderrWrite = IntPtr.Zero;
-            IntPtr stdinHandle = IntPtr.Zero;
+            IntPtr stdinRead = IntPtr.Zero;
+            IntPtr stdinWrite = IntPtr.Zero;
             PROCESS_INFORMATION process = new PROCESS_INFORMATION();
             IntPtr environmentBlock = IntPtr.Zero;
             Task<PipeCapture> stdoutTask = null;
             Task<PipeCapture> stderrTask = null;
+            Task inputTask = null;
             Task quotaTask = null;
             CancellationTokenSource quotaCancellation = new CancellationTokenSource();
             ManualResetEventSlim overflow = new ManualResetEventSlim(false);
@@ -1846,24 +3061,51 @@ namespace OpenCoven
             {
                 CreateBoundedPipe(inheritable, out stdoutRead, out stdoutWrite);
                 CreateBoundedPipe(inheritable, out stderrRead, out stderrWrite);
-                stdinHandle = CreateFileW(
-                    "NUL",
-                    0x80000000,
-                    0x00000001 | 0x00000002,
-                    ref inheritable,
-                    3,
-                    0x00000080,
-                    IntPtr.Zero);
-                if (stdinHandle == new IntPtr(-1))
+                if (StandardInput == null)
                 {
-                    stdinHandle = IntPtr.Zero;
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Opening NUL failed.");
+                    stdinRead = CreateFileW(
+                        "NUL",
+                        GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        ref inheritable,
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL,
+                        IntPtr.Zero);
+                    if (stdinRead == new IntPtr(-1))
+                    {
+                        stdinRead = IntPtr.Zero;
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Opening NUL failed.");
+                    }
+                }
+                else
+                {
+                    if (!CreatePipe(
+                            out stdinRead,
+                            out stdinWrite,
+                            ref inheritable,
+                            0))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Creating standard input pipe failed.");
+                    }
+                    if (!SetHandleInformation(
+                            stdinWrite,
+                            HANDLE_FLAG_INHERIT,
+                            0))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Protecting standard input pipe failed.");
+                    }
                 }
 
                 STARTUPINFO startup = new STARTUPINFO();
                 startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
                 startup.dwFlags = STARTF_USESTDHANDLES;
-                startup.hStdInput = stdinHandle;
+                startup.hStdInput = stdinRead;
                 startup.hStdOutput = stdoutWrite;
                 startup.hStdError = stderrWrite;
                 environmentBlock = BuildEnvironmentBlock(
@@ -1902,8 +3144,8 @@ namespace OpenCoven
                 stdoutWrite = IntPtr.Zero;
                 CloseHandle(stderrWrite);
                 stderrWrite = IntPtr.Zero;
-                CloseHandle(stdinHandle);
-                stdinHandle = IntPtr.Zero;
+                CloseHandle(stdinRead);
+                stdinRead = IntPtr.Zero;
 
                 if (!AssignProcessToJobObject(jobHandle, process.hProcess))
                 {
@@ -1937,6 +3179,11 @@ namespace OpenCoven
                 {
                     TerminateJobObject(jobHandle, 1);
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "ResumeThread failed.");
+                }
+                if (StandardInput != null)
+                {
+                    inputTask = WritePipeAsync(stdinWrite, StandardInput);
+                    stdinWrite = IntPtr.Zero;
                 }
 
                 Stopwatch timer = Stopwatch.StartNew();
@@ -2004,7 +3251,14 @@ namespace OpenCoven
                     throw new TimeoutException("Directory quota monitor could not be reaped.");
                 }
 
-                if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 30000))
+                List<Task> ioTasks = new List<Task>();
+                ioTasks.Add(stdoutTask);
+                ioTasks.Add(stderrTask);
+                if (inputTask != null)
+                {
+                    ioTasks.Add(inputTask);
+                }
+                if (!Task.WaitAll(ioTasks.ToArray(), 30000))
                 {
                     TerminateJobObject(jobHandle, 1);
                     throw new TimeoutException("Supervised output readers could not be reaped.");
@@ -2054,6 +3308,16 @@ namespace OpenCoven
                     {
                     }
                 }
+                if (inputTask != null)
+                {
+                    try
+                    {
+                        inputTask.Wait(30000);
+                    }
+                    catch (AggregateException)
+                    {
+                    }
+                }
                 quotaCancellation.Dispose();
                 resourceQuotaExceeded.Dispose();
                 overflow.Dispose();
@@ -2067,7 +3331,8 @@ namespace OpenCoven
                 CloseIfValid(stdoutWrite);
                 CloseIfValid(stderrRead);
                 CloseIfValid(stderrWrite);
-                CloseIfValid(stdinHandle);
+                CloseIfValid(stdinRead);
+                CloseIfValid(stdinWrite);
             }
         }
 
@@ -2351,6 +3616,24 @@ namespace OpenCoven
             });
         }
 
+        private static Task WritePipeAsync(IntPtr handle, byte[] bytes)
+        {
+            SafeFileHandle safeHandle = new SafeFileHandle(handle, true);
+            return Task.Run(delegate
+            {
+                using (safeHandle)
+                using (FileStream stream = new FileStream(
+                    safeHandle,
+                    FileAccess.Write,
+                    4096,
+                    false))
+                {
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush();
+                }
+            });
+        }
+
         private static IntPtr BuildEnvironmentBlock(
             IDictionary environment,
             WindowsIsolatedUser isolatedUser,
@@ -2557,6 +3840,28 @@ namespace OpenCoven
         {
             internal uint FileAttributes;
             internal uint ReparseTag;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NATIVE_FILETIME
+        {
+            internal uint LowDateTime;
+            internal uint HighDateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BY_HANDLE_FILE_INFORMATION
+        {
+            internal uint FileAttributes;
+            internal NATIVE_FILETIME CreationTime;
+            internal NATIVE_FILETIME LastAccessTime;
+            internal NATIVE_FILETIME LastWriteTime;
+            internal uint VolumeSerialNumber;
+            internal uint FileSizeHigh;
+            internal uint FileSizeLow;
+            internal uint NumberOfLinks;
+            internal uint FileIndexHigh;
+            internal uint FileIndexLow;
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -2798,6 +4103,19 @@ namespace OpenCoven
             int informationClass,
             out FILE_ATTRIBUTE_TAG_INFO information,
             uint bufferSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandle(
+            IntPtr file,
+            out BY_HANDLE_FILE_INFORMATION information);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetFileType(IntPtr file);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FlushFileBuffers(IntPtr file);
 
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

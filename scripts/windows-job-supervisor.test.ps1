@@ -62,6 +62,14 @@ try {
     'operator-private',
     [Text.UTF8Encoding]::new($false)
   )
+  $handoffCanarySecret =
+    "supervisor-only-canary-$([Guid]::NewGuid().ToString('N'))"
+  $handoffCanary = Join-Path $operatorPrivateRoot 'handoff-canary.txt'
+  [IO.File]::WriteAllText(
+    $handoffCanary,
+    $handoffCanarySecret,
+    [Text.UTF8Encoding]::new($false)
+  )
   $childEnvironment.OPENCOVEN_OPERATOR_PRIVATE_ROOT = $operatorPrivateRoot
   $accessProbeSource = Join-Path $root 'job-access-probe.cs'
   [IO.File]::WriteAllText(
@@ -280,6 +288,426 @@ if (-not `$operatorDenied) {
     }
   } finally {
     $accessJob.Dispose()
+  }
+
+  $handoffAttackSource = Join-Path $root 'artifact-handoff-attack.cs'
+  [IO.File]::WriteAllText(
+    $handoffAttackSource,
+    @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+
+public static class ArtifactHandoffAttack
+{
+    private const uint SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1;
+    private const uint SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE = 0x2;
+
+    public static void ReplaceFileWithSymbolicLink(string path, string target)
+    {
+        File.Delete(path);
+        if (!CreateSymbolicLinkW(
+                path,
+                target,
+                SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Test file symbolic link creation failed.");
+        }
+    }
+
+    public static void CreateHardLink(string path, string existing)
+    {
+        if (!CreateHardLinkW(path, existing, IntPtr.Zero))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Test hardlink creation failed.");
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateSymbolicLinkW(
+        string symbolicLink,
+        string target,
+        uint flags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(
+        string fileName,
+        string existingFileName,
+        IntPtr securityAttributes);
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $handoffReplacementScript = Join-Path $root 'artifact-handoff-replacement.ps1'
+  [IO.File]::WriteAllText(
+    $handoffReplacementScript,
+    @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText($env:OPENCOVEN_HANDOFF_ATTACK_SOURCE)
+) -Language CSharp
+if ($env:OPENCOVEN_HANDOFF_ATTACK -eq 'symlink') {
+  [ArtifactHandoffAttack]::ReplaceFileWithSymbolicLink(
+    $env:OPENCOVEN_HANDOFF_RECORD,
+    $env:OPENCOVEN_HANDOFF_CANARY
+  )
+} elseif ($env:OPENCOVEN_HANDOFF_ATTACK -eq 'junction') {
+  $parent = [IO.Directory]::GetParent($env:OPENCOVEN_HANDOFF_RECORD).FullName
+  $real = "$parent-real"
+  [IO.Directory]::Move($parent, $real)
+  & $env:COMSPEC /d /c "mklink /J `"$parent`" `"$real`""
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Test parent junction creation failed.'
+  }
+} else {
+  throw 'Unknown artifact handoff replacement attack.'
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $handoffProducerTemplate = @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText($env:OPENCOVEN_HANDOFF_ATTACK_SOURCE)
+) -Language CSharp
+$recordParent = [IO.Directory]::GetParent($env:OPENCOVEN_HANDOFF_RECORD).FullName
+[IO.Directory]::CreateDirectory($recordParent) | Out-Null
+[IO.File]::WriteAllText(
+  $env:OPENCOVEN_HANDOFF_RECORD,
+  '{' + "`n" +
+    '  "platform": "win32-x64",' + "`n" +
+    '  "schemaVersion": 2' + "`n" +
+    '}' + "`n",
+  [Text.UTF8Encoding]::new($false)
+)
+$validated = [IO.File]::ReadAllText($env:OPENCOVEN_HANDOFF_RECORD) |
+  ConvertFrom-Json
+if ($validated.schemaVersion -ne 2 -or $validated.platform -ne 'win32-x64') {
+  throw 'Test record validation failed.'
+}
+if ($env:OPENCOVEN_HANDOFF_ATTACK -eq 'hardlink') {
+  [ArtifactHandoffAttack]::CreateHardLink(
+    "$($env:OPENCOVEN_HANDOFF_RECORD).link",
+    $env:OPENCOVEN_HANDOFF_RECORD
+  )
+} elseif (
+  $env:OPENCOVEN_HANDOFF_ATTACK -eq 'symlink' -or
+  $env:OPENCOVEN_HANDOFF_ATTACK -eq 'junction'
+) {
+  $replacement = Start-Process `
+    -FilePath $env:OPENCOVEN_WINDOWS_SYSTEM_PWSH `
+    -ArgumentList @(
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-File',
+      $env:OPENCOVEN_HANDOFF_REPLACEMENT_SCRIPT
+    ) `
+    -Wait `
+    -PassThru
+  if ($replacement.ExitCode -ne 0) {
+    throw 'Background artifact replacement failed.'
+  }
+}
+'@
+  $handoffValidatorScript = Join-Path $root 'artifact-handoff-validator.ps1'
+  [IO.File]::WriteAllText(
+    $handoffValidatorScript,
+    @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText($env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)
+) -Language CSharp
+$inputStream = [Console]::OpenStandardInput()
+$memory = [IO.MemoryStream]::new()
+try {
+  $inputStream.CopyTo($memory)
+  $bytes = $memory.ToArray()
+} finally {
+  $memory.Dispose()
+  $inputStream.Dispose()
+}
+[OpenCoven.WindowsJobSupervisor]::RequireCanonicalSchemaV2Artifact(
+  $bytes,
+  $env:OPENCOVEN_EXPECTED_RECORD_SHA256,
+  'win32-x64'
+)
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $expectedHandoffBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+    '{' + "`n" +
+      '  "platform": "win32-x64",' + "`n" +
+      '  "schemaVersion": 2' + "`n" +
+      '}' + "`n"
+  )
+  $expectedHandoffDigest = [Convert]::ToHexString(
+    [Security.Cryptography.SHA256]::HashData($expectedHandoffBytes)
+  ).ToLowerInvariant()
+
+  function Invoke-HandoffProducer {
+    param(
+      [Parameter(Mandatory)][string]$Label,
+      [Parameter(Mandatory)][string]$Attack
+    )
+
+    $caseRoot = Join-Path (
+      $isolatedUser.WorkspacePath
+    ) "handoff-$Label-$([Guid]::NewGuid().ToString('N'))"
+    $recordPath = Join-Path $caseRoot '.artifacts\record.json'
+    $scriptPath = Join-Path $root "handoff-$Label.ps1"
+    [IO.File]::WriteAllText(
+      $scriptPath,
+      $handoffProducerTemplate,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $environment = $childEnvironment.Clone()
+    $environment.OPENCOVEN_HANDOFF_ATTACK = $Attack
+    $environment.OPENCOVEN_HANDOFF_ATTACK_SOURCE = $handoffAttackSource
+    $environment.OPENCOVEN_HANDOFF_CANARY = $handoffCanary
+    $environment.OPENCOVEN_HANDOFF_RECORD = $recordPath
+    $environment.OPENCOVEN_HANDOFF_REPLACEMENT_SCRIPT = $handoffReplacementScript
+    $job = [OpenCoven.WindowsJobSupervisor]::Create(
+      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+      $isolatedUser
+    )
+    try {
+      $result = $job.RunAsUser(
+        $isolatedUser,
+        $trustedPwsh,
+        "-NoLogo -NoProfile -NonInteractive -File `"$scriptPath`"",
+        $isolatedUser.RootPath,
+        $environment,
+        [TimeSpan]::FromSeconds(30),
+        1MB,
+        1MB
+      )
+      if ($result.ExitCode -ne 0) {
+        throw "Artifact handoff producer '$Label' failed."
+      }
+      return [pscustomobject]@{
+        Job = $job
+        RecordPath = $recordPath
+      }
+    } catch {
+      $job.Dispose()
+      throw
+    }
+  }
+
+  function Assert-HandoffRejected {
+    param(
+      [Parameter(Mandatory)]$Case,
+      [Parameter(Mandatory)][string]$Failure
+    )
+
+    $rejected = $false
+    try {
+      $Case.Job.CaptureIsolatedArtifact(
+        $isolatedUser,
+        $isolatedUser.WorkspacePath,
+        $Case.RecordPath,
+        1MB
+      ) | Out-Null
+    } catch {
+      $rejected = $true
+      if ($_.Exception.ToString().Contains($handoffCanarySecret)) {
+        throw 'Artifact handoff failure exposed supervisor-only canary bytes.'
+      }
+    } finally {
+      $Case.Job.Dispose()
+    }
+    if (-not $rejected) {
+      throw $Failure
+    }
+  }
+
+  $successCase = Invoke-HandoffProducer -Label 'success' -Attack 'none'
+  try {
+    $validatedArtifact = $successCase.Job.CaptureIsolatedArtifact(
+      $isolatedUser,
+      $isolatedUser.WorkspacePath,
+      $successCase.RecordPath,
+      1MB
+    )
+    if (
+      $validatedArtifact.Size -ne $expectedHandoffBytes.Length -or
+      $validatedArtifact.Sha256 -cne $expectedHandoffDigest
+    ) {
+      throw 'Valid artifact handoff changed captured bytes.'
+    }
+    $validationEnvironment = $childEnvironment.Clone()
+    $validationEnvironment.OPENCOVEN_EXPECTED_RECORD_SHA256 =
+      $validatedArtifact.Sha256
+    $validationResult = $successCase.Job.RunAsUserWithStandardInput(
+      $isolatedUser,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$handoffValidatorScript`"",
+      $isolatedUser.RootPath,
+      $validationEnvironment,
+      [TimeSpan]::FromSeconds(30),
+      1MB,
+      1MB,
+      $validatedArtifact.Bytes
+    )
+    if ($validationResult.ExitCode -ne 0) {
+      throw 'Fresh unprivileged handle-captured record validation failed.'
+    }
+    $handoffOutputRoot = Join-Path $operatorPrivateRoot 'handoff-output'
+    [IO.Directory]::CreateDirectory($handoffOutputRoot) | Out-Null
+    [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory(
+      $handoffOutputRoot
+    )
+    $publishedPath = Join-Path $handoffOutputRoot 'record.json'
+    $successCase.Job.PublishValidatedArtifact(
+      $validatedArtifact,
+      $handoffOutputRoot,
+      $publishedPath
+    )
+    if (
+      [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+          [IO.File]::ReadAllBytes($publishedPath)
+        )
+      ).ToLowerInvariant() -cne $expectedHandoffDigest
+    ) {
+      throw 'Published artifact bytes differ from the validated handle bytes.'
+    }
+  } finally {
+    $successCase.Job.Dispose()
+  }
+
+  Assert-HandoffRejected `
+    -Case (Invoke-HandoffProducer -Label 'symlink' -Attack 'symlink') `
+    -Failure 'Symlink replacement artifact handoff unexpectedly succeeded.'
+  Assert-HandoffRejected `
+    -Case (Invoke-HandoffProducer -Label 'hardlink' -Attack 'hardlink') `
+    -Failure 'Hardlink artifact handoff unexpectedly succeeded.'
+  Assert-HandoffRejected `
+    -Case (Invoke-HandoffProducer -Label 'junction' -Attack 'junction') `
+    -Failure 'Parent junction artifact handoff unexpectedly succeeded.'
+
+  $ownerCase = Invoke-HandoffProducer -Label 'owner' -Attack 'none'
+  $ownerAcl = Get-Acl -LiteralPath $ownerCase.RecordPath
+  $ownerAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+  Set-Acl -LiteralPath $ownerCase.RecordPath -AclObject $ownerAcl
+  Assert-HandoffRejected `
+    -Case $ownerCase `
+    -Failure 'Wrong-owner artifact handoff unexpectedly succeeded.'
+
+  $daclCase = Invoke-HandoffProducer -Label 'dacl' -Attack 'none'
+  & (Join-Path $env:SystemRoot 'System32\icacls.exe') `
+    $daclCase.RecordPath `
+    '/grant' `
+    '*S-1-1-0:(R)' | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Permissive artifact test DACL could not be applied.'
+  }
+  Assert-HandoffRejected `
+    -Case $daclCase `
+    -Failure 'Permissive-DACL artifact handoff unexpectedly succeeded.'
+
+  $raceCase = Invoke-HandoffProducer -Label 'race' -Attack 'none'
+  $raceStop = Join-Path $operatorPrivateRoot 'handoff-race-stop'
+  $raceReady = Join-Path $operatorPrivateRoot 'handoff-race-ready'
+  $raceScript = Join-Path $root 'artifact-handoff-race.ps1'
+  [IO.File]::WriteAllText(
+    $raceScript,
+    @'
+$ErrorActionPreference = 'Continue'
+Set-StrictMode -Version Latest
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText($env:OPENCOVEN_HANDOFF_ATTACK_SOURCE)
+) -Language CSharp
+$reported = $false
+while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
+  try {
+    [ArtifactHandoffAttack]::ReplaceFileWithSymbolicLink(
+      $env:OPENCOVEN_HANDOFF_RECORD,
+      $env:OPENCOVEN_HANDOFF_CANARY
+    )
+    if (-not $reported) {
+      [IO.File]::WriteAllText($env:OPENCOVEN_HANDOFF_RACE_READY, 'ready')
+      $reported = $true
+    }
+  } catch {
+  }
+  Start-Sleep -Milliseconds 1
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $raceEnvironment = @{
+    OPENCOVEN_HANDOFF_ATTACK_SOURCE = $handoffAttackSource
+    OPENCOVEN_HANDOFF_CANARY = $handoffCanary
+    OPENCOVEN_HANDOFF_RACE_READY = $raceReady
+    OPENCOVEN_HANDOFF_RACE_STOP = $raceStop
+    OPENCOVEN_HANDOFF_RECORD = $raceCase.RecordPath
+  }
+  $raceProcess = Start-Process `
+    -FilePath $trustedPwsh `
+    -ArgumentList @(
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-File',
+      $raceScript
+    ) `
+    -Environment $raceEnvironment `
+    -RedirectStandardOutput (Join-Path $operatorPrivateRoot 'handoff-race.stdout') `
+    -RedirectStandardError (Join-Path $operatorPrivateRoot 'handoff-race.stderr') `
+    -PassThru
+  try {
+    $raceDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not [IO.File]::Exists($raceReady)) {
+      if ($raceProcess.HasExited) {
+        throw 'Artifact replacement race exited before replacing the record.'
+      }
+      if ([DateTime]::UtcNow -ge $raceDeadline) {
+        throw 'Artifact replacement race did not replace the record.'
+      }
+      Start-Sleep -Milliseconds 10
+    }
+    try {
+      $raceArtifact = $raceCase.Job.CaptureIsolatedArtifact(
+        $isolatedUser,
+        $isolatedUser.WorkspacePath,
+        $raceCase.RecordPath,
+        1MB
+      )
+      if ($raceArtifact.Sha256 -cne $expectedHandoffDigest) {
+        throw 'Artifact replacement race exposed supervisor-only canary bytes.'
+      }
+    } catch {
+      if (
+        $_.Exception.ToString().Contains($handoffCanarySecret) -or
+        $_.Exception.Message -eq
+          'Artifact replacement race exposed supervisor-only canary bytes.'
+      ) {
+        throw 'Artifact replacement race exposed supervisor-only canary bytes.'
+      }
+    }
+  } finally {
+    [IO.File]::WriteAllText($raceStop, 'stop')
+    if (-not $raceProcess.WaitForExit(10000)) {
+      $raceProcess.Kill($true)
+      $raceProcess.WaitForExit()
+    }
+    if ($raceProcess.ExitCode -ne 0) {
+      throw 'Artifact replacement race process failed.'
+    }
+    $raceProcess.Dispose()
+    $raceCase.Job.Dispose()
   }
 
   $timeoutPids = Join-Path $root 'timeout-pids.txt'

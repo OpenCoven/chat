@@ -312,8 +312,8 @@ membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
 flags are not enabled. The outer process retains non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
-reaps the complete Job on every exit path, and copies only the final canonical
-JSON record into the runner-owned artifact workspace.
+reaps the complete Job on every exit path, and requires zero active Job
+processes before beginning artifact handoff.
 
 The assigned child performs every Windows production operation: exact Chat
 checkout, tool acquisition, dependency installation, tool and harness
@@ -328,6 +328,30 @@ do not compile this evidence RPC path, and ordinary non-evidence RPC tests do
 not set the schema-v2 mode. The four Job binding variables are explicitly
 carried through the harness's curated environment; they cannot degrade to an
 unnamed or ambient Job.
+
+The privileged handoff never reopens the record through managed path APIs.
+With the Job explicitly terminated and empty, the supervisor retains
+non-delete-sharing, no-follow handles for every directory from the isolated
+workspace root to the record. Each directory must remain on the same volume,
+must not be a reparse point, must be owned by the isolated SID, and must retain
+the exact restrictive isolated-user, supervisor, SYSTEM, Administrators, and
+Owner Rights DACL. The final record is opened read-only with
+`FILE_FLAG_OPEN_REPARSE_POINT` and no write/delete sharing. It must be one
+bounded disk file, not a directory or reparse point, have exactly one hard
+link, and retain the expected isolated owner and restrictive DACL. Volume
+serial, file ID, attributes, link count, and size are rechecked on the same
+handle after the bounded read.
+
+Those handle-captured bytes and their SHA-256 are passed over an inherited
+anonymous stdin pipe to a fresh restricted-user PowerShell process. That
+process receives no source path and revalidates the exact digest, strict UTF-8,
+schema-v2 platform binding, and recursively sorted canonical JSON. Only after
+that validation process is also terminated and the Job again reports zero
+active processes does the supervisor create the destination with `CREATE_NEW`
+and an owner-private protected DACL. It writes and flushes the same in-memory
+bytes through the new handle, rereads them through that handle, and verifies
+their digest, size, attributes, single-link state, volume, and file ID.
+`File.Copy` and post-validation path reads are not used.
 
 After the root exits, the trusted outer process terminates and reaps the Job,
 closes every pinned handle, removes any Windows profile with `DeleteProfileW`,
@@ -385,7 +409,12 @@ job retains the frozen Rust supervisor artifact behavior tests. The protected
 lane executes the same process/ACL/membership preflight directly from the exact
 inline production source before its first download. macOS development can
 parse and compile the source but cannot claim those native Windows runtime
-results.
+results. The native suite also has a background supervised process replace an
+already validated record with a file symlink to a supervisor-only canary before
+exiting, and proves the handoff fails without reading or publishing the canary.
+Separate cases reject a second hard link, a parent junction, wrong record
+ownership, a permissive DACL, and an active replacement race; the success case
+exercises stdin revalidation plus create-new, owner-private publication.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -546,10 +575,10 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 191,842 | `265105fa817e6590144e642d90118035c37af98963aec91e00d04d56b6dd0fee` |
+| `.github/workflows/client-v1-conformance.yml` | 260,241 | `475195251f0a82d2e1cf21b42b3e23bd05e17d94b950ca1439fe850504b7c69d` |
 | `scripts/phase1-conformance.mjs` | 187,069 | `1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70` |
-| `scripts/windows-job-supervisor.cs` | 108,965 | `d52ebb4b449ee1b57fd78c122c5220ba3c73b22a125b47b5dfe381ed75e9a3c6` |
-| `scripts/windows-job-supervisor.test.ps1` | 29,018 | `bfcce4db9f75e054cb0ed78ae70d61ce80ab87b2adf6d6dead31150825593eb2` |
+| `scripts/windows-job-supervisor.cs` | 161,804 | `535bb32f226dafc6ef3a940cd4d67588ac3a7bc65d5840d4aa2860148e7f2e99` |
+| `scripts/windows-job-supervisor.test.ps1` | 42,729 | `e1346bdb720b72ae9571541a3793f19d5c4c7bb181b08b6b44c8ab447405a028` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Its production
 job remains `platform-conformance`; the fresh validation, OIDC attestation, and
