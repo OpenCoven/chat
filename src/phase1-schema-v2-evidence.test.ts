@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -580,6 +581,74 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
         environmentId: '20863036831',
       },
     });
+  });
+
+  test('rejects a file that mutates during its evidence snapshot', async () => {
+    const module = await import('../scripts/phase1-schema-v2-evidence.mjs');
+    const readSnapshot = Reflect.get(module, 'readConsistentEvidenceFile');
+    expect(readSnapshot).toBeTypeOf('function');
+    if (typeof readSnapshot !== 'function') {
+      return;
+    }
+
+    const scratchParent = resolve(projectRoot, '.artifacts');
+    mkdirSync(scratchParent, { recursive: true });
+    const scratchRoot = mkdtempSync(resolve(scratchParent, 'schema-v2-snapshot-'));
+    const mutatingPath = resolve(scratchRoot, 'mutating.bin');
+    writeFileSync(mutatingPath, Buffer.alloc(16 * 1024 * 1024, 0x61));
+
+    const worker = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+          import { closeSync, ftruncateSync, openSync } from 'node:fs';
+          const descriptor = openSync(process.argv[1], 'r+');
+          process.stdout.write('ready\\n');
+          let large = false;
+          try {
+            while (true) {
+              ftruncateSync(descriptor, large ? 16 * 1024 * 1024 : 4 * 1024 * 1024);
+              large = !large;
+            }
+          } finally {
+            closeSync(descriptor);
+          }
+        `,
+        mutatingPath,
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    try {
+      const ready = Promise.race([
+        once(worker.stdout, 'data').then(([chunk]) => String(chunk)),
+        once(worker, 'exit').then(([code, signal]) => {
+          throw new Error(`Snapshot mutation worker exited early: ${code ?? signal}.`);
+        }),
+      ]);
+      await expect(ready).resolves.toContain('ready');
+
+      let rejectedRace = false;
+      for (let attempt = 0; attempt < 50 && !rejectedRace; attempt += 1) {
+        try {
+          readSnapshot(scratchRoot, 'mutating.bin', 'Mutating evidence file');
+        } catch (error) {
+          rejectedRace =
+            error instanceof Error && /changed while it was being read/u.test(error.message);
+        }
+      }
+      expect(rejectedRace).toBe(true);
+    } finally {
+      if (worker.exitCode === null && worker.signalCode === null) {
+        worker.kill('SIGKILL');
+        await once(worker, 'exit');
+      }
+      rmSync(scratchRoot, { recursive: true, force: true });
+    }
   });
 
   test('rejects a validator checkout at the wrong commit or tree', async () => {

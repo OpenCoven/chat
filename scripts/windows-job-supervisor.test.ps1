@@ -108,6 +108,131 @@ Start-Sleep -Seconds 300
   $closeJob.Dispose()
   Assert-ProcessExited -ProcessId $grandchildPid
 
+  $retainedJobName =
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+  $retainedPidPath = Join-Path $root 'retained-handle-pid.txt'
+  $retainedHandleSource = Join-Path $root 'retained-handle.cs'
+  [IO.File]::WriteAllText(
+    $retainedHandleSource,
+    @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class RetainedJobHandle
+{
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+
+    public static void Hold(string name, string pidPath)
+    {
+        IntPtr handle = OpenJobObjectW(JOB_OBJECT_QUERY, false, name);
+        if (handle == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Retained Job Object query handle could not be opened.");
+        }
+        try
+        {
+            File.WriteAllText(
+                pidPath,
+                Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture));
+            Thread.Sleep(TimeSpan.FromMinutes(5));
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(uint desiredAccess, bool inherit, string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $retainedHandleScript = Join-Path $root 'retained-handle.ps1'
+  [IO.File]::WriteAllText(
+    $retainedHandleScript,
+    @"
+Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($retainedHandleSource.Replace("'", "''"))')) -Language CSharp
+[RetainedJobHandle]::Hold(`$env:RETAINED_JOB_NAME, '$($retainedPidPath.Replace("'", "''"))')
+"@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $retainedRootScript = Join-Path $root 'retained-root.ps1'
+  [IO.File]::WriteAllText(
+    $retainedRootScript,
+    @"
+`$descendant = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File','$($retainedHandleScript.Replace("'", "''"))') -RedirectStandardOutput '$((Join-Path $root 'retained-stdout.txt').Replace("'", "''"))' -RedirectStandardError '$((Join-Path $root 'retained-stderr.txt').Replace("'", "''"))' -PassThru
+`$deadline = [DateTime]::UtcNow.AddSeconds(10)
+while (-not [IO.File]::Exists('$($retainedPidPath.Replace("'", "''"))')) {
+  if (`$descendant.HasExited) {
+    throw 'Retained Job handle descendant exited before reporting readiness.'
+  }
+  if ([DateTime]::UtcNow -ge `$deadline) {
+    throw 'Retained Job handle descendant did not report readiness.'
+  }
+  Start-Sleep -Milliseconds 50
+}
+"@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $retainedEnvironment = $childEnvironment.Clone()
+  $retainedEnvironment.RETAINED_JOB_NAME = $retainedJobName
+  $retainedJob = [OpenCoven.WindowsJobSupervisor]::Create($retainedJobName)
+  $retainedPid = 0
+  try {
+    $retainedTimer = [Diagnostics.Stopwatch]::StartNew()
+    $retainedResult = $retainedJob.Run(
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$retainedRootScript`"",
+      $root,
+      $retainedEnvironment,
+      [TimeSpan]::FromSeconds(30),
+      1MB,
+      1MB
+    )
+    $retainedTimer.Stop()
+    if ($retainedResult.ExitCode -ne 0) {
+      throw 'Successful root result changed during retained Job handle teardown.'
+    }
+    if ($retainedTimer.Elapsed -ge [TimeSpan]::FromSeconds(20)) {
+      throw 'Retained Job handle teardown did not finish within the runtime bound.'
+    }
+    $retainedPid = [int]([IO.File]::ReadAllText($retainedPidPath).Trim())
+    try {
+      Assert-ProcessExited -ProcessId $retainedPid
+    } catch {
+      throw 'Successful root teardown did not terminate the retained Job handle descendant.'
+    }
+  } finally {
+    $retainedJob.Dispose()
+    if ($retainedPid -eq 0 -and [IO.File]::Exists($retainedPidPath)) {
+      $retainedPid = [int]([IO.File]::ReadAllText($retainedPidPath).Trim())
+    }
+    if ($retainedPid -ne 0) {
+      try {
+        $remaining = [Diagnostics.Process]::GetProcessById($retainedPid)
+        try {
+          $remaining.Kill($true)
+          $remaining.WaitForExit()
+        } finally {
+          $remaining.Dispose()
+        }
+      } catch [ArgumentException] {
+      }
+    }
+  }
+
   $mismatchScript = Join-Path $root 'mismatch.ps1'
   [IO.File]::WriteAllText(
     $mismatchScript,

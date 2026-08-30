@@ -24,6 +24,20 @@ export function createObservedAssertionRecorder(
   }>;
 };
 
+export function readConsistentEvidenceFile(
+  root: string,
+  relativePath: string,
+  label: string,
+): {
+  bytes: Buffer;
+  path: string;
+  metadata: {
+    path: string;
+    size: number;
+    sha256: string;
+  };
+};
+
 export function loadSdkEvidenceContract(options: {
   validatorRoot: string;
   validatorIdentity: {

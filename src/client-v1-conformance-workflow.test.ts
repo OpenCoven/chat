@@ -461,10 +461,30 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'ResourceQuotaExceeded',
         'MeasureDirectoryBytes',
         'WaitForSingleObject',
+        'QueryInformationJobObject',
+        'JobObjectBasicAccountingInformation',
+        'ActiveProcesses',
         'CloseHandle',
       ]) {
         expect(source).toContain(required);
       }
+      expect(source.indexOf('GetExitCodeProcess(process.hProcess')).toBeLessThan(
+        source.indexOf('TerminateJobAndWaitForZero(jobHandle'),
+      );
+      const finalTeardown = source.indexOf(
+        'TerminateJobAndWaitForZero(\n                    jobHandle',
+      );
+      const finalQuotaCheck = source.indexOf(
+        'DirectoryQuotasExceeded(DirectoryQuotas)',
+        finalTeardown,
+      );
+      const finalOutputCheck = source.indexOf(
+        'Task.WaitAll(new Task[] { stdoutTask, stderrTask }',
+        finalQuotaCheck,
+      );
+      expect(finalTeardown).toBeGreaterThan(-1);
+      expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
+      expect(finalOutputCheck).toBeGreaterThan(finalQuotaCheck);
       expect(source).not.toContain('JOB_OBJECT_LIMIT_BREAKAWAY_OK');
       expect(source).not.toContain('JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK');
     }
@@ -517,6 +537,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Wrong existing native Job binding',
       'Valid native Job binding did not reach native RPC startup.',
       'Directory quota excess did not fail closed.',
+      'Successful root teardown did not terminate the retained Job handle descendant.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }

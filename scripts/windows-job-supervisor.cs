@@ -104,6 +104,7 @@ namespace OpenCoven
         private const uint WAIT_OBJECT_0 = 0x00000000;
         private const uint WAIT_TIMEOUT = 0x00000102;
         private const uint INFINITE = 0xffffffff;
+        private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
         private const int SupervisorFailureExitCode = unchecked((int)0xe0434f4d);
         private const int MaximumQuotaEntries = 500000;
@@ -408,7 +409,6 @@ namespace OpenCoven
 
                 Stopwatch timer = Stopwatch.StartNew();
                 bool timedOut = false;
-                bool terminated = false;
                 bool quotaExceeded = false;
                 while (true)
                 {
@@ -437,7 +437,6 @@ namespace OpenCoven
                                 Marshal.GetLastWin32Error(),
                                 "TerminateJobObject failed.");
                         }
-                        terminated = true;
                         if (WaitForSingleObject(process.hProcess, 30000) != WAIT_OBJECT_0)
                         {
                             throw new TimeoutException(
@@ -445,26 +444,6 @@ namespace OpenCoven
                         }
                         break;
                     }
-                }
-                if (!quotaExceeded && DirectoryQuotas.Length > 0)
-                {
-                    quotaExceeded = DirectoryQuotasExceeded(DirectoryQuotas);
-                    if (quotaExceeded && !terminated)
-                    {
-                        if (!TerminateJobObject(jobHandle, 1))
-                        {
-                            throw new Win32Exception(
-                                Marshal.GetLastWin32Error(),
-                                "TerminateJobObject failed after resource quota excess.");
-                        }
-                        terminated = true;
-                    }
-                }
-                quotaCancellation.Cancel();
-                if (quotaTask != null && !quotaTask.Wait(30000))
-                {
-                    TerminateJobObject(jobHandle, 1);
-                    throw new TimeoutException("Directory quota monitor could not be reaped.");
                 }
 
                 uint nativeExitCode;
@@ -475,14 +454,22 @@ namespace OpenCoven
                         "GetExitCodeProcess failed.");
                 }
                 int exitCode = unchecked((int)nativeExitCode);
-                if (!terminated && exitCode != 0)
+                TerminateJobAndWaitForZero(
+                    jobHandle,
+                    nativeExitCode == 0 ? 1u : nativeExitCode,
+                    30000);
+
+                quotaExceeded = quotaExceeded || resourceQuotaExceeded.IsSet;
+                if (DirectoryQuotas.Length > 0)
                 {
-                    if (!TerminateJobObject(jobHandle, nativeExitCode))
-                    {
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "TerminateJobObject failed after child failure.");
-                    }
+                    quotaExceeded =
+                        DirectoryQuotasExceeded(DirectoryQuotas) || quotaExceeded;
+                }
+                quotaCancellation.Cancel();
+                if (quotaTask != null && !quotaTask.Wait(30000))
+                {
+                    TerminateJobObject(jobHandle, 1);
+                    throw new TimeoutException("Directory quota monitor could not be reaped.");
                 }
 
                 if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 30000))
@@ -510,7 +497,14 @@ namespace OpenCoven
             {
                 if (process.hProcess != IntPtr.Zero)
                 {
-                    TerminateJobObject(jobHandle, 1);
+                    try
+                    {
+                        TerminateJobAndWaitForZero(jobHandle, 1, 30000);
+                    }
+                    catch
+                    {
+                        TerminateJobObject(jobHandle, 1);
+                    }
                     WaitForSingleObject(process.hProcess, 30000);
                 }
                 throw;
@@ -542,6 +536,47 @@ namespace OpenCoven
                 CloseIfValid(stderrRead);
                 CloseIfValid(stderrWrite);
                 CloseIfValid(stdinHandle);
+            }
+        }
+
+        private static void TerminateJobAndWaitForZero(
+            IntPtr job,
+            uint exitCode,
+            int timeoutMilliseconds)
+        {
+            if (!TerminateJobObject(job, exitCode))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "TerminateJobObject failed during final teardown.");
+            }
+
+            Stopwatch timer = Stopwatch.StartNew();
+            while (true)
+            {
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+                if (!QueryInformationJobObject(
+                        job,
+                        JobObjectBasicAccountingInformation,
+                        out accounting,
+                        (uint)Marshal.SizeOf(
+                            typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                        IntPtr.Zero))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "QueryInformationJobObject failed during final teardown.");
+                }
+                if (accounting.ActiveProcesses == 0)
+                {
+                    return;
+                }
+                if (timer.ElapsedMilliseconds >= timeoutMilliseconds)
+                {
+                    throw new TimeoutException(
+                        "Supervised Job Object processes could not be reaped.");
+                }
+                Thread.Sleep(10);
             }
         }
 
@@ -909,6 +944,19 @@ namespace OpenCoven
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+        {
+            internal long TotalUserTime;
+            internal long TotalKernelTime;
+            internal long ThisPeriodTotalUserTime;
+            internal long ThisPeriodTotalKernelTime;
+            internal uint TotalPageFaultCount;
+            internal uint TotalProcesses;
+            internal uint ActiveProcesses;
+            internal uint TotalTerminatedProcesses;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct FILE_ATTRIBUTE_TAG_INFO
         {
             internal uint FileAttributes;
@@ -925,6 +973,15 @@ namespace OpenCoven
             int informationClass,
             IntPtr information,
             uint informationLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryInformationJobObject(
+            IntPtr job,
+            int informationClass,
+            out JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information,
+            uint informationLength,
+            IntPtr returnLength);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

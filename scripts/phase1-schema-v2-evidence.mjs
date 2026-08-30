@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -47,6 +55,9 @@ const gitOidPattern = /^[0-9a-f]{40}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
+const MAXIMUM_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024;
+const EVIDENCE_READ_CHUNK_BYTES = 64 * 1024;
+const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
 
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -77,33 +88,109 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function readRegularFile(root, relativePath, label) {
+function sameFileState(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function readBoundedDescriptor(descriptor, openedStats, label) {
+  if (openedStats.size > BigInt(MAXIMUM_EVIDENCE_FILE_BYTES)) {
+    throw new Error(`${label} exceeds the evidence file size limit.`);
+  }
+  const expectedSize = Number(openedStats.size);
+  const buffer = Buffer.allocUnsafe(expectedSize + 1);
+  let total = 0;
+  while (total < buffer.length) {
+    const bytesRead = readSync(
+      descriptor,
+      buffer,
+      total,
+      Math.min(EVIDENCE_READ_CHUNK_BYTES, buffer.length - total),
+      null,
+    );
+    if (bytesRead === 0) {
+      break;
+    }
+    total += bytesRead;
+  }
+  if (total !== expectedSize) {
+    throw new Error(`${label} changed while it was being read.`);
+  }
+  return buffer.subarray(0, total);
+}
+
+export function readConsistentEvidenceFile(root, relativePath, label) {
   const path = resolve(root, relativePath);
   const rootPath = realpathSync(root);
-  const stats = lstatSync(path);
-  const offset = relative(rootPath, realpathSync(path));
+  const pathStats = lstatSync(path, { bigint: true });
+  const realPath = realpathSync(path);
+  const offset = relative(rootPath, realPath);
   if (
-    stats.isSymbolicLink() ||
-    !stats.isFile() ||
+    pathStats.isSymbolicLink() ||
+    !pathStats.isFile() ||
     offset === '..' ||
     offset.startsWith(`..${sep}`) ||
     isAbsolute(offset)
   ) {
     throw new Error(`${label} must be a regular file inside the validator checkout.`);
   }
-  return {
-    bytes: readFileSync(path),
-    path,
-    metadata: {
-      path: relativePath,
-      size: stats.size,
-      sha256: sha256(readFileSync(path)),
-    },
-  };
+
+  let descriptor;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | noFollow);
+    const openedStats = fstatSync(descriptor, { bigint: true });
+    if (!openedStats.isFile()) {
+      throw new Error(`${label} must be a regular file inside the validator checkout.`);
+    }
+    if (openedStats.dev !== pathStats.dev || openedStats.ino !== pathStats.ino) {
+      throw new Error(`${label} changed while it was being read.`);
+    }
+
+    const bytes = readBoundedDescriptor(descriptor, openedStats, label);
+    const completedStats = fstatSync(descriptor, { bigint: true });
+    let completedPathStats;
+    let completedRealPath;
+    try {
+      completedPathStats = lstatSync(path, { bigint: true });
+      completedRealPath = realpathSync(path);
+    } catch {
+      throw new Error(`${label} changed while it was being read.`);
+    }
+    if (
+      !sameFileState(openedStats, completedStats) ||
+      completedPathStats.isSymbolicLink() ||
+      !completedPathStats.isFile() ||
+      completedPathStats.dev !== completedStats.dev ||
+      completedPathStats.ino !== completedStats.ino ||
+      completedRealPath !== realPath
+    ) {
+      throw new Error(`${label} changed while it was being read.`);
+    }
+
+    return {
+      bytes,
+      path,
+      metadata: {
+        path: relativePath,
+        size: bytes.byteLength,
+        sha256: sha256(bytes),
+      },
+    };
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+  }
 }
 
 function metadataForExpectedFile(root, expected, label) {
-  const file = readRegularFile(root, expected.path, label);
+  const file = readConsistentEvidenceFile(root, expected.path, label);
   assertMetadataMatches(
     file.metadata,
     {
@@ -256,17 +343,17 @@ export async function verifySchemaV2ProducerCheckout({
     tree: producerIdentity.tree,
   };
   assertIdentityMatches(identity, producer, 'Schema-v2 producer');
-  const packageManifest = readRegularFile(
+  const packageManifest = readConsistentEvidenceFile(
     producerRoot,
     'package.json',
     'Schema-v2 producer package manifest',
   ).metadata;
-  const harness = readRegularFile(
+  const harness = readConsistentEvidenceFile(
     producerRoot,
     producer.harness.path,
     'Schema-v2 producer harness',
   ).metadata;
-  const workflow = readRegularFile(
+  const workflow = readConsistentEvidenceFile(
     producerRoot,
     producer.workflow.path,
     'Schema-v2 protected workflow',
@@ -351,22 +438,22 @@ export async function loadSdkEvidenceContract(optionsValue) {
     throw new Error(`SDK validator tree ${actual.tree} does not match ${expected.tree}.`);
   }
 
-  const contractFile = readRegularFile(
+  const contractFile = readConsistentEvidenceFile(
     validatorRoot,
     'scripts/conformance-contract.mjs',
     'SDK executable contract',
   );
-  const schemaFile = readRegularFile(
+  const schemaFile = readConsistentEvidenceFile(
     validatorRoot,
     'conformance/client-v1-cross-repository-evidence.schema.json',
     'SDK evidence schema',
   );
-  const registryFile = readRegularFile(
+  const registryFile = readConsistentEvidenceFile(
     validatorRoot,
     'conformance/client-v1-cross-repository-assertions.json',
     'SDK assertion registry',
   );
-  const lockFile = readRegularFile(
+  const lockFile = readConsistentEvidenceFile(
     validatorRoot,
     'conformance/client-v1-cross-repository-lock.json',
     'SDK frozen conformance lock',
