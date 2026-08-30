@@ -42,8 +42,13 @@ pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_P
 pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
 pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+#[cfg(windows)]
+const WINDOWS_SCHEMA_V2_EVIDENCE_ENV: &str = "OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE";
+#[cfg(windows)]
 const WINDOWS_JOB_REQUIRED_ENV: &str = "OPENCOVEN_WINDOWS_JOB_REQUIRED";
+#[cfg(windows)]
 const WINDOWS_JOB_NONCE_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NONCE";
+#[cfg(windows)]
 const WINDOWS_JOB_NAME_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NAME";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
 const CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING: &str = "production-keyring";
@@ -87,11 +92,21 @@ fn adoption_fault_barrier(phase: &str) -> Result<(), NativeDiagnostic> {
         .map_err(|_| NativeDiagnostic::new("keychain_failure", false))
 }
 
-fn validate_windows_job_binding_values(
-    required: &str,
-    nonce: &str,
-    name: &str,
+#[cfg(any(windows, test))]
+fn validate_windows_job_binding_environment_values(
+    evidence_mode: Option<&str>,
+    required: Option<&str>,
+    nonce: Option<&str>,
+    name: Option<&str>,
 ) -> NativeResult<()> {
+    match evidence_mode {
+        None => return Ok(()),
+        Some("1") => {}
+        Some(_) => return Err(NativeDiagnostic::new("invalid_native_input", false)),
+    }
+    let (Some(required), Some(nonce), Some(name)) = (required, nonce, name) else {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    };
     let valid_nonce = nonce.len() == 32
         && nonce
             .bytes()
@@ -105,55 +120,58 @@ fn validate_windows_job_binding_values(
     Ok(())
 }
 
+#[cfg(windows)]
 fn require_windows_job_supervision_from_environment() -> NativeResult<()> {
-    let required = match env::var(WINDOWS_JOB_REQUIRED_ENV) {
-        Ok(value) => value,
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{
+            JobObjects::{IsProcessInJob, OpenJobObjectW},
+            Threading::GetCurrentProcess,
+        },
+    };
+
+    let evidence_mode = match env::var(WINDOWS_SCHEMA_V2_EVIDENCE_ENV) {
+        Ok(value) => Some(value),
         Err(env::VarError::NotPresent) => return Ok(()),
         Err(env::VarError::NotUnicode(_)) => {
             return Err(NativeDiagnostic::new("invalid_native_input", false));
         }
     };
-    let nonce = env::var(WINDOWS_JOB_NONCE_ENV)
-        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?;
-    let name = env::var(WINDOWS_JOB_NAME_ENV)
-        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?;
-    validate_windows_job_binding_values(&required, &nonce, &name)?;
+    let required = env::var(WINDOWS_JOB_REQUIRED_ENV).ok();
+    let nonce = env::var(WINDOWS_JOB_NONCE_ENV).ok();
+    let name = env::var(WINDOWS_JOB_NAME_ENV).ok();
+    validate_windows_job_binding_environment_values(
+        evidence_mode.as_deref(),
+        required.as_deref(),
+        nonce.as_deref(),
+        name.as_deref(),
+    )?;
+    let name = name.expect("validated Windows Job name must be present");
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::{
-            Foundation::CloseHandle,
-            System::{
-                JobObjects::{IsProcessInJob, OpenJobObjectW},
-                Threading::GetCurrentProcess,
-            },
-        };
-
-        const JOB_OBJECT_QUERY: u32 = 0x0004;
-        let wide_name = std::ffi::OsStr::new(&name)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide_name.as_ptr()) };
-        if job.is_null() {
-            return Err(NativeDiagnostic::new("invalid_native_input", false));
-        }
-        let mut member = 0;
-        let inspected = unsafe { IsProcessInJob(GetCurrentProcess(), job, &mut member) };
-        unsafe {
-            CloseHandle(job);
-        }
-        if inspected == 0 || member == 0 {
-            return Err(NativeDiagnostic::new("invalid_native_input", false));
-        }
-        Ok(())
+    const JOB_OBJECT_QUERY: u32 = 0x0004;
+    let wide_name = std::ffi::OsStr::new(&name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide_name.as_ptr()) };
+    if job.is_null() {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
     }
-
-    #[cfg(not(windows))]
-    {
-        Err(NativeDiagnostic::new("invalid_native_input", false))
+    let mut member = 0;
+    let inspected = unsafe { IsProcessInJob(GetCurrentProcess(), job, &mut member) };
+    unsafe {
+        CloseHandle(job);
     }
+    if inspected == 0 || member == 0 {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn require_windows_job_supervision_from_environment() -> NativeResult<()> {
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -2249,11 +2267,11 @@ mod tests {
     };
 
     use super::{
-        parse_command, parse_request_line, read_bounded_line, validate_windows_job_binding_values,
-        BoundedLine, ConformanceCaveLauncher, ConformanceCredentialCleanup, RpcCommand, RpcRuntime,
-        SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID,
-        CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV, CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID,
-        MAX_LINE_BYTES,
+        parse_command, parse_request_line, read_bounded_line,
+        validate_windows_job_binding_environment_values, BoundedLine, ConformanceCaveLauncher,
+        ConformanceCredentialCleanup, RpcCommand, RpcRuntime, SharedMemoryCredentialCustody,
+        CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV,
+        CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
         cave::CaveLauncher,
@@ -2277,15 +2295,47 @@ mod tests {
         let nonce = "0123456789abcdef0123456789abcdef";
         let name = format!(r"Local\OpenCoven.Chat.Conformance.{nonce}");
 
-        assert!(validate_windows_job_binding_values("1", nonce, &name).is_ok());
-        assert!(validate_windows_job_binding_values("0", nonce, &name).is_err());
-        assert!(validate_windows_job_binding_values("1", "short", &name).is_err());
-        assert!(validate_windows_job_binding_values(
-            "1",
-            nonce,
-            r"Local\OpenCoven.Chat.Conformance.other"
+        assert!(validate_windows_job_binding_environment_values(
+            Some("1"),
+            Some("1"),
+            Some(nonce),
+            Some(&name)
         )
-        .is_err());
+        .is_ok());
+        for binding in [
+            (Some("invalid"), Some("1"), Some(nonce), Some(name.as_str())),
+            (Some("1"), None, Some(nonce), Some(name.as_str())),
+            (Some("1"), Some("0"), Some(nonce), Some(name.as_str())),
+            (Some("1"), Some("1"), None, Some(name.as_str())),
+            (Some("1"), Some("1"), Some("short"), Some(name.as_str())),
+            (Some("1"), Some("1"), Some(nonce), None),
+            (
+                Some("1"),
+                Some("1"),
+                Some(nonce),
+                Some(r"Local\OpenCoven.Chat.Conformance.other"),
+            ),
+        ] {
+            assert!(validate_windows_job_binding_environment_values(
+                binding.0, binding.1, binding.2, binding.3
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn windows_job_binding_is_not_required_outside_evidence_mode() {
+        assert!(validate_windows_job_binding_environment_values(None, None, None, None).is_ok());
+        assert!(
+            validate_windows_job_binding_environment_values(
+                None,
+                Some("invalid"),
+                Some("invalid"),
+                Some("invalid")
+            )
+            .is_ok(),
+            "ordinary non-evidence native execution must ignore Job binding variables"
+        );
     }
 
     struct RecordingEmergencyCleanup {

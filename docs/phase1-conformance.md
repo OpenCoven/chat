@@ -225,10 +225,19 @@ in this implementation session's artifact area.
 The `win32-x64` matrix expansion does not begin with checkout or a setup
 action. Its first step is inline `pwsh` reviewed as part of the workflow
 itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025` x64 image, Windows build 26100, allowlisted PowerShell
-Core/.NET runtime families, the absolute system PowerShell, `kernel32.dll`,
-`cmd.exe`, MSVC, and Windows SDK paths, and non-reparse runner temporary and
-workspace roots.
+GitHub `windows-2025` x64 image at exact image version `20260824.239.3`,
+Windows build `26100.33296`, `kernel32.dll` file version
+`10.0.26100.33296`, PowerShell `7.6.5` at
+`C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
+`10.0.11`, MSVC tools `14.50.35717` beneath
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC`,
+and Windows SDK `10.0.26100.0` with `rc.exe` at
+`C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
+The workflow also requires valid Microsoft Authenticode signatures for the
+trusted PowerShell, kernel, command processor, compiler, linker, and resource
+compiler, plus non-reparse runner temporary and workspace roots. These pins
+are step-level workflow metadata; accepting a runner image update therefore
+requires an explicit protected-workflow metadata and digest update.
 
 The inline C# P/Invoke supervisor creates a named, nonce-bound Job Object with
 only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. It calls `CreateProcessW` with
@@ -247,18 +256,34 @@ verification, the Windows Job runtime test, all candidate/validator/Cave/Coven
 checkouts and builds, native RPC execution, schema-v2 production, and final
 canonical-record validation. The Node harness verifies that its own PID is in
 the nonce-named Job through trusted system PowerShell. The phase-1 native RPC
-opens the same named Job and fails before runtime initialization if its nonce
-binding or membership is absent. Those four binding variables are explicitly
+receives a separate schema-v2 evidence-mode binding, opens the same named Job,
+and fails before runtime initialization if the required flag, nonce, name,
+existing Job, or membership is absent or malformed. Ordinary production builds
+do not compile this evidence RPC path, and ordinary non-evidence RPC tests do
+not set the schema-v2 mode. The four Job binding variables are explicitly
 carried through the harness's curated environment; they cannot degrade to an
 unnamed or ambient Job.
+
+The supervisor continuously measures reviewed roots and terminates the entire
+Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
+384 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
+for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
+for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
+protected checkout's Git objects, 768 MiB for each SDK/Chat/Cave/Coven/
+validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
+workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
+bootstrap root. Quotas are rechecked after the root process exits so a
+last-moment excess cannot escape the watchdog.
 
 The child receives a constructed environment rather than the runner
 environment. It contains no GitHub token, OIDC request value, Git credential,
 Cargo credential, or proxy setting. Git disables system/global configuration,
 credential helpers, prompts, replacement objects, and non-HTTPS fetch
-protocols. Downloads use a proxy-free .NET `HttpClient`, allow only HTTPS and
-an explicit host list, cap redirects and time, require an exact byte count,
-and verify SHA-256 before execution or extraction.
+protocols, and enables fetched-object verification. Downloads use a proxy-free
+.NET `HttpClient`, allow only HTTPS, permit at most the reviewed per-asset
+redirect chain (`github.com` to `release-assets.githubusercontent.com` for
+PortableGit; no redirects for Node, pnpm, or rustup), cap time, require an
+exact byte count, and verify SHA-256 before execution or extraction.
 
 The directly downloaded Windows assets are:
 

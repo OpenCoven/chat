@@ -55,15 +55,6 @@ import {
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const gitCommonDirectory = resolve(
-  projectRoot,
-  execFileSync('git', ['rev-parse', '--git-common-dir'], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-  }).trim(),
-);
-const chatRepositoryRoot = dirname(gitCommonDirectory);
-const repositoriesParent = dirname(chatRepositoryRoot);
 const defaultRetainedReport = resolve(
   projectRoot,
   'test-results',
@@ -267,12 +258,46 @@ function killUntrackedOwnedChild(child) {
   child.kill('SIGKILL');
 }
 
-function defaultSourceRoot(environmentName, repositoryName) {
+function configuredSourceRoot(environmentName) {
   if (process.env[environmentName] !== undefined) {
     return resolve(process.env[environmentName]);
   }
-  const candidate = resolve(repositoriesParent, repositoryName);
-  return existsSync(candidate) ? candidate : undefined;
+  return undefined;
+}
+
+function resolveRepositoryLayout() {
+  const gitCommonDirectory = resolve(
+    projectRoot,
+    execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    }).trim(),
+  );
+  const chatRepositoryRoot = dirname(gitCommonDirectory);
+  return {
+    chatRepositoryRoot,
+    repositoriesParent: dirname(chatRepositoryRoot),
+  };
+}
+
+function resolveDefaultSourceRoots(options, repositoryLayout) {
+  const source = { ...options };
+  for (const [optionName, repositoryName] of [
+    ['sdkSourceRoot', 'sdk'],
+    ['sdkValidatorSourceRoot', 'sdk'],
+    ['caveSourceRoot', 'coven-cave'],
+    ['covenSourceRoot', 'coven'],
+  ]) {
+    if (source[optionName] === undefined) {
+      const candidate = resolve(repositoryLayout.repositoriesParent, repositoryName);
+      source[optionName] = existsSync(candidate) ? candidate : undefined;
+    }
+  }
+  return source;
 }
 
 export class CommandExecutionError extends Error {
@@ -318,10 +343,10 @@ export function parseArgs(argv) {
     outputPath: undefined,
     validatorRevision: undefined,
     chatSourceRoot: resolve(process.env.OPENCOVEN_CHAT_ROOT ?? projectRoot),
-    sdkSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_ROOT', 'sdk'),
-    sdkValidatorSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT', 'sdk'),
-    caveSourceRoot: defaultSourceRoot('OPENCOVEN_CAVE_ROOT', 'coven-cave'),
-    covenSourceRoot: defaultSourceRoot('OPENCOVEN_COVEN_ROOT', 'coven'),
+    sdkSourceRoot: configuredSourceRoot('OPENCOVEN_SDK_ROOT'),
+    sdkValidatorSourceRoot: configuredSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT'),
+    caveSourceRoot: configuredSourceRoot('OPENCOVEN_CAVE_ROOT'),
+    covenSourceRoot: configuredSourceRoot('OPENCOVEN_COVEN_ROOT'),
   };
   let retainedReportWasSet = false;
   let validatorRevisionWasSet = false;
@@ -896,11 +921,15 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
     process.platform === 'win32'
       ? undefined
       : createProcessOwnedArtifactRoot({ prefix: 'p1ot', shortPath: true });
+  const observationEnvironment = {
+    ...environment,
+    CARGO_TARGET_DIR: resolve(artifactRoot.rootPath, 'build', 'observation-target'),
+  };
   const testEnvironment =
     shortRoot === undefined
-      ? environment
+      ? observationEnvironment
       : {
-          ...environment,
+          ...observationEnvironment,
           TMPDIR: shortRoot.rootPath,
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
@@ -3578,6 +3607,7 @@ export async function runSchemaV2Conformance(options) {
   const windowsJobBinding =
     schemaV2 && process.platform === 'win32' ? windowsJobBindingEnvironment(process.env) : {};
   assertWindowsJobMembership(windowsJobBinding);
+  options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
   const startedAt = new Date().toISOString();
   const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
   const operatorBefore =
@@ -3592,6 +3622,7 @@ export async function runSchemaV2Conformance(options) {
   const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
   const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
   const environment = safeEnvironment(executionRoot.rootPath, {
+    ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
     ...linuxSessionEnvironment,
     ...windowsJobBinding,
   });

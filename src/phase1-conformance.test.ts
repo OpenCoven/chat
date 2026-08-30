@@ -284,6 +284,28 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow(/system PowerShell/u);
   });
 
+  test('has no module-scope subprocess and makes Windows membership the first schema-v2 subprocess', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const firstExport = source.indexOf('export function scrubEvidenceAuthorizationEnvironment');
+    const runStart = source.indexOf('export async function runSchemaV2Conformance');
+    const runSource = source.slice(runStart);
+
+    expect(source.slice(0, firstExport)).not.toContain('execFileSync(');
+    expect(runSource.indexOf('scrubEvidenceAuthorizationEnvironment()')).toBeLessThan(
+      runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)'),
+    );
+    expect(runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)')).toBeLessThan(
+      runSource.indexOf('resolveRepositoryLayout()'),
+    );
+    expect(runSource.indexOf('resolveRepositoryLayout()')).toBeLessThan(
+      runSource.indexOf('createExactCheckouts('),
+    );
+    expect(runSource).toContain("OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1'");
+  });
+
   test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
     expect(verifyFrozenPackedConsumer).toBeTypeOf('function');
     const source = readFileSync(
@@ -291,6 +313,16 @@ describe('Phase 1 real-authority conformance harness', () => {
       'utf8',
     );
     expect(source).toContain('chatRoot: roots.producerRoot');
+  });
+
+  test('routes schema-v2 Cargo observations into the supervised build quota root', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain(
+      "CARGO_TARGET_DIR: resolve(artifactRoot.rootPath, 'build', 'observation-target')",
+    );
   });
 
   test('preserves a private infrastructure cause only on the in-memory error object', () => {
