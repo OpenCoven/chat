@@ -545,6 +545,17 @@ blob/SHA-256 set for every executable harness module. Intentional native
 conformance deltas from the production Chat commit are separately allowlisted
 by exact path, blob, and digest.
 
+The dedicated workflow is manually dispatchable and uses the protected
+environment `client-v1-conformance`, GitHub environment ID `20863036831`.
+Every producer, validation, attestation, and aggregation job independently
+requires the exact job-level condition
+`if: github.ref == 'refs/heads/main'`. A dispatch from a feature branch, tag,
+or any other ref therefore skips the complete evidence graph before a runner
+or protected environment is selected. This workflow main-only control and the
+environment policy below are both required; neither substitutes for the other.
+
+That environment must have:
+
 On POSIX the supervisor reports through a private fd 3 pipe that is not inherited
 by the target; no status path or capability enters the target environment.
 Timeout and output-limit cancellation signal the live supervisor, which remains
@@ -557,6 +568,13 @@ The dedicated workflow uses the protected `client-v1-conformance`
 environment. It requires the reviewed deployment protection and the nonsecret
 `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable set to the exact reviewed
 lowercase 40-hex SDK validator commit.
+
+Repository `main` currently has no external branch-protection rule, so the
+environment's `protected_branches` deployment policy alone does not constrain
+workflow origin. That external policy gap no longer weakens the workflow's
+origin guarantee because the exact `refs/heads/main` job conditions fail closed
+independently. Branch protection must still be enabled and maintained so the
+environment policy provides its required second control.
 
 Self-review is prevented and administrators cannot bypass the protection. The
 exact SDK workflow contract requires no application credential secret because
@@ -687,7 +705,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 266,717 | `6f926fde4689d0d751f0507cd42011ed999d1323538ec61ce641610707ce6e1d` |
+| `.github/workflows/client-v1-conformance.yml` | 266,877 | `c33d96f08389c3bf9933d06bd5a113a8558606f58e580242f79f7db6941d640d` |
 | `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
 | `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |

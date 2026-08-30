@@ -10,6 +10,7 @@ permissions:
 jobs:
   platform-conformance:
     name: platform-conformance (${{ matrix.platform }})
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -5454,6 +5455,7 @@ jobs:
           include-hidden-files: true
   validate-conformance-artifacts:
     name: validate-conformance-artifacts
+    if: github.ref == 'refs/heads/main'
     needs: platform-conformance
     runs-on: ubuntu-24.04
     environment: client-v1-conformance
@@ -5579,6 +5581,7 @@ jobs:
           EOF
   attest-conformance-artifacts:
     name: attest-conformance-artifacts
+    if: github.ref == 'refs/heads/main'
     needs: validate-conformance-artifacts
     runs-on: ubuntu-24.04
     environment: client-v1-conformance
@@ -5641,6 +5644,7 @@ jobs:
           subject-path: .artifacts/client-v1-conformance-win32-x64.json
   aggregate-conformance:
     name: aggregate-conformance
+    if: github.ref == 'refs/heads/main'
     needs: attest-conformance-artifacts
     runs-on: ubuntu-24.04
     permissions: {}

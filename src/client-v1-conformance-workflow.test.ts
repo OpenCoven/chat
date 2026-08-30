@@ -109,11 +109,30 @@ function countOccurrences(value: string, expected: string): number {
   return value.split(expected).length - 1;
 }
 
+function verifyExactMainRefConstraint(label: string, job: string): void {
+  const jobLevelConditions = job.match(/^ {4}if:.*$/gmu) ?? [];
+  if (
+    jobLevelConditions.length !== 1 ||
+    jobLevelConditions[0] !== "    if: github.ref == 'refs/heads/main'"
+  ) {
+    throw new Error(`${label} job is not constrained to the exact main branch ref`);
+  }
+}
+
 function verifyHardenedWorkflowGraph(workflow: string): void {
   const producer = workflowJob(workflow, 'platform-conformance');
   const validation = workflowJob(workflow, 'validate-conformance-artifacts');
   const attestation = workflowJob(workflow, 'attest-conformance-artifacts');
   const aggregate = workflowJob(workflow, 'aggregate-conformance');
+
+  for (const [label, job] of [
+    ['producer', producer],
+    ['validator', validation],
+    ['attestation', attestation],
+    ['aggregate', aggregate],
+  ] as const) {
+    verifyExactMainRefConstraint(label, job);
+  }
 
   for (const [label, job] of [
     ['producer', producer],
@@ -547,6 +566,34 @@ describe('Chat-local protected Windows conformance workflow', () => {
         workflow.replace(
           'name: client-v1-conformance-darwin-arm64',
           'name: $' + "{{ format('client-v1-conformance-{0}', inputs.platform) }}",
+        ),
+    ],
+    [
+      'missing exact main-ref constraint',
+      (workflow: string) => workflow.replace("    if: github.ref == 'refs/heads/main'\n", ''),
+    ],
+    [
+      'changed exact main-ref constraint',
+      (workflow: string) =>
+        workflow.replace(
+          "    if: github.ref == 'refs/heads/main'",
+          "    if: github.ref == 'refs/heads/feature'",
+        ),
+    ],
+    [
+      'ambiguous main-or-other constraint',
+      (workflow: string) =>
+        workflow.replace(
+          "    if: github.ref == 'refs/heads/main'",
+          "    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature'",
+        ),
+    ],
+    [
+      'tag constraint',
+      (workflow: string) =>
+        workflow.replace(
+          "    if: github.ref == 'refs/heads/main'",
+          "    if: github.ref == 'refs/tags/main'",
         ),
     ],
   ])('rejects hardened graph negative: %s', (_label, mutate) => {
