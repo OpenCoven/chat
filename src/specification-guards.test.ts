@@ -927,7 +927,9 @@ describe('Phase 1 specification guards', () => {
     expect(packageStart).toBeGreaterThanOrEqual(0);
     expect(packageEnd).toBeGreaterThan(packageStart);
     expect(packageBody.match(/'Cave conformance package'/g)).toHaveLength(1);
-    expect(packageBody).toMatch(/'Cave conformance package'[\s\S]*?\['pnpm@10\.34\.0', 'build'\]/);
+    expect(packageBody).toMatch(
+      /'Cave conformance package'[\s\S]*?\['pnpm@10\.34\.0', 'build:conformance'\]/,
+    );
     expect(packageBody).not.toContain('retryCaveConformancePackage');
     expect(packageBody).not.toContain("resolve(roots.caveRoot, '.next')");
     for (const laterPackage of [

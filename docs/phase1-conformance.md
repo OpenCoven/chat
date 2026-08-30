@@ -44,6 +44,11 @@ scripts/github-conformance-evidence.mjs
 
 Chat does not copy or relax their validators.
 
+The locked Cave checkout is built with its committed `build:conformance`
+entrypoint so the two finite compatibility presets are compiled into the
+ephemeral test artifact. A normal production Cave build keeps those runtime
+selectors disabled.
+
 ## Local commands
 
 The legacy internal report remains:

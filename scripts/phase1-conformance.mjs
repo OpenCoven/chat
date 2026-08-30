@@ -771,6 +771,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       files: [
         'tests/cave-discovery-pairing.spec.ts',
         'tests/cave-canonical-reads.spec.ts',
+        'tests/cave-hpke-bound-v1.spec.ts',
         'tests/cave-managed-native.spec.ts',
         'tests/cave-managed-native-staged.spec.ts',
         'tests/coven-discovery.spec.ts',
@@ -1240,7 +1241,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     artifactRoot,
     'Cave conformance package',
     'corepack',
-    ['pnpm@10.34.0', 'build'],
+    ['pnpm@10.34.0', 'build:conformance'],
     {
       cwd: roots.caveRoot,
       env: environment,

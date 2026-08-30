@@ -646,7 +646,9 @@ export function createObservedAssertionRecorder(expectedIdsValue, subject) {
     complete() {
       const missing = expectedIds.filter((id) => !observed.has(id));
       if (missing.length > 0) {
-        throw new Error(`Observed ${subject} assertions are missing required results.`);
+        throw new Error(
+          `Observed ${subject} assertions are missing required results: ${missing.join(',')}.`,
+        );
       }
       return expectedIds.map((id) => observed.get(id));
     },
