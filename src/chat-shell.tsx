@@ -7,6 +7,7 @@ import type {
 import type { Page } from '@opencoven/sdk-core/browser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { createManualPageWalk, type ManualPageWalk } from './lib/sdk/manual-page-walk';
 import type { QueryAdapter, QueryResult } from './lib/sdk/query-adapter';
 
 type WithId = Readonly<{ id: string }>;
@@ -51,6 +52,7 @@ const AUTH_REPAIR_CODES = new Set([
   'credential_unavailable',
   'credential_update_in_progress',
 ]);
+const INVALID_PAGINATION_CODE = 'invalid_response';
 
 function toListState<T>(result: QueryResult<Page<T>>): ListResourceState<T> {
   switch (result.status) {
@@ -72,6 +74,16 @@ function toListState<T>(result: QueryResult<Page<T>>): ListResourceState<T> {
         hasMore: result.data.cursor?.hasMore ?? false,
       };
   }
+}
+
+function toRootListState<T>(
+  result: QueryResult<Page<T>>,
+  walk: ManualPageWalk,
+): ListResourceState<T> {
+  if (result.status === 'ok' && !walk.acceptRootPage(result.data)) {
+    return { status: 'error', code: INVALID_PAGINATION_CODE };
+  }
+  return toListState(result);
 }
 
 function mergeListState<T extends WithId>(
@@ -211,6 +223,10 @@ function loadMoreButton(label: string, onClick: () => void, disabled: boolean) {
   );
 }
 
+function permitsLoadMore(state: LoadMoreState): boolean {
+  return state.status !== 'error' || state.code !== INVALID_PAGINATION_CODE;
+}
+
 export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: ChatShellProps) {
   const [familiarsState, setFamiliarsState] = useState<ListResourceState<CaveCanonicalFamiliar>>({
     status: 'idle',
@@ -238,11 +254,50 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
   const threadHeadingRef = useRef<HTMLHeadingElement>(null);
   const shellRequestRef = useRef(0);
   const threadRequestRef = useRef(0);
+  const pageWalksRef = useRef<{
+    familiars: ManualPageWalk;
+    projects: ManualPageWalk;
+    conversations: ManualPageWalk;
+    messages: ManualPageWalk;
+  } | null>(null);
+  if (pageWalksRef.current === null) {
+    pageWalksRef.current = {
+      familiars: createManualPageWalk(),
+      projects: createManualPageWalk(),
+      conversations: createManualPageWalk(),
+      messages: createManualPageWalk(),
+    };
+  }
+  const pageWalks = pageWalksRef.current;
+
+  function resetAllPageWalks(): void {
+    shellRequestRef.current += 1;
+    threadRequestRef.current += 1;
+    pageWalks.familiars.reset();
+    pageWalks.projects.reset();
+    pageWalks.conversations.reset();
+    pageWalks.messages.reset();
+    setFamiliarsLoadMore({ status: 'idle' });
+    setProjectsLoadMore({ status: 'idle' });
+    setConversationsLoadMore({ status: 'idle' });
+    setMessagesLoadMore({ status: 'idle' });
+  }
+
+  const reconcile =
+    onReconcile === undefined
+      ? undefined
+      : () => {
+          resetAllPageWalks();
+          onReconcile();
+        };
 
   useEffect(() => {
     let active = true;
     shellRequestRef.current += 1;
     const requestId = shellRequestRef.current;
+    pageWalks.familiars.reset();
+    pageWalks.projects.reset();
+    pageWalks.conversations.reset();
 
     async function loadShell() {
       setFamiliarsState({ status: 'loading' });
@@ -266,9 +321,9 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
       ) {
         return;
       }
-      setFamiliarsState(toListState(familiarsResult));
-      setProjectsState(toListState(projectsResult));
-      setConversationsState(toListState(conversationsResult));
+      setFamiliarsState(toRootListState(familiarsResult, pageWalks.familiars));
+      setProjectsState(toRootListState(projectsResult, pageWalks.projects));
+      setConversationsState(toRootListState(conversationsResult, pageWalks.conversations));
     }
 
     void loadShell();
@@ -276,7 +331,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     return () => {
       active = false;
     };
-  }, [queryAdapter]);
+  }, [pageWalks, queryAdapter]);
 
   function loadMoreFamiliars() {
     if (familiarsState.status !== 'ready' || !familiarsState.hasMore) {
@@ -284,6 +339,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     }
     const cursor = familiarsState.cursor;
     if (cursor === undefined || familiarsLoadMore.status === 'loading') {
+      return;
+    }
+    if (!pageWalks.familiars.canFetchNextPage()) {
+      setFamiliarsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
       return;
     }
 
@@ -299,6 +358,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         return;
       }
       if (result.status === 'ok') {
+        if (!pageWalks.familiars.acceptNextPage(cursor, result.data)) {
+          setFamiliarsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+          return;
+        }
         setFamiliarsLoadMore({ status: 'idle' });
         setFamiliarsState((previous) => mergeListState(previous, result.data));
         return;
@@ -323,6 +386,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     if (cursor === undefined || projectsLoadMore.status === 'loading') {
       return;
     }
+    if (!pageWalks.projects.canFetchNextPage()) {
+      setProjectsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+      return;
+    }
 
     const requestId = shellRequestRef.current;
     setProjectsLoadMore({ status: 'loading' });
@@ -336,6 +403,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         return;
       }
       if (result.status === 'ok') {
+        if (!pageWalks.projects.acceptNextPage(cursor, result.data)) {
+          setProjectsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+          return;
+        }
         setProjectsLoadMore({ status: 'idle' });
         setProjectsState((previous) => mergeListState(previous, result.data));
         return;
@@ -360,6 +431,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     if (cursor === undefined || conversationsLoadMore.status === 'loading') {
       return;
     }
+    if (!pageWalks.conversations.canFetchNextPage()) {
+      setConversationsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+      return;
+    }
 
     const requestId = shellRequestRef.current;
     setConversationsLoadMore({ status: 'loading' });
@@ -373,6 +448,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         return;
       }
       if (result.status === 'ok') {
+        if (!pageWalks.conversations.acceptNextPage(cursor, result.data)) {
+          setConversationsLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+          return;
+        }
         setConversationsLoadMore({ status: 'idle' });
         setConversationsState((previous) => mergeListState(previous, result.data));
         return;
@@ -401,6 +480,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     ) {
       return;
     }
+    if (!pageWalks.messages.canFetchNextPage()) {
+      setMessagesLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+      return;
+    }
 
     const conversationId = selectedConversationId;
     const requestId = threadRequestRef.current;
@@ -415,6 +498,10 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         return;
       }
       if (result.status === 'ok') {
+        if (!pageWalks.messages.acceptNextPage(cursor, result.data)) {
+          setMessagesLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
+          return;
+        }
         setMessagesLoadMore({ status: 'idle' });
         setMessagesState((previous) => mergeListState(previous, result.data));
         return;
@@ -488,6 +575,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     const requestId = threadRequestRef.current;
 
     setMessagesLoadMore({ status: 'idle' });
+    pageWalks.messages.reset();
 
     if (selectedConversationId === null) {
       setConversationState({ status: 'idle' });
@@ -516,7 +604,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         return;
       }
       setConversationState(itemState(conversationResult));
-      setMessagesState(toListState(messagesResult));
+      setMessagesState(toRootListState(messagesResult, pageWalks.messages));
     }
 
     void loadThread();
@@ -524,7 +612,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     return () => {
       active = false;
     };
-  }, [queryAdapter, selectedConversationId]);
+  }, [pageWalks, queryAdapter, selectedConversationId]);
 
   useEffect(() => {
     if (selectedConversationId === null || conversationState.status !== 'ready') {
@@ -536,7 +624,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
   function renderConversationList() {
     const action = repairAction([familiarsState, conversationsState, conversationsLoadMore], {
       onForgetCredential,
-      onReconcile,
+      onReconcile: reconcile,
     });
 
     if (conversationsState.status === 'loading' || familiarsState.status === 'loading') {
@@ -575,11 +663,13 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           <>
             {statusPanel('More conversations are available. Load more to keep browsing.')}
             {loadMoreAction}
-            {loadMoreButton(
-              'Load more conversations',
-              loadMoreConversations,
-              conversationsLoadMore.status === 'loading',
-            )}
+            {permitsLoadMore(conversationsLoadMore)
+              ? loadMoreButton(
+                  'Load more conversations',
+                  loadMoreConversations,
+                  conversationsLoadMore.status === 'loading',
+                )
+              : null}
           </>
         );
       }
@@ -613,7 +703,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           })}
         </div>
         {loadMoreAction}
-        {hasMore
+        {hasMore && permitsLoadMore(conversationsLoadMore)
           ? loadMoreButton(
               'Load more conversations',
               loadMoreConversations,
@@ -627,7 +717,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
   function renderProjects() {
     const action = repairAction([projectsState, projectsLoadMore], {
       onForgetCredential,
-      onReconcile,
+      onReconcile: reconcile,
     });
 
     if (projectsState.status === 'loading') {
@@ -665,7 +755,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           ))}
         </ul>
         {loadMoreAction}
-        {hasMore
+        {hasMore && permitsLoadMore(projectsLoadMore)
           ? loadMoreButton(
               'Load more projects',
               loadMoreProjects,
@@ -681,7 +771,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
       [familiarsState, conversationsState, conversationState, messagesState, messagesLoadMore],
       {
         onForgetCredential,
-        onReconcile,
+        onReconcile: reconcile,
       },
     );
 
@@ -734,11 +824,13 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           <>
             {statusPanel('More messages are available. Load more to keep reading.')}
             {loadMoreAction}
-            {loadMoreButton(
-              'Load more messages',
-              loadMoreMessages,
-              messagesLoadMore.status === 'loading',
-            )}
+            {permitsLoadMore(messagesLoadMore)
+              ? loadMoreButton(
+                  'Load more messages',
+                  loadMoreMessages,
+                  messagesLoadMore.status === 'loading',
+                )
+              : null}
           </>
         );
       }
@@ -766,7 +858,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           ))}
         </ol>
         {loadMoreAction}
-        {hasMore
+        {hasMore && permitsLoadMore(messagesLoadMore)
           ? loadMoreButton(
               'Load more messages',
               loadMoreMessages,
@@ -818,21 +910,29 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
                 ? statusPanel(
                     'Cave access needs to be repaired in the desktop app.',
                     'alert',
-                    repairAction([familiarsLoadMore], { onForgetCredential, onReconcile }),
+                    repairAction([familiarsLoadMore], {
+                      onForgetCredential,
+                      onReconcile: reconcile,
+                    }),
                   )
                 : null}
               {familiarsLoadMore.status === 'error'
                 ? statusPanel(
                     formatError(familiarsLoadMore.code),
                     'alert',
-                    repairAction([familiarsLoadMore], { onForgetCredential, onReconcile }),
+                    repairAction([familiarsLoadMore], {
+                      onForgetCredential,
+                      onReconcile: reconcile,
+                    }),
                   )
                 : null}
-              {loadMoreButton(
-                'Load more familiars',
-                loadMoreFamiliars,
-                familiarsLoadMore.status === 'loading',
-              )}
+              {permitsLoadMore(familiarsLoadMore)
+                ? loadMoreButton(
+                    'Load more familiars',
+                    loadMoreFamiliars,
+                    familiarsLoadMore.status === 'loading',
+                  )
+                : null}
             </>
           ) : null}
         </div>
