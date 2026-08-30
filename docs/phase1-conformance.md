@@ -181,25 +181,37 @@ the process-group leader through bounded TERM-to-KILL descendant cleanup and is
 then reaped.
 
 `HOME`, XDG directories, temporary directories, pnpm store, Cargo home, Cave
-home, and Coven home are isolated. Cave pairing uses the production native
-keyring, restarts the RPC process, reuses the credential, then deletes it and
-proves the exact `ai.opencoven.chat` / `cave-client-v1:<Cave UUID>` account is
-missing again. A separate conformance-only command addresses that exact account
-through a native-issued one-shot reservation handle and capability. Its marker
-lives in a dedicated conformance cleanup keyring service, binds the native
-observed UUID, target account, schema, run identity, harness identity, and
-capability verifier, and is removed only after both target and marker verify
-`NoEntry`. The cleanup command accepts no caller-selected UUID or account and
-requires no discovery handle. Pairing cannot begin until the native response is
-fully validated; command failure, malformed output, or a lost response invokes
-the same-process prepared-marker cancellation command before failing closed.
-The native RPC keeps the newly created marker behind an RAII output transaction:
+home, and Coven home are isolated for the ordinary harness, checkout,
+packaging, and non-native work. Darwin native-RPC subprocesses are the
+intentional exception: both the main native scenario and emergency credential
+cleanup receive the caller/operator `HOME`, so that the production macOS native
+keychain adapter performs its native lookup in that context. The runner
+therefore does not claim that the operator home is untouched. It continues to
+isolate the authority homes used by the scenario, all execution artifact roots,
+and the XDG, temporary, pnpm, Cargo, Git/config, proxy, terminal-prompt, and
+process-control environment used by the harness; it also fingerprints the
+bounded operator Cave and Coven authority state before and after the run.
+
+Cave pairing uses the production native keyring, restarts the RPC process,
+reuses the credential, then deletes it and proves the exact
+`ai.opencoven.chat` / `cave-client-v1:<Cave UUID>` account is missing again.
+Credential operations are constrained to that dedicated, labeled account: a
+separate conformance-only command addresses it only through a native-issued
+one-shot reservation handle and capability. Its marker lives in a dedicated
+conformance cleanup keyring service, binds the native-observed UUID, target
+account, schema, run identity, harness identity, and capability verifier, and
+is removed only after both target and marker verify `NoEntry`. The cleanup
+command accepts no caller-selected UUID or account and requires no discovery
+handle. Pairing cannot begin until the native response is fully validated;
+command failure, malformed output, or a lost response invokes the same-process
+prepared-marker cancellation command before failing closed. The native RPC
+keeps the newly created marker behind an RAII output transaction:
 serialization, framing, write, flush, or closed-output failure synchronously
-deletes and verifies the marker before the process exits.
-The macOS CI run repeats this through the real native-RPC subprocess and an
-isolated disposable production keychain, then probes both services and verifies
-that replay cleanup returns the bounded missing-credential diagnostic.
-macOS additionally verifies the active disposable keychain.
+deletes and verifies the marker before the process exits. The macOS CI run
+repeats this through the real native-RPC subprocess and an isolated disposable
+production keychain, then probes both services, verifies that replay cleanup
+returns the bounded missing-credential diagnostic, and verifies the active
+disposable keychain.
 
 Restart reuse transfers cleanup ownership through a recoverable two-phase
 protocol under the production keyring mutation lock. `begin_adopt` records a
