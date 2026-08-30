@@ -477,6 +477,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
       resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
       'utf8',
     );
+    const conformance = readFileSync(
+      resolve(projectRoot, 'src-tauri', 'src', 'conformance.rs'),
+      'utf8',
+    );
+    const guard = conformance.slice(
+      conformance.indexOf('fn require_windows_job_supervision_from_environment()'),
+      conformance.indexOf(
+        '#[cfg(not(windows))]\nfn require_windows_job_supervision_from_environment()',
+      ),
+    );
 
     expect(windowsJob.indexOf('Build phase1 native RPC')).toBeLessThan(
       windowsJob.indexOf('Test Windows Job Object supervision'),
@@ -491,6 +501,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(windowsJob).toContain(
       'pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-job-supervisor.test.ps1',
     );
+    const nonEvidenceReturn = guard.indexOf('Err(env::VarError::NotPresent) => return Ok(())');
+    expect(nonEvidenceReturn).toBeGreaterThan(-1);
+    expect(nonEvidenceReturn).toBeLessThan(guard.indexOf('env::var(WINDOWS_JOB_REQUIRED_ENV)'));
     for (const requiredCase of [
       'Positive Job Object membership failed.',
       'A process in Job B was accepted as a member of existing Job A.',
