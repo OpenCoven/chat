@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const operatorStateIds = Object.freeze(['cave-home', 'coven-home', 'projects']);
@@ -13,8 +13,8 @@ const digestPattern = /^[0-9a-f]{64}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const defaultLimits = Object.freeze({
   maxDepth: 16,
-  maxEntries: 20_000,
-  maxBytes: 64 * 1024 * 1024,
+  maxEntries: 100_000,
+  maxBytes: 1024 * 1024 * 1024,
 });
 
 function missingPath(error) {
@@ -25,6 +25,22 @@ function snapshotPath(path, limits = defaultLimits) {
   const root = resolve(path);
   const digest = createHash('sha256');
   const state = { entries: 0, bytes: 0 };
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+
+  const hashFile = (entryPath) => {
+    const descriptor = openSync(entryPath, 'r');
+    try {
+      while (true) {
+        const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+        if (bytesRead === 0) {
+          return;
+        }
+        digest.update(buffer.subarray(0, bytesRead));
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+  };
 
   const visit = (entryPath, relativePath, depth) => {
     if (depth > limits.maxDepth) {
@@ -69,7 +85,7 @@ function snapshotPath(path, limits = defaultLimits) {
       throw new Error('Operator state exceeds the snapshot byte limit.');
     }
     digest.update(`file:${normalized}:${stats.mode & 0o777}:${stats.size}\0`);
-    digest.update(readFileSync(entryPath));
+    hashFile(entryPath);
     digest.update('\0');
   };
 
