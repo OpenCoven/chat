@@ -30,6 +30,21 @@ export type MockMessage = {
   /** Plain body text. A `/command` prefix is styled by the renderer. */
   text?: string;
   /**
+   * A concise, user-facing rationale summary for the demo.
+   *
+   * This is intentionally structured explanatory content, not hidden model
+   * chain-of-thought. Production data will replace it with an authority-owned
+   * summary when that contract exists.
+   */
+  reasoning?: {
+    summary: string;
+    steps: Array<{
+      kind: 'analysis' | 'design' | 'safety';
+      label: string;
+      text: string;
+    }>;
+  };
+  /**
    * Set when the turn is a generated image rather than prose.
    *
    * Carries a description and the prompt it came from: the placeholder is
@@ -81,6 +96,26 @@ export const MOCK_CONVERSATIONS: MockConversation[] = [
         id: 'm4',
         role: 'assistant',
         sentAt: '10:41 PM',
+        reasoning: {
+          summary: 'Built a compact visual response from the two constraints in the prompt.',
+          steps: [
+            {
+              kind: 'analysis',
+              label: 'Interpret prompt',
+              text: 'Identified “cat” as the subject and “purple” as the palette constraint.',
+            },
+            {
+              kind: 'design',
+              label: 'Compose image',
+              text: 'Used a centered silhouette so the subject remains legible at transcript size.',
+            },
+            {
+              kind: 'safety',
+              label: 'Keep it local',
+              text: 'Rendered a deterministic SVG so this demo does not call an external model.',
+            },
+          ],
+        },
         image: { alt: 'A purple cat in a glowing garden', prompt: 'cat purple' },
       },
     ],

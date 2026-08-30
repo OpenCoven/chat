@@ -31,6 +31,7 @@
     "test:phase1-conformance": "node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all"
   },
   "dependencies": {
+    "@base-ui/react": "1.7.0",
     "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",
     "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.1.0.tgz",
     "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.1.0.tgz",
