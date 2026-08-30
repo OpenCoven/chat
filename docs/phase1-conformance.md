@@ -20,7 +20,7 @@ handling, canonical reads, Coven identity, cleanup, and evidence compatibility.
 - Cave authority `2a0ff9237e94e652e477b22f60fd6d721b9e6451`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support
-  `c1eeaec6d91f0098b88c60c7fcdb65f43d0fc936`;
+  `b8537aabc2dddb62a8423c41cab83a6291f26de7`;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
