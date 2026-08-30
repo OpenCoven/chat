@@ -652,6 +652,48 @@ mod tests {
     }
 
     #[test]
+    fn wrong_owner_discovery_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "wrong owner private cause";
+        let diagnostic = map_client_error(ClientError::Discovery(canary.to_owned()));
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("reconcile_required", false)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
+    fn unix_peer_provider_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "peer provider private cause";
+        let diagnostic = map_client_error(ClientError::Io {
+            operation: "failed to inspect connected peer credentials",
+            source: std::io::Error::other(canary),
+        });
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("service_unavailable", true)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
+    fn windows_ownership_provider_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "ownership provider private cause";
+        let diagnostic = map_client_error(ClientError::Io {
+            operation: "failed to inspect named pipe ownership",
+            source: std::io::Error::other(canary),
+        });
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("service_unavailable", true)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
     fn explicit_home_wins_and_missing_platform_home_fails_closed() {
         let explicit = PathBuf::from("explicit-coven-home");
         assert_eq!(
