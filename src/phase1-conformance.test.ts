@@ -1504,7 +1504,6 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(publicPhase1FailureDiagnostic(new Error(diagnostic ?? 'missing'))).toBe(id);
     },
   );
-
   test('passes the observed supervisor status into missing-keychain diagnostics', () => {
     const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
     const scenario = source.slice(
