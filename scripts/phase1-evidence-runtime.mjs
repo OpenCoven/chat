@@ -12,7 +12,7 @@ const isolationRootIds = Object.freeze([
 const digestPattern = /^[0-9a-f]{64}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const defaultLimits = Object.freeze({
-  maxDepth: 16,
+  maxDepth: 64,
   maxEntries: 100_000,
   maxLogicalBytes: 1024 * 1024 * 1024 * 1024,
   maxContentBytes: 64 * 1024 * 1024,
