@@ -150,9 +150,32 @@ command output, prompt, message, or socket handle is retained.
 Linux schema-v2 execution receives only a fresh, owned Secret Service D-Bus
 session and its curated runtime environment. macOS uses an owned disposable
 keychain. All lanes use the production native adapter with an isolated
-conformance namespace; generic schema-v2 custody cleanup is limited to the
-installation entry in that namespace, while reservation-based credential
-cleanup remains capability-bound and fail-closed.
+conformance namespace. The producer proves that namespace is empty, performs
+the real installation ID and credential round trip, then asks native code to
+issue a cryptographically random 256-bit cleanup grant for the exact sorted,
+deduplicated set of observed Cave instance accounts plus the installation
+account. Native code atomically persists a one-shot, MAC-bound marker beneath
+the process-owned isolated home. The marker binds the grant identity, isolated
+service, canonical account set, storage identity, and issuing process under a
+native-only per-process MAC key without storing the raw grant.
+
+The producer immediately redeems and drops the grant. Redemption atomically
+claims the marker before deleting only the marker-bound entries, so replay,
+concurrent use, marker tampering, service/account substitution, links, and path
+swaps fail closed. The run requires the same empty-state digest afterward and
+preserves unrelated entries. A missing, malformed, or production keyring
+service is rejected before native custody access or grant issuance; missing or
+locked native services also fail the run. Reservation-based production-keyring
+credential cleanup remains capability-bound and fail-closed.
+
+On Unix, cleanup marker creation, publication, and claiming use private
+owner-checked directories, no-follow directory-relative operations, exact
+`0700`/`0600` modes, regular-file identity and link-count checks, and file plus
+directory synchronization. On Windows, the corresponding path checks reject
+reparse points and foreign or writable-untrusted ACLs, verify file identity and
+link count, and use create-new files plus write-through atomic moves. These RPC
+controls are compiled only into the `phase1-conformance` binary and are not
+registered as production Tauri commands or capabilities.
 
 ## Isolation and retained evidence
 

@@ -295,8 +295,18 @@ struct WindowsFileMetadata {
     is_reparse_point: bool,
     owner_matches_current_user: bool,
     len: u64,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    links: u64,
     volume_serial: u64,
     file_index: u64,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowsPrivatePathMetadata {
+    pub(crate) links: u64,
+    pub(crate) volume_serial: u64,
+    pub(crate) file_index: u64,
 }
 
 #[cfg(any(windows, test))]
@@ -723,6 +733,7 @@ mod windows_discovery {
                 is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
                 owner_matches_current_user,
                 len: ((information.nFileSizeHigh as u64) << 32) | information.nFileSizeLow as u64,
+                links: information.nNumberOfLinks as u64,
                 volume_serial: information.dwVolumeSerialNumber as u64,
                 file_index: ((information.nFileIndexHigh as u64) << 32)
                     | information.nFileIndexLow as u64,
@@ -732,6 +743,42 @@ mod windows_discovery {
 
     pub(super) fn current_user_identity() -> Result<String, WindowsDiscoveryIoError> {
         NativeWindowsDiscovery::new().map(|discovery| discovery.identity)
+    }
+
+    pub(super) fn private_path_metadata(
+        path: &Path,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let discovery = NativeWindowsDiscovery::new()?;
+        let handle = discovery.open(path, directory)?;
+        private_metadata(&discovery, handle.0, directory)
+    }
+
+    pub(super) fn private_handle_metadata(
+        handle: HANDLE,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let discovery = NativeWindowsDiscovery::new()?;
+        private_metadata(&discovery, handle, directory)
+    }
+
+    fn private_metadata(
+        discovery: &NativeWindowsDiscovery,
+        handle: HANDLE,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let metadata = discovery.metadata(handle)?;
+        let validation = if directory {
+            super::validate_windows_directory(metadata)
+        } else {
+            super::validate_windows_file(metadata)
+        };
+        validation.map_err(|_| WindowsDiscoveryIoError::Unavailable)?;
+        Ok(super::WindowsPrivatePathMetadata {
+            links: metadata.links,
+            volume_serial: metadata.volume_serial,
+            file_index: metadata.file_index,
+        })
     }
 
     impl WindowsDiscoveryBackend for NativeWindowsDiscovery {
@@ -997,6 +1044,22 @@ fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
 #[cfg(windows)]
 pub(crate) fn current_windows_user_identity() -> Result<String, ()> {
     windows_discovery::current_user_identity().map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_private_path(
+    path: &Path,
+    directory: bool,
+) -> Result<WindowsPrivatePathMetadata, ()> {
+    windows_discovery::private_path_metadata(path, directory).map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_private_handle(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    directory: bool,
+) -> Result<WindowsPrivatePathMetadata, ()> {
+    windows_discovery::private_handle_metadata(handle, directory).map_err(|_| ())
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -1657,6 +1720,7 @@ mod tests {
             is_reparse_point: false,
             owner_matches_current_user: true,
             len: 42,
+            links: 1,
             volume_serial,
             file_index,
         }

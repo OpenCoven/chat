@@ -1969,6 +1969,7 @@ async function runNativeMissingKeychainTrustScenario(
       COVEN_CAVE_HOME: resolve(trustHome, 'coven', 'cave'),
       COVEN_CAVE_AUTH_TOKEN: canary,
       OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'missing-keychain-trust',
+      OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE: `ai.opencoven.chat.phase1.${randomBytes(16).toString('hex')}`,
     },
     detached: ownedProcessGroupsSupported,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -2780,22 +2781,30 @@ async function runNativeScenarios({
       if (rpc !== undefined) {
         try {
           if (platformEnvironment !== undefined) {
-            if (typeof handle === 'string') {
-              const forgotten = await rpc.ok('cave_forget_credential', {
-                handle,
-                operation: rpc.operation(),
+            let grant;
+            try {
+              const cleanupInstanceIds = [...nativeInstanceIds].sort();
+              const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
+                instanceIds: cleanupInstanceIds,
               });
-              if (!['deleted', 'missing'].includes(forgotten.status)) {
-                throw new Error('Native custody forget did not reach a terminal state.');
+              if (
+                issued === null ||
+                typeof issued !== 'object' ||
+                typeof issued.grant !== 'string' ||
+                !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
+              ) {
+                throw new Error('Native custody cleanup grant was not canonical.');
               }
+              grant = issued.grant;
+              issued.grant = undefined;
+              nativeStateAfter = validateNativeCustodyProof(
+                await rpc.ok('conformance_cleanup_native_custody', { grant }),
+                platformEnvironment.nativeCustody,
+                'Native custody cleanup',
+              );
+            } finally {
+              grant = undefined;
             }
-            nativeStateAfter = validateNativeCustodyProof(
-              await rpc.ok('conformance_cleanup_native_custody', {
-                instanceIds: [],
-              }),
-              platformEnvironment.nativeCustody,
-              'Native custody cleanup',
-            );
           }
         } finally {
           await rpc.close();

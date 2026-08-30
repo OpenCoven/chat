@@ -10,6 +10,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     cave::{
@@ -167,8 +168,15 @@ enum RpcCommand {
         capability: String,
         owner_token: String,
     },
-    ConformanceNativeCustodyState,
-    ConformanceCleanupNativeCustody,
+    ConformanceNativeCustodyState {
+        instance_ids: Vec<String>,
+    },
+    ConformanceIssueNativeCustodyCleanup {
+        instance_ids: Vec<String>,
+    },
+    ConformanceCleanupNativeCustody {
+        grant: Zeroizing<String>,
+    },
     CaveListFamiliars {
         handle: String,
         page: NativePage,
@@ -226,8 +234,9 @@ impl RpcCommand {
                 | Self::CaveResetPairing { .. }
                 | Self::ConformancePrepareNativeCleanup { .. }
                 | Self::ConformanceDeleteNativeCredential { .. }
-                | Self::ConformanceNativeCustodyState
-                | Self::ConformanceCleanupNativeCustody
+                | Self::ConformanceNativeCustodyState { .. }
+                | Self::ConformanceIssueNativeCustodyCleanup { .. }
+                | Self::ConformanceCleanupNativeCustody { .. }
                 | Self::ResetNativeState
                 | Self::Shutdown
         )
@@ -676,8 +685,9 @@ impl Clone for RpcRuntime {
 }
 
 trait ConformanceCredentialCleanup: Send + Sync {
-    fn state(&self) -> Result<(&'static str, bool, String), KeyringError>;
-    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError>;
+    fn state(&self, instance_ids: &[String]) -> Result<(&'static str, bool, String), KeyringError>;
+    fn issue_cleanup_grant(&self, instance_ids: &[String]) -> Result<String, KeyringError>;
+    fn cleanup_state(&self, grant: &str) -> Result<(&'static str, bool, String), KeyringError>;
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError>;
     fn begin_adopt(
         &self,
@@ -710,12 +720,16 @@ trait ConformanceCredentialCleanup: Send + Sync {
 }
 
 impl ConformanceCredentialCleanup for NativeKeyring {
-    fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
-        self.conformance_state(&[])
+    fn state(&self, instance_ids: &[String]) -> Result<(&'static str, bool, String), KeyringError> {
+        self.conformance_state(instance_ids)
     }
 
-    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
-        self.cleanup_conformance_entries(&[])
+    fn issue_cleanup_grant(&self, instance_ids: &[String]) -> Result<String, KeyringError> {
+        self.issue_conformance_cleanup_grant(instance_ids)
+    }
+
+    fn cleanup_state(&self, grant: &str) -> Result<(&'static str, bool, String), KeyringError> {
+        self.redeem_conformance_cleanup_grant(grant)
     }
 
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError> {
@@ -809,7 +823,10 @@ impl RpcRuntime {
                 ))
             }
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_SYSTEM => {
-                let keyring = Arc::new(NativeKeyring::for_schema_v2());
+                let keyring = Arc::new(
+                    NativeKeyring::for_schema_v2()
+                        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?,
+                );
                 Ok(Self::with_custody(
                     keyring.clone(),
                     Some(keyring as Arc<dyn ConformanceCredentialCleanup>),
@@ -1093,13 +1110,14 @@ impl RpcRuntime {
                 }
                 json!({ "status": "missing" })
             }
-            RpcCommand::ConformanceNativeCustodyState => {
+            RpcCommand::ConformanceNativeCustodyState { instance_ids } => {
                 let cleanup = self
                     .emergency_cleanup
                     .as_ref()
                     .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
-                let (backend, empty, state_sha256) =
-                    cleanup.state().map_err(|error| error.diagnostic())?;
+                let (backend, empty, state_sha256) = cleanup
+                    .state(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
                 json!({
                     "backend": backend,
                     "available": true,
@@ -1107,13 +1125,23 @@ impl RpcRuntime {
                     "stateSha256": state_sha256,
                 })
             }
-            RpcCommand::ConformanceCleanupNativeCustody => {
+            RpcCommand::ConformanceIssueNativeCustodyCleanup { instance_ids } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let grant = cleanup
+                    .issue_cleanup_grant(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
+                json!({ "grant": grant })
+            }
+            RpcCommand::ConformanceCleanupNativeCustody { grant } => {
                 let cleanup = self
                     .emergency_cleanup
                     .as_ref()
                     .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
                 let (backend, empty, state_sha256) = cleanup
-                    .cleanup_state()
+                    .cleanup_state(&grant)
                     .map_err(|error| error.diagnostic())?;
                 json!({
                     "backend": backend,
@@ -1491,25 +1519,21 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
         }
         "conformance_native_custody_state" => {
             expect_exact_args(object, &["instanceIds"])?;
-            let instance_ids = object
-                .get("instanceIds")
-                .and_then(Value::as_array)
-                .ok_or(("invalid_native_input", false))?;
-            if !instance_ids.is_empty() {
-                return invalid();
-            }
-            Ok(RpcCommand::ConformanceNativeCustodyState)
+            Ok(RpcCommand::ConformanceNativeCustodyState {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
+        }
+        "conformance_issue_native_custody_cleanup" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            Ok(RpcCommand::ConformanceIssueNativeCustodyCleanup {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
         }
         "conformance_cleanup_native_custody" => {
-            expect_exact_args(object, &["instanceIds"])?;
-            let instance_ids = object
-                .get("instanceIds")
-                .and_then(Value::as_array)
-                .ok_or(("invalid_native_input", false))?;
-            if !instance_ids.is_empty() {
-                return invalid();
-            }
-            Ok(RpcCommand::ConformanceCleanupNativeCustody)
+            expect_exact_args(object, &["grant"])?;
+            Ok(RpcCommand::ConformanceCleanupNativeCustody {
+                grant: required_cleanup_grant(object, "grant")?,
+            })
         }
         "cave_list_familiars" => {
             expect_exact_args(object, &["handle", "operation", "page"])?;
@@ -1594,6 +1618,44 @@ fn required_attempt_id(
     NativeOperationInput::new(attempt_id.clone(), 1)
         .map_err(|_| ("invalid_native_input", false))?;
     Ok(attempt_id)
+}
+
+fn required_instance_ids(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, (&'static str, bool)> {
+    let values = object
+        .get(key)
+        .and_then(Value::as_array)
+        .filter(|values| values.len() <= 8)
+        .ok_or(("invalid_native_input", false))?;
+    let mut instance_ids = Vec::with_capacity(values.len());
+    for value in values {
+        let instance_id = value
+            .as_str()
+            .filter(|value| validate_installation_id(value).is_ok())
+            .ok_or(("invalid_native_input", false))?
+            .to_owned();
+        instance_ids.push(instance_id);
+    }
+    Ok(instance_ids)
+}
+
+fn required_cleanup_grant(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Zeroizing<String>, (&'static str, bool)> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| {
+            value.len() == 43
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
+        .map(|value| Zeroizing::new(value.to_owned()))
+        .ok_or(("invalid_native_input", false))
 }
 
 fn required_operation(
@@ -1781,13 +1843,17 @@ pub fn run_stdio() -> io::Result<()> {
     while let Some(line) = read_bounded_line(&mut stdin)? {
         reap_rpc_workers(&mut workers)?;
         let request = match line {
-            BoundedLine::Line(line) => match parse_request_line(&line) {
-                Ok(request) => request,
-                Err(response) => {
-                    write_rpc_response(&stdout, &response)?;
-                    continue;
+            BoundedLine::Line(mut line) => {
+                let request = parse_request_line(&line);
+                line.zeroize();
+                match request {
+                    Ok(request) => request,
+                    Err(response) => {
+                        write_rpc_response(&stdout, &response)?;
+                        continue;
+                    }
                 }
-            },
+            }
             BoundedLine::Oversized => {
                 write_rpc_response(
                     &stdout,
@@ -2141,11 +2207,21 @@ mod tests {
     }
 
     impl ConformanceCredentialCleanup for RecordingEmergencyCleanup {
-        fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        fn state(
+            &self,
+            _instance_ids: &[String],
+        ) -> Result<(&'static str, bool, String), KeyringError> {
             Err(KeyringError::Failure)
         }
 
-        fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        fn issue_cleanup_grant(&self, _instance_ids: &[String]) -> Result<String, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn cleanup_state(
+            &self,
+            _grant: &str,
+        ) -> Result<(&'static str, bool, String), KeyringError> {
             Err(KeyringError::Failure)
         }
 
@@ -2246,6 +2322,70 @@ mod tests {
         .expect("coven health should be registered");
 
         assert!(matches!(command, RpcCommand::CovenHealth { .. }));
+    }
+
+    #[test]
+    fn parses_only_bounded_native_custody_proof_commands() {
+        const INSTANCE_ID: &str = "00000000-0000-4000-8000-000000000001";
+        let state = parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [INSTANCE_ID]})),
+        )
+        .expect("native custody state should be registered");
+        let issue = parse_command(
+            "conformance_issue_native_custody_cleanup",
+            Some(json!({"instanceIds": [INSTANCE_ID, INSTANCE_ID]})),
+        )
+        .expect("native custody cleanup issuance should be registered");
+        let cleanup = parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({"grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})),
+        )
+        .expect("native custody cleanup should be registered");
+
+        assert!(matches!(
+            state,
+            RpcCommand::ConformanceNativeCustodyState { .. }
+        ));
+        assert!(matches!(
+            issue,
+            RpcCommand::ConformanceIssueNativeCustodyCleanup { .. }
+        ));
+        assert!(matches!(
+            cleanup,
+            RpcCommand::ConformanceCleanupNativeCustody { .. }
+        ));
+        assert!(parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+            ]})),
+        )
+        .is_err());
+        assert!(parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({
+                "grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "instanceIds": [INSTANCE_ID],
+            })),
+        )
+        .is_err());
+        assert!(parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({
+                "grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "service": "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef",
+            })),
+        )
+        .is_err());
     }
 
     #[test]

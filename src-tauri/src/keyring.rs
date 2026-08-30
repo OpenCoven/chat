@@ -23,8 +23,12 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::cave::NativeDiagnostic;
 
 const SERVICE: &str = "ai.opencoven.chat";
-const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
-const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
+#[cfg(feature = "phase1-conformance")]
+const CONFORMANCE_SERVICE_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE";
+#[cfg(feature = "phase1-conformance")]
+pub(crate) const CONFORMANCE_SERVICE_PREFIX: &str = "ai.opencoven.chat.phase1.";
+pub(crate) const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
+pub(crate) const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
 #[cfg(unix)]
 const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
@@ -37,11 +41,40 @@ const CONFORMANCE_HARNESS_IDENTITY: &str = "phase1-native-rpc-v1";
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
 
+#[cfg(feature = "phase1-conformance")]
+fn conformance_service_name_from_value(value: Option<&str>) -> Result<String, KeyringError> {
+    let service = value.ok_or(KeyringError::Unavailable)?;
+    if service
+        .strip_prefix(CONFORMANCE_SERVICE_PREFIX)
+        .is_some_and(|suffix| {
+            suffix.len() == 32
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+    {
+        Ok(service.to_owned())
+    } else {
+        Err(KeyringError::Unavailable)
+    }
+}
+
+#[cfg(feature = "phase1-conformance")]
+fn configured_conformance_service() -> Result<String, KeyringError> {
+    match std::env::var(CONFORMANCE_SERVICE_ENV) {
+        Ok(value) => conformance_service_name_from_value(Some(&value)),
+        Err(std::env::VarError::NotPresent) => conformance_service_name_from_value(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(KeyringError::Unavailable),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum KeyringError {
     NotFound,
     Unavailable,
     Failure,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantRejected,
 }
 
 impl KeyringError {
@@ -50,6 +83,8 @@ impl KeyringError {
             Self::NotFound => NativeDiagnostic::new("credential_missing", true),
             Self::Unavailable => NativeDiagnostic::new("secure_store_unavailable", true),
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
         }
     }
 }
@@ -135,11 +170,17 @@ pub(crate) struct NativeKeyring {
     #[cfg(feature = "phase1-conformance")]
     provider_preset: Option<NativeProviderPreset>,
     #[cfg(feature = "phase1-conformance")]
+    conformance_service: Option<String>,
+    #[cfg(feature = "phase1-conformance")]
     reservation_required: bool,
     #[cfg(feature = "phase1-conformance")]
     prepared_instance: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     #[cfg(feature = "phase1-conformance")]
     prepared_cleanup: std::sync::Arc<std::sync::Mutex<Option<ConformanceCleanupReservation>>>,
+    #[cfg(feature = "phase1-conformance")]
+    cleanup_process_secret: std::sync::Arc<OnceLock<Zeroizing<[u8; 32]>>>,
+    #[cfg(feature = "phase1-conformance")]
+    issued_cleanup_grants: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 #[cfg(feature = "phase1-conformance")]
@@ -203,8 +244,11 @@ impl NativeKeyring {
         }
     }
 
-    pub(crate) fn for_schema_v2() -> Self {
-        Self::default()
+    pub(crate) fn for_schema_v2() -> Result<Self, KeyringError> {
+        Ok(Self {
+            conformance_service: Some(configured_conformance_service()?),
+            ..Self::default()
+        })
     }
 
     fn reject_provider_if_configured(&self) -> Result<(), KeyringError> {
@@ -212,6 +256,22 @@ impl NativeKeyring {
             Some(NativeProviderPreset::MissingKeychainTrust) => Err(KeyringError::Unavailable),
             None => Ok(()),
         }
+    }
+
+    fn service_name(&self) -> &str {
+        self.conformance_service.as_deref().unwrap_or(SERVICE)
+    }
+
+    fn cleanup_process_secret(&self, create: bool) -> Result<&[u8; 32], KeyringError> {
+        if self.cleanup_process_secret.get().is_none() && create {
+            let mut secret = Zeroizing::new([0_u8; 32]);
+            getrandom::fill(secret.as_mut()).map_err(|_| KeyringError::Unavailable)?;
+            let _ = self.cleanup_process_secret.set(secret);
+        }
+        self.cleanup_process_secret
+            .get()
+            .map(|secret| &**secret)
+            .ok_or(KeyringError::CleanupGrantRejected)
     }
 
     fn conformance_reservation_entry(handle: &str) -> Result<Entry, KeyringError> {
@@ -229,7 +289,7 @@ impl NativeKeyring {
         self.reject_provider_if_configured()?;
         validate_installation_id(instance_id)?;
         let _guard = acquire_mutation_lock()?;
-        match Self::credential_entry(instance_id)?.get_secret() {
+        match Self::credential_entry_for_service(self.service_name(), instance_id)?.get_secret() {
             Err(KeyringBackendError::NoEntry) => {}
             Ok(mut value) => {
                 value.zeroize();
@@ -322,7 +382,7 @@ impl NativeKeyring {
         if marker.owner_token != owner_token {
             return Ok(ConformanceCleanupOutcome::Transferred);
         }
-        let target = Self::credential_entry(&marker.instance_id)?;
+        let target = Self::credential_entry_for_service(self.service_name(), &marker.instance_id)?;
         match target.delete_credential() {
             Ok(()) | Err(KeyringBackendError::NoEntry) => {}
             Err(error) => return Err(map_keyring_error(error)),
@@ -409,7 +469,9 @@ impl NativeKeyring {
             }
             return Err(KeyringError::Failure);
         }
-        match Self::credential_entry(&marker.instance_id)?.get_secret() {
+        match Self::credential_entry_for_service(self.service_name(), &marker.instance_id)?
+            .get_secret()
+        {
             Ok(mut value) => value.zeroize(),
             Err(error) => return Err(map_keyring_error(error)),
         }
@@ -541,12 +603,79 @@ impl NativeKeyring {
         &self,
         instance_ids: &[String],
     ) -> Result<(&'static str, bool, String), KeyringError> {
+        let service = self.service_name();
         self.reject_provider_if_configured()?;
+        if service == SERVICE && !instance_ids.is_empty() {
+            return Err(KeyringError::Failure);
+        }
+        let accounts = canonical_conformance_cleanup_accounts(instance_ids)?;
         let _guard = acquire_mutation_lock()?;
-        let mut occupied = Self::conformance_entry_present(&Self::installation_id_entry()?)?;
-        for instance_id in instance_ids {
-            validate_installation_id(instance_id)?;
-            occupied |= Self::conformance_entry_present(&Self::credential_entry(instance_id)?)?;
+        Self::conformance_state_for_accounts(service, &accounts)
+    }
+
+    pub(crate) fn issue_conformance_cleanup_grant(
+        &self,
+        instance_ids: &[String],
+    ) -> Result<String, KeyringError> {
+        let service = self.service_name();
+        self.reject_provider_if_configured()?;
+        if service == SERVICE {
+            return Err(KeyringError::Unavailable);
+        }
+        let accounts = canonical_conformance_cleanup_accounts(instance_ids)?;
+        let grant =
+            crate::cleanup_grant::issue(service, &accounts, self.cleanup_process_secret(true)?)?;
+        let grant_identity = crate::cleanup_grant::grant_identity(&grant)?;
+        let mut issued = self
+            .issued_cleanup_grants
+            .lock()
+            .map_err(|_| KeyringError::Failure)?;
+        if !issued.insert(grant_identity) {
+            return Err(KeyringError::Failure);
+        }
+        Ok(grant)
+    }
+
+    pub(crate) fn redeem_conformance_cleanup_grant(
+        &self,
+        grant: &str,
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        let service = self.service_name();
+        self.reject_provider_if_configured()?;
+        if service == SERVICE {
+            return Err(KeyringError::Unavailable);
+        }
+        let grant_identity = crate::cleanup_grant::grant_identity(grant)?;
+        {
+            let mut issued = self
+                .issued_cleanup_grants
+                .lock()
+                .map_err(|_| KeyringError::CleanupGrantRejected)?;
+            if !issued.remove(&grant_identity) {
+                return Err(KeyringError::CleanupGrantRejected);
+            }
+        }
+        let scope =
+            crate::cleanup_grant::redeem(grant, service, self.cleanup_process_secret(false)?)?;
+        let _guard = acquire_mutation_lock()?;
+        for account in &scope.accounts {
+            let entry = Self::entry_for(scope.service.as_str(), account)?;
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => {}
+                Err(error) => return Err(map_keyring_error(error)),
+            }
+        }
+        Self::conformance_state_for_accounts(&scope.service, &scope.accounts)
+    }
+
+    fn conformance_state_for_accounts(
+        service: &str,
+        accounts: &[String],
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        validate_conformance_cleanup_accounts(accounts)?;
+        let mut occupied = false;
+        for account in accounts {
+            occupied |= Self::conformance_entry_present(&Self::entry_for(service, account)?)?;
         }
         let digest = Sha256::digest(if occupied {
             b"phase1-native-custody-occupied-v1".as_slice()
@@ -554,30 +683,6 @@ impl NativeKeyring {
             b"phase1-native-custody-empty-v1".as_slice()
         });
         Ok((native_keyring_backend(), !occupied, format!("{digest:x}")))
-    }
-
-    pub(crate) fn cleanup_conformance_entries(
-        &self,
-        instance_ids: &[String],
-    ) -> Result<(&'static str, bool, String), KeyringError> {
-        self.reject_provider_if_configured()?;
-        let _guard = acquire_mutation_lock()?;
-        for entry in std::iter::once(Self::installation_id_entry()?).chain(
-            instance_ids
-                .iter()
-                .map(|instance_id| {
-                    validate_installation_id(instance_id)?;
-                    Self::credential_entry(instance_id)
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        ) {
-            match entry.delete_credential() {
-                Ok(()) | Err(KeyringBackendError::NoEntry) => {}
-                Err(error) => return Err(map_keyring_error(error)),
-            }
-        }
-        drop(_guard);
-        self.conformance_state(instance_ids)
     }
 
     fn require_prepared_instance(&self, instance_id: &str) -> Result<(), KeyringError> {
@@ -596,6 +701,47 @@ impl NativeKeyring {
     }
 }
 
+#[cfg(feature = "phase1-conformance")]
+fn canonical_conformance_cleanup_accounts(
+    instance_ids: &[String],
+) -> Result<Vec<String>, KeyringError> {
+    let mut instance_ids = instance_ids.to_vec();
+    for instance_id in &instance_ids {
+        validate_installation_id(instance_id)?;
+    }
+    instance_ids.sort();
+    instance_ids.dedup();
+    let mut accounts = Vec::with_capacity(instance_ids.len() + 1);
+    accounts.push(INSTALLATION_ID_ACCOUNT.to_owned());
+    accounts.extend(
+        instance_ids
+            .into_iter()
+            .map(|instance_id| format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}")),
+    );
+    validate_conformance_cleanup_accounts(&accounts)?;
+    Ok(accounts)
+}
+
+#[cfg(feature = "phase1-conformance")]
+pub(crate) fn validate_conformance_cleanup_accounts(
+    accounts: &[String],
+) -> Result<(), KeyringError> {
+    if accounts.is_empty() || accounts.len() > 9 || accounts[0] != INSTALLATION_ID_ACCOUNT {
+        return Err(KeyringError::Failure);
+    }
+    let prefix = format!("{CREDENTIAL_ACCOUNT_PREFIX}:");
+    let mut previous: Option<&str> = None;
+    for account in &accounts[1..] {
+        let instance_id = account.strip_prefix(&prefix).ok_or(KeyringError::Failure)?;
+        validate_installation_id(instance_id)?;
+        if previous.is_some_and(|previous| previous >= account.as_str()) {
+            return Err(KeyringError::Failure);
+        }
+        previous = Some(account);
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn mutation_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -608,7 +754,7 @@ struct CredentialMutationGuard {
     _file: fs::File,
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(not(feature = "phase1-conformance"), test)))]
 fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".coven").join("chat")
 }
@@ -638,12 +784,47 @@ fn credential_lock_path_for_root(
 
 #[cfg(unix)]
 fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+    #[cfg(all(feature = "phase1-conformance", not(test)))]
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
     #[cfg(feature = "phase1-conformance")]
     if let Some(path) = env::var_os("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT") {
         return credential_lock_path_for_root(&std::path::PathBuf::from(path));
     }
     let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
-    credential_lock_path_for_root(&default_credential_lock_root(std::path::Path::new(&home)))
+    let home = std::path::PathBuf::from(home);
+    #[cfg(all(feature = "phase1-conformance", not(test)))]
+    {
+        let home_metadata = fs::symlink_metadata(&home).map_err(|_| KeyringError::Unavailable)?;
+        if home_metadata.file_type().is_symlink()
+            || !home_metadata.is_dir()
+            || home_metadata.uid() != unsafe { libc::geteuid() }
+            || home_metadata.mode() & 0o777 != 0o700
+        {
+            return Err(KeyringError::Unavailable);
+        }
+        let mut current = home;
+        for component in [".coven", "chat"] {
+            current.push(component);
+            match fs::create_dir(&current) {
+                Ok(()) => fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| KeyringError::Unavailable)?,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(_) => return Err(KeyringError::Unavailable),
+            }
+            let metadata = fs::symlink_metadata(&current).map_err(|_| KeyringError::Unavailable)?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_dir()
+                || metadata.uid() != unsafe { libc::geteuid() }
+                || metadata.mode() & 0o777 != 0o700
+            {
+                return Err(KeyringError::Unavailable);
+            }
+        }
+        Ok(current.join("credential-mutation.lock"))
+    }
+    #[cfg(any(not(feature = "phase1-conformance"), test))]
+    credential_lock_path_for_root(&default_credential_lock_root(&home))
 }
 
 #[cfg(unix)]
@@ -1168,8 +1349,12 @@ impl CredentialCustody for NativeKeyring {
     fn installation_id(&self) -> Result<String, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
         self.reject_provider_if_configured()?;
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
         let _guard = acquire_mutation_lock()?;
-        let entry = Self::installation_id_entry()?;
+        let entry = Self::installation_id_entry_for_service(service)?;
         match entry.get_secret() {
             Ok(bytes) => {
                 let bytes = Zeroizing::new(bytes);
@@ -1201,9 +1386,13 @@ impl CredentialCustody for NativeKeyring {
     ) -> Result<CredentialSlot, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
         self.reject_provider_if_configured()?;
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
         validate_credential_origin(origin)?;
         let _guard = acquire_mutation_lock()?;
-        let entry = Self::credential_entry(instance_id)?;
+        let entry = Self::credential_entry_for_service(service, instance_id)?;
         let raw = entry.get_secret();
         let stored = match raw {
             Ok(raw) => {
@@ -1239,6 +1428,10 @@ impl CredentialCustody for NativeKeyring {
             self.reject_provider_if_configured()?;
             self.require_prepared_instance(instance_id)?;
         }
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
         validate_credential_origin(origin)?;
         if let Some(expected_credential) = expected_credential {
             validate_credential_origin(&expected_credential.origin)?;
@@ -1247,7 +1440,7 @@ impl CredentialCustody for NativeKeyring {
             return Err(KeyringError::Failure);
         }
         let _guard = acquire_mutation_lock()?;
-        let entry = Self::credential_entry(instance_id)?;
+        let entry = Self::credential_entry_for_service(service, instance_id)?;
         let current = match entry.get_secret() {
             Ok(value) => {
                 let value = Zeroizing::new(value);
@@ -1297,6 +1490,10 @@ impl CredentialCustody for NativeKeyring {
             self.reject_provider_if_configured()?;
             self.require_prepared_instance(instance_id)?;
         }
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
         validate_credential_origin(origin)?;
         validate_credential_origin(&expected_stale_credential.origin)?;
         if bearer.is_empty()
@@ -1306,7 +1503,7 @@ impl CredentialCustody for NativeKeyring {
             return Err(KeyringError::Failure);
         }
         let _guard = acquire_mutation_lock()?;
-        let entry = Self::credential_entry(instance_id)?;
+        let entry = Self::credential_entry_for_service(service, instance_id)?;
         let stored = match entry.get_secret() {
             Ok(value) => {
                 let value = Zeroizing::new(value);
@@ -1345,10 +1542,14 @@ impl CredentialCustody for NativeKeyring {
     ) -> Result<bool, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
         self.reject_provider_if_configured()?;
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
         validate_credential_origin(origin)?;
         validate_credential_origin(&expected_credential.origin)?;
         let _guard = acquire_mutation_lock()?;
-        let entry = Self::credential_entry(instance_id)?;
+        let entry = Self::credential_entry_for_service(service, instance_id)?;
         let stored = match entry.get_secret() {
             Ok(value) => {
                 let value = Zeroizing::new(value);
@@ -1421,10 +1622,6 @@ pub(crate) fn validate_credential_origin(origin: &str) -> Result<(), KeyringErro
 }
 
 impl NativeKeyring {
-    fn entry(account: &str) -> Result<Entry, KeyringError> {
-        Self::entry_for(SERVICE, account)
-    }
-
     fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
         if STORE_INITIALIZED.get().is_none() {
             if !initialize_store() {
@@ -1447,15 +1644,21 @@ impl NativeKeyring {
         }
     }
 
-    fn installation_id_entry() -> Result<Entry, KeyringError> {
-        Self::entry(INSTALLATION_ID_ACCOUNT)
+    fn installation_id_entry_for_service(service: &str) -> Result<Entry, KeyringError> {
+        Self::entry_for(service, INSTALLATION_ID_ACCOUNT)
     }
 
-    fn credential_entry(instance_id: &str) -> Result<Entry, KeyringError> {
+    fn credential_entry_for_service(
+        service: &str,
+        instance_id: &str,
+    ) -> Result<Entry, KeyringError> {
         if instance_id.is_empty() || instance_id.len() > 128 {
             return Err(KeyringError::Failure);
         }
-        Self::entry(&format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"))
+        Self::entry_for(
+            service,
+            &format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"),
+        )
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -1553,6 +1756,36 @@ mod tests {
         assert!(keyring
             .require_prepared_instance("installation-id-v1")
             .is_err());
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn production_keyring_state_rejects_caller_selected_accounts() {
+        let keyring = super::NativeKeyring::for_conformance();
+        assert!(matches!(
+            keyring.conformance_state(&["00000000-0000-4000-8000-000000000001".to_owned()]),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn phase1_keyring_service_never_falls_back_to_production() {
+        assert!(matches!(
+            super::conformance_service_name_from_value(None),
+            Err(KeyringError::Unavailable)
+        ));
+        assert!(matches!(
+            super::conformance_service_name_from_value(Some("ai.opencoven.chat")),
+            Err(KeyringError::Unavailable)
+        ));
+        assert_eq!(
+            super::conformance_service_name_from_value(Some(
+                "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
+            ))
+            .unwrap(),
+            "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
+        );
     }
 
     #[test]

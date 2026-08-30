@@ -232,7 +232,13 @@ describe('Phase 1 specification guards', () => {
     const library = readText('src-tauri/src/lib.rs');
     const commands = readText('src-tauri/src/commands.rs');
     const capability = readText('src-tauri/capabilities/default.json');
-    const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
+    const controls = [
+      'conformance_native_custody_state',
+      'conformance_issue_native_custody_cleanup',
+      'conformance_cleanup_native_custody',
+      'conformance_reset_native_state',
+      'conformance_shutdown',
+    ];
 
     expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
     const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
@@ -248,6 +254,21 @@ describe('Phase 1 specification guards', () => {
       expect(capability).not.toContain(control);
       expect(readText('src-tauri/build.rs')).not.toContain(control);
     }
+
+    const conformance = readText('src-tauri/src/conformance.rs');
+    const producer = readText('scripts/phase1-schema-v2-producer.mjs');
+    expect(conformance).toContain('"conformance_issue_native_custody_cleanup"');
+    expect(conformance).toMatch(
+      /"conformance_cleanup_native_custody"[\s\S]*?expect_exact_args\(object, &\["grant"\]\)/,
+    );
+    expect(producer).toContain("rpc.ok('conformance_issue_native_custody_cleanup'");
+    expect(producer).toContain("rpc.ok('conformance_cleanup_native_custody', { grant })");
+    expect(producer).toContain('const cleanupInstanceIds = [...nativeInstanceIds].sort();');
+    expect(producer).toContain('issued.grant = undefined;');
+    expect(producer).toContain('grant = undefined;');
+    expect(producer).not.toContain(
+      "rpc.ok('conformance_cleanup_native_custody', {\n                instanceIds:",
+    );
   });
 
   it('pins Coven health to an isolated producer-client self probe without fallback trust', () => {
@@ -907,6 +928,15 @@ describe('Phase 1 specification guards', () => {
     );
 
     expect(phase1Job).toContain('timeout-minutes: 120');
+  });
+
+  it('compiles the phase1 native cleanup grant implementation on Windows', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const windowsRust = workflow.slice(workflow.indexOf('  windows-supervisor-behavior:'));
+
+    expect(windowsRust).toContain(
+      'cargo check --manifest-path src-tauri/Cargo.toml --all-targets --all-features',
+    );
   });
 
   it('skips the expensive jobs for a branch that changed only prose', () => {

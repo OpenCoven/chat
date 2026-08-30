@@ -16,6 +16,7 @@ const INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 const MAX_LINE_BYTES: usize = 64 * 1024;
 const CONFORMANCE_SOURCE: &str = include_str!("../src/conformance.rs");
 
+#[cfg(target_os = "macos")]
 fn rpc_request(
     stdin: &mut ChildStdin,
     stdout: &mut BufReader<ChildStdout>,
@@ -69,6 +70,7 @@ fn windows_launched_cave_is_bound_to_a_kill_on_close_job() {
     }
 }
 const NATIVE_PROVIDER_PRESET_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+const CONFORMANCE_SERVICE_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE";
 
 #[test]
 fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_mutating_home() {
@@ -163,6 +165,10 @@ fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_muta
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
         .env(NATIVE_PROVIDER_PRESET_ENV, "missing-keychain-trust")
+        .env(
+            CONFORMANCE_SERVICE_ENV,
+            "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef",
+        )
         .env("HOME", &home)
         .env("COVEN_CAVE_AUTH_TOKEN", canary)
         .stdin(Stdio::piped())
@@ -220,6 +226,746 @@ fn subprocess_native_missing_keychain_trust_fails_closed_without_leaking_or_muta
     home_cleanup
         .cleanup()
         .expect("isolated home cleanup must succeed");
+}
+
+#[test]
+fn subprocess_rejects_missing_malformed_and_production_keyring_services_before_custody_access() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    for (label, service) in [
+        ("missing", None),
+        (
+            "malformed",
+            Some("ai.opencoven.chat.phase1.not-a-valid-namespace"),
+        ),
+        ("production", Some("ai.opencoven.chat")),
+    ] {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock must follow Unix epoch")
+            .as_nanos();
+        let home = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!(
+                "phase1-cleanup-service-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+        fs::create_dir_all(&home).expect("isolated home must be created");
+        #[cfg(unix)]
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+            .expect("isolated home must be private");
+
+        let mut command = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"));
+        command
+            .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
+            .env("HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(service) = service {
+            command.env(CONFORMANCE_SERVICE_ENV, service);
+        } else {
+            command.env_remove(CONFORMANCE_SERVICE_ENV);
+        }
+        let mut child = command.spawn().expect("phase1-native-rpc must start");
+        {
+            let mut stdin = child.stdin.take().expect("child stdin must be piped");
+            writeln!(
+                stdin,
+                r#"{{"id":"installation","command":"app_installation_id"}}"#
+            )
+            .expect("installation request must be written");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("phase1-native-rpc must reject its configuration");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout)
+                .expect("stdout must be UTF-8")
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).expect("response must be JSON"))
+                .collect::<Vec<_>>(),
+            vec![json!({
+                "id": "invalid-request",
+                "ok": false,
+                "error": {"code": "invalid_native_input", "retryable": false}
+            })],
+            "{label} service must fail before RPC startup",
+        );
+        assert!(
+            fs::read_dir(&home)
+                .expect("isolated home must remain readable")
+                .next()
+                .is_none(),
+            "{label} service must not touch custody or create grant state",
+        );
+        fs::remove_dir(&home).expect("isolated home must be removable");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
+    use std::{
+        collections::BTreeSet,
+        fs,
+        io::BufReader,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    const INSTALLATION_ACCOUNT: &str = "installation-id-v1";
+    const TARGET_A: &str = "00000000-0000-4000-8000-000000000001";
+    const TARGET_B: &str = "00000000-0000-4000-8000-000000000002";
+    const UNRELATED: &str = "00000000-0000-4000-8000-000000000003";
+
+    fn credential_account(instance_id: &str) -> String {
+        format!("cave-client-v1:{instance_id}")
+    }
+
+    fn run_security(home: &Path, arguments: &[&str]) -> std::process::Output {
+        Command::new("/usr/bin/security")
+            .args(arguments)
+            .env("HOME", home)
+            .output()
+            .expect("security command must run")
+    }
+
+    fn set_entry(home: &Path, keychain: &Path, service: &str, account: &str, value: &str) {
+        let output = run_security(
+            home,
+            &[
+                "add-generic-password",
+                "-U",
+                "-A",
+                "-a",
+                account,
+                "-s",
+                service,
+                "-w",
+                value,
+                keychain.to_str().expect("keychain path must be UTF-8"),
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "test keyring entry must be stored: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    fn entry_present(home: &Path, keychain: &Path, service: &str, account: &str) -> bool {
+        run_security(
+            home,
+            &[
+                "find-generic-password",
+                "-a",
+                account,
+                "-s",
+                service,
+                keychain.to_str().expect("keychain path must be UTF-8"),
+            ],
+        )
+        .status
+        .success()
+    }
+
+    struct KeychainCleanup {
+        home: PathBuf,
+        path: PathBuf,
+    }
+
+    impl Drop for KeychainCleanup {
+        fn drop(&mut self) {
+            let _ = run_security(
+                &self.home,
+                &["delete-keychain", self.path.to_str().unwrap_or_default()],
+            );
+        }
+    }
+
+    struct HomeCleanup(PathBuf);
+
+    impl Drop for HomeCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    struct RpcProcess {
+        child: std::process::Child,
+        stdin: ChildStdin,
+        stdout: BufReader<ChildStdout>,
+    }
+
+    impl RpcProcess {
+        fn request(&mut self, value: Value) -> Value {
+            serde_json::to_writer(&mut self.stdin, &value).expect("request must serialize");
+            self.stdin
+                .write_all(b"\n")
+                .expect("request delimiter must write");
+            self.stdin.flush().expect("request must flush");
+            let mut line = String::new();
+            self.stdout
+                .read_line(&mut line)
+                .expect("response must be readable");
+            serde_json::from_str(&line).expect("response must be JSON")
+        }
+
+        fn issue(&mut self, instance_ids: &[&str]) -> String {
+            let response = self.request(json!({
+                "id": "issue",
+                "command": "conformance_issue_native_custody_cleanup",
+                "args": {"instanceIds": instance_ids},
+            }));
+            assert_eq!(
+                response["ok"], true,
+                "cleanup grant issuance must succeed: {response}"
+            );
+            let grant = response["result"]["grant"]
+                .as_str()
+                .expect("cleanup grant must be returned")
+                .to_owned();
+            assert_eq!(grant.len(), 43, "grant must encode exactly 256 random bits");
+            assert!(
+                grant
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
+                "grant must be opaque base64url without padding",
+            );
+            grant
+        }
+
+        fn cleanup(&mut self, grant: &str) -> Value {
+            self.request(json!({
+                "id": "cleanup",
+                "command": "conformance_cleanup_native_custody",
+                "args": {"grant": grant},
+            }))
+        }
+
+        fn reject_cleanup(&mut self, grant: &str) {
+            assert_eq!(
+                self.cleanup(grant),
+                json!({
+                    "id": "cleanup",
+                    "ok": false,
+                    "error": {"code": "cleanup_grant_rejected", "retryable": false},
+                }),
+            );
+        }
+    }
+
+    fn marker_files(home: &Path) -> BTreeSet<PathBuf> {
+        let directory = home
+            .join(".coven")
+            .join("chat")
+            .join("phase1-cleanup-grants-v1");
+        match fs::read_dir(directory) {
+            Ok(entries) => entries
+                .map(|entry| {
+                    entry
+                        .expect("marker directory entry must be readable")
+                        .path()
+                })
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("grant-") && name.ends_with(".json"))
+                })
+                .collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+            Err(error) => panic!("marker directory must be readable: {error}"),
+        }
+    }
+
+    fn issue_with_marker(rpc: &mut RpcProcess, home: &Path, ids: &[&str]) -> (String, PathBuf) {
+        let before = marker_files(home);
+        let grant = rpc.issue(ids);
+        let after = marker_files(home);
+        let created = after.difference(&before).cloned().collect::<Vec<_>>();
+        assert_eq!(
+            created.len(),
+            1,
+            "issuance must atomically publish one marker"
+        );
+        (grant, created[0].clone())
+    }
+
+    fn rewrite_marker(path: &Path, mutate: impl FnOnce(&mut Value)) {
+        let mut marker: Value =
+            serde_json::from_slice(&fs::read(path).expect("marker must be readable"))
+                .expect("marker must be JSON");
+        mutate(&mut marker);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .expect("marker must remain writable by its owner");
+        serde_json::to_writer(&file, &marker).expect("mutated marker must serialize");
+        file.sync_all().expect("mutated marker must sync");
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock must follow Unix epoch")
+        .as_nanos();
+    let service = format!(
+        "ai.opencoven.chat.phase1.{:032x}",
+        nonce ^ u128::from(std::process::id())
+    );
+    let home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "phase1-cleanup-grant-home-{}-{nonce}",
+            std::process::id()
+        ));
+    fs::create_dir_all(&home).expect("isolated home must be created");
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+        .expect("isolated home must be private");
+    let _home_cleanup = HomeCleanup(home.clone());
+    let preferences = home.join("Library").join("Preferences");
+    let keychains = home.join("Library").join("Keychains");
+    for directory in [home.join("Library"), preferences, keychains.clone()] {
+        fs::create_dir_all(&directory).expect("isolated keychain directory must be created");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+            .expect("isolated keychain directory must be private");
+    }
+    let keychain = keychains.join("phase1-test.keychain-db");
+    let password = format!("{:064x}", nonce ^ u128::from(std::process::id()));
+    for arguments in [
+        vec![
+            "create-keychain",
+            "-p",
+            password.as_str(),
+            keychain.to_str().expect("keychain path must be UTF-8"),
+        ],
+        vec![
+            "set-keychain-settings",
+            "-lut",
+            "7200",
+            keychain.to_str().expect("keychain path must be UTF-8"),
+        ],
+        vec![
+            "unlock-keychain",
+            "-p",
+            password.as_str(),
+            keychain.to_str().expect("keychain path must be UTF-8"),
+        ],
+        vec![
+            "default-keychain",
+            "-d",
+            "user",
+            "-s",
+            keychain.to_str().expect("keychain path must be UTF-8"),
+        ],
+        vec![
+            "list-keychains",
+            "-d",
+            "user",
+            "-s",
+            keychain.to_str().expect("keychain path must be UTF-8"),
+        ],
+    ] {
+        let output = run_security(&home, &arguments);
+        assert!(
+            output.status.success(),
+            "isolated keychain setup must succeed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+    fs::set_permissions(&keychain, fs::Permissions::from_mode(0o600))
+        .expect("isolated keychain must be private");
+    let _keychain_cleanup = KeychainCleanup {
+        home: home.clone(),
+        path: keychain.clone(),
+    };
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
+        .env(CONFORMANCE_SERVICE_ENV, &service)
+        .env("HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc must start");
+    let stdin = child.stdin.take().expect("child stdin must be piped");
+    let stdout = BufReader::new(child.stdout.take().expect("child stdout must be piped"));
+    let mut rpc = RpcProcess {
+        child,
+        stdin,
+        stdout,
+    };
+
+    let before = rpc.request(json!({
+        "id": "state",
+        "command": "conformance_native_custody_state",
+        "args": {"instanceIds": [TARGET_A, TARGET_B]},
+    }));
+    assert_eq!(
+        before["ok"], true,
+        "native custody preflight failed: {before}"
+    );
+    assert_eq!(before["result"]["empty"], true);
+
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT,
+        INSTALLATION_ID,
+    );
+    let credential =
+        r#"{"bearer":"secret","credential_id":"credential","origin":"http://127.0.0.1:4310/"}"#;
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A),
+        credential,
+    );
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_B),
+        credential,
+    );
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(UNRELATED),
+        credential,
+    );
+
+    let (grant, marker) = issue_with_marker(&mut rpc, &home, &[TARGET_B, TARGET_A, TARGET_B]);
+    let marker_text = fs::read_to_string(&marker).expect("marker must be readable");
+    assert!(
+        !marker_text.contains(&grant),
+        "marker must not persist the raw grant"
+    );
+    let marker_json: Value = serde_json::from_str(&marker_text).expect("marker must be JSON");
+    assert_eq!(
+        marker_json["payload"]["accounts"],
+        json!([
+            INSTALLATION_ACCOUNT,
+            credential_account(TARGET_A),
+            credential_account(TARGET_B),
+        ]),
+        "marker must bind the canonical sorted and deduplicated account set",
+    );
+
+    rpc.reject_cleanup("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_B)
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(UNRELATED)
+    ));
+    assert_eq!(
+        rpc.request(json!({
+            "id": "cleanup",
+            "command": "conformance_cleanup_native_custody",
+            "args": {"grant": grant, "instanceIds": [UNRELATED]},
+        }))["error"],
+        json!({"code": "invalid_native_input", "retryable": false}),
+        "cleanup must reject caller-selected account scope",
+    );
+    assert_eq!(
+        rpc.request(json!({
+            "id": "cleanup",
+            "command": "conformance_cleanup_native_custody",
+            "args": {"grant": grant, "service": "ai.opencoven.chat"},
+        }))["error"],
+        json!({"code": "invalid_native_input", "retryable": false}),
+        "cleanup must reject caller-selected service scope",
+    );
+
+    for id in ["cleanup-race-one", "cleanup-race-two"] {
+        serde_json::to_writer(
+            &mut rpc.stdin,
+            &json!({
+                "id": id,
+                "command": "conformance_cleanup_native_custody",
+                "args": {"grant": grant},
+            }),
+        )
+        .expect("concurrent cleanup request must serialize");
+        rpc.stdin
+            .write_all(b"\n")
+            .expect("concurrent cleanup delimiter must write");
+    }
+    rpc.stdin
+        .flush()
+        .expect("concurrent cleanup requests must flush");
+    let concurrent = [0, 1].map(|_| {
+        let mut line = String::new();
+        rpc.stdout
+            .read_line(&mut line)
+            .expect("concurrent cleanup response must be readable");
+        serde_json::from_str::<Value>(&line).expect("concurrent cleanup response must be JSON")
+    });
+    let cleaned = concurrent
+        .iter()
+        .find(|response| response["ok"] == true)
+        .expect("one concurrent cleanup redemption must succeed");
+    let rejected = concurrent
+        .iter()
+        .find(|response| response["ok"] == false)
+        .expect("one concurrent cleanup redemption must be rejected");
+    assert_eq!(
+        rejected["error"],
+        json!({"code": "cleanup_grant_rejected", "retryable": false}),
+    );
+    assert_eq!(cleaned["result"]["empty"], true);
+    assert_eq!(
+        cleaned["result"]["stateSha256"],
+        before["result"]["stateSha256"]
+    );
+    assert!(!entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(!entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+    assert!(!entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_B)
+    ));
+    assert!(
+        entry_present(&home, &keychain, &service, &credential_account(UNRELATED)),
+        "cleanup must preserve unrelated entries in the isolated namespace",
+    );
+    rpc.reject_cleanup(&grant);
+
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT,
+        INSTALLATION_ID,
+    );
+    set_entry(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A),
+        credential,
+    );
+    let (account_grant, account_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    rewrite_marker(&account_marker, |marker| {
+        marker["payload"]["accounts"][1] = Value::String(credential_account(UNRELATED));
+    });
+    rpc.reject_cleanup(&account_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+    rpc.reject_cleanup(&account_grant);
+
+    let (service_grant, service_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    rewrite_marker(&service_marker, |marker| {
+        marker["payload"]["service"] =
+            Value::String("ai.opencoven.chat.phase1.ffffffffffffffffffffffffffffffff".to_owned());
+    });
+    rpc.reject_cleanup(&service_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+
+    let (symlink_grant, symlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let saved_marker = symlink_marker.with_extension("saved");
+    fs::rename(&symlink_marker, &saved_marker).expect("marker must move aside");
+    std::os::unix::fs::symlink(
+        saved_marker
+            .file_name()
+            .expect("saved marker must have a file name"),
+        &symlink_marker,
+    )
+    .expect("marker symlink must be created");
+    rpc.reject_cleanup(&symlink_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+
+    let (hardlink_grant, hardlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let hardlink_alias = hardlink_marker.with_extension("alias");
+    fs::hard_link(&hardlink_marker, &hardlink_alias).expect("marker hard link must be created");
+    rpc.reject_cleanup(&hardlink_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+
+    let (replaced_grant, replaced_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (_substitute_grant, substitute_marker) = issue_with_marker(&mut rpc, &home, &[UNRELATED]);
+    fs::remove_file(&replaced_marker).expect("original marker must be removed");
+    fs::rename(&substitute_marker, &replaced_marker).expect("substitute marker must be installed");
+    rpc.reject_cleanup(&replaced_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+
+    let (directory_grant, directory_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let marker_directory = directory_marker
+        .parent()
+        .expect("marker must have a parent")
+        .to_owned();
+    let saved_directory = marker_directory.with_extension("saved");
+    fs::rename(&marker_directory, &saved_directory).expect("marker directory must move aside");
+    fs::create_dir(&marker_directory).expect("substitute marker directory must be created");
+    fs::set_permissions(&marker_directory, fs::Permissions::from_mode(0o700))
+        .expect("substitute marker directory must be private");
+    let substituted_marker = marker_directory.join(
+        directory_marker
+            .file_name()
+            .expect("marker must have a file name"),
+    );
+    fs::copy(
+        saved_directory.join(
+            directory_marker
+                .file_name()
+                .expect("marker must have a file name"),
+        ),
+        &substituted_marker,
+    )
+    .expect("signed marker must be copied into the substitute directory");
+    fs::set_permissions(&substituted_marker, fs::Permissions::from_mode(0o600))
+        .expect("substituted marker must retain a private mode");
+    rpc.reject_cleanup(&directory_grant);
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+    fs::remove_dir_all(&marker_directory).expect("substitute marker directory must be removed");
+    fs::rename(&saved_directory, &marker_directory)
+        .expect("original marker directory must be restored");
+
+    let final_grant = rpc.issue(&[TARGET_A]);
+    assert_eq!(rpc.cleanup(&final_grant)["ok"], true);
+    assert!(!entry_present(
+        &home,
+        &keychain,
+        &service,
+        INSTALLATION_ACCOUNT
+    ));
+    assert!(!entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(TARGET_A)
+    ));
+    assert!(entry_present(
+        &home,
+        &keychain,
+        &service,
+        &credential_account(UNRELATED)
+    ));
+
+    assert_eq!(
+        rpc.request(json!({"id":"shutdown","command":"conformance_shutdown"})),
+        json!({
+            "id": "shutdown",
+            "ok": true,
+            "result": {"status": "shutting_down"},
+        }),
+    );
+    drop(rpc.stdin);
+    let output = rpc
+        .child
+        .wait_with_output()
+        .expect("phase1-native-rpc must exit");
+    assert!(
+        output.status.success(),
+        "native RPC stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
