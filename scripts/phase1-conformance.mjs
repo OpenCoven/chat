@@ -217,6 +217,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.pairing-reservation',
   'phase1.native-scenarios.pairing-reservation-request',
   'phase1.native-scenarios.pairing-reservation-keychain',
+  'phase1.native-scenarios.pairing-reservation-store-unavailable',
+  'phase1.native-scenarios.pairing-reservation-invalid-handle',
+  'phase1.native-scenarios.pairing-reservation-discovery-required',
+  'phase1.native-scenarios.pairing-reservation-health-required',
   'phase1.native-scenarios.pairing-reservation-rejected',
   'phase1.native-scenarios.pairing-reservation-response',
   'phase1.native-scenarios.pairing-reservation-cleanup',
@@ -2702,11 +2706,14 @@ export async function establishNativeCleanupReservation(rpc, handle, onStage = (
     onStage('reservation-request');
     const response = await rpc.request('conformance_prepare_native_cleanup', { handle });
     if (response?.ok !== true) {
-      onStage(
-        response?.error?.code === 'keychain_failure'
-          ? 'reservation-keychain'
-          : 'reservation-rejected',
-      );
+      const rejectionStage = {
+        keychain_failure: 'reservation-keychain',
+        secure_store_unavailable: 'reservation-store-unavailable',
+        invalid_discovery_handle: 'reservation-invalid-handle',
+        cave_discovery_required: 'reservation-discovery-required',
+        cave_health_required: 'reservation-health-required',
+      }[response?.error?.code];
+      onStage(rejectionStage ?? 'reservation-rejected');
       throw new Error('native cleanup reservation request was rejected');
     }
     onStage('reservation-response');
@@ -2914,7 +2921,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     const origin = `http://127.0.0.1:${port}`;
     const adminToken = `phase1-${randomUUID()}`;
     rpcEnvironment = {
-      ...environment,
+      ...nativeAdapterTestEnvironment(environment),
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),

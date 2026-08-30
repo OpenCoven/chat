@@ -37,6 +37,10 @@ export function establishNativeCleanupReservation(
     stage:
       | 'reservation-request'
       | 'reservation-keychain'
+      | 'reservation-store-unavailable'
+      | 'reservation-invalid-handle'
+      | 'reservation-discovery-required'
+      | 'reservation-health-required'
       | 'reservation-rejected'
       | 'reservation-response'
       | 'reservation-cleanup',
@@ -88,6 +92,10 @@ export function runReservedNativePairing(options: {
     stage:
       | 'reservation-request'
       | 'reservation-keychain'
+      | 'reservation-store-unavailable'
+      | 'reservation-invalid-handle'
+      | 'reservation-discovery-required'
+      | 'reservation-health-required'
       | 'reservation-rejected'
       | 'reservation-response'
       | 'reservation-cleanup'

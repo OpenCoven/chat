@@ -447,6 +447,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain(
       "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'production-keyring'",
     );
+    const nativeScenario = source.slice(
+      source.indexOf('async function runNativeScenarios'),
+      source.indexOf('export function resolveLockedCovenDaemonCommand'),
+    );
+    expect(nativeScenario).toContain('...nativeAdapterTestEnvironment(environment)');
     expect(source).toContain("'security', ['default-keychain', '-d', 'user']");
     expect(source).toContain('cave-client-v1:');
     expect(source).toContain("await rpc.ok('cave_forget_credential'");
