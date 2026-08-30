@@ -459,7 +459,7 @@ describe('Phase 1 specification guards', () => {
     }
   }, 60_000);
 
-  it('runs the frozen supervisor behavioral gate on windows-latest', () => {
+  it('runs the frozen supervisor behavioral gate on windows-2025', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const testSource = readText('src/phase1-windows-supervisor.test.ts');
     const harnessSource = readText('scripts/phase1-conformance.mjs');
@@ -467,7 +467,7 @@ describe('Phase 1 specification guards', () => {
       /\n {2}windows-supervisor-behavior:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
     )?.groups?.job;
 
-    expect(job).toContain('runs-on: windows-latest');
+    expect(job).toContain('runs-on: windows-2025');
     expect(job).toContain('needs: [changes, rust]');
     expect(job).toContain('actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093');
     expect(job).toContain('dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c');

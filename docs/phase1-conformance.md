@@ -268,24 +268,52 @@ workspace roots. These pins are step-level workflow metadata; accepting a
 runner image update therefore requires an explicit protected-workflow metadata
 and digest update.
 
-The inline C# P/Invoke supervisor creates a named, nonce-bound Job Object with
-only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Creation uses a protected DACL with
-exactly one non-inherited ACE: the current user may reopen only with
-`JOB_OBJECT_QUERY | SYNCHRONIZE`. The creator retains its original full-access
-handle, while same-user supervised code cannot reopen the name with
-`JOB_OBJECT_SET_ATTRIBUTES`, `JOB_OBJECT_ASSIGN_PROCESS`, or
-`JOB_OBJECT_TERMINATE`; attempting to enable silent breakaway through the
-query-only handle is denied. The supervisor validates the exact owner,
-protected-DACL control bit, one-ACE count, SID, flags, and access mask before
-use. It calls `CreateProcessW` with `CREATE_SUSPENDED`, assigns the child with
-`AssignProcessToJobObject`, confirms membership with `IsProcessInJob`, and only
-then calls `ResumeThread`. Breakaway flags are not enabled. The parent retains
-non-delete-sharing handles for the bootstrap and workspace directories,
-captures stdout and stderr independently with 16 MiB bounds, applies a
-55-minute total timeout, terminates the complete Job on timeout, overflow,
-launch error, or non-zero child status, reaps the root, and closes every native
-handle. Closing the final Job handle also kills any descendant that outlived
-the supervised root.
+Before any Windows network access or repository mutation, the trusted outer
+PowerShell process uses only the signed `advapi32.dll`, `netapi32.dll`,
+`userenv.dll`, and `kernel32.dll` facilities from the exact pinned image to
+create a cryptographically random ephemeral local account. `NetUserAdd` creates
+it as `USER_PRIV_USER`; no local-group API is used, and a real logon token is
+checked to prove that the account is not a member of Administrators. Its random
+password remains a private field in the trusted supervisor process and is
+never written to disk, placed in the child environment, or exposed to the
+checkout.
+
+The outer process creates a fresh bootstrap root, profile, temporary directory,
+and checkout workspace owned by that account. Each directory has a protected,
+exact DACL: the ephemeral owner receives file/directory modify access without
+`WRITE_DAC` or `WRITE_OWNER`; Owner Rights suppresses implicit owner DACL
+rewrites; SYSTEM, Administrators, and the original supervisor retain full
+cleanup access; broad Users, Everyone, and Authenticated Users grants are
+absent. The original GitHub artifact workspace is separately protected for
+SYSTEM, Administrators, and the supervisor. `HOME`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `TEMP`, `TMP`, the checkout, and all package/tool caches point
+inside the isolated bootstrap root. The child receives no runner GitHub token,
+OIDC request value, Git/Cargo credential, proxy, or operator home path.
+
+The supervisor protects its own process DACL. SYSTEM, Administrators, and the
+original runner identity retain full access, while the ephemeral identity
+receives only `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`. Before any
+download, the child proves that it is non-admin; that
+`OpenProcess(PROCESS_DUP_HANDLE)`, `WRITE_DAC`, and `WRITE_OWNER` against the
+supervisor fail; that `DuplicateHandle` cannot copy the authoritative Job
+handle even when its numeric value is known; and that attempts to replace the
+supervisor process DACL or owner fail. This distinct owner-SID boundary closes
+the same-user owner-rights escape that a Job Object DACL alone cannot close.
+
+The named, nonce-bound Job Object has only
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Its protected DACL contains one
+non-inherited ACE granting the ephemeral SID only
+`JOB_OBJECT_QUERY | SYNCHRONIZE`; the Job owner remains the trusted runner
+identity, which retains the original full-access handle. Set/assign/terminate
+reopens and silent-breakaway mutation are denied. The supervisor launches the
+bootstrap with `CreateProcessWithLogonW(LOGON_WITH_PROFILE)` and
+`CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
+flags are not enabled. The outer process retains non-delete-sharing handles for
+the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
+independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
+reaps the complete Job on every exit path, and copies only the final canonical
+JSON record into the runner-owned artifact workspace.
 
 The assigned child performs every Windows production operation: exact Chat
 checkout, tool acquisition, dependency installation, tool and harness
@@ -300,6 +328,13 @@ do not compile this evidence RPC path, and ordinary non-evidence RPC tests do
 not set the schema-v2 mode. The four Job binding variables are explicitly
 carried through the harness's curated environment; they cannot degrade to an
 unnamed or ambient Job.
+
+After the root exits, the trusted outer process terminates and reaps the Job,
+closes every pinned handle, removes any Windows profile with `DeleteProfileW`,
+safely deletes the non-reparse bootstrap tree, calls `NetUserDel`, and verifies
+that the account, profile registry entry/directory, and bootstrap root are
+gone. Cleanup attempts are aggregated so one failure cannot skip later
+cleanup, and any account/profile/root cleanup failure fails the workflow.
 
 The supervisor continuously measures reviewed roots and terminates the entire
 Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
@@ -337,15 +372,19 @@ toolchain component hashes from that release manifest. The workflow then
 requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
 
-`scripts/windows-job-supervisor.test.ps1` is also run by the ordinary Windows
-Rust CI job. On Windows it compiles the reviewed C# source, proves query-only
-reopen succeeds while set/assign/terminate reopen and silent-breakaway
-mutation are denied, creates a child/grandchild tree, proves timeout
-termination reaches both processes, proves kill-on-close reaches a surviving
-grandchild, and proves a mismatched named-Job membership check fails. The
-protected lane runs the same test against the exact inline supervisor source
-after checkout and while already inside the production Job. macOS development
-can parse and compile the source but cannot claim those native runtime
+`scripts/windows-job-supervisor.test.ps1` is also run by the ordinary elevated
+`windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
+user and scoped profile/temp/workspace ACLs, launches every supervised probe as
+that user, proves the supervisor process and authoritative Job handle cannot be
+opened or mutated through the former same-user path, and proves the account,
+Windows profile, and root are removed. It also preserves the query-only Job
+reopen, set/assign/terminate denial, silent-breakaway denial,
+child/grandchild timeout, descendant-retained-handle, kill-on-close, quota,
+positive membership, wrong-Job membership, and native binding cases. The same
+job retains the frozen Rust supervisor artifact behavior tests. The protected
+lane executes the same process/ACL/membership preflight directly from the exact
+inline production source before its first download. macOS development can
+parse and compile the source but cannot claim those native Windows runtime
 results.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
@@ -500,6 +539,24 @@ node ./scripts/phase1-artifact-secret-scan.mjs \
 
 A producer failure, timeout, incomplete assertion set, or isolation/redaction
 mismatch fails without publishing partial evidence.
+
+### SDK verification metadata for this producer
+
+The later SDK validator repin must use these exact committed file bytes:
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `.github/workflows/client-v1-conformance.yml` | 191,842 | `265105fa817e6590144e642d90118035c37af98963aec91e00d04d56b6dd0fee` |
+| `scripts/phase1-conformance.mjs` | 187,069 | `1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70` |
+| `scripts/windows-job-supervisor.cs` | 108,965 | `d52ebb4b449ee1b57fd78c122c5220ba3c73b22a125b47b5dfe381ed75e9a3c6` |
+| `scripts/windows-job-supervisor.test.ps1` | 29,018 | `bfcce4db9f75e054cb0ed78ae70d61ce80ab87b2adf6d6dead31150825593eb2` |
+
+The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Its production
+job remains `platform-conformance`; the fresh validation, OIDC attestation, and
+terminal confirmation jobs remain `validate-conformance-artifacts`,
+`attest-conformance-artifacts`, and `aggregate-conformance`. The Chat producer
+commit and tree are recorded only after this commit is created; no SDK
+validator SHA is committed into Chat.
 
 ## Non-cyclic SDK handoff
 

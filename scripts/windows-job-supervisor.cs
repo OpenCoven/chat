@@ -3,12 +3,15 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 namespace OpenCoven
@@ -32,6 +35,513 @@ namespace OpenCoven
             }
             GC.SuppressFinalize(this);
         }
+    }
+
+    public sealed class WindowsIsolatedUser : IDisposable
+    {
+        private const uint NERR_SUCCESS = 0;
+        private const uint NERR_USER_NOT_FOUND = 2221;
+        private const uint NERR_USER_EXISTS = 2224;
+        private const uint USER_PRIV_USER = 1;
+        private const uint UF_SCRIPT = 0x0001;
+        private const uint UF_NORMAL_ACCOUNT = 0x0200;
+        private const uint UF_DONT_EXPIRE_PASSWD = 0x10000;
+        private const int LOGON32_LOGON_INTERACTIVE = 2;
+        private const int LOGON32_PROVIDER_DEFAULT = 0;
+        private const int ERROR_INSUFFICIENT_BUFFER = 122;
+        private const int MaximumAccountCreationAttempts = 8;
+
+        private string password;
+        private bool disposed;
+
+        private WindowsIsolatedUser(
+            string userName,
+            string passwordValue,
+            string sid,
+            string rootPath,
+            string profilePath,
+            string tempPath,
+            string workspacePath,
+            string operatingSystemProfilePath)
+        {
+            UserName = userName;
+            password = passwordValue;
+            Sid = sid;
+            RootPath = rootPath;
+            ProfilePath = profilePath;
+            TempPath = tempPath;
+            WorkspacePath = workspacePath;
+            OperatingSystemProfilePath = operatingSystemProfilePath;
+        }
+
+        public string UserName { get; private set; }
+        public string Sid { get; private set; }
+        public string RootPath { get; private set; }
+        public string ProfilePath { get; private set; }
+        public string TempPath { get; private set; }
+        public string WorkspacePath { get; private set; }
+        public string OperatingSystemProfilePath { get; private set; }
+
+        internal string Password
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return password;
+            }
+        }
+
+        public static WindowsIsolatedUser Create(string rootPath)
+        {
+            if (String.IsNullOrWhiteSpace(rootPath) || !Path.IsPathRooted(rootPath))
+            {
+                throw new ArgumentException(
+                    "Isolated bootstrap root must be absolute.",
+                    "rootPath");
+            }
+            string fullRoot = Path.GetFullPath(rootPath);
+            if (Directory.Exists(fullRoot) || File.Exists(fullRoot))
+            {
+                throw new IOException("Isolated bootstrap root already exists.");
+            }
+
+            string userName = null;
+            string passwordValue = null;
+            string sid = null;
+            bool accountCreated = false;
+            try
+            {
+                for (int attempt = 0; attempt < MaximumAccountCreationAttempts; attempt++)
+                {
+                    userName = GenerateUserName();
+                    passwordValue = GeneratePassword();
+                    USER_INFO_1 information = new USER_INFO_1();
+                    information.usri1_name = userName;
+                    information.usri1_password = passwordValue;
+                    information.usri1_priv = USER_PRIV_USER;
+                    information.usri1_flags =
+                        UF_SCRIPT | UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD;
+                    uint parameterError;
+                    uint status = NetUserAdd(
+                        null,
+                        1,
+                        ref information,
+                        out parameterError);
+                    if (status == NERR_USER_EXISTS)
+                    {
+                        continue;
+                    }
+                    if (status != NERR_SUCCESS)
+                    {
+                        throw new Win32Exception(
+                            unchecked((int)status),
+                            "Ephemeral local user creation failed.");
+                    }
+                    accountCreated = true;
+                    break;
+                }
+                if (!accountCreated)
+                {
+                    throw new InvalidOperationException(
+                        "A unique ephemeral local user name could not be allocated.");
+                }
+
+                SecurityIdentifier accountSid = (SecurityIdentifier)new NTAccount(
+                    Environment.MachineName,
+                    userName).Translate(typeof(SecurityIdentifier));
+                sid = accountSid.Value;
+                ValidateStandardUser(userName, passwordValue, sid);
+
+                string profilePath = Path.Combine(fullRoot, "profile");
+                string tempPath = Path.Combine(fullRoot, "temp");
+                string workspacePath = Path.Combine(fullRoot, "workspace");
+                Directory.CreateDirectory(fullRoot);
+                Directory.CreateDirectory(profilePath);
+                Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
+                Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Local"));
+                Directory.CreateDirectory(tempPath);
+                Directory.CreateDirectory(workspacePath);
+
+                SecurityIdentifier supervisor =
+                    WindowsIdentity.GetCurrent().User;
+                if (supervisor == null)
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor Windows user SID is unavailable.");
+                }
+                foreach (string directory in new string[]
+                {
+                    fullRoot,
+                    profilePath,
+                    Path.Combine(profilePath, @"AppData\Roaming"),
+                    Path.Combine(profilePath, @"AppData\Local"),
+                    tempPath,
+                    workspacePath,
+                })
+                {
+                    WindowsJobSupervisor.SecureIsolatedDirectory(
+                        directory,
+                        sid,
+                        supervisor.Value);
+                }
+                WindowsJobSupervisor.ProtectCurrentProcess(
+                    sid,
+                    supervisor.Value);
+
+                return new WindowsIsolatedUser(
+                    userName,
+                    passwordValue,
+                    sid,
+                    fullRoot,
+                    profilePath,
+                    tempPath,
+                    workspacePath,
+                    Path.Combine(GetProfilesRoot(), userName));
+            }
+            catch (Exception original)
+            {
+                List<Exception> cleanupFailures = new List<Exception>();
+                if (Directory.Exists(fullRoot))
+                {
+                    try
+                    {
+                        WindowsJobSupervisor.DeleteDirectoryTree(fullRoot);
+                    }
+                    catch (Exception error)
+                    {
+                        cleanupFailures.Add(error);
+                    }
+                }
+                if (accountCreated)
+                {
+                    try
+                    {
+                        uint status = NetUserDel(null, userName);
+                        if (status != NERR_SUCCESS &&
+                            status != NERR_USER_NOT_FOUND)
+                        {
+                            throw new Win32Exception(
+                                unchecked((int)status),
+                                "Ephemeral local user deletion failed.");
+                        }
+                        IntPtr information;
+                        status = NetUserGetInfo(
+                            null,
+                            userName,
+                            1,
+                            out information);
+                        if (information != IntPtr.Zero)
+                        {
+                            NetApiBufferFree(information);
+                        }
+                        if (status != NERR_USER_NOT_FOUND)
+                        {
+                            throw new InvalidOperationException(
+                                "Ephemeral local user survived cleanup.");
+                        }
+                    }
+                    catch (Exception error)
+                    {
+                        cleanupFailures.Add(error);
+                    }
+                }
+                if (cleanupFailures.Count != 0)
+                {
+                    cleanupFailures.Insert(0, original);
+                    throw new InvalidOperationException(
+                        "Ephemeral local user cleanup failed during creation.",
+                        new AggregateException(cleanupFailures.ToArray()));
+                }
+                throw;
+            }
+        }
+
+        internal void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException("WindowsIsolatedUser");
+            }
+        }
+
+        private static void ValidateStandardUser(
+            string userName,
+            string passwordValue,
+            string expectedSid)
+        {
+            IntPtr information = IntPtr.Zero;
+            uint status = NetUserGetInfo(null, userName, 1, out information);
+            if (status != NERR_SUCCESS || information == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user could not be queried.");
+            }
+            try
+            {
+                USER_INFO_1 value = (USER_INFO_1)Marshal.PtrToStructure(
+                    information,
+                    typeof(USER_INFO_1));
+                if (value.usri1_priv != USER_PRIV_USER ||
+                    (value.usri1_flags & UF_NORMAL_ACCOUNT) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral account is not a standard local user.");
+                }
+            }
+            finally
+            {
+                NetApiBufferFree(information);
+            }
+
+            IntPtr token;
+            if (!LogonUserW(
+                    userName,
+                    Environment.MachineName,
+                    passwordValue,
+                    LOGON32_LOGON_INTERACTIVE,
+                    LOGON32_PROVIDER_DEFAULT,
+                    out token))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Ephemeral standard-user logon validation failed.");
+            }
+            try
+            {
+                using (WindowsIdentity identity = new WindowsIdentity(token))
+                {
+                    if (identity.User == null || identity.User.Value != expectedSid)
+                    {
+                        throw new InvalidOperationException(
+                            "Ephemeral logon token SID changed.");
+                    }
+                }
+                IntPtr administrators;
+                if (!ConvertStringSidToSidW(
+                        "S-1-5-32-544",
+                        out administrators))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Administrators SID conversion failed.");
+                }
+                try
+                {
+                    bool isAdministrator;
+                    if (!CheckTokenMembership(
+                            token,
+                            administrators,
+                            out isAdministrator))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Ephemeral token group validation failed.");
+                    }
+                    if (isAdministrator)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted identity unexpectedly belongs to Administrators.");
+                    }
+                }
+                finally
+                {
+                    LocalFree(administrators);
+                }
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+        }
+
+        private static string GenerateUserName()
+        {
+            byte[] bytes = new byte[8];
+            using (RandomNumberGenerator random = RandomNumberGenerator.Create())
+            {
+                random.GetBytes(bytes);
+            }
+            return "ocv" + BitConverter.ToString(bytes)
+                .Replace("-", String.Empty)
+                .ToLowerInvariant();
+        }
+
+        private static string GeneratePassword()
+        {
+            byte[] bytes = new byte[48];
+            using (RandomNumberGenerator random = RandomNumberGenerator.Create())
+            {
+                random.GetBytes(bytes);
+            }
+            return Convert.ToBase64String(bytes) + "aA1!";
+        }
+
+        private static string GetProfilesRoot()
+        {
+            uint length = 0;
+            GetProfilesDirectoryW(null, ref length);
+            if (length == 0 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Windows profile root length could not be queried.");
+            }
+            StringBuilder value = new StringBuilder(checked((int)length));
+            if (!GetProfilesDirectoryW(value, ref length))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Windows profile root could not be queried.");
+            }
+            return Path.GetFullPath(value.ToString());
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            Exception failure = null;
+            try
+            {
+                WindowsJobSupervisor.DeleteOperatingSystemProfile(
+                    Sid,
+                    OperatingSystemProfilePath);
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+            try
+            {
+                WindowsJobSupervisor.DeleteDirectoryTree(RootPath);
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+            }
+            try
+            {
+                uint status = NetUserDel(null, UserName);
+                if (status != NERR_SUCCESS && status != NERR_USER_NOT_FOUND)
+                {
+                    throw new Win32Exception(
+                        unchecked((int)status),
+                        "Ephemeral local user deletion failed.");
+                }
+                IntPtr information;
+                status = NetUserGetInfo(null, UserName, 1, out information);
+                if (information != IntPtr.Zero)
+                {
+                    NetApiBufferFree(information);
+                }
+                if (status != NERR_USER_NOT_FOUND)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral local user survived cleanup.");
+                }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+            }
+            password = null;
+            if (Directory.Exists(OperatingSystemProfilePath))
+            {
+                failure = failure ?? new InvalidOperationException(
+                    "Ephemeral Windows profile survived cleanup.");
+            }
+            if (Directory.Exists(RootPath))
+            {
+                failure = failure ?? new InvalidOperationException(
+                    "Ephemeral bootstrap root survived cleanup.");
+            }
+            GC.SuppressFinalize(this);
+            if (failure != null)
+            {
+                throw new InvalidOperationException(
+                    "Ephemeral Windows identity cleanup failed.",
+                    failure);
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct USER_INFO_1
+        {
+            internal string usri1_name;
+            internal string usri1_password;
+            internal uint usri1_password_age;
+            internal uint usri1_priv;
+            internal string usri1_home_dir;
+            internal string usri1_comment;
+            internal uint usri1_flags;
+            internal string usri1_script_path;
+        }
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetUserAdd(
+            string serverName,
+            uint level,
+            ref USER_INFO_1 buffer,
+            out uint parameterError);
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetUserGetInfo(
+            string serverName,
+            string userName,
+            uint level,
+            out IntPtr buffer);
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetUserDel(string serverName, string userName);
+
+        [DllImport("netapi32.dll")]
+        private static extern uint NetApiBufferFree(IntPtr buffer);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LogonUserW(
+            string userName,
+            string domain,
+            string passwordValue,
+            int logonType,
+            int logonProvider,
+            out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CheckTokenMembership(
+            IntPtr token,
+            IntPtr sidToCheck,
+            [MarshalAs(UnmanagedType.Bool)] out bool isMember);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertStringSidToSidW(
+            string stringSid,
+            out IntPtr sid);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetProfilesDirectoryW(
+            StringBuilder profilesDirectory,
+            ref uint size);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
     }
 
     public sealed class WindowsJobRunResult
@@ -94,6 +604,7 @@ namespace OpenCoven
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint STARTF_USESTDHANDLES = 0x00000100;
         private const uint HANDLE_FLAG_INHERIT = 0x00000001;
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -101,12 +612,24 @@ namespace OpenCoven
         private const uint JOB_OBJECT_SET_ATTRIBUTES = 0x0002;
         private const uint JOB_OBJECT_QUERY = 0x0004;
         private const uint JOB_OBJECT_TERMINATE = 0x0008;
+        private const uint PROCESS_DUP_HANDLE = 0x00000040;
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
+        private const uint READ_CONTROL = 0x00020000;
+        private const uint WRITE_DAC = 0x00040000;
+        private const uint WRITE_OWNER = 0x00080000;
         private const uint SYNCHRONIZE = 0x00100000;
+        private const uint PROCESS_ALL_ACCESS = 0x001fffff;
+        private const uint FILE_ALL_ACCESS = 0x001f01ff;
+        private const uint FILE_MODIFY_ACCESS = 0x001301bf;
         private const uint OWNER_SECURITY_INFORMATION = 0x00000001;
         private const uint DACL_SECURITY_INFORMATION = 0x00000004;
+        private const uint PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000;
         private const ushort SE_DACL_PROTECTED = 0x1000;
         private const byte ACCESS_ALLOWED_ACE_TYPE = 0x00;
+        private const byte OBJECT_INHERIT_ACE = 0x01;
+        private const byte CONTAINER_INHERIT_ACE = 0x02;
         private const int SE_KERNEL_OBJECT = 6;
+        private const int SE_FILE_OBJECT = 1;
         private const int AclSizeInformation = 2;
         private const uint SDDL_REVISION_1 = 1;
         private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
@@ -116,21 +639,43 @@ namespace OpenCoven
         private const uint WAIT_OBJECT_0 = 0x00000000;
         private const uint WAIT_TIMEOUT = 0x00000102;
         private const uint INFINITE = 0xffffffff;
+        private const int ERROR_ACCESS_DENIED = 5;
+        private const int ERROR_FILE_NOT_FOUND = 2;
+        private const int ERROR_PATH_NOT_FOUND = 3;
+        private const int ERROR_NOT_FOUND = 1168;
         private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
         private const int SupervisorFailureExitCode = unchecked((int)0xe0434f4d);
         private const int MaximumQuotaEntries = 500000;
 
         private IntPtr jobHandle;
+        private readonly string supervisedSid;
         private bool disposed;
 
-        private WindowsJobSupervisor(IntPtr handle)
+        private WindowsJobSupervisor(IntPtr handle, string isolatedSid)
         {
             jobHandle = handle;
+            supervisedSid = isolatedSid;
         }
 
-        public static WindowsJobSupervisor Create(string name)
+        public long AuthoritativeHandleValue
         {
+            get
+            {
+                ThrowIfDisposed();
+                return jobHandle.ToInt64();
+            }
+        }
+
+        public static WindowsJobSupervisor Create(
+            string name,
+            WindowsIsolatedUser isolatedUser)
+        {
+            if (isolatedUser == null)
+            {
+                throw new ArgumentNullException("isolatedUser");
+            }
+            isolatedUser.ThrowIfDisposed();
             if (String.IsNullOrWhiteSpace(name) ||
                 !name.StartsWith(@"Local\OpenCoven.Chat.", StringComparison.Ordinal) ||
                 name.Length > 240)
@@ -146,7 +691,7 @@ namespace OpenCoven
             }
             string currentUserSid = currentUser.Value;
             string sddl = "O:" + currentUserSid +
-                "D:P(A;;0x00100004;;;" + currentUserSid + ")";
+                "D:P(A;;0x00100004;;;" + isolatedUser.Sid + ")";
             IntPtr securityDescriptor;
             uint securityDescriptorLength;
             if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -176,7 +721,10 @@ namespace OpenCoven
 
                 try
                 {
-                    ValidateJobObjectSecurity(handle, currentUserSid);
+                    ValidateJobObjectSecurity(
+                        handle,
+                        currentUserSid,
+                        isolatedUser.Sid);
                     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits =
                         new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
                     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -200,7 +748,7 @@ namespace OpenCoven
                     {
                         Marshal.FreeHGlobal(buffer);
                     }
-                    return new WindowsJobSupervisor(handle);
+                    return new WindowsJobSupervisor(handle, isolatedUser.Sid);
                 }
                 catch
                 {
@@ -214,14 +762,25 @@ namespace OpenCoven
             }
         }
 
-        private static void ValidateJobObjectSecurity(IntPtr handle, string currentUserSid)
+        private static void ValidateJobObjectSecurity(
+            IntPtr handle,
+            string currentUserSid,
+            string isolatedSid)
         {
-            IntPtr expectedSid;
-            if (!ConvertStringSidToSidW(currentUserSid, out expectedSid))
+            IntPtr expectedOwner;
+            if (!ConvertStringSidToSidW(currentUserSid, out expectedOwner))
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
                     "Current user SID conversion failed.");
+            }
+            IntPtr expectedTrustee;
+            if (!ConvertStringSidToSidW(isolatedSid, out expectedTrustee))
+            {
+                LocalFree(expectedOwner);
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Isolated user SID conversion failed.");
             }
 
             IntPtr owner = IntPtr.Zero;
@@ -242,7 +801,7 @@ namespace OpenCoven
                     owner == IntPtr.Zero ||
                     dacl == IntPtr.Zero ||
                     descriptor == IntPtr.Zero ||
-                    !EqualSid(owner, expectedSid))
+                    !EqualSid(owner, expectedOwner))
                 {
                     throw new InvalidOperationException(
                         "Named Job Object owner or DACL is not the current user.");
@@ -290,7 +849,7 @@ namespace OpenCoven
                     ace.Header.AceFlags != 0 ||
                     ace.Mask != reopenedAccess ||
                     (ace.Mask & prohibitedAccess) != 0 ||
-                    !EqualSid(aceSid, expectedSid))
+                    !EqualSid(aceSid, expectedTrustee))
                 {
                     throw new InvalidOperationException(
                         "Named Job Object DACL ACE is not exact query-only current-user access.");
@@ -302,7 +861,817 @@ namespace OpenCoven
                 {
                     LocalFree(descriptor);
                 }
-                LocalFree(expectedSid);
+                LocalFree(expectedTrustee);
+                LocalFree(expectedOwner);
+            }
+        }
+
+        internal static void SecureIsolatedDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            EnablePrivilege("SeRestorePrivilege");
+            string sddl = "O:" + isolatedSid + "D:P" +
+                "(A;OICI;0x001f01ff;;;SY)" +
+                "(A;OICI;0x001f01ff;;;BA)" +
+                "(A;OICI;0x001f01ff;;;" + supervisorSid + ")" +
+                "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                "(A;OICI;0x00020000;;;S-1-3-4)";
+            IntPtr securityDescriptor;
+            uint securityDescriptorLength;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl,
+                    SDDL_REVISION_1,
+                    out securityDescriptor,
+                    out securityDescriptorLength))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Isolated directory security descriptor creation failed.");
+            }
+            try
+            {
+                if (!SetFileSecurityW(
+                        path,
+                        OWNER_SECURITY_INFORMATION |
+                            DACL_SECURITY_INFORMATION |
+                            PROTECTED_DACL_SECURITY_INFORMATION,
+                        securityDescriptor))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Isolated directory security could not be applied.");
+                }
+            }
+            finally
+            {
+                LocalFree(securityDescriptor);
+            }
+            ValidateIsolatedDirectory(path, isolatedSid, supervisorSid);
+        }
+
+        public static void ProtectSupervisorDirectory(string path)
+        {
+            if (String.IsNullOrWhiteSpace(path) ||
+                !Path.IsPathRooted(path) ||
+                !Directory.Exists(path) ||
+                (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Supervisor-private directory is missing, relative, or a reparse point.");
+            }
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Supervisor Windows user SID is unavailable.");
+            }
+            string sddl = "O:" + current.Value + "D:P" +
+                "(A;OICI;0x001f01ff;;;SY)" +
+                "(A;OICI;0x001f01ff;;;BA)" +
+                "(A;OICI;0x001f01ff;;;" + current.Value + ")";
+            IntPtr securityDescriptor;
+            uint securityDescriptorLength;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl,
+                    SDDL_REVISION_1,
+                    out securityDescriptor,
+                    out securityDescriptorLength))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Supervisor-private directory descriptor creation failed.");
+            }
+            try
+            {
+                if (!SetFileSecurityW(
+                        path,
+                        OWNER_SECURITY_INFORMATION |
+                            DACL_SECURITY_INFORMATION |
+                            PROTECTED_DACL_SECURITY_INFORMATION,
+                        securityDescriptor))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Supervisor-private directory could not be protected.");
+                }
+            }
+            finally
+            {
+                LocalFree(securityDescriptor);
+            }
+        }
+
+        public static void RequireCurrentIdentityOwnsIsolatedDirectory(string path)
+        {
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Restricted Windows identity SID is unavailable.");
+            }
+            ValidateIsolatedDirectory(path, current.Value, null);
+        }
+
+        private static void ValidateIsolatedDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            if (String.IsNullOrWhiteSpace(path) ||
+                !Path.IsPathRooted(path) ||
+                !Directory.Exists(path) ||
+                (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Restricted directory is missing, relative, or a reparse point.");
+            }
+
+            IntPtr expectedOwner = IntPtr.Zero;
+            IntPtr expectedSystem = IntPtr.Zero;
+            IntPtr expectedAdministrators = IntPtr.Zero;
+            IntPtr expectedSupervisor = IntPtr.Zero;
+            IntPtr expectedOwnerRights = IntPtr.Zero;
+            IntPtr forbiddenEveryone = IntPtr.Zero;
+            IntPtr forbiddenAuthenticatedUsers = IntPtr.Zero;
+            IntPtr forbiddenUsers = IntPtr.Zero;
+            IntPtr owner = IntPtr.Zero;
+            IntPtr dacl = IntPtr.Zero;
+            IntPtr descriptor = IntPtr.Zero;
+            try
+            {
+                expectedOwner = ConvertSid(isolatedSid, "Restricted owner SID conversion failed.");
+                expectedSystem = ConvertSid("S-1-5-18", "SYSTEM SID conversion failed.");
+                expectedAdministrators = ConvertSid(
+                    "S-1-5-32-544",
+                    "Administrators SID conversion failed.");
+                if (supervisorSid != null)
+                {
+                    expectedSupervisor = ConvertSid(
+                        supervisorSid,
+                        "Supervisor SID conversion failed.");
+                }
+                expectedOwnerRights = ConvertSid(
+                    "S-1-3-4",
+                    "Owner Rights SID conversion failed.");
+                forbiddenEveryone = ConvertSid(
+                    "S-1-1-0",
+                    "Everyone SID conversion failed.");
+                forbiddenAuthenticatedUsers = ConvertSid(
+                    "S-1-5-11",
+                    "Authenticated Users SID conversion failed.");
+                forbiddenUsers = ConvertSid(
+                    "S-1-5-32-545",
+                    "Users SID conversion failed.");
+
+                uint status = GetNamedSecurityInfoW(
+                    path,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner,
+                    IntPtr.Zero,
+                    out dacl,
+                    IntPtr.Zero,
+                    out descriptor);
+                if (status != 0 ||
+                    owner == IntPtr.Zero ||
+                    dacl == IntPtr.Zero ||
+                    descriptor == IntPtr.Zero ||
+                    !EqualSid(owner, expectedOwner))
+                {
+                    throw new InvalidOperationException(
+                        "Restricted directory owner or DACL is not exact.");
+                }
+
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision) ||
+                    (control & SE_DACL_PROTECTED) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted directory DACL is not protected.");
+                }
+
+                ACL_SIZE_INFORMATION aclInformation;
+                if (!GetAclInformation(
+                        dacl,
+                        out aclInformation,
+                        (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
+                        AclSizeInformation) ||
+                    aclInformation.AceCount != 5)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted directory DACL must contain exactly five ACEs.");
+                }
+
+                bool foundSystem = false;
+                bool foundAdministrators = false;
+                bool foundSupervisor = false;
+                bool foundOwner = false;
+                bool foundOwnerRights = false;
+                byte directoryFlags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+                for (uint index = 0; index < aclInformation.AceCount; index++)
+                {
+                    IntPtr acePointer;
+                    if (!GetAce(dacl, index, out acePointer) ||
+                        acePointer == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted directory DACL ACE could not be read.");
+                    }
+                    ACCESS_ALLOWED_ACE ace =
+                        (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
+                            acePointer,
+                            typeof(ACCESS_ALLOWED_ACE));
+                    IntPtr aceSid = new IntPtr(
+                        acePointer.ToInt64() +
+                        Marshal.OffsetOf(
+                            typeof(ACCESS_ALLOWED_ACE),
+                            "SidStart").ToInt64());
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
+                        ace.Header.AceFlags != directoryFlags)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted directory DACL contains an unexpected ACE.");
+                    }
+                    if (EqualSid(aceSid, expectedSystem) &&
+                        ace.Mask == FILE_ALL_ACCESS &&
+                        !foundSystem)
+                    {
+                        foundSystem = true;
+                    }
+                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                        ace.Mask == FILE_ALL_ACCESS &&
+                        !foundAdministrators)
+                    {
+                        foundAdministrators = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == FILE_MODIFY_ACCESS &&
+                        !foundOwner)
+                    {
+                        foundOwner = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwnerRights) &&
+                        ace.Mask == READ_CONTROL &&
+                        !foundOwnerRights)
+                    {
+                        foundOwnerRights = true;
+                    }
+                    else if (ace.Mask == FILE_ALL_ACCESS &&
+                        !foundSupervisor &&
+                        !EqualSid(aceSid, forbiddenEveryone) &&
+                        !EqualSid(aceSid, forbiddenAuthenticatedUsers) &&
+                        !EqualSid(aceSid, forbiddenUsers) &&
+                        (expectedSupervisor == IntPtr.Zero ||
+                            EqualSid(aceSid, expectedSupervisor)))
+                    {
+                        foundSupervisor = true;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted directory DACL trustee or access mask is not exact.");
+                    }
+                }
+                if (!foundSystem ||
+                    !foundAdministrators ||
+                    !foundSupervisor ||
+                    !foundOwner ||
+                    !foundOwnerRights)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted directory DACL is incomplete.");
+                }
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero)
+                {
+                    LocalFree(descriptor);
+                }
+                FreeLocalSid(forbiddenUsers);
+                FreeLocalSid(forbiddenAuthenticatedUsers);
+                FreeLocalSid(forbiddenEveryone);
+                FreeLocalSid(expectedOwnerRights);
+                FreeLocalSid(expectedSupervisor);
+                FreeLocalSid(expectedAdministrators);
+                FreeLocalSid(expectedSystem);
+                FreeLocalSid(expectedOwner);
+            }
+        }
+
+        internal static void ProtectCurrentProcess(
+            string isolatedSid,
+            string supervisorSid)
+        {
+            string sddl = "D:P" +
+                "(A;;0x001fffff;;;SY)" +
+                "(A;;0x001fffff;;;BA)" +
+                "(A;;0x001fffff;;;" + supervisorSid + ")" +
+                "(A;;0x00101000;;;" + isolatedSid + ")";
+            IntPtr securityDescriptor;
+            uint securityDescriptorLength;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl,
+                    SDDL_REVISION_1,
+                    out securityDescriptor,
+                    out securityDescriptorLength))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Supervisor process security descriptor creation failed.");
+            }
+            try
+            {
+                if (!SetKernelObjectSecurity(
+                        GetCurrentProcess(),
+                        DACL_SECURITY_INFORMATION |
+                            PROTECTED_DACL_SECURITY_INFORMATION,
+                        securityDescriptor))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Supervisor process DACL could not be protected.");
+                }
+            }
+            finally
+            {
+                LocalFree(securityDescriptor);
+            }
+            ValidateSupervisorProcessSecurity(isolatedSid, supervisorSid);
+        }
+
+        private static void ValidateSupervisorProcessSecurity(
+            string isolatedSid,
+            string supervisorSid)
+        {
+            IntPtr expectedOwner = ConvertSid(
+                supervisorSid,
+                "Supervisor owner SID conversion failed.");
+            IntPtr expectedSystem = ConvertSid(
+                "S-1-5-18",
+                "SYSTEM SID conversion failed.");
+            IntPtr expectedAdministrators = ConvertSid(
+                "S-1-5-32-544",
+                "Administrators SID conversion failed.");
+            IntPtr expectedRestricted = ConvertSid(
+                isolatedSid,
+                "Restricted SID conversion failed.");
+            IntPtr owner = IntPtr.Zero;
+            IntPtr dacl = IntPtr.Zero;
+            IntPtr descriptor = IntPtr.Zero;
+            try
+            {
+                uint status = GetSecurityInfo(
+                    GetCurrentProcess(),
+                    SE_KERNEL_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner,
+                    IntPtr.Zero,
+                    out dacl,
+                    IntPtr.Zero,
+                    out descriptor);
+                if (status != 0 ||
+                    owner == IntPtr.Zero ||
+                    dacl == IntPtr.Zero ||
+                    descriptor == IntPtr.Zero ||
+                    !EqualSid(owner, expectedOwner))
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor process owner or DACL is not exact.");
+                }
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision) ||
+                    (control & SE_DACL_PROTECTED) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor process DACL is not protected.");
+                }
+                ACL_SIZE_INFORMATION aclInformation;
+                if (!GetAclInformation(
+                        dacl,
+                        out aclInformation,
+                        (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
+                        AclSizeInformation) ||
+                    aclInformation.AceCount != 4)
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor process DACL must contain exactly four ACEs.");
+                }
+                bool foundSystem = false;
+                bool foundAdministrators = false;
+                bool foundSupervisor = false;
+                bool foundRestricted = false;
+                for (uint index = 0; index < aclInformation.AceCount; index++)
+                {
+                    IntPtr acePointer;
+                    if (!GetAce(dacl, index, out acePointer) ||
+                        acePointer == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException(
+                            "Supervisor process DACL ACE could not be read.");
+                    }
+                    ACCESS_ALLOWED_ACE ace =
+                        (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
+                            acePointer,
+                            typeof(ACCESS_ALLOWED_ACE));
+                    IntPtr aceSid = new IntPtr(
+                        acePointer.ToInt64() +
+                        Marshal.OffsetOf(
+                            typeof(ACCESS_ALLOWED_ACE),
+                            "SidStart").ToInt64());
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
+                        ace.Header.AceFlags != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Supervisor process DACL contains an unexpected ACE.");
+                    }
+                    if (EqualSid(aceSid, expectedSystem) &&
+                        ace.Mask == PROCESS_ALL_ACCESS &&
+                        !foundSystem)
+                    {
+                        foundSystem = true;
+                    }
+                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                        ace.Mask == PROCESS_ALL_ACCESS &&
+                        !foundAdministrators)
+                    {
+                        foundAdministrators = true;
+                    }
+                    else if (EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == PROCESS_ALL_ACCESS &&
+                        !foundSupervisor)
+                    {
+                        foundSupervisor = true;
+                    }
+                    else if (EqualSid(aceSid, expectedRestricted) &&
+                        ace.Mask ==
+                            (PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE) &&
+                        !foundRestricted)
+                    {
+                        foundRestricted = true;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "Supervisor process DACL trustee or access mask is not exact.");
+                    }
+                }
+                if (!foundSystem ||
+                    !foundAdministrators ||
+                    !foundSupervisor ||
+                    !foundRestricted)
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor process DACL is incomplete.");
+                }
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero)
+                {
+                    LocalFree(descriptor);
+                }
+                FreeLocalSid(expectedRestricted);
+                FreeLocalSid(expectedAdministrators);
+                FreeLocalSid(expectedSystem);
+                FreeLocalSid(expectedOwner);
+            }
+        }
+
+        public static void RequireRestrictedSupervisorBoundary(
+            int supervisorProcessId,
+            long supervisorJobHandleValue)
+        {
+            if (supervisorProcessId < 1 || supervisorJobHandleValue == 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    "Supervisor process or Job handle identity is invalid.");
+            }
+            IntPtr administrators = ConvertSid(
+                "S-1-5-32-544",
+                "Administrators SID conversion failed.");
+            try
+            {
+                bool isAdministrator;
+                if (!CheckTokenMembership(
+                        IntPtr.Zero,
+                        administrators,
+                        out isAdministrator))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Restricted token group validation failed.");
+                }
+                if (isAdministrator)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted identity unexpectedly belongs to Administrators.");
+                }
+            }
+            finally
+            {
+                FreeLocalSid(administrators);
+            }
+
+            RequireDeniedProcessAccess(
+                supervisorProcessId,
+                PROCESS_DUP_HANDLE,
+                "PROCESS_DUP_HANDLE open unexpectedly succeeded.");
+            RequireDeniedProcessAccess(
+                supervisorProcessId,
+                WRITE_DAC,
+                "WRITE_DAC open unexpectedly succeeded.");
+            RequireDeniedProcessAccess(
+                supervisorProcessId,
+                WRITE_OWNER,
+                "WRITE_OWNER open unexpectedly succeeded.");
+
+            IntPtr query = OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                false,
+                checked((uint)supervisorProcessId));
+            if (query == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Supervisor query-only process open was denied.");
+            }
+            try
+            {
+                IntPtr duplicated;
+                if (DuplicateHandle(
+                        query,
+                        new IntPtr(supervisorJobHandleValue),
+                        GetCurrentProcess(),
+                        out duplicated,
+                        JOB_OBJECT_QUERY,
+                        false,
+                        0))
+                {
+                    CloseHandle(duplicated);
+                    throw new InvalidOperationException(
+                        "DuplicateHandle unexpectedly succeeded.");
+                }
+
+                uint daclStatus = SetSecurityInfo(
+                    query,
+                    SE_KERNEL_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero);
+                if (daclStatus == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Supervisor DACL modification unexpectedly succeeded.");
+                }
+
+                SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+                if (current == null)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted Windows identity SID is unavailable.");
+                }
+                IntPtr currentSid = ConvertSid(
+                    current.Value,
+                    "Restricted owner SID conversion failed.");
+                try
+                {
+                    uint ownerStatus = SetSecurityInfo(
+                        query,
+                        SE_KERNEL_OBJECT,
+                        OWNER_SECURITY_INFORMATION,
+                        currentSid,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        IntPtr.Zero);
+                    if (ownerStatus == 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Supervisor owner modification unexpectedly succeeded.");
+                    }
+                }
+                finally
+                {
+                    FreeLocalSid(currentSid);
+                }
+            }
+            finally
+            {
+                CloseHandle(query);
+            }
+        }
+
+        private static void RequireDeniedProcessAccess(
+            int processId,
+            uint access,
+            string failureMessage)
+        {
+            IntPtr handle = OpenProcess(
+                access,
+                false,
+                checked((uint)processId));
+            if (handle != IntPtr.Zero)
+            {
+                CloseHandle(handle);
+                throw new InvalidOperationException(failureMessage);
+            }
+            if (Marshal.GetLastWin32Error() != ERROR_ACCESS_DENIED)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Dangerous supervisor process open failed unexpectedly.");
+            }
+        }
+
+        internal static void DeleteOperatingSystemProfile(
+            string sid,
+            string expectedProfilePath)
+        {
+            string registryPath =
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid;
+            string actualProfilePath = null;
+            using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
+            {
+                if (profile != null)
+                {
+                    actualProfilePath = Convert.ToString(
+                        profile.GetValue("ProfileImagePath"));
+                    if (!String.IsNullOrWhiteSpace(actualProfilePath))
+                    {
+                        actualProfilePath = Path.GetFullPath(
+                            Environment.ExpandEnvironmentVariables(actualProfilePath));
+                    }
+                }
+            }
+            bool registryProfileExists;
+            using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
+            {
+                registryProfileExists = profile != null;
+            }
+            bool profileExists =
+                registryProfileExists ||
+                Directory.Exists(expectedProfilePath) ||
+                (!String.IsNullOrWhiteSpace(actualProfilePath) &&
+                    Directory.Exists(actualProfilePath));
+            if (profileExists && !DeleteProfileW(sid, null, null))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (error != ERROR_FILE_NOT_FOUND &&
+                    error != ERROR_PATH_NOT_FOUND &&
+                    error != ERROR_NOT_FOUND)
+                {
+                    throw new Win32Exception(
+                        error,
+                        "Ephemeral Windows profile deletion failed.");
+                }
+            }
+
+            Stopwatch timer = Stopwatch.StartNew();
+            while (timer.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                bool registryExists;
+                using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
+                {
+                    registryExists = profile != null;
+                }
+                if (!registryExists &&
+                    !Directory.Exists(expectedProfilePath) &&
+                    (String.IsNullOrWhiteSpace(actualProfilePath) ||
+                        !Directory.Exists(actualProfilePath)))
+                {
+                    return;
+                }
+                Thread.Sleep(100);
+            }
+            throw new InvalidOperationException(
+                "Ephemeral Windows profile survived cleanup.");
+        }
+
+        internal static void DeleteDirectoryTree(string root)
+        {
+            if (!Directory.Exists(root))
+            {
+                return;
+            }
+            DirectoryInfo directory = new DirectoryInfo(root);
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Cleanup root became a reparse point.");
+            }
+            DeleteDirectoryContents(directory);
+            directory.Delete(false);
+            if (Directory.Exists(root))
+            {
+                throw new IOException("Ephemeral bootstrap root survived cleanup.");
+            }
+        }
+
+        private static void DeleteDirectoryContents(DirectoryInfo directory)
+        {
+            foreach (FileSystemInfo entry in directory.GetFileSystemInfos())
+            {
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    if ((entry.Attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (!RemoveDirectoryW(entry.FullName))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "Cleanup reparse directory could not be removed.");
+                        }
+                    }
+                    else if (!DeleteFileW(entry.FullName))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Cleanup reparse file could not be removed.");
+                    }
+                    continue;
+                }
+                DirectoryInfo childDirectory = entry as DirectoryInfo;
+                if (childDirectory != null)
+                {
+                    DeleteDirectoryContents(childDirectory);
+                    childDirectory.Delete(false);
+                }
+                else
+                {
+                    entry.Attributes = FileAttributes.Normal;
+                    entry.Delete();
+                }
+            }
+        }
+
+        private static IntPtr ConvertSid(string sid, string failureMessage)
+        {
+            IntPtr converted;
+            if (!ConvertStringSidToSidW(sid, out converted))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    failureMessage);
+            }
+            return converted;
+        }
+
+        private static void FreeLocalSid(IntPtr sid)
+        {
+            if (sid != IntPtr.Zero)
+            {
+                LocalFree(sid);
+            }
+        }
+
+        private static void EnablePrivilege(string privilege)
+        {
+            IntPtr token;
+            if (!OpenProcessToken(
+                    GetCurrentProcess(),
+                    0x0020 | 0x0008,
+                    out token))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Supervisor process token could not be opened.");
+            }
+            try
+            {
+                LUID luid;
+                if (!LookupPrivilegeValueW(null, privilege, out luid))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Required Windows cleanup privilege is unavailable.");
+                }
+                TOKEN_PRIVILEGES privileges = new TOKEN_PRIVILEGES();
+                privileges.PrivilegeCount = 1;
+                privileges.Luid = luid;
+                privileges.Attributes = 0x00000002;
+                if (!AdjustTokenPrivileges(
+                        token,
+                        false,
+                        ref privileges,
+                        0,
+                        IntPtr.Zero,
+                        IntPtr.Zero) ||
+                    Marshal.GetLastWin32Error() == 1300)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Required Windows cleanup privilege could not be enabled.");
+                }
+            }
+            finally
+            {
+                CloseHandle(token);
             }
         }
 
@@ -375,7 +1744,8 @@ namespace OpenCoven
             return new WindowsPinnedDirectory(handle);
         }
 
-        public WindowsJobRunResult Run(
+        public WindowsJobRunResult RunAsUser(
+            WindowsIsolatedUser isolatedUser,
             string applicationName,
             string arguments,
             string workingDirectory,
@@ -384,7 +1754,8 @@ namespace OpenCoven
             int MaxStdoutBytes,
             int MaxStderrBytes)
         {
-            return Run(
+            return RunAsUser(
+                isolatedUser,
                 applicationName,
                 arguments,
                 workingDirectory,
@@ -395,7 +1766,8 @@ namespace OpenCoven
                 new WindowsDirectoryQuota[0]);
         }
 
-        public WindowsJobRunResult Run(
+        public WindowsJobRunResult RunAsUser(
+            WindowsIsolatedUser isolatedUser,
             string applicationName,
             string arguments,
             string workingDirectory,
@@ -406,6 +1778,19 @@ namespace OpenCoven
             WindowsDirectoryQuota[] DirectoryQuotas)
         {
             ThrowIfDisposed();
+            if (isolatedUser == null)
+            {
+                throw new ArgumentNullException("isolatedUser");
+            }
+            isolatedUser.ThrowIfDisposed();
+            if (!String.Equals(
+                    isolatedUser.Sid,
+                    supervisedSid,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Job Object restricted identity does not match the launch identity.");
+            }
             if (String.IsNullOrWhiteSpace(applicationName) || !Path.IsPathRooted(applicationName))
             {
                 throw new ArgumentException("Application path must be absolute.", "applicationName");
@@ -481,7 +1866,10 @@ namespace OpenCoven
                 startup.hStdInput = stdinHandle;
                 startup.hStdOutput = stdoutWrite;
                 startup.hStdError = stderrWrite;
-                environmentBlock = BuildEnvironmentBlock(environment);
+                environmentBlock = BuildEnvironmentBlock(
+                    environment,
+                    isolatedUser,
+                    jobHandle);
                 StringBuilder commandLine = new StringBuilder();
                 commandLine.Append(QuoteArgument(applicationName));
                 if (!String.IsNullOrWhiteSpace(arguments))
@@ -490,11 +1878,13 @@ namespace OpenCoven
                     commandLine.Append(arguments);
                 }
 
-                bool created = CreateProcessW(
+                bool created = CreateProcessWithLogonW(
+                    isolatedUser.UserName,
+                    Environment.MachineName,
+                    isolatedUser.Password,
+                    LOGON_WITH_PROFILE,
                     applicationName,
                     commandLine,
-                    IntPtr.Zero,
-                    IntPtr.Zero,
                     true,
                     CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
                     environmentBlock,
@@ -503,7 +1893,9 @@ namespace OpenCoven
                     out process);
                 if (!created)
                 {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessW failed.");
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "CreateProcessWithLogonW failed.");
                 }
 
                 CloseHandle(stdoutWrite);
@@ -866,12 +2258,27 @@ namespace OpenCoven
                 disposed = true;
                 IntPtr handle = jobHandle;
                 jobHandle = IntPtr.Zero;
+                Exception failure = null;
                 if (handle != IntPtr.Zero)
                 {
+                    try
+                    {
+                        TerminateJobAndWaitForZero(handle, 1, 30000);
+                    }
+                    catch (Exception error)
+                    {
+                        failure = error;
+                    }
                     CloseHandle(handle);
                 }
+                GC.SuppressFinalize(this);
+                if (failure != null)
+                {
+                    throw new InvalidOperationException(
+                        "Job Object cleanup failed.",
+                        failure);
+                }
             }
-            GC.SuppressFinalize(this);
         }
 
         private void ThrowIfDisposed()
@@ -944,7 +2351,10 @@ namespace OpenCoven
             });
         }
 
-        private static IntPtr BuildEnvironmentBlock(IDictionary environment)
+        private static IntPtr BuildEnvironmentBlock(
+            IDictionary environment,
+            WindowsIsolatedUser isolatedUser,
+            IntPtr authoritativeJobHandle)
         {
             SortedDictionary<string, string> values =
                 new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -959,9 +2369,16 @@ namespace OpenCoven
                     {
                         throw new ArgumentException("Child environment is malformed.");
                     }
-                    values.Add(key, value);
+                    values[key] = value;
                 }
             }
+            values["USERNAME"] = isolatedUser.UserName;
+            values["USERDOMAIN"] = Environment.MachineName;
+            values["OPENCOVEN_WINDOWS_RESTRICTED_USER_SID"] = isolatedUser.Sid;
+            values["OPENCOVEN_WINDOWS_SUPERVISOR_PID"] =
+                Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
+            values["OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE"] =
+                authoritativeJobHandle.ToInt64().ToString(CultureInfo.InvariantCulture);
 
             StringBuilder block = new StringBuilder();
             foreach (KeyValuePair<string, string> entry in values)
@@ -1072,6 +2489,21 @@ namespace OpenCoven
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct LUID
+        {
+            internal uint LowPart;
+            internal int HighPart;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_PRIVILEGES
+        {
+            internal uint PrivilegeCount;
+            internal LUID Luid;
+            internal uint Attributes;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
         {
             internal long PerProcessUserTimeLimit;
@@ -1157,6 +2589,41 @@ namespace OpenCoven
             IntPtr sacl,
             out IntPtr securityDescriptor);
 
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint GetNamedSecurityInfoW(
+            string objectName,
+            int objectType,
+            uint securityInformation,
+            out IntPtr owner,
+            IntPtr group,
+            out IntPtr dacl,
+            IntPtr sacl,
+            out IntPtr securityDescriptor);
+
+        [DllImport("advapi32.dll")]
+        private static extern uint SetSecurityInfo(
+            IntPtr handle,
+            int objectType,
+            uint securityInformation,
+            IntPtr owner,
+            IntPtr group,
+            IntPtr dacl,
+            IntPtr sacl);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetFileSecurityW(
+            string fileName,
+            uint securityInformation,
+            IntPtr securityDescriptor);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetKernelObjectSecurity(
+            IntPtr handle,
+            uint securityInformation,
+            IntPtr securityDescriptor);
+
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetSecurityDescriptorControl(
@@ -1179,6 +2646,37 @@ namespace OpenCoven
         [DllImport("advapi32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool EqualSid(IntPtr sid1, IntPtr sid2);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CheckTokenMembership(
+            IntPtr token,
+            IntPtr sidToCheck,
+            [MarshalAs(UnmanagedType.Bool)] out bool isMember);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenProcessToken(
+            IntPtr process,
+            uint desiredAccess,
+            out IntPtr token);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LookupPrivilegeValueW(
+            string systemName,
+            string name,
+            out LUID luid);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AdjustTokenPrivileges(
+            IntPtr token,
+            bool disableAllPrivileges,
+            ref TOKEN_PRIVILEGES newState,
+            uint bufferLength,
+            IntPtr previousState,
+            IntPtr returnLength);
 
         [DllImport("kernel32.dll")]
         private static extern IntPtr LocalFree(IntPtr memory);
@@ -1217,19 +2715,38 @@ namespace OpenCoven
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetCurrentProcess();
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CreateProcessW(
+        private static extern bool CreateProcessWithLogonW(
+            string userName,
+            string domain,
+            string password,
+            uint logonFlags,
             string applicationName,
             StringBuilder commandLine,
-            IntPtr processAttributes,
-            IntPtr threadAttributes,
             bool inheritHandles,
             uint creationFlags,
             IntPtr environment,
             string currentDirectory,
             ref STARTUPINFO startupInfo,
             out PROCESS_INFORMATION processInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            uint processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateHandle(
+            IntPtr sourceProcess,
+            IntPtr sourceHandle,
+            IntPtr targetProcess,
+            out IntPtr targetHandle,
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            uint options);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint ResumeThread(IntPtr thread);
@@ -1281,6 +2798,21 @@ namespace OpenCoven
             int informationClass,
             out FILE_ATTRIBUTE_TAG_INFO information,
             uint bufferSize);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteProfileW(
+            string sidString,
+            string profilePath,
+            string computerName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteFileW(string fileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RemoveDirectoryW(string pathName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

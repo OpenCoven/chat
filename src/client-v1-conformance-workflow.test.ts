@@ -686,7 +686,22 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
     for (const source of sources) {
       for (const required of [
-        'CreateProcessW',
+        'WindowsIsolatedUser',
+        'NetUserAdd',
+        'NetUserDel',
+        'LogonUserW',
+        'CheckTokenMembership',
+        'CreateProcessWithLogonW',
+        'LOGON_WITH_PROFILE',
+        'ProtectCurrentProcess',
+        'PROCESS_DUP_HANDLE',
+        'WRITE_DAC',
+        'WRITE_OWNER',
+        'DuplicateHandle',
+        'SetSecurityInfo',
+        'DeleteProfileW',
+        'SetFileSecurityW',
+        'PROTECTED_DACL_SECURITY_INFORMATION',
         'CREATE_SUSPENDED',
         'CreateJobObjectW',
         'ConvertStringSecurityDescriptorToSecurityDescriptorW',
@@ -738,6 +753,20 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source).not.toContain('JOB_OBJECT_LIMIT_BREAKAWAY_OK');
       expect(source).not.toContain('JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK');
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
+      expect(source).not.toContain('private static extern bool CreateProcessW(');
+      expect(source).not.toContain('NetLocalGroupAddMembers');
+      expect(source).toContain('Ephemeral local user cleanup failed during creation.');
+      for (const failure of [
+        'Restricted identity unexpectedly belongs to Administrators.',
+        'PROCESS_DUP_HANDLE open unexpectedly succeeded.',
+        'WRITE_DAC open unexpectedly succeeded.',
+        'WRITE_OWNER open unexpectedly succeeded.',
+        'DuplicateHandle unexpectedly succeeded.',
+        'Supervisor DACL modification unexpectedly succeeded.',
+        'Supervisor owner modification unexpectedly succeeded.',
+      ]) {
+        expect(source).toContain(failure);
+      }
     }
   });
 
@@ -762,6 +791,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(windowsJob.indexOf('Build phase1 native RPC')).toBeLessThan(
       windowsJob.indexOf('Test Windows Job Object supervision'),
     );
+    expect(windowsJob).toContain('runs-on: windows-2025');
     expect(windowsJob).toContain(
       'cargo build --manifest-path src-tauri/Cargo.toml --features phase1-conformance --bin phase1-native-rpc',
     );
@@ -794,8 +824,65 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'JOB_OBJECT_ASSIGN_PROCESS reopen unexpectedly succeeded.',
       'JOB_OBJECT_TERMINATE reopen unexpectedly succeeded.',
       'Enabling silent breakaway unexpectedly succeeded.',
+      'Restricted user profile is outside the isolated root.',
+      'Restricted user temporary directory is outside the isolated root.',
+      'Restricted user workspace is outside the isolated root.',
+      'Restricted identity accessed supervisor-private credential root.',
+      'Ephemeral local user survived cleanup.',
+      'Ephemeral Windows profile survived cleanup.',
+      'Ephemeral bootstrap root survived cleanup.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
+    }
+  });
+
+  test('creates a distinct non-admin Windows identity before supervised mutation', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const runBody = workflowRunBody(bootstrap);
+    const identityCreate = runBody.indexOf('[OpenCoven.WindowsIsolatedUser]::Create(');
+    const jobCreate = runBody.indexOf('[OpenCoven.WindowsJobSupervisor]::Create(');
+    const supervisedRun = runBody.indexOf('$job.RunAsUser(');
+
+    expect(identityCreate).toBeGreaterThan(-1);
+    expect(jobCreate).toBeGreaterThan(identityCreate);
+    expect(supervisedRun).toBeGreaterThan(jobCreate);
+    expect(runBody.indexOf('Download-PinnedAsset')).toBeGreaterThan(identityCreate);
+    expect(runBody.indexOf('git fetch exact protected Chat revision')).toBeGreaterThan(
+      identityCreate,
+    );
+    expect(runBody).toContain('$workspace = $isolatedUser.WorkspacePath');
+    expect(runBody).toContain('HOME = $isolatedUser.ProfilePath');
+    expect(runBody).toContain('USERPROFILE = $isolatedUser.ProfilePath');
+    expect(runBody).toContain('TEMP = $isolatedUser.TempPath');
+    expect(runBody).toContain('TMP = $isolatedUser.TempPath');
+    expect(runBody).toContain('GITHUB_WORKSPACE = $workspace');
+    expect(runBody).toContain("XDG_CACHE_HOME = (Join-Path $bootstrapRoot 'xdg\\cache')");
+    expect(runBody).toContain('DOTNET_CLI_HOME = $isolatedUser.ProfilePath');
+    expect(runBody).toContain("NUGET_PACKAGES = (Join-Path $bootstrapRoot 'nuget')");
+    expect(runBody).toContain("NPM_CONFIG_CACHE = (Join-Path $bootstrapRoot 'npm-cache')");
+    expect(runBody).toContain('ProtectSupervisorDirectory');
+    expect(runBody).toContain('$artifactWorkspace');
+    expect(runBody).toContain('[IO.File]::Copy(');
+    expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_PID');
+    expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE');
+    expect(runBody).toContain('RequireRestrictedSupervisorBoundary');
+    expect(runBody).toContain('$isolatedUser.Dispose()');
+    expect(runBody).not.toContain('$job.Run(');
+  });
+
+  test('documents the exact committed workflow and Windows harness metadata', () => {
+    const guide = readFileSync(resolve(projectRoot, 'docs', 'phase1-conformance.md'), 'utf8');
+    for (const relativePath of [
+      '.github/workflows/client-v1-conformance.yml',
+      'scripts/phase1-conformance.mjs',
+      'scripts/windows-job-supervisor.cs',
+      'scripts/windows-job-supervisor.test.ps1',
+    ]) {
+      const bytes = readFileSync(resolve(projectRoot, relativePath));
+      expect(guide).toContain(
+        `| \`${relativePath}\` | ${bytes.byteLength.toLocaleString('en-US')} | \`${sha256(bytes)}\` |`,
+      );
     }
   });
 
@@ -810,6 +897,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'AMD64',
       'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       'C:\\Windows\\System32\\kernel32.dll',
+      'C:\\Windows\\System32\\advapi32.dll',
+      'C:\\Windows\\System32\\netapi32.dll',
+      'C:\\Windows\\System32\\userenv.dll',
       'node-v24.18.1-win-x64.zip',
       'pnpm-10.34.0.tgz',
       'rustup-init.exe',
@@ -820,7 +910,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'https://',
       'git fetch',
       'pnpm install --frozen-lockfile --ignore-scripts',
-      'windows-job-supervisor.test.ps1',
       'phase1-conformance.mjs',
       'Validate canonical platform record',
       'OPENCOVEN_WINDOWS_JOB_REQUIRED',
@@ -930,7 +1019,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         new RegExp(`'${label}'[\\s\\S]{0,180}\\n\\s+${limit.replace('.', '\\.')}`, 'u'),
       );
     }
-    expect(bootstrap).toContain('$job.Run(');
+    expect(bootstrap).toContain('$job.RunAsUser(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain('Supervised Windows production exceeded a resource quota.');
   });

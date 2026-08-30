@@ -581,7 +581,7 @@ jobs:
 
   windows-supervisor-behavior:
     name: Windows supervisor behavior
-    runs-on: windows-latest
+    runs-on: windows-2025
     needs: [changes, rust]
     if: always() && needs.rust.result == 'success' && needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 20

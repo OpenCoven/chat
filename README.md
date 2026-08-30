@@ -187,6 +187,15 @@ the same artifacts again, compares the digests, and attests without executing
 repository or artifact content. Neither replaces or loosens the Phase 0
 canary lock.
 
+Before the Windows producer downloads or checks out anything, its trusted
+outer supervisor creates a random local non-admin identity with an isolated,
+protected profile, temporary directory, and workspace. It protects the
+supervisor process and authoritative Job handle from that identity, launches
+the complete producer tree suspended with `CreateProcessWithLogonW`, and
+assigns it to the query-only nonce-bound Job before resuming it. Every exit
+terminates the Job and verifies removal of the ephemeral account, Windows
+profile, and bootstrap root.
+
 ## CI coverage
 
 `.github/workflows/ci.yml` runs:
@@ -201,6 +210,9 @@ canary lock.
 - the macOS packaged real-authority matrix with exact counterpart checkouts
   pinned by `phase1-conformance.lock.json`, an isolated keychain, and a
   secret-scanned SDK platform record
+- Windows runtime coverage for the cross-user Job supervisor boundary,
+  descendant teardown, quotas, membership, and fail-closed account/profile
+  cleanup
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

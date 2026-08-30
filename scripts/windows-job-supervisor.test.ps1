@@ -33,16 +33,36 @@ function Assert-ProcessExited {
 
 $trustedPwsh = (Get-Process -Id $PID).Path
 $root = Join-Path ([IO.Path]::GetTempPath()) "opencoven-job-runtime-$PID-$([Guid]::NewGuid().ToString('N'))"
-[IO.Directory]::CreateDirectory($root) | Out-Null
+$isolatedUser = [OpenCoven.WindowsIsolatedUser]::Create($root)
+$ephemeralUserName = $isolatedUser.UserName
+$ephemeralProfilePath = $isolatedUser.OperatingSystemProfilePath
+$operatorPrivateRoot = Join-Path (
+  [IO.Path]::GetTempPath()
+) "opencoven-supervisor-private-$PID-$([Guid]::NewGuid().ToString('N'))"
 $childEnvironment = @{
   SystemRoot = $env:SystemRoot
   WINDIR = $env:WINDIR
   COMSPEC = $env:COMSPEC
   PATH = "$([IO.Path]::GetDirectoryName($trustedPwsh));$($env:SystemRoot)\System32"
-  TEMP = $root
-  TMP = $root
+  HOME = $isolatedUser.ProfilePath
+  USERPROFILE = $isolatedUser.ProfilePath
+  APPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Roaming')
+  LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
+  TEMP = $isolatedUser.TempPath
+  TMP = $isolatedUser.TempPath
+  GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
+  OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
+  OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE = $sourcePath
 }
 try {
+  [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
+  [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
+  [IO.File]::WriteAllText(
+    (Join-Path $operatorPrivateRoot 'credential-marker.txt'),
+    'operator-private',
+    [Text.UTF8Encoding]::new($false)
+  )
+  $childEnvironment.OPENCOVEN_OPERATOR_PRIVATE_ROOT = $operatorPrivateRoot
   $accessProbeSource = Join-Path $root 'job-access-probe.cs'
   [IO.File]::WriteAllText(
     $accessProbeSource,
@@ -195,8 +215,47 @@ public static class JobAccessProbe
   [IO.File]::WriteAllText(
     $accessProbeScript,
     @"
+Add-Type -TypeDefinition ([IO.File]::ReadAllText(`$env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)) -Language CSharp
 Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("'", "''"))')) -Language CSharp
+[OpenCoven.WindowsJobSupervisor]::RequireRestrictedSupervisorBoundary(
+  [int]`$env:OPENCOVEN_WINDOWS_SUPERVISOR_PID,
+  [long]`$env:OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE
+)
 [JobAccessProbe]::Run(`$env:OPENCOVEN_ACCESS_PROBE_JOB)
+`$root = [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT)
+`$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
+`$temp = [IO.Path]::GetFullPath(`$env:TEMP)
+`$workspace = [IO.Path]::GetFullPath(`$env:GITHUB_WORKSPACE)
+if (-not `$profile.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted user profile is outside the isolated root.'
+}
+if (-not `$temp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted user temporary directory is outside the isolated root.'
+}
+if (-not `$workspace.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted user workspace is outside the isolated root.'
+}
+foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
+  [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(`$directory)
+}
+`$operatorDenied = `$false
+try {
+  [IO.File]::ReadAllText(
+    (Join-Path `$env:OPENCOVEN_OPERATOR_PRIVATE_ROOT 'credential-marker.txt')
+  ) | Out-Null
+} catch {
+  if (
+    `$_.Exception -is [UnauthorizedAccessException] -or
+    `$_.Exception.InnerException -is [UnauthorizedAccessException]
+  ) {
+    `$operatorDenied = `$true
+  } else {
+    throw
+  }
+}
+if (-not `$operatorDenied) {
+  throw 'Restricted identity accessed supervisor-private credential root.'
+}
 "@,
     [Text.UTF8Encoding]::new($false)
   )
@@ -204,12 +263,13 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("
     "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment = $childEnvironment.Clone()
   $accessEnvironment.OPENCOVEN_ACCESS_PROBE_JOB = $accessJobName
-  $accessJob = [OpenCoven.WindowsJobSupervisor]::Create($accessJobName)
+  $accessJob = [OpenCoven.WindowsJobSupervisor]::Create($accessJobName, $isolatedUser)
   try {
-    $accessResult = $accessJob.Run(
+    $accessResult = $accessJob.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$accessProbeScript`"",
-      $root,
+      $isolatedUser.RootPath,
       $accessEnvironment,
       [TimeSpan]::FromSeconds(30),
       1MB,
@@ -234,10 +294,12 @@ Start-Sleep -Seconds 300
     [Text.UTF8Encoding]::new($false)
   )
   $timeoutJob = [OpenCoven.WindowsJobSupervisor]::Create(
-    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
   )
   try {
-    $result = $timeoutJob.Run(
+    $result = $timeoutJob.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$timeoutScript`"",
       $root,
@@ -269,9 +331,11 @@ Start-Sleep -Seconds 300
     [Text.UTF8Encoding]::new($false)
   )
   $closeJob = [OpenCoven.WindowsJobSupervisor]::Create(
-    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
   )
-  $closeResult = $closeJob.Run(
+  $closeResult = $closeJob.RunAsUser(
+    $isolatedUser,
     $trustedPwsh,
     "-NoLogo -NoProfile -NonInteractive -File `"$closeScript`"",
     $root,
@@ -367,11 +431,15 @@ while (-not [IO.File]::Exists('$($retainedPidPath.Replace("'", "''"))')) {
   )
   $retainedEnvironment = $childEnvironment.Clone()
   $retainedEnvironment.RETAINED_JOB_NAME = $retainedJobName
-  $retainedJob = [OpenCoven.WindowsJobSupervisor]::Create($retainedJobName)
+  $retainedJob = [OpenCoven.WindowsJobSupervisor]::Create(
+    $retainedJobName,
+    $isolatedUser
+  )
   $retainedPid = 0
   try {
     $retainedTimer = [Diagnostics.Stopwatch]::StartNew()
-    $retainedResult = $retainedJob.Run(
+    $retainedResult = $retainedJob.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$retainedRootScript`"",
       $root,
@@ -422,10 +490,12 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     [Text.UTF8Encoding]::new($false)
   )
   $mismatchJob = [OpenCoven.WindowsJobSupervisor]::Create(
-    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
   )
   try {
-    $mismatch = $mismatchJob.Run(
+    $mismatch = $mismatchJob.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$mismatchScript`"",
       $root,
@@ -456,10 +526,12 @@ Start-Sleep -Seconds 300
     [Text.UTF8Encoding]::new($false)
   )
   $quotaJob = [OpenCoven.WindowsJobSupervisor]::Create(
-    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
   )
   try {
-    $quotaResult = $quotaJob.Run(
+    $quotaResult = $quotaJob.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$quotaScript`"",
       $root,
@@ -481,8 +553,14 @@ Start-Sleep -Seconds 300
 
   $membershipAName = "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
   $membershipBName = "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
-  $membershipA = [OpenCoven.WindowsJobSupervisor]::Create($membershipAName)
-  $membershipB = [OpenCoven.WindowsJobSupervisor]::Create($membershipBName)
+  $membershipA = [OpenCoven.WindowsJobSupervisor]::Create(
+    $membershipAName,
+    $isolatedUser
+  )
+  $membershipB = [OpenCoven.WindowsJobSupervisor]::Create(
+    $membershipBName,
+    $isolatedUser
+  )
   $membershipScript = Join-Path $root 'membership.ps1'
   [IO.File]::WriteAllText(
     $membershipScript,
@@ -495,7 +573,8 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
   try {
     $positiveEnvironment = $childEnvironment.Clone()
     $positiveEnvironment.EXPECTED_JOB = $membershipAName
-    $positive = $membershipA.Run(
+    $positive = $membershipA.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$membershipScript`"",
       $root,
@@ -510,7 +589,8 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
 
     $wrongEnvironment = $childEnvironment.Clone()
     $wrongEnvironment.EXPECTED_JOB = $membershipAName
-    $wrong = $membershipB.Run(
+    $wrong = $membershipB.RunAsUser(
+      $isolatedUser,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$membershipScript`"",
       $root,
@@ -623,8 +703,8 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
       $jobAName = "Local\OpenCoven.Chat.Conformance.$jobANonce"
       $jobBNonce = '22222222222222222222222222222222'
       $jobBName = "Local\OpenCoven.Chat.Conformance.$jobBNonce"
-      $jobA = [OpenCoven.WindowsJobSupervisor]::Create($jobAName)
-      $jobB = [OpenCoven.WindowsJobSupervisor]::Create($jobBName)
+      $jobA = [OpenCoven.WindowsJobSupervisor]::Create($jobAName, $isolatedUser)
+      $jobB = [OpenCoven.WindowsJobSupervisor]::Create($jobBName, $isolatedUser)
       try {
         $unsupervisedNativeEnvironment = $childEnvironment.Clone()
         $unsupervisedNativeEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
@@ -642,7 +722,8 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         $wrongNativeEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $jobAName
         Assert-NativeBindingRejected `
           -Label 'Wrong existing native Job binding' `
-          -Result ($jobB.Run(
+          -Result ($jobB.RunAsUser(
+            $isolatedUser,
             $nativeRpc,
             '',
             $root,
@@ -657,7 +738,8 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         $validNativeEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
         $validNativeEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $jobANonce
         $validNativeEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $jobAName
-        $validNative = $jobA.Run(
+        $validNative = $jobA.RunAsUser(
+          $isolatedUser,
           $nativeRpc,
           '',
           $root,
@@ -679,5 +761,29 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     $membershipA.Dispose()
   }
 } finally {
-  [IO.Directory]::Delete($root, $true)
+  $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+  try {
+    $isolatedUser.Dispose()
+  } catch {
+    $cleanupErrors.Add($_.Exception)
+  }
+  if ([IO.Directory]::Exists($operatorPrivateRoot)) {
+    try {
+      [IO.Directory]::Delete($operatorPrivateRoot, $true)
+    } catch {
+      $cleanupErrors.Add($_.Exception)
+    }
+  }
+  if ($cleanupErrors.Count -ne 0) {
+    throw [AggregateException]::new('Windows supervisor test cleanup failed.', $cleanupErrors)
+  }
+}
+if ($null -ne (Get-LocalUser -Name $ephemeralUserName -ErrorAction SilentlyContinue)) {
+  throw 'Ephemeral local user survived cleanup.'
+}
+if ([IO.Directory]::Exists($ephemeralProfilePath)) {
+  throw 'Ephemeral Windows profile survived cleanup.'
+}
+if ([IO.Directory]::Exists($root)) {
+  throw 'Ephemeral bootstrap root survived cleanup.'
 }
