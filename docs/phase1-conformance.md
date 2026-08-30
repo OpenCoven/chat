@@ -229,15 +229,23 @@ GitHub `windows-2025` x64 image at exact image version `20260824.239.3`,
 Windows build `26100.33296`, `kernel32.dll` file version
 `10.0.26100.33296`, PowerShell `7.6.5` at
 `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
-`10.0.11`, MSVC tools `14.50.35717` beneath
-`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC`,
-and Windows SDK `10.0.26100.0` with `rc.exe` at
+`10.0.11`, Visual Studio Enterprise 2022 `17.14.37614.0` at
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise`, and its v143 MSVC
+tools `14.44.35211` at
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35211`.
+The compiler and linker are pinned respectively to that toolset's
+`bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
+`10.0.26100.0` provides `rc.exe` at
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
+These values come from the authoritative `actions/runner-images` inventory for
+release tag `win25/20260824.239` at commit
+`420ee0b3db1d89cc8745d939f2a72ff7bc426b97`.
 The workflow also requires valid Microsoft Authenticode signatures for the
-trusted PowerShell, kernel, command processor, compiler, linker, and resource
-compiler, plus non-reparse runner temporary and workspace roots. These pins
-are step-level workflow metadata; accepting a runner image update therefore
-requires an explicit protected-workflow metadata and digest update.
+trusted PowerShell, kernel, command processor, Visual Studio executable,
+compiler, linker, and resource compiler, plus non-reparse runner temporary and
+workspace roots. These pins are step-level workflow metadata; accepting a
+runner image update therefore requires an explicit protected-workflow metadata
+and digest update.
 
 The inline C# P/Invoke supervisor creates a named, nonce-bound Job Object with
 only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. It calls `CreateProcessW` with

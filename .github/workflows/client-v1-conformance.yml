@@ -40,8 +40,12 @@ jobs:
           OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5'
           OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\Program Files\PowerShell\7\pwsh.exe'
           OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11'
-          OPENCOVEN_WINDOWS_MSVC_VERSION: '14.50.35717'
-          OPENCOVEN_WINDOWS_MSVC_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.50.35717'
+          OPENCOVEN_WINDOWS_VS_VERSION: '17.14.37614.0'
+          OPENCOVEN_WINDOWS_VS_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
+          OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35211'
+          OPENCOVEN_WINDOWS_MSVC_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35211'
+          OPENCOVEN_WINDOWS_CL_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35211\bin\Hostx64\x64\cl.exe'
+          OPENCOVEN_WINDOWS_LINK_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35211\bin\Hostx64\x64\link.exe'
           OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0'
           OPENCOVEN_WINDOWS_RC_PATH: 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe'
         run: |
@@ -159,10 +163,36 @@ jobs:
           if ((Get-ChildItem -LiteralPath $workspace -Force | Measure-Object).Count -ne 0) {
             throw 'The pre-checkout GitHub workspace is not empty.'
           }
+          $visualStudioRoot = $env:OPENCOVEN_WINDOWS_VS_PATH
+          $trustedVisualStudio = Join-Path $visualStudioRoot 'Common7\IDE\devenv.exe'
+          if (
+            -not [IO.Directory]::Exists($visualStudioRoot) -or
+            -not [IO.File]::Exists($trustedVisualStudio)
+          ) {
+            throw 'The exact reviewed Visual Studio 2022 installation is unavailable.'
+          }
+          $visualStudioVersion = (
+            [Diagnostics.FileVersionInfo]::GetVersionInfo($trustedVisualStudio).ProductVersion `
+              -split ' '
+          )[0]
+          if ($visualStudioVersion -ne $env:OPENCOVEN_WINDOWS_VS_VERSION) {
+            throw 'The reviewed Visual Studio 2022 version changed.'
+          }
+          Assert-NoReparsePath -Path $visualStudioRoot -Label 'Visual Studio 2022 installation'
+          Assert-NoReparsePath -Path $trustedVisualStudio -Label 'Visual Studio 2022 executable'
+          Assert-MicrosoftSignature -Path $trustedVisualStudio -Label 'Visual Studio 2022 executable'
+
           $msvcRoot = $env:OPENCOVEN_WINDOWS_MSVC_PATH
+          $expectedMsvcRoot = Join-Path `
+            $visualStudioRoot `
+            "VC\Tools\MSVC\$($env:OPENCOVEN_WINDOWS_MSVC_VERSION)"
           if (
             -not [IO.Directory]::Exists($msvcRoot) -or
-            [IO.Path]::GetFileName($msvcRoot) -ne $env:OPENCOVEN_WINDOWS_MSVC_VERSION
+            -not [String]::Equals(
+              [IO.Path]::GetFullPath($msvcRoot),
+              [IO.Path]::GetFullPath($expectedMsvcRoot),
+              [StringComparison]::OrdinalIgnoreCase
+            )
           ) {
             throw 'The exact reviewed Visual Studio 2022 MSVC facility is unavailable.'
           }
@@ -191,9 +221,15 @@ jobs:
           )) {
             Assert-NoReparsePath -Path $facility -Label 'MSVC/Windows SDK facility'
           }
+          if (
+            (Join-Path $msvcBin 'cl.exe') -ne $env:OPENCOVEN_WINDOWS_CL_PATH -or
+            (Join-Path $msvcBin 'link.exe') -ne $env:OPENCOVEN_WINDOWS_LINK_PATH
+          ) {
+            throw 'The exact reviewed MSVC compiler or linker path changed.'
+          }
           $trustedBuildTools = @(
-            (Join-Path $msvcBin 'link.exe'),
-            (Join-Path $msvcBin 'cl.exe'),
+            $env:OPENCOVEN_WINDOWS_LINK_PATH,
+            $env:OPENCOVEN_WINDOWS_CL_PATH,
             $env:OPENCOVEN_WINDOWS_RC_PATH
           )
           foreach ($tool in $trustedBuildTools) {

@@ -25,9 +25,15 @@ const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
   OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
-  OPENCOVEN_WINDOWS_MSVC_VERSION: '14.50.35717',
+  OPENCOVEN_WINDOWS_VS_VERSION: '17.14.37614.0',
+  OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
+  OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35211',
   OPENCOVEN_WINDOWS_MSVC_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.50.35717',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211',
+  OPENCOVEN_WINDOWS_CL_PATH:
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211\\bin\\Hostx64\\x64\\cl.exe',
+  OPENCOVEN_WINDOWS_LINK_PATH:
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35211\\bin\\Hostx64\\x64\\link.exe',
   OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0',
   OPENCOVEN_WINDOWS_RC_PATH:
     'C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe',
@@ -602,6 +608,24 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(bootstrap).not.toMatch(/\b(?:curl|wget|Invoke-WebRequest)\b/u);
     expect(bootstrap).not.toContain('http://');
     expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
+  });
+
+  test('requires the exact reviewed Windows image, Visual Studio, and v143 tool paths', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const environment = workflowStepEnvironment(bootstrap);
+    const runBody = workflowRunBody(bootstrap);
+
+    expect(workflow).not.toContain('14.50.35717');
+    for (const [name, value] of Object.entries(reviewedWindowsPins)) {
+      expect(environment).toContain(`${name}: '${value}'`);
+      expect(runBody).toContain(`$env:${name}`);
+    }
+    expect(runBody).toContain(
+      '[Diagnostics.FileVersionInfo]::GetVersionInfo($trustedVisualStudio).ProductVersion',
+    );
+    expect(runBody).toContain("(Join-Path $msvcBin 'cl.exe')");
+    expect(runBody).toContain("(Join-Path $msvcBin 'link.exe')");
   });
 
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
