@@ -1,6 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Menu } from '@base-ui/react/menu';
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ChatInspector } from './chat-inspector';
 import { DocumentReader, type ReaderDocument } from './document-reader';
+import { Icon } from './minimal-icons';
 import {
   MOCK_COMMANDS,
   MOCK_CONVERSATIONS,
@@ -9,8 +21,17 @@ import {
   mockReply,
   nowLabel,
 } from './mock-data';
-import { MOCK_FAMILIARS } from './mock-familiars';
+import { MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
 import type { MockArtifact, MockLinkPreview } from './mock-rich-content';
+
+type RailSide = 'conversations' | 'inspector';
+
+const RAIL_LIMITS = {
+  conversations: { min: 240, max: 440 },
+  inspector: { min: 300, max: 480 },
+} as const;
+const MIN_THREAD_WIDTH = 360;
+const RAIL_KEYBOARD_STEP = 12;
 
 /**
  * Proof-of-concept chat surface.
@@ -92,6 +113,222 @@ function Avatar({ label, seed, size }: { label: string; seed: string; size: numb
   );
 }
 
+function FamiliarSelector({
+  activeFamiliar,
+  onValueChange,
+}: {
+  activeFamiliar: MockFamiliar | undefined;
+  onValueChange: (familiarId: string) => void;
+}) {
+  const activeName = activeFamiliar?.name ?? 'Choose familiar';
+
+  return (
+    <Menu.Root>
+      <Menu.Trigger className="familiar-switcher" aria-label={`Sidebar familiar: ${activeName}`}>
+        <Avatar
+          label={activeFamiliar?.name ?? 'No familiar'}
+          seed={activeFamiliar?.id ?? 'none'}
+          size={30}
+        />
+        <span className="familiar-switcher-copy">
+          <span className="familiar-switcher-name">{activeName}</span>
+          <span className="familiar-switcher-role">
+            <span className="familiar-switcher-status" aria-hidden="true" />
+            {activeFamiliar?.role ?? 'No familiar selected'}
+          </span>
+        </span>
+        <Icon name="caret-up-down" size={16} />
+      </Menu.Trigger>
+
+      <Menu.Portal>
+        <Menu.Positioner className="familiar-menu-positioner" align="start" sideOffset={6}>
+          <Menu.Popup className="familiar-menu" aria-label="Choose active familiar">
+            <Menu.Group>
+              <Menu.GroupLabel className="familiar-menu-label">Familiars</Menu.GroupLabel>
+              <Menu.RadioGroup
+                value={activeFamiliar?.id ?? ''}
+                onValueChange={(value) => {
+                  if (typeof value === 'string') {
+                    onValueChange(value);
+                  }
+                }}
+              >
+                {MOCK_FAMILIARS.map((familiar) => (
+                  <Menu.RadioItem
+                    key={familiar.id}
+                    className="familiar-menu-item"
+                    value={familiar.id}
+                    label={`${familiar.name}, ${familiar.role}`}
+                    aria-label={`${familiar.name}, ${familiar.role}`}
+                    closeOnClick
+                  >
+                    <Avatar label={familiar.name} seed={familiar.id} size={28} />
+                    <span className="familiar-menu-copy">
+                      <span className="familiar-menu-name">{familiar.name}</span>
+                      <span className="familiar-menu-role">{familiar.role}</span>
+                    </span>
+                    <Menu.RadioItemIndicator className="familiar-menu-current">
+                      Current
+                    </Menu.RadioItemIndicator>
+                  </Menu.RadioItem>
+                ))}
+              </Menu.RadioGroup>
+            </Menu.Group>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
+function ConversationSearchDialog({
+  conversations,
+  activeId,
+  query,
+  onQueryChange,
+  onSelect,
+  onClose,
+}: {
+  conversations: MockConversation[];
+  activeId: string;
+  query: string;
+  onQueryChange: (query: string) => void;
+  onSelect: (conversationId: string) => void;
+  onClose: () => void;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const results = conversations.filter((conversation) => {
+    const familiar = MOCK_FAMILIARS.find((item) => item.id === conversation.familiarId);
+    return [conversation.title, conversation.preview, familiar?.name ?? '']
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
+
+  useEffect(() => {
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    input.current?.focus();
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose]);
+
+  function keepFocusInside(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusable = panel.current?.querySelectorAll<HTMLElement>(
+      'input:not([disabled]), button:not([disabled])',
+    );
+    if (!focusable || focusable.length === 0) {
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) {
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  return (
+    <div
+      className="conversation-search-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search conversations"
+      onKeyDown={keepFocusInside}
+    >
+      <button
+        type="button"
+        className="conversation-search-backdrop"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div ref={panel} className="conversation-search-panel">
+        <div className="conversation-search-field">
+          <Icon name="magnifying-glass" size={17} />
+          <input
+            ref={input}
+            type="search"
+            aria-label="Search conversations"
+            placeholder="Search conversations"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+          <kbd>⌘K</kbd>
+        </div>
+        <div className="conversation-search-results">
+          <p className="conversation-search-heading">
+            <span>Conversations</span>
+            <span>{results.length}</span>
+          </p>
+          {results.length > 0 ? (
+            results.map((conversation) => {
+              const familiar = MOCK_FAMILIARS.find((item) => item.id === conversation.familiarId);
+
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`conversation-search-result ${
+                    conversation.id === activeId ? 'is-active' : ''
+                  }`}
+                  aria-label={`${conversation.title}, ${familiar?.name ?? 'No familiar'}`}
+                  onClick={() => onSelect(conversation.id)}
+                >
+                  <Avatar
+                    label={familiar?.name ?? conversation.title}
+                    seed={familiar?.id ?? conversation.id}
+                    size={28}
+                  />
+                  <span className="conversation-search-copy">
+                    <strong>{conversation.title}</strong>
+                    <span>
+                      {familiar?.name ?? 'No familiar'} · {conversation.preview}
+                    </span>
+                  </span>
+                  {conversation.id === activeId ? (
+                    <Icon name="check-circle-fill" size={15} />
+                  ) : (
+                    <span className="conversation-search-time">{conversation.timestamp}</span>
+                  )}
+                </button>
+              );
+            })
+          ) : (
+            <p className="conversation-search-empty">No conversations match “{query.trim()}”.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Message text with a leading slash command emphasised.
  *
@@ -121,7 +358,15 @@ function MessageText({ text }: { text: string }) {
  * that would have to be licensed and reviewed. It reads as "an image was
  * generated here" without pretending to be a real model output.
  */
-function GeneratedImage({ alt, prompt }: { alt: string; prompt: string }) {
+function GeneratedImage({
+  alt,
+  prompt,
+  onOpen,
+}: {
+  alt: string;
+  prompt: string;
+  onOpen?: () => void;
+}) {
   // Hue derived from the prompt, so `/image cat purple` and `/image dog blue`
   // are visibly different generations rather than the same tile twice.
   let seed = 0;
@@ -129,10 +374,11 @@ function GeneratedImage({ alt, prompt }: { alt: string; prompt: string }) {
     seed += character.charCodeAt(0);
   }
   const hue = seed % 360;
-  const gradientId = `demo-bg-${hue}`;
-  const glowId = `demo-glow-${hue}`;
+  const instanceId = useId().replaceAll(':', '');
+  const gradientId = `demo-bg-${instanceId}-${hue}`;
+  const glowId = `demo-glow-${instanceId}-${hue}`;
 
-  return (
+  const artwork = (
     <svg className="generated" viewBox="0 0 600 400" role="img" aria-label={alt}>
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
@@ -167,6 +413,86 @@ function GeneratedImage({ alt, prompt }: { alt: string; prompt: string }) {
         <circle cx="418" cy="326" r="3" />
       </g>
     </svg>
+  );
+
+  if (!onOpen) {
+    return artwork;
+  }
+
+  return (
+    <button
+      type="button"
+      className="generated-trigger"
+      aria-label={`Expand image: ${alt}`}
+      onClick={onOpen}
+    >
+      {artwork}
+    </button>
+  );
+}
+
+function ImageLightbox({
+  image,
+  onClose,
+}: {
+  image: NonNullable<MockMessage['image']>;
+  onClose: () => void;
+}) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        closeButton.current?.focus();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    closeButton.current?.focus();
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="image-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Expanded image: ${image.alt}`}
+    >
+      <button
+        type="button"
+        className="image-lightbox-backdrop"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div className="image-lightbox-artwork">
+        <GeneratedImage alt={image.alt} prompt={image.prompt} />
+      </div>
+      <button
+        ref={closeButton}
+        type="button"
+        className="image-lightbox-close"
+        aria-label="Close image preview"
+        onClick={onClose}
+      >
+        <Icon name="x" size={18} />
+      </button>
+    </div>
   );
 }
 
@@ -290,12 +616,57 @@ function ArtifactCard({
   );
 }
 
+function ReasoningBlock({ reasoning }: { reasoning: NonNullable<MockMessage['reasoning']> }) {
+  const stepIcons = {
+    analysis: 'magnifying-glass',
+    design: 'paint-brush',
+    safety: 'check-circle-fill',
+  } as const;
+
+  return (
+    <details className="reasoning-block" open>
+      <summary className="reasoning-summary">
+        <span className="reasoning-mark" aria-hidden="true">
+          <Icon name="brain" size={15} />
+        </span>
+        <span className="reasoning-label">Reasoning</span>
+        <span className="reasoning-meta">
+          <span className="reasoning-demo">Demo</span>
+          <span>{reasoning.steps.length} steps</span>
+        </span>
+        <Icon name="caret-down" size={13} />
+      </summary>
+      <div className="reasoning-content">
+        <p className="reasoning-intent">
+          <Icon name="sparkle" size={13} />
+          <span>{reasoning.summary}</span>
+        </p>
+        <ol>
+          {reasoning.steps.map((step) => (
+            <li key={step.label} className="reasoning-step" data-kind={step.kind}>
+              <span className="reasoning-step-icon" aria-hidden="true">
+                <Icon name={stepIcons[step.kind]} size={13} />
+              </span>
+              <span className="reasoning-step-copy">
+                <strong>{step.label}</strong>
+                <span>{step.text}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </details>
+  );
+}
+
 function MessageRow({
   message,
+  onOpenImage,
   onOpenArtifact,
   isStreaming = false,
 }: {
   message: MockMessage;
+  onOpenImage: (image: NonNullable<MockMessage['image']>) => void;
   onOpenArtifact: (artifact: MockArtifact) => void;
   isStreaming?: boolean;
 }) {
@@ -306,10 +677,15 @@ function MessageRow({
   const stamp = <span className="stamp">{message.sentAt}</span>;
 
   if (message.image) {
+    const image = message.image;
+
     return (
       <div className={`row ${mine ? 'row-mine' : 'row-theirs'}`}>
         {mine ? stamp : null}
-        <GeneratedImage alt={message.image.alt} prompt={message.image.prompt} />
+        <div className="message-stack">
+          {message.reasoning ? <ReasoningBlock reasoning={message.reasoning} /> : null}
+          <GeneratedImage alt={image.alt} prompt={image.prompt} onOpen={() => onOpenImage(image)} />
+        </div>
         {mine ? null : stamp}
       </div>
     );
@@ -392,15 +768,21 @@ export function ChatDemo() {
   const [activeId, setActiveId] = useState(MOCK_CONVERSATIONS[0]?.id ?? '');
   const [conversationsOpen, setConversationsOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(() => !isNarrowWindow());
+  const [conversationsWidth, setConversationsWidth] = useState(320);
+  const [inspectorWidth, setInspectorWidth] = useState(340);
+  const [resizingRail, setResizingRail] = useState<RailSide | null>(null);
   const isNarrow = useNarrowWindow();
   const [draft, setDraft] = useState('');
-  const [search, setSearch] = useState('');
+  const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
+  const [conversationSearchQuery, setConversationSearchQuery] = useState('');
   const [pendingReply, setPendingReply] = useState(false);
   const [reader, setReader] = useState<ReaderDocument | null>(null);
+  const [focusedImage, setFocusedImage] = useState<NonNullable<MockMessage['image']> | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
   /** Id of the message currently streaming, so the composer can offer stop. */
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
+  const resizeCleanup = useRef<(() => void) | null>(null);
   const replyCount = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
@@ -408,9 +790,7 @@ export function ChatDemo() {
   const activeFamiliar = MOCK_FAMILIARS.find((familiar) => familiar.id === active?.familiarId);
   const messageCount = active?.messages.length ?? 0;
 
-  const visible = conversations.filter((conversation) =>
-    conversation.title.toLowerCase().includes(search.trim().toLowerCase()),
-  );
+  const visible = conversations;
 
   const showingCommands = draft.trim().startsWith('/') && !draft.trim().includes(' ');
   const commandMatches = showingCommands
@@ -445,6 +825,7 @@ export function ChatDemo() {
       for (const id of pending) {
         window.clearTimeout(id);
       }
+      resizeCleanup.current?.();
     };
   }, []);
 
@@ -455,7 +836,13 @@ export function ChatDemo() {
   }, [conversationsOpen, inspectorOpen, isNarrow]);
 
   useEffect(() => {
-    if (!isNarrow || (!conversationsOpen && !inspectorOpen)) {
+    if (
+      !isNarrow ||
+      conversationSearchOpen ||
+      focusedImage ||
+      reader ||
+      (!conversationsOpen && !inspectorOpen)
+    ) {
       return;
     }
 
@@ -471,7 +858,34 @@ export function ChatDemo() {
     window.addEventListener('keydown', onKeyDown);
 
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [conversationsOpen, inspectorOpen, isNarrow]);
+  }, [conversationSearchOpen, conversationsOpen, focusedImage, inspectorOpen, isNarrow, reader]);
+
+  const closeConversationSearch = useCallback(() => {
+    setConversationSearchOpen(false);
+  }, []);
+
+  const openConversationSearch = useCallback(() => {
+    setConversationSearchQuery('');
+    setConversationSearchOpen(true);
+  }, []);
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') {
+        return;
+      }
+
+      event.preventDefault();
+      if (conversationSearchOpen) {
+        closeConversationSearch();
+      } else {
+        openConversationSearch();
+      }
+    }
+
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
+  }, [closeConversationSearch, conversationSearchOpen, openConversationSearch]);
 
   /** Complete the draft to a command, leaving a trailing space to type into. */
   function completeCommand(name: string) {
@@ -628,11 +1042,114 @@ export function ChatDemo() {
     setInspectorOpen(true);
   }
 
+  function selectConversationFromSearch(conversationId: string) {
+    cancelPending();
+    setActiveId(conversationId);
+    closeConversationSearch();
+    if (isNarrow) {
+      setConversationsOpen(false);
+    }
+  }
+
+  function maximumRailWidth(side: RailSide): number {
+    const otherWidth =
+      side === 'conversations'
+        ? inspectorOpen
+          ? inspectorWidth
+          : 0
+        : conversationsOpen
+          ? conversationsWidth
+          : 0;
+    const limit = RAIL_LIMITS[side];
+
+    const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
+
+    return Math.max(limit.min, Math.min(limit.max, viewportWidth - otherWidth - MIN_THREAD_WIDTH));
+  }
+
+  function setRailWidth(side: RailSide, width: number) {
+    const limit = RAIL_LIMITS[side];
+    const nextWidth = Math.min(maximumRailWidth(side), Math.max(limit.min, Math.round(width)));
+
+    if (side === 'conversations') {
+      setConversationsWidth(nextWidth);
+    } else {
+      setInspectorWidth(nextWidth);
+    }
+  }
+
+  function beginRailResize(side: RailSide, event: ReactPointerEvent<HTMLDivElement>) {
+    if (isNarrow || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    resizeCleanup.current?.();
+
+    const startX = event.clientX;
+    const startWidth = side === 'conversations' ? conversationsWidth : inspectorWidth;
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const delta =
+        side === 'conversations' ? pointerEvent.clientX - startX : startX - pointerEvent.clientX;
+      setRailWidth(side, startWidth + delta);
+    }
+
+    function finishResize() {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishResize);
+      window.removeEventListener('pointercancel', finishResize);
+      resizeCleanup.current = null;
+      setResizingRail(null);
+    }
+
+    setResizingRail(side);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', finishResize);
+    window.addEventListener('pointercancel', finishResize);
+    resizeCleanup.current = finishResize;
+  }
+
+  function resizeRailWithKeyboard(side: RailSide, event: ReactKeyboardEvent<HTMLDivElement>) {
+    const currentWidth = side === 'conversations' ? conversationsWidth : inspectorWidth;
+    const outwardKey = side === 'conversations' ? 'ArrowRight' : 'ArrowLeft';
+    const inwardKey = side === 'conversations' ? 'ArrowLeft' : 'ArrowRight';
+    let nextWidth: number | undefined;
+
+    if (event.key === outwardKey) {
+      nextWidth = currentWidth + (event.shiftKey ? RAIL_KEYBOARD_STEP * 4 : RAIL_KEYBOARD_STEP);
+    } else if (event.key === inwardKey) {
+      nextWidth = currentWidth - (event.shiftKey ? RAIL_KEYBOARD_STEP * 4 : RAIL_KEYBOARD_STEP);
+    } else if (event.key === 'Home') {
+      nextWidth = RAIL_LIMITS[side].min;
+    } else if (event.key === 'End') {
+      nextWidth = maximumRailWidth(side);
+    }
+
+    if (nextWidth !== undefined) {
+      event.preventDefault();
+      setRailWidth(side, nextWidth);
+    }
+  }
+
+  const closeFocusedImage = useCallback(() => {
+    setFocusedImage(null);
+  }, []);
+
+  const layoutStyle: CSSProperties & {
+    '--demo-conversations-open-width': string;
+    '--demo-inspector-open-width': string;
+  } = {
+    '--demo-conversations-open-width': `${conversationsWidth}px`,
+    '--demo-inspector-open-width': `${inspectorWidth}px`,
+  };
+
   return (
     <div
       className={`chat-demo ${conversationsOpen ? '' : 'is-conversations-closed'} ${
         inspectorOpen ? '' : 'is-inspector-closed'
-      }`}
+      } ${resizingRail ? 'is-resizing' : ''}`}
+      style={layoutStyle}
     >
       <aside
         id="conversation-panel"
@@ -641,143 +1158,138 @@ export function ChatDemo() {
         hidden={!conversationsOpen}
       >
         <header className="sidebar-header">
-          <label className="familiar-switcher">
-            <Avatar
-              label={activeFamiliar?.name ?? 'No familiar'}
-              seed={activeFamiliar?.id ?? 'none'}
-              size={34}
-            />
-            <span className="familiar-switcher-copy">
-              <span className="familiar-switcher-name">
-                {activeFamiliar?.name ?? 'Choose familiar'}
-              </span>
-              <span className="familiar-switcher-role">
-                <span className="familiar-switcher-status" aria-hidden="true" />
-                {activeFamiliar?.role ?? 'No familiar selected'}
-              </span>
-            </span>
-            <span className="familiar-switcher-chevron" aria-hidden="true">
-              ⌄
-            </span>
-            <select
-              aria-label="Active familiar"
-              value={activeFamiliar?.id ?? ''}
-              onChange={(event) => changeActiveFamiliar(event.target.value)}
+          <h2 className="sidebar-title">
+            <button
+              type="button"
+              className="sidebar-header-toggle"
+              aria-label="Hide conversations"
+              aria-controls="conversation-panel"
+              aria-expanded="true"
+              onClick={() => setConversationsOpen(false)}
             >
-              {MOCK_FAMILIARS.map((familiar) => (
-                <option key={familiar.id} value={familiar.id}>
-                  {familiar.name} — {familiar.role}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="glass-control"
-            aria-label="Hide conversations"
-            aria-controls="conversation-panel"
-            aria-expanded="true"
-            onClick={() => setConversationsOpen(false)}
-          >
-            ‹
-          </button>
+              <span className="sidebar-title-label">Conversations</span>
+              <Icon name="sidebar-simple" size={15} />
+            </button>
+          </h2>
         </header>
-        <div className="search-wrap">
-          <svg className="search-icon" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-            <line x1="10.6" y1="10.6" x2="14" y2="14" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
-          <input
-            className="search"
-            type="search"
-            placeholder="Search"
-            aria-label="Search conversations"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
+
+        <div className="sidebar-controls">
+          <FamiliarSelector activeFamiliar={activeFamiliar} onValueChange={changeActiveFamiliar} />
+
+          <div className="sidebar-primary-actions">
+            <button type="button" className="new-conversation" aria-label="Start a new chat">
+              <Icon name="plus" size={14} />
+              <span>New Chat</span>
+            </button>
+            <button
+              type="button"
+              className="conversation-search-trigger"
+              aria-label="Search conversations"
+              aria-keyshortcuts="Meta+K Control+K"
+              title="Search conversations (⌘K)"
+              onClick={openConversationSearch}
+            >
+              <Icon name="magnifying-glass" size={15} />
+            </button>
+          </div>
         </div>
 
-        <ul className="conversations">
-          {visible.map((conversation) => (
-            <li key={conversation.id}>
-              <button
-                type="button"
-                className={`conversation ${conversation.id === activeId ? 'is-active' : ''}`}
-                aria-label={conversation.title}
-                onClick={() => {
-                  // Switching away cancels the stream rather than letting it
-                  // keep writing into a thread the user has left.
-                  cancelPending();
-                  setActiveId(conversation.id);
-                }}
-              >
-                <Avatar label={conversation.title} seed={conversation.id} size={44} />
-                <span className="conversation-body">
-                  <span className="conversation-top">
-                    <span className="conversation-title">{conversation.title}</span>
-                    <span className="conversation-time">{conversation.timestamp}</span>
-                  </span>
-                  <span className="conversation-preview">
-                    {conversation.previewGlyph ? (
-                      <span className="preview-glyph" aria-hidden="true">
-                        {conversation.previewGlyph}
-                      </span>
-                    ) : null}
-                    {conversation.preview}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className={`conversation-scroll ${visible.length < 5 ? 'is-sparse' : ''}`}>
+          {visible.length > 0 ? (
+            <h3 className="conversation-section-label">
+              <span>Recent</span>
+              <span className="conversation-section-count">{visible.length}</span>
+              <span className="conversation-section-rule" aria-hidden="true" />
+            </h3>
+          ) : null}
 
-        <button type="button" className="new-conversation">
-          <span aria-hidden="true">＋</span>
-          <span>New conversation</span>
-        </button>
+          <ul className="conversations">
+            {visible.map((conversation) => {
+              const conversationFamiliar = MOCK_FAMILIARS.find(
+                (familiar) => familiar.id === conversation.familiarId,
+              );
+              const conversationStatus = conversationFamiliar?.status ?? 'offline';
+
+              return (
+                <li key={conversation.id}>
+                  <button
+                    type="button"
+                    className={`conversation ${conversation.id === activeId ? 'is-active' : ''}`}
+                    aria-label={conversation.title}
+                    data-status={conversationStatus}
+                    onClick={() => {
+                      // Switching away cancels the stream rather than letting it
+                      // keep writing into a thread the user has left.
+                      cancelPending();
+                      setActiveId(conversation.id);
+                    }}
+                  >
+                    <span className="conversation-status-rail" aria-hidden="true" />
+                    <Avatar
+                      label={conversationFamiliar?.name ?? conversation.title}
+                      seed={conversationFamiliar?.id ?? conversation.id}
+                      size={24}
+                    />
+                    <span className="conversation-body">
+                      <span className="conversation-top">
+                        <span className="conversation-title">{conversation.title}</span>
+                        <span className="conversation-time">{conversation.timestamp}</span>
+                      </span>
+                      <span className="conversation-preview">
+                        <span className="conversation-status-dot" aria-hidden="true" />
+                        {conversation.previewGlyph ? (
+                          <span className="preview-glyph" aria-hidden="true">
+                            {conversation.previewGlyph}
+                          </span>
+                        ) : null}
+                        {conversation.preview}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <hr
+          className="rail-resizer rail-resizer-conversations"
+          aria-label="Resize conversations sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={RAIL_LIMITS.conversations.min}
+          aria-valuemax={maximumRailWidth('conversations')}
+          aria-valuenow={conversationsWidth}
+          tabIndex={0}
+          onPointerDown={(event) => beginRailResize('conversations', event)}
+          onKeyDown={(event) => resizeRailWithKeyboard('conversations', event)}
+        />
       </aside>
 
       <main className="thread">
-        <header className="thread-header">
-          {conversationsOpen ? (
-            <span />
-          ) : (
-            <button
-              type="button"
-              className="glass-control"
-              aria-label="Show conversations"
-              aria-controls="conversation-panel"
-              aria-expanded="false"
-              onClick={showConversations}
-            >
-              ›
-            </button>
-          )}
+        {!conversationsOpen ? (
+          <button
+            type="button"
+            className="glass-control thread-edge-control thread-edge-control-left"
+            aria-label="Show conversations"
+            aria-controls="conversation-panel"
+            aria-expanded="false"
+            onClick={showConversations}
+          >
+            <Icon name="sidebar-simple" size={16} />
+          </button>
+        ) : null}
 
-          <div className="thread-title">
-            <Avatar
-              label={activeFamiliar?.name ?? active?.title ?? ''}
-              seed={activeFamiliar?.id ?? active?.id ?? 'none'}
-              size={24}
-            />
-            <span>{activeFamiliar?.name ?? 'No agent'}</span>
-          </div>
-
-          {inspectorOpen ? (
-            <span />
-          ) : (
-            <button
-              type="button"
-              className="glass-control"
-              aria-label="Show agent inspector"
-              aria-controls="agent-inspector"
-              aria-expanded="false"
-              onClick={showInspector}
-            >
-              ‹
-            </button>
-          )}
-        </header>
+        {!inspectorOpen ? (
+          <button
+            type="button"
+            className="glass-control thread-edge-control thread-edge-control-right"
+            aria-label="Show agent inspector"
+            aria-controls="agent-inspector"
+            aria-expanded="false"
+            onClick={showInspector}
+          >
+            ‹
+          </button>
+        ) : null}
 
         <div className="transcript">
           {active ? (
@@ -788,6 +1300,7 @@ export function ChatDemo() {
                   key={message.id}
                   message={message}
                   isStreaming={message.id === streamingId}
+                  onOpenImage={setFocusedImage}
                   onOpenArtifact={(artifact) =>
                     setReader({
                       kind: artifact.kind,
@@ -928,10 +1441,32 @@ export function ChatDemo() {
       </main>
 
       <aside id="agent-inspector" aria-label="Agent inspector" hidden={!inspectorOpen}>
+        <hr
+          className="rail-resizer rail-resizer-inspector"
+          aria-label="Resize agent inspector"
+          aria-orientation="vertical"
+          aria-valuemin={RAIL_LIMITS.inspector.min}
+          aria-valuemax={maximumRailWidth('inspector')}
+          aria-valuenow={inspectorWidth}
+          tabIndex={0}
+          onPointerDown={(event) => beginRailResize('inspector', event)}
+          onKeyDown={(event) => resizeRailWithKeyboard('inspector', event)}
+        />
         <ChatInspector familiar={activeFamiliar} onClose={() => setInspectorOpen(false)} />
       </aside>
 
       {reader ? <DocumentReader document={reader} onClose={() => setReader(null)} /> : null}
+      {focusedImage ? <ImageLightbox image={focusedImage} onClose={closeFocusedImage} /> : null}
+      {conversationSearchOpen ? (
+        <ConversationSearchDialog
+          conversations={conversations}
+          activeId={activeId}
+          query={conversationSearchQuery}
+          onQueryChange={setConversationSearchQuery}
+          onSelect={selectConversationFromSearch}
+          onClose={closeConversationSearch}
+        />
+      ) : null}
     </div>
   );
 }
