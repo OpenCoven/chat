@@ -214,6 +214,14 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.rpc-start',
   'phase1.native-scenarios.launch',
   'phase1.native-scenarios.pairing',
+  'phase1.native-scenarios.pairing-reservation',
+  'phase1.native-scenarios.pairing-credential-status',
+  'phase1.native-scenarios.pairing-create',
+  'phase1.native-scenarios.pairing-pending',
+  'phase1.native-scenarios.pairing-approve',
+  'phase1.native-scenarios.pairing-approved',
+  'phase1.native-scenarios.pairing-exchange',
+  'phase1.native-scenarios.pairing-denial',
   'phase1.native-scenarios.restart',
   'phase1.native-scenarios.reads',
   'phase1.native-scenarios.reconciliation',
@@ -2585,7 +2593,9 @@ async function pairNative(
   adminToken,
   installationId,
   approvePairing = adminMutation,
+  onStage = () => {},
 ) {
+  onStage('create');
   const created = await rpc.ok('cave_pairing_create', {
     handle,
     request: {
@@ -2599,6 +2609,7 @@ async function pairNative(
   if (typeof requestId !== 'string') {
     throw new Error('native pairing creation omitted its request ID');
   }
+  onStage('pending');
   const pending = await rpc.ok('cave_pairing_poll', {
     handle,
     requestId,
@@ -2607,6 +2618,7 @@ async function pairNative(
   if (pending.status !== 'pending') {
     throw new Error('native pairing did not begin pending');
   }
+  onStage('approve');
   await approvePairing(
     origin,
     adminToken,
@@ -2616,6 +2628,7 @@ async function pairNative(
       decision: 'approved',
     },
   );
+  onStage('approved');
   const approved = await rpc.ok('cave_pairing_poll', {
     handle,
     requestId,
@@ -2624,6 +2637,7 @@ async function pairNative(
   if (approved.status !== 'approved') {
     throw new Error('native pairing was not approved');
   }
+  onStage('exchange');
   const exchanged = await rpc.ok('cave_pairing_exchange', {
     handle,
     requestId,
@@ -2797,9 +2811,12 @@ export async function runReservedNativePairing({
   approvePairing = adminMutation,
   onReservation = () => {},
   onCredentialMayExist = () => {},
+  onStage = () => {},
 }) {
+  onStage('reservation');
   const reservation = await establishNativeCleanupReservation(rpc, handle);
   onReservation(reservation);
+  onStage('credential-status');
   const initialCredentialStatus = await rpc.ok('cave_credential_status', {
     handle,
     operation: rpc.operation(),
@@ -2808,7 +2825,15 @@ export async function runReservedNativePairing({
     throw new Error('isolated native credential store was not empty');
   }
   onCredentialMayExist();
-  const paired = await pairNative(rpc, handle, origin, adminToken, installationId, approvePairing);
+  const paired = await pairNative(
+    rpc,
+    handle,
+    origin,
+    adminToken,
+    installationId,
+    approvePairing,
+    onStage,
+  );
   return { reservation, initialCredentialStatus, paired };
 }
 
@@ -2949,6 +2974,9 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           onCredentialMayExist() {
             credentialMayExist = true;
           },
+          onStage(stage) {
+            activeNativeStage = `pairing-${stage}`;
+          },
         }),
       runLifecycle: async (reservedPairing) => {
         nativeCredentialStoreBefore = createHash('sha256')
@@ -2968,7 +2996,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           'phase1.assertion.passed',
         );
 
-        activeNativeStage = 'restart';
+        activeNativeStage = 'pairing-denial';
         try {
           const created = await rpc.ok('cave_pairing_create', {
             handle,
@@ -2998,7 +3026,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           addAssertion(results, 'phase1.pairing.denial', 'failed', 'phase1.assertion.failed');
         }
 
-        activeNativeStage = 'reads';
+        activeNativeStage = 'restart';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3220,6 +3248,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
+        activeNativeStage = 'reads';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,

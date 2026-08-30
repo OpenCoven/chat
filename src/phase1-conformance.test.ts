@@ -486,6 +486,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       const rpcCalls: string[] = [];
       const approvals: string[] = [];
       const credentialMayExistTransitions: boolean[] = [];
+      const pairingStages: string[] = [];
       let subsequentLifecycleCalls = 0;
       const rpc = {
         async request(command: string) {
@@ -531,6 +532,9 @@ describe('Phase 1 real-authority conformance harness', () => {
               onCredentialMayExist: () => {
                 credentialMayExistTransitions.push(true);
               },
+              onStage: (stage) => {
+                pairingStages.push(stage);
+              },
             }),
           runLifecycle: async () => {
             subsequentLifecycleCalls += 1;
@@ -554,6 +558,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       ).toEqual([]);
       expect(approvals).toEqual([]);
       expect(credentialMayExistTransitions).toEqual([]);
+      expect(pairingStages).toEqual(['reservation']);
       expect(subsequentLifecycleCalls).toBe(0);
       expect(markerPresent).toBe(false);
     },

@@ -76,6 +76,16 @@ export function runReservedNativePairing(options: {
     ownerToken: string;
   }) => void;
   onCredentialMayExist?: () => void;
+  onStage?: (
+    stage:
+      | 'reservation'
+      | 'credential-status'
+      | 'create'
+      | 'pending'
+      | 'approve'
+      | 'approved'
+      | 'exchange',
+  ) => void;
 }): Promise<unknown>;
 export function runNativeScenarioOrchestrator<T>(options: {
   runPairing(): Promise<T>;
