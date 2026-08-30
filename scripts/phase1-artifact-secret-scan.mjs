@@ -222,7 +222,7 @@ export function validatePhase1SanitizedReport(value) {
   );
   if (
     `${environment.os}-${environment.arch}` !== report.platform ||
-    !/^v24\.\d+\.\d+$/u.test(environment.nodeVersion) ||
+    environment.nodeVersion !== 'v24.18.1' ||
     environment.packageManagerVersion !== 'pnpm@10.34.0'
   ) {
     throw new Error('Phase 1 report environment is invalid.');
