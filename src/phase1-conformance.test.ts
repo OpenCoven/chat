@@ -1462,6 +1462,16 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test.each([
+    'phase1.stage.isolation-proof.failed',
+    'phase1.stage.assertion-recording.failed',
+    'phase1.stage.evidence-build.failed',
+    'phase1.stage.evidence-validation.failed',
+    'phase1.stage.evidence-retention.failed',
+  ])('publishes the bounded post-runtime diagnostic %s', (diagnosticId) => {
+    expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
+  });
+
+  test.each([
     [
       'timeout',
       { terminationReason: 'timeout' },

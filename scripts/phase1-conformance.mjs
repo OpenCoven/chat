@@ -327,6 +327,11 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.runtime-assertions.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
+  'phase1.stage.isolation-proof.failed',
+  'phase1.stage.assertion-recording.failed',
+  'phase1.stage.evidence-build.failed',
+  'phase1.stage.evidence-validation.failed',
+  'phase1.stage.evidence-retention.failed',
   'phase1.stage.execution-root-cleanup.failed',
   'phase1.cave-authority.timeout',
   'phase1.cave-authority.output-limit',
@@ -4554,102 +4559,112 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     cleanupFailure,
     operatorStateBefore,
   });
-  const isolationRoots = isolationRootObservations.map((root) => ({
-    id: root.id,
-    ownershipVerified: root.ownershipVerified,
-    removedAfterRun:
-      typeof root.path === 'string'
-        ? !existsSync(root.path) && root.removedAfterRun !== false
-        : root.removedAfterRun === true,
-  }));
-  recordVerifiedIds(assertionRecorder, 'chat', evidenceChatAssertionIds);
-  assertionRecorder.pass(
-    'chat',
-    platform === 'darwin-arm64'
-      ? 'chat.native.macos-keychain.isolated'
-      : platform === 'linux-x64'
-        ? 'chat.native.linux-keyring.isolated'
-        : 'chat.native.windows-credential-manager.isolated',
+  const isolationRoots = runPublicPhase1Stage('phase1.stage.isolation-proof.failed', () =>
+    isolationRootObservations.map((root) => ({
+      id: root.id,
+      ownershipVerified: root.ownershipVerified,
+      removedAfterRun:
+        typeof root.path === 'string'
+          ? !existsSync(root.path) && root.removedAfterRun !== false
+          : root.removedAfterRun === true,
+    })),
   );
-  const assertionResults = assertionRecorder.results();
-  const report = buildPlatformEvidence({
-    registry: evidenceAuthorities.registry,
-    platform,
-    caveRecord,
-    releases: {
-      cave: lock.release.caveVersion,
-      coven: lock.release.covenVersion,
-    },
-    commits: {
-      cave: lock.cave.revision,
-      coven: lock.coven.revision,
-      sdk: lock.evidence.revision,
-      chat: lock.chat.revision,
-    },
-    digests: {
-      caveAssertionEngine: lock.release.caveArtifacts.assertionEngine.sha256,
-      caveContractFixture: lock.release.caveArtifacts.contractFixture.sha256,
-      hpkeVectors: lock.release.caveArtifacts.hpkeVectors.sha256,
-      consumerLock: lock.release.consumerLock.sha256,
-      assertionRegistry: lock.evidence.assertionRegistry.sha256,
-      sdkTarballs: artifactDigests.sdkTarballs,
-    },
-    sdkAssertions: assertionResults.sdk,
-    chatAssertions: assertionResults.chat,
-    environment: {
-      nodeVersion: toolVersions.nodeVersion,
-      packageManagerVersion: toolVersions.packageManagerVersion,
-    },
-    metadata: {
-      sdkCandidateRevision: lock.sdk.revision,
-      sdkManifestSha256: lock.release.sdkManifest.sha256,
-      chatHarnessRevision: lock.harness.revision,
-      windowsSupervisorSha256: lock.tools.windowsSupervisor.artifact.sha256,
-      mingwPackageVersion: lock.tools.windowsSupervisor.toolchain.packageVersion,
-      mingwHomebrewCoreRevision: lock.tools.windowsSupervisor.toolchain.homebrewCoreRevision,
-      mingwBottleLayerSha256: lock.tools.windowsSupervisor.toolchain.bottleLayerSha256,
-      mingwLinkerVersion: lock.tools.windowsSupervisor.toolchain.linkerVersion,
-      rustVersion: toolVersions.rustVersion,
-    },
-    isolation: {
-      roots: isolationRoots,
-      operatorState: [
-        {
-          id: 'cave-home',
-          beforeSha256: operatorStateBefore['cave-home'],
-          afterSha256: operatorStateAfter['cave-home'],
-        },
-        {
-          id: 'coven-home',
-          beforeSha256: operatorStateBefore['coven-home'],
-          afterSha256: operatorStateAfter['coven-home'],
-        },
-        {
-          id: 'native-credential-store',
-          beforeSha256: nativeCredentialStoreState.beforeSha256,
-          afterSha256: nativeCredentialStoreState.afterSha256,
-        },
-        {
-          id: 'projects',
-          beforeSha256: operatorStateBefore.projects,
-          afterSha256: operatorStateAfter.projects,
-        },
-      ],
-    },
+  const assertionResults = runPublicPhase1Stage('phase1.stage.assertion-recording.failed', () => {
+    recordVerifiedIds(assertionRecorder, 'chat', evidenceChatAssertionIds);
+    assertionRecorder.pass(
+      'chat',
+      platform === 'darwin-arm64'
+        ? 'chat.native.macos-keychain.isolated'
+        : platform === 'linux-x64'
+          ? 'chat.native.linux-keyring.isolated'
+          : 'chat.native.windows-credential-manager.isolated',
+    );
+    return assertionRecorder.results();
   });
+  const report = runPublicPhase1Stage('phase1.stage.evidence-build.failed', () =>
+    buildPlatformEvidence({
+      registry: evidenceAuthorities.registry,
+      platform,
+      caveRecord,
+      releases: {
+        cave: lock.release.caveVersion,
+        coven: lock.release.covenVersion,
+      },
+      commits: {
+        cave: lock.cave.revision,
+        coven: lock.coven.revision,
+        sdk: lock.evidence.revision,
+        chat: lock.chat.revision,
+      },
+      digests: {
+        caveAssertionEngine: lock.release.caveArtifacts.assertionEngine.sha256,
+        caveContractFixture: lock.release.caveArtifacts.contractFixture.sha256,
+        hpkeVectors: lock.release.caveArtifacts.hpkeVectors.sha256,
+        consumerLock: lock.release.consumerLock.sha256,
+        assertionRegistry: lock.evidence.assertionRegistry.sha256,
+        sdkTarballs: artifactDigests.sdkTarballs,
+      },
+      sdkAssertions: assertionResults.sdk,
+      chatAssertions: assertionResults.chat,
+      environment: {
+        nodeVersion: toolVersions.nodeVersion,
+        packageManagerVersion: toolVersions.packageManagerVersion,
+      },
+      metadata: {
+        sdkCandidateRevision: lock.sdk.revision,
+        sdkManifestSha256: lock.release.sdkManifest.sha256,
+        chatHarnessRevision: lock.harness.revision,
+        windowsSupervisorSha256: lock.tools.windowsSupervisor.artifact.sha256,
+        mingwPackageVersion: lock.tools.windowsSupervisor.toolchain.packageVersion,
+        mingwHomebrewCoreRevision: lock.tools.windowsSupervisor.toolchain.homebrewCoreRevision,
+        mingwBottleLayerSha256: lock.tools.windowsSupervisor.toolchain.bottleLayerSha256,
+        mingwLinkerVersion: lock.tools.windowsSupervisor.toolchain.linkerVersion,
+        rustVersion: toolVersions.rustVersion,
+      },
+      isolation: {
+        roots: isolationRoots,
+        operatorState: [
+          {
+            id: 'cave-home',
+            beforeSha256: operatorStateBefore['cave-home'],
+            afterSha256: operatorStateAfter['cave-home'],
+          },
+          {
+            id: 'coven-home',
+            beforeSha256: operatorStateBefore['coven-home'],
+            afterSha256: operatorStateAfter['coven-home'],
+          },
+          {
+            id: 'native-credential-store',
+            beforeSha256: nativeCredentialStoreState.beforeSha256,
+            afterSha256: nativeCredentialStoreState.afterSha256,
+          },
+          {
+            id: 'projects',
+            beforeSha256: operatorStateBefore.projects,
+            afterSha256: operatorStateAfter.projects,
+          },
+        ],
+      },
+    }),
+  );
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
-  evidenceAuthorities.parsePlatformEvidence(serialized, 'Chat Phase 1 platform evidence');
+  runPublicPhase1Stage('phase1.stage.evidence-validation.failed', () =>
+    evidenceAuthorities.parsePlatformEvidence(serialized, 'Chat Phase 1 platform evidence'),
+  );
 
-  const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
-  return withOwnedArtifactRoot(reportRoot, async () => {
-    const reportPath = resolve(reportRoot.rootPath, 'report.json');
-    writeFileSync(reportPath, serialized, { mode: 0o600 });
-    await reportRoot.retainSanitizedJsonReport({
-      reportPath,
-      destinationPath: options.retainSanitizedReport,
-      secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
+  return runPublicPhase1StageAsync('phase1.stage.evidence-retention.failed', () => {
+    const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
+    return withOwnedArtifactRoot(reportRoot, async () => {
+      const reportPath = resolve(reportRoot.rootPath, 'report.json');
+      writeFileSync(reportPath, serialized, { mode: 0o600 });
+      await reportRoot.retainSanitizedJsonReport({
+        reportPath,
+        destinationPath: options.retainSanitizedReport,
+        secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
+      });
+      return report;
     });
-    return report;
   });
 }
 
