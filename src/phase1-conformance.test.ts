@@ -457,6 +457,20 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('const cleanupCapabilityPattern'),
     );
     expect(emergencyCleanupBoundary).toContain('...nativeAdapterTestEnvironment(environment)');
+    const nativeStages = [
+      "activeNativeStage = 'restart'",
+      "activeNativeStage = 'reads'",
+      "activeNativeStage = 'reconciliation'",
+      "activeNativeStage = 'revocation'",
+      "activeNativeStage = 'credential-cleanup'",
+      "activeNativeStage = 'credential-cleanup-health'",
+      "activeNativeStage = 'credential-cleanup-identity'",
+      "activeNativeStage = 'credential-cleanup-forget'",
+      "activeNativeStage = 'credential-cleanup-status'",
+      "activeNativeStage = 'credential-cleanup-result'",
+    ].map((stage) => nativeScenario.indexOf(stage));
+    expect(nativeStages.every((stage) => stage >= 0)).toBe(true);
+    expect(nativeStages).toEqual([...nativeStages].sort((left, right) => left - right));
     expect(source).toContain("'security', ['default-keychain', '-d', 'user']");
     expect(source).toContain('cave-client-v1:');
     expect(source).toContain("await rpc.ok('cave_forget_credential'");

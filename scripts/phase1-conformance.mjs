@@ -236,6 +236,11 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.reconciliation',
   'phase1.native-scenarios.revocation',
   'phase1.native-scenarios.credential-cleanup',
+  'phase1.native-scenarios.credential-cleanup-health',
+  'phase1.native-scenarios.credential-cleanup-identity',
+  'phase1.native-scenarios.credential-cleanup-forget',
+  'phase1.native-scenarios.credential-cleanup-status',
+  'phase1.native-scenarios.credential-cleanup-result',
   'phase1.native-scenarios.stale-discovery',
   'phase1.native-scenarios.cleanup',
   'phase1.native-scenarios.missing-keychain',
@@ -3134,7 +3139,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
-        activeNativeStage = 'reconciliation';
+        activeNativeStage = 'reads';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3208,7 +3213,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
-        activeNativeStage = 'revocation';
+        activeNativeStage = 'reconciliation';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3269,7 +3274,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
-        activeNativeStage = 'reads';
+        activeNativeStage = 'revocation';
         if (typeof credentialId !== 'string') {
           addAssertion(
             results,
@@ -3341,22 +3346,27 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
 
         activeNativeStage = 'credential-cleanup';
         if (typeof credentialId === 'string' && typeof handle === 'string') {
+          activeNativeStage = 'credential-cleanup-health';
           const cleanupHealth = await rpc.ok('cave_health', {
             handle,
             operation: rpc.operation(),
           });
+          activeNativeStage = 'credential-cleanup-identity';
           if (cleanupHealth.data?.instanceId !== nativeCredentialInstanceId) {
             throw new Error('Cave identity changed before native credential cleanup');
           }
           finalNativeCredentialInstanceId = cleanupHealth.data.instanceId;
+          activeNativeStage = 'credential-cleanup-forget';
           await rpc.ok('cave_forget_credential', {
             handle,
             operation: rpc.operation(),
           });
+          activeNativeStage = 'credential-cleanup-status';
           const status = await rpc.ok('cave_credential_status', {
             handle,
             operation: rpc.operation(),
           });
+          activeNativeStage = 'credential-cleanup-result';
           if (status.status !== 'missing') {
             throw new Error('native credential cleanup did not converge to missing');
           }
