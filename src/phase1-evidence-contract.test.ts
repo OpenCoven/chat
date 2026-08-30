@@ -294,6 +294,18 @@ describe('SDK cross-repository evidence compatibility', () => {
     expect(() => validateMetadataAssertionBindings(duplicated)).toThrow(/unrelated assertion/);
   });
 
+  test('keeps the Windows supervisor metadata binding within the SDK evidence limit', () => {
+    const diagnosticId = windowsSupervisorDiagnosticId(metadata);
+
+    expect(Buffer.byteLength(diagnosticId, 'utf8')).toBeLessThanOrEqual(192);
+    expect(
+      windowsSupervisorDiagnosticId({
+        ...metadata,
+        windowsSupervisorSha256: 'e'.repeat(64),
+      }),
+    ).not.toBe(diagnosticId);
+  });
+
   test('builds the exact SDK platform envelope with structured coverage and scope IDs', () => {
     const registry = parseLockedAssertionRegistry(
       registryText(),

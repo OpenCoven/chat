@@ -304,18 +304,18 @@ export function validateMetadataAssertionBindings({ sdkAssertions, chatAssertion
 }
 
 export function windowsSupervisorDiagnosticId(metadata) {
-  return [
-    'phase1.windows-supervisor',
-    metadata.windowsSupervisorSha256,
-    'mingw-w64',
-    metadata.mingwPackageVersion.replace('mingw-w64 ', ''),
-    'homebrew-core',
-    metadata.mingwHomebrewCoreRevision,
-    'bottle',
-    metadata.mingwBottleLayerSha256,
-    'ld',
-    metadata.mingwLinkerVersion,
-  ].join('.');
+  const binding = createHash('sha256')
+    .update(
+      JSON.stringify([
+        metadata.windowsSupervisorSha256,
+        metadata.mingwPackageVersion,
+        metadata.mingwHomebrewCoreRevision,
+        metadata.mingwBottleLayerSha256,
+        metadata.mingwLinkerVersion,
+      ]),
+    )
+    .digest('hex');
+  return `phase1.windows-supervisor.v1.${binding}`;
 }
 
 function requireDigest(value, label) {
