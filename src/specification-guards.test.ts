@@ -61,6 +61,20 @@ function readJson<T>(relativePath: string) {
   return JSON.parse(readText(relativePath)) as T;
 }
 
+function workflowJobs(workflow: string) {
+  const jobsBlock = workflow.slice(workflow.indexOf('\njobs:'));
+  const headers = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)];
+
+  return new Map(
+    headers.map((header, index) => {
+      const start = header.index ?? 0;
+      const end = headers[index + 1]?.index ?? jobsBlock.length;
+
+      return [header[1], jobsBlock.slice(start, end)];
+    }),
+  );
+}
+
 function listRuntimeSourceFiles(relativePath: string): string[] {
   const absolutePath = resolve(projectRoot, relativePath);
   const entries = readdirSync(absolutePath);
@@ -961,12 +975,17 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toMatch(/^ {2}changes:$/m);
     expect(workflow).toContain('docs_only: $' + '{{ steps.classify.outputs.docs_only }}');
 
-    const gated = workflow.match(/if: needs\.changes\.outputs\.docs_only != 'true'/g) ?? [];
+    const gatedJobs = [...workflowJobs(workflow)]
+      .filter(([, job]) => /^ {4}if: needs\.changes\.outputs\.docs_only != 'true'$/m.test(job))
+      .map(([name]) => name);
 
-    expect(
-      gated,
-      'E2E, Desktop build, Rust, Phase 1 conformance, and Unix supervisor tests are the jobs worth skipping',
-    ).toHaveLength(5);
+    expect(gatedJobs).toEqual([
+      'e2e',
+      'phase1-conformance',
+      'desktop',
+      'rust',
+      'unix-supervisor',
+    ]);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
@@ -1280,7 +1299,6 @@ describe('Phase 1 specification guards', () => {
     const defaultConfig = readText('vitest.config.ts');
     const heavyConfig = readText('vitest.heavy.config.ts');
     const workflow = readText('.github/workflows/ci.yml');
-
     expect(packageManifest.scripts?.test).toBe(
       'corepack pnpm@10.34.0 --ignore-workspace test:unit',
     );
