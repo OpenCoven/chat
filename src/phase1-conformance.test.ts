@@ -1498,6 +1498,8 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.each([
     ['evidence exceeds the 1-byte evidence limit', 'size'],
+    ['Evidence exceeds the 50000-node limit', 'size'],
+    ['Evidence exceeds the 32-level depth limit', 'size'],
     ['Chat Phase 1 platform evidence is not valid JSON: private parser detail', 'json'],
     ['duplicate JSON object key at private.path', 'duplicate-key'],
     ['evidence.private contains a possible secret', 'possible-secret'],

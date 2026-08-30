@@ -4321,7 +4321,10 @@ export function evidenceValidationFailureDiagnostic(error) {
     typeof error.message === 'string'
       ? error.message
       : '';
-  if (message.includes('evidence limit')) {
+  if (
+    message.includes('evidence limit') ||
+    /^Evidence exceeds the \d+-(?:node|level depth) limit$/u.test(message)
+  ) {
     return 'phase1.stage.evidence-validation.size';
   }
   if (message.includes('is not valid JSON')) {
