@@ -727,6 +727,25 @@ async function runExactCargoObservationTests({
   return passed;
 }
 
+export function normalizeSchemaV2ObservationTests(value) {
+  const keys = ['chat', 'chatRust', 'covenRust', 'sdk'];
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join('\0') !== keys.join('\0') ||
+    keys.some((key) => !(value[key] instanceof Set))
+  ) {
+    throw new Error('Schema-v2 observation test results are incomplete or malformed.');
+  }
+  return Object.freeze({
+    sdk: value.sdk,
+    chat: value.chat,
+    chatRust: value.chatRust,
+    covenRust: value.covenRust,
+  });
+}
+
 export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
   const shortRoot =
     process.platform === 'win32'
@@ -836,7 +855,12 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
             ]),
       ],
     });
-    return { sdkTests, chatTests, chatRustTests, covenRustTests };
+    return normalizeSchemaV2ObservationTests({
+      sdk: sdkTests,
+      chat: chatTests,
+      chatRust: chatRustTests,
+      covenRust: covenRustTests,
+    });
   } finally {
     if (shortRoot !== undefined) {
       await shortRoot.cleanup();

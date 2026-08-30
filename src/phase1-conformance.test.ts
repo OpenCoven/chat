@@ -28,6 +28,7 @@ import {
   classifyCavePackageFailure,
   cloneExactCheckout,
   NativeRpcClient,
+  normalizeSchemaV2ObservationTests,
   parseArgs,
   parseCaveConformanceOutput,
   recordCaveMatrixFailure,
@@ -97,6 +98,28 @@ function assertionAt(assertions: ReturnType<typeof passingAssertions>, index: nu
 }
 
 describe('Phase 1 real-authority conformance harness', () => {
+  test('normalizes the exact observation result map consumed by schema-v2 adaptation', () => {
+    const sdk = new Set(['sdk observation']);
+    const chat = new Set(['chat observation']);
+    const chatRust = new Set(['chat rust observation']);
+    const covenRust = new Set(['coven rust observation']);
+
+    expect(normalizeSchemaV2ObservationTests({ sdk, chat, chatRust, covenRust })).toEqual({
+      sdk,
+      chat,
+      chatRust,
+      covenRust,
+    });
+    expect(() =>
+      normalizeSchemaV2ObservationTests({
+        sdkTests: sdk,
+        chatTests: chat,
+        chatRustTests: chatRust,
+        covenRustTests: covenRust,
+      } as never),
+    ).toThrow(/incomplete or malformed/u);
+  });
+
   test.skipIf(process.platform === 'win32')(
     'clones local sources without invoking their upload-pack hook',
     async () => {

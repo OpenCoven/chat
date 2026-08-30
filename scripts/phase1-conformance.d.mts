@@ -60,10 +60,22 @@ export function runSchemaV2ObservationSuites(
   environment: NodeJS.ProcessEnv,
   platform: 'darwin-arm64' | 'linux-x64' | 'win32-x64',
 ): Promise<{
-  sdkTests: Set<string>;
-  chatTests: Set<string>;
-  chatRustTests: Set<string>;
-  covenRustTests: Set<string>;
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
+}>;
+
+export function normalizeSchemaV2ObservationTests(value: {
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
+}): Readonly<{
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
 }>;
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
 export function assertPairingStatus(
