@@ -312,11 +312,7 @@ describe('Phase 1 conformance lock', () => {
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     expect(readPhase1ConformanceLock()).toEqual({
       path: resolve(projectRoot, 'phase1-conformance.lock.json'),
-      version: 2,
-      validator: {
-        repository: 'OpenCoven/sdk',
-        revision: 'b42c03f00ab248504c8930564790a9744403abe5',
-      },
+      version: 3,
       chat: {
         repository: 'OpenCoven/chat',
         revision: 'edd4728792321771496df58bfc0e6122908a96ec',
@@ -338,6 +334,20 @@ describe('Phase 1 conformance lock', () => {
         tree: '7cc5988b5a06f3f279e5c034cf2228775bd2b0e0',
       },
     });
+  });
+
+  test('rejects a committed validator selector in the non-cyclic version-3 source lock', () => {
+    const lock = JSON.parse(
+      readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
+    );
+    lock.validator = {
+      repository: 'OpenCoven/sdk',
+      revision: 'b42c03f00ab248504c8930564790a9744403abe5',
+    };
+
+    expect(() => readPhase1ConformanceLock(writeLock(lock))).toThrow(
+      /version, chat, sdk, cave, and coven/u,
+    );
   });
 
   test('rejects an unexpected repository', () => {

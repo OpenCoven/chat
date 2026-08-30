@@ -14,6 +14,7 @@ export function parseArgs(argv: string[]): {
   retainSanitizedReport: string;
   platform?: 'darwin-arm64' | 'linux-x64' | 'win32-x64';
   outputPath?: string;
+  validatorRevision?: string;
   chatSourceRoot: string;
   sdkSourceRoot?: string;
   sdkValidatorSourceRoot?: string;
@@ -49,6 +50,10 @@ export function buildPhase1Report(options: {
   };
   diagnosticIds: string[];
 };
+export function buildObservedSchemaV2Assertions(options: Record<string, unknown>): {
+  sdk: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
+  chat: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
+};
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
 export function assertPairingStatus(
   value: { status?: string } | null | undefined,
@@ -83,6 +88,8 @@ export function cloneExactCheckout(options: {
 }): Promise<void>;
 export class NativeRpcClient {
   constructor(child: unknown, options?: { shutdownTimeoutMs?: number });
+  commandCount(command: string): number;
+  responsesContainNoSecrets(): boolean;
   close(): Promise<void>;
 }
 export function safeEnvironment(

@@ -101,6 +101,10 @@ export function verifyFrozenPackedConsumer(options: {
   releaseManifest: ContractCanaryLock['sdk']['releaseManifest'];
   sdkArtifacts: ContractCanaryLock['sdk']['artifacts'];
   caveArtifacts: ContractCanaryLock['cave']['artifacts'];
+  observedAssertions: {
+    sdk: readonly string[];
+    chat: readonly string[];
+  };
 };
 export function parseArgs(argv: string[]): {
   sdkRoot: string;

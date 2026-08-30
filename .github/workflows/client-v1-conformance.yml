@@ -1,6 +1,10 @@
 name: client-v1 conformance
 on:
   workflow_dispatch:
+    inputs:
+      validator_revision:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -38,12 +42,18 @@ jobs:
         run: corepack pnpm@10.34.0 install --frozen-lockfile --ignore-scripts
       - name: Set up frozen Rust
         run: rustup toolchain install 1.95.0 --profile minimal && rustup default 1.95.0
+      - name: Install frozen Linux Secret Service
+        if: matrix.platform == 'linux-x64'
+        run: node scripts/phase1-linux-secret-service.mjs --install
       - name: Require frozen toolchain
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; const run = (command, args) => execFileSync(command, args, { encoding: ''utf8'' }).trim(); if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
       - name: Verify frozen harness bytes
-        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 89787 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''6942967d4173db5640794b132953a86c152064854703ff96e257de472c1cfb5b'') throw new Error(''Frozen harness bytes do not match'');"'
+        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 118110 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''e509c3643b8ef56ed7e49ce4e5ee7a7603a2d8276e71194fb6257e092b22648f'') throw new Error(''Frozen harness bytes do not match'');"'
       - name: Produce platform evidence
-        run: node scripts/phase1-conformance.mjs --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"
+        shell: bash
+        env:
+          OPENCOVEN_VALIDATOR_REVISION: ${{ inputs.validator_revision }}
+        run: if [[ "${{ matrix.platform }}" == "linux-x64" ]]; then bash scripts/phase1-linux-secret-service.sh --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; else node scripts/phase1-conformance.mjs --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; fi
       - name: Validate canonical platform record
         run: 'node --input-type=module --eval "import { lstatSync, readFileSync } from ''node:fs''; const sort = (value) => Array.isArray(value) ? value.map(sort) : value !== null && typeof value === ''object'' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])])) : value; const path = process.argv[1]; const stats = lstatSync(path); const text = readFileSync(path, ''utf8''); const value = JSON.parse(text); if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 || stats.size > 1048576 || value === null || Array.isArray(value) || value.schemaVersion !== 2 || value.platform !== process.argv[2] || JSON.stringify(sort(value), null, 2) + ''\n'' !== text) throw new Error(''Platform record is not canonical'');" ".artifacts/client-v1-conformance-${{ matrix.platform }}.json" "${{ matrix.platform }}"'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

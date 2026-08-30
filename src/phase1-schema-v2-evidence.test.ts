@@ -9,8 +9,10 @@ import {
   REQUIRED_PHASE1_ASSERTION_IDS,
   validatePhase1SanitizedReport,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
+import { buildObservedSchemaV2Assertions } from '../scripts/phase1-conformance.mjs';
 import {
   buildSchemaV2PlatformEvidence,
+  createObservedAssertionRecorder,
   loadSdkEvidenceContract,
   serializeValidatedSchemaV2PlatformEvidence,
 } from '../scripts/phase1-schema-v2-evidence.mjs';
@@ -310,6 +312,20 @@ async function fixture() {
         tree: validator.tree,
       },
     },
+    observedAssertions: {
+      sdk: assertions.sdk.map((id) => ({
+        id,
+        result: 'pass',
+        diagnosticId: 'phase1.assertion.passed',
+      })),
+      chat: [...assertions.chat.common, ...(assertions.chat.platforms['darwin-arm64'] ?? [])].map(
+        (id) => ({
+          id,
+          result: 'pass',
+          diagnosticId: 'phase1.assertion.passed',
+        }),
+      ),
+    },
     verified: {
       validator,
       candidate: {
@@ -387,6 +403,146 @@ async function fixture() {
 }
 
 describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', () => {
+  test('records each observed assertion exactly once without filling omissions', () => {
+    const recorder = createObservedAssertionRecorder(['sdk.one', 'sdk.two'], 'SDK');
+    recorder.pass('sdk.two');
+    recorder.pass('sdk.one');
+
+    expect(recorder.complete()).toEqual([
+      {
+        id: 'sdk.one',
+        result: 'pass',
+        diagnosticId: 'phase1.assertion.passed',
+      },
+      {
+        id: 'sdk.two',
+        result: 'pass',
+        diagnosticId: 'phase1.assertion.passed',
+      },
+    ]);
+    expect(() => recorder.pass('sdk.one')).toThrow(/duplicate/u);
+    expect(() => createObservedAssertionRecorder(['sdk.one'], 'SDK').pass('sdk.unknown')).toThrow(
+      /unexpected/u,
+    );
+    expect(() => createObservedAssertionRecorder(['sdk.one'], 'SDK').complete()).toThrow(
+      /missing/u,
+    );
+  });
+
+  test('derives the complete registry only from named checks observed during the run', async () => {
+    const { input, registry } = await fixture();
+    const sdkTests = new Set([
+      'canonicalizes routes and validates strict discovery v2',
+      'rejects stale or malformed discovery records',
+      'invalidates an instance-replaced credential before bearer attachment',
+      'accepts Cave health responses when the minimum client version is compatible',
+      'creates, polls, exchanges, validates, and forgets a paired credential',
+      "surfaces pairing exchange errors: 'pairing_pending'",
+      "surfaces pairing exchange errors: 'pairing_denied'",
+      "surfaces pairing exchange errors: 'pairing_expired'",
+      'allows only one transport exchange across concurrent exchange attempts',
+      'allows retry after a pre-send authority mismatch without replaying the secret',
+      'preserves the managed contract error code and retry semantics for rate_limited',
+      'never parses a proxy rejection as a Client v1 health envelope',
+      'uses exact canonical routes, deterministic queries, encoded ids',
+      'validates page options and conversation ids before transport I/O',
+      'parses the optional top-level cursor with core canonical validation',
+      'propagates reconcile_required from messages without retrying and forwards the id',
+      'preserves revoked bearer rejection without fallback or retry',
+      'prefers non-empty COVEN_HOME without invoking the CLI',
+      'sends only the reviewed health request and parses a valid response',
+      'preserves structured daemon error fields without flattening them',
+      'reports connect timeout and honors cancellation',
+      'rejects a Unix response received at its 1ms absolute deadline',
+      "rejects 'oversized body declaration'",
+      'rejects invalid HTTP health framing',
+      'rejects missing Entry constructors as secure_store_unavailable',
+      'fails closed before discovery when transport security is missing at runtime',
+    ]);
+    const chatTests = new Set([
+      'never places secret canaries in managed command arguments or results',
+      'surfaces reconcile_required separately from generic errors',
+      'only revokes after a confirmed packed managed credential status',
+      'propagates a managed SDK deadline to native cancellation and caps native duration',
+    ]);
+    const chatRust = new Set([
+      'transport::tests::pairing_exchange_empty_post_declares_zero_content_length',
+      'coven::tests::maps_client_failures_to_bounded_diagnostics_without_leaking_details',
+    ]);
+    const covenRust = new Set([
+      'transport::unix::tests::platform_peer_credentials_report_the_connected_process_uid',
+      'transport::unix::tests::connected_peer_uid_must_match_discovered_and_current_owner',
+      'discovers_only_an_owner_local_unix_socket',
+      'a_mutation_is_not_sent_to_a_replacement_before_that_peer_is_negotiated',
+    ]);
+    const native = {
+      backend: 'macos-keychain',
+      compatibilityBeforePairing: true,
+      releaseDiscovery: true,
+      compatibleHealth: true,
+      pairingCreate: true,
+      pairingPending: true,
+      pairingExchange: true,
+      pairingDenied: true,
+      pairingSecretNative: true,
+      bearerNative: true,
+      bearerNeverCrossedBoundary: true,
+      nativeStoreRoundtrip: true,
+      restartCredentialReused: true,
+      noAutomaticRepairing: true,
+      staleStateRefused: true,
+      reads: {
+        familiars: true,
+        projects: true,
+        conversations: true,
+        conversation: true,
+        messages: true,
+      },
+      reconcileRequired: true,
+      reconcileDidNotPair: true,
+      revocationTransition: true,
+      revokedReads: {
+        familiars: true,
+        projects: true,
+        conversations: true,
+        conversation: true,
+        messages: true,
+      },
+      allRevokedReadsRefused: true,
+      keychainUnavailable: true,
+    };
+    const options = {
+      registry,
+      platform: 'darwin-arm64',
+      packageObservations: {
+        sdk: input.observedAssertions.sdk.slice(0, 6).map(({ id }) => id),
+        chat: input.observedAssertions.chat.slice(0, 4).map(({ id }) => id),
+      },
+      primaryReport: input.primaryReport,
+      caveRecord: input.caveRecord,
+      native,
+      coven: {
+        ownerLocal: true,
+        health: true,
+        connectedIdentity: true,
+        executableTrusted: true,
+        executableTrustFailure: true,
+        trustProviderUnavailable: true,
+      },
+      tests: { sdk: sdkTests, chat: chatTests, chatRust, covenRust },
+      scansPassed: true,
+    };
+
+    const observed = buildObservedSchemaV2Assertions(options);
+    expect(observed.sdk.map(({ id }) => id)).toEqual(
+      (registry.assertions as { sdk: string[] }).sdk,
+    );
+    expect(observed.chat).toHaveLength(input.observedAssertions.chat.length);
+
+    sdkTests.delete('reports connect timeout and honors cancellation');
+    expect(() => buildObservedSchemaV2Assertions(options)).toThrow(/missing/u);
+  });
+
   test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
     const loaded = await loadSdkEvidenceContract({
       validatorRoot,
@@ -502,6 +658,72 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
           },
         }),
       ).toThrow();
+    },
+  );
+
+  test.each(['missing', 'duplicate', 'unexpected', 'skip', 'fail'])(
+    'rejects %s observed SDK assertion results',
+    async (kind) => {
+      const { input } = await fixture();
+      const sdk = input.observedAssertions.sdk.map((entry) => ({ ...entry }));
+      const first = sdk[0];
+      if (first === undefined) {
+        throw new Error('SDK observation fixture is empty');
+      }
+      if (kind === 'missing') {
+        sdk.pop();
+      } else if (kind === 'duplicate') {
+        sdk.push({ ...first });
+      } else if (kind === 'unexpected') {
+        sdk[0] = { ...first, id: 'sdk.unexpected' };
+      } else if (kind === 'skip') {
+        sdk[0] = { ...first, result: 'skip' };
+      } else {
+        sdk[0] = { ...first, result: 'fail' };
+      }
+
+      expect(() =>
+        buildSchemaV2PlatformEvidence({
+          ...input,
+          observedAssertions: {
+            ...input.observedAssertions,
+            sdk,
+          },
+        }),
+      ).toThrow(/observed SDK assertion/iu);
+    },
+  );
+
+  test.each(['missing', 'duplicate', 'unexpected', 'skip', 'fail'])(
+    'rejects %s observed Chat assertion results',
+    async (kind) => {
+      const { input } = await fixture();
+      const chat = input.observedAssertions.chat.map((entry) => ({ ...entry }));
+      const first = chat[0];
+      if (first === undefined) {
+        throw new Error('Chat observation fixture is empty');
+      }
+      if (kind === 'missing') {
+        chat.pop();
+      } else if (kind === 'duplicate') {
+        chat.push({ ...first });
+      } else if (kind === 'unexpected') {
+        chat[0] = { ...first, id: 'chat.unexpected' };
+      } else if (kind === 'skip') {
+        chat[0] = { ...first, result: 'skip' };
+      } else {
+        chat[0] = { ...first, result: 'fail' };
+      }
+
+      expect(() =>
+        buildSchemaV2PlatformEvidence({
+          ...input,
+          observedAssertions: {
+            ...input.observedAssertions,
+            chat,
+          },
+        }),
+      ).toThrow(/observed Chat assertion/iu);
     },
   );
 
@@ -647,6 +869,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       schema: input.sdkContract.schema,
     });
     const reordered = reverseObjectKeys(input) as typeof input;
+    reordered.observedAssertions.sdk.reverse();
+    reordered.observedAssertions.chat.reverse();
     const second = serializeValidatedSchemaV2PlatformEvidence(
       buildSchemaV2PlatformEvidence(reordered),
       {

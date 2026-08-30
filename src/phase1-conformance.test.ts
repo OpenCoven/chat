@@ -258,6 +258,8 @@ describe('Phase 1 real-authority conformance harness', () => {
   test('parses the protected schema-v2 platform invocation without legacy output flags', () => {
     expect(
       parseArgs([
+        '--validator-revision',
+        'd'.repeat(40),
         '--platform',
         'darwin-arm64',
         '--output',
@@ -265,13 +267,36 @@ describe('Phase 1 real-authority conformance harness', () => {
       ]),
     ).toMatchObject({
       platform: 'darwin-arm64',
+      validatorRevision: 'd'.repeat(40),
       outputPath: expect.stringContaining('.artifacts/client-v1-conformance-darwin-arm64.json'),
     });
-    expect(() => parseArgs(['--platform', 'linux-x64'])).toThrow(/requires --output/u);
+    expect(() =>
+      parseArgs(['--validator-revision', 'd'.repeat(40), '--platform', 'linux-x64']),
+    ).toThrow(/requires --output/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'linux-x64',
+        '--output',
+        './.artifacts/client-v1-conformance-linux-x64.json',
+      ]),
+    ).toThrow(/requires --validator-revision/u);
+    expect(() =>
+      parseArgs([
+        '--validator-revision',
+        'D'.repeat(40),
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+      ]),
+    ).toThrow(/lowercase immutable 40-character commit SHA/u);
     expect(() =>
       parseArgs([
         '--platform',
         'darwin-arm64',
+        '--validator-revision',
+        'd'.repeat(40),
         '--output',
         './.artifacts/client-v1-conformance-linux-x64.json',
       ]),
@@ -280,12 +305,17 @@ describe('Phase 1 real-authority conformance harness', () => {
       parseArgs([
         '--platform',
         'darwin-arm64',
+        '--validator-revision',
+        'd'.repeat(40),
         '--output',
         './.artifacts/client-v1-conformance-darwin-arm64.json',
         '--retain-sanitized-report',
         './legacy.json',
       ]),
     ).toThrow(/cannot combine/u);
+    expect(() => parseArgs(['--validator-revision', 'd'.repeat(40), '--scenario', 'all'])).toThrow(
+      /only valid with schema-v2/u,
+    );
   });
 
   test('parses Cave assertion output without retaining diagnostic prose', () => {

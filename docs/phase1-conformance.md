@@ -5,7 +5,7 @@ Chat has one real-authority journey with two evidence surfaces:
 - `pnpm test:phase1-conformance` keeps the strict schema-v1 report used by the
   original Phase 1 gate.
 - `.github/workflows/client-v1-conformance.yml` invokes the same harness with
-  `--platform` and `--output`, adapts only a complete passing primary run, and
+  `--validator-revision`, `--platform`, and `--output`, adapts only a complete passing primary run, and
   retains one canonical SDK schema-v2 platform record.
 
 The schema-v2 path does not convert failures, blocks, skips, missing backends,
@@ -15,10 +15,8 @@ and the exact SDK validator accepts the final bytes.
 
 ## Frozen inputs
 
-`phase1-conformance.lock.json` version 2 pins:
+`phase1-conformance.lock.json` version 3 pins only the non-cyclic source side:
 
-- temporary SDK validator revision
-  `b42c03f00ab248504c8930564790a9744403abe5`;
 - SDK package candidate
   `acc38488f00860d246c3c553375634d64806eabb` and tree;
 - Cave authority
@@ -28,8 +26,9 @@ and the exact SDK validator accepts the final bytes.
 - Chat production source
   `edd4728792321771496df58bfc0e6122908a96ec` and tree.
 
-The validator is separate from the packed SDK candidate. The harness clones
-the exact revisions into process-owned roots, rejects staged, unstaged,
+The validator is separate from the packed SDK candidate and is selected by a
+required protected-run `validator_revision` input. The harness clones every
+exact revision into process-owned roots, rejects staged, unstaged,
 untracked, ignored, hidden-index, filtered, replacement-ref, submodule, tree,
 or HEAD drift, and executes only committed authority and harness bytes.
 
@@ -57,6 +56,7 @@ A schema-v2 platform run must use its exact output path:
 
 ```bash
 node scripts/phase1-conformance.mjs \
+  --validator-revision <full-sdk-validator-commit> \
   --platform darwin-arm64 \
   --output .artifacts/client-v1-conformance-darwin-arm64.json
 ```
@@ -75,8 +75,10 @@ OPENCOVEN_CAVE_ROOT
 OPENCOVEN_COVEN_ROOT
 ```
 
-The corresponding command-line overrides are `--chat-root`, `--sdk-root`,
-`--validator-root`, `--cave-root`, and `--coven-root`. Overrides select a Git
+The corresponding source-path overrides are `--chat-root`, `--sdk-root`,
+`--validator-root`, `--cave-root`, and `--coven-root`. The validator path is
+only an object source: `--validator-revision` remains the immutable selector.
+Overrides select a Git
 object source only; the harness still creates and verifies detached clean
 checkouts at the lock revisions.
 
@@ -107,21 +109,32 @@ ID and credential round trip, deletes the installation and credential
 entries, and requires the same empty-state digest afterward. Missing or locked
 native services fail the run.
 
-Linux runners must expose a working Secret Service session. Windows runners
-must permit local-persistence Credential Manager entries. macOS runners must
-permit generic-password operations. No fallback to shared-memory custody is
-allowed in a schema-v2 run.
+The Linux workflow installs exact Ubuntu 24.04 versions of `dbus-daemon`,
+`gnome-keyring`, and `libsecret-tools`. It then creates a private mode-`0700`
+runtime root, starts a fresh `dbus-run-session` and foreground Secret Service,
+performs an independent `secret-tool` store/lookup/delete probe, runs the
+harness, terminates the exact daemon PID, and verifies the owned root before
+deleting it. Only its validated `DBUS_SESSION_BUS_ADDRESS` and
+`XDG_RUNTIME_DIR` enter the curated harness subprocess environment.
+
+Windows runners must permit local-persistence Credential Manager entries.
+macOS runners must permit generic-password operations. No fallback to
+shared-memory custody is allowed in a schema-v2 run.
 
 ## Protected workflow
 
 The dedicated workflow is manually dispatchable and uses the protected
-environment `client-v1-conformance`. That environment must have:
+environment `client-v1-conformance`, GitHub environment ID `20863036831`.
+That environment must have:
 
 - required reviewers; and
 - deployment branch rules restricted to protected branches.
 
-The exact SDK workflow contract currently requires no application credential
-secret because all counterpart repositories are public. The workflow has only
+Self-review is prevented and administrators cannot bypass the protection. The
+exact SDK workflow contract requires no application credential secret because
+all counterpart repositories are public. The manual dispatch requires one
+input, `validator_revision`, containing the full lowercase 40-character SDK
+validator commit. The workflow has only
 the three protected matrix jobs and one permissionless aggregation-confirmation
 job. It uses only the pinned official checkout, Node, pnpm, artifact upload,
 and build-provenance attestation actions required by the SDK validator.
@@ -168,15 +181,18 @@ For schema v2, all 15 must be `passed`. The adapter then:
 
 1. retains Cave's exact `renderConformanceRecord` output from the locked Cave
    engine, including every frozen Cave assertion in order;
-2. emits every frozen SDK assertion and every common plus platform Chat
-   assertion exactly once, in registry order, as `pass`;
-3. recomputes validator, candidate, Cave, Coven, Chat, harness, manifest,
+2. records each frozen SDK and common/platform Chat assertion only after its
+   named packed-consumer, SDK test, native RPC, Cave, Coven, platform-trust, or
+   evidence-scan check succeeds during that run;
+3. rejects incomplete, duplicate, unexpected, skipped, failed, or blocked
+   observed-result maps rather than filling omissions with passing entries;
+4. recomputes validator, candidate, Cave, Coven, Chat, harness, manifest,
    tarball, fixture, vector, lockfile, registry, consumer-lock, and vendor
    identities from exact checkout or artifact bytes;
-4. records exact toolchain and native backend metadata;
-5. records opaque process-owned root IDs and before/after operator-state
+5. records exact toolchain and native backend metadata;
+6. records opaque process-owned root IDs and before/after operator-state
    digests; and
-6. uses the SDK recursive canonical serializer: sorted object keys, preserved
+7. uses the SDK recursive canonical serializer: sorted object keys, preserved
    array order, two-space JSON, LF endings, and one trailing newline.
 
 The schema-v2 path consumes Chat's frozen vendored SDK tarballs on every
@@ -219,12 +235,11 @@ Diagnostics are stable IDs only.
   byte/inode snapshot confirms it did not change after scanning.
 - Partial subprocess output and skipped controls are never accepted as passes.
 
-At the temporary validator revision, the SDK frozen lock deliberately records
-the old Chat source as `blocked`. Therefore the protected workflow is expected
-to fail closed and **no platform evidence is claimed yet**. Before a real
-matrix run can pass, SDK #74 must contain a compatible producer entry naming
-the reviewed Chat producer commit, harness bytes, workflow bytes, protected
-environment, and artifact conventions.
+No platform evidence is claimed until an SDK validator commit contains a
+compatible producer entry naming the reviewed Chat producer commit, harness
+bytes, workflow bytes, protected environment, and artifact conventions. A
+missing, malformed, stale, or otherwise incompatible `validator_revision`
+fails before evidence publication.
 
 ## SDK aggregation handoff
 
@@ -236,14 +251,16 @@ verifies each attestation, re-renders the Cave record, and aggregates only the
 downloaded canonical bytes. Chat does not create or commit a synthetic
 aggregate.
 
-## Pending SDK #74 merge pin
+## Non-cyclic SDK handoff
 
-After SDK #74 merges with the compatible Chat producer entry, update only:
+The Chat producer commit is created first. SDK #74 then freezes that exact
+producer commit/tree, package manifest, harness, workflow, environment ID, and
+source/signer digests in a later validator commit. Operators dispatch the
+already-committed Chat workflow with that full SDK commit as
+`validator_revision`.
 
-```text
-phase1-conformance.lock.json → validator.revision
-```
-
-from the temporary PR head to the SDK merge commit. The validator tree and
-contract/schema metadata are recomputed from that exact clean checkout, so no
-producer code or workflow surgery is required.
+The selected validator commit and tree, plus its contract and schema digests,
+are recomputed from the exact clean checkout and embedded in the platform
+record. The SDK aggregator still requires those values to equal the validator
+checkout performing aggregation. No SDK validator revision is committed back
+into Chat, so the two repositories do not form a commit-hash cycle.

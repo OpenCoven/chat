@@ -500,6 +500,22 @@ export function verifyFrozenPackedConsumer({ chatRoot = root, sdkRoot, caveRoot 
       releaseManifest: lock.sdk.releaseManifest,
       sdkArtifacts: lock.sdk.artifacts,
       caveArtifacts: lock.cave.artifacts,
+      observedAssertions: Object.freeze({
+        sdk: Object.freeze([
+          'sdk.install.packed-tarballs',
+          'sdk.install.public-exports',
+          'sdk.install.no-source-checkout',
+          'sdk.install.no-workspace-link',
+          'sdk.provenance.fixture-bytes-match',
+          'sdk.provenance.hpke-vectors-match',
+        ]),
+        chat: Object.freeze([
+          'chat.install.exact-sdk-tarballs',
+          'chat.install.consumer-lock-matches',
+          'chat.install.no-source-checkout',
+          'chat.install.no-workspace-link',
+        ]),
+      }),
     });
   } finally {
     if (artifactContext !== undefined) {

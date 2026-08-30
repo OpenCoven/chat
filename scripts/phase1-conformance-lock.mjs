@@ -189,8 +189,8 @@ export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
   }
 
   requireRecord(lockData, 'phase1-conformance.lock.json');
-  if (lockData.version !== 1 && lockData.version !== 2) {
-    throw new Error('phase1-conformance.lock.json version must be 1 or 2.');
+  if (![1, 2, 3].includes(lockData.version)) {
+    throw new Error('phase1-conformance.lock.json version must be 1, 2, or 3.');
   }
   const keys = lockData.version === 2 ? repositoryKeys : legacyRepositoryKeys;
   requireExactKeys(
@@ -206,7 +206,11 @@ export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
     ...Object.fromEntries(
       keys.map((key) => [
         key,
-        normalizeLockEntry(lockData, key, lockData.version === 2 && key !== 'validator'),
+        normalizeLockEntry(
+          lockData,
+          key,
+          (lockData.version === 2 && key !== 'validator') || lockData.version === 3,
+        ),
       ]),
     ),
   });

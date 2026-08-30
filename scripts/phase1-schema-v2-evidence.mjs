@@ -112,14 +112,10 @@ export function assertSdkContractMatchesPhase1Lock(sdkContractValue, phase1LockV
   const sdkContract = requireRecord(sdkContractValue, 'SDK evidence contract');
   const phase1Lock = requireRecord(phase1LockValue, 'Phase 1 conformance lock');
   const frozenLock = requireRecord(sdkContract.frozenLock, 'Frozen SDK lock');
-  if (phase1Lock.version !== 2) {
-    throw new Error('Schema-v2 evidence requires Phase 1 lock version 2.');
+  if (phase1Lock.version !== 3) {
+    throw new Error('Schema-v2 evidence requires Phase 1 lock version 3.');
   }
   const expected = {
-    validator: {
-      repository: sdkContract.validatorIdentity.repository,
-      revision: sdkContract.validatorIdentity.commit,
-    },
     sdk: {
       repository: frozenLock.candidate.repository,
       revision: frozenLock.candidate.commit,
@@ -141,7 +137,7 @@ export function assertSdkContractMatchesPhase1Lock(sdkContractValue, phase1LockV
       tree: frozenLock.sources.chat.tree,
     },
   };
-  for (const key of ['validator', 'sdk', 'cave', 'coven', 'chat']) {
+  for (const key of ['sdk', 'cave', 'coven', 'chat']) {
     if (!equalJson(phase1Lock[key], expected[key])) {
       throw new Error(`Phase 1 ${key} pin does not match the SDK frozen contract.`);
     }
@@ -574,12 +570,79 @@ function validateCaveRecord(caveRecordValue, registry, expected) {
   return structuredClone(caveRecord);
 }
 
-function passingAssertions(ids) {
-  return ids.map((id) => ({
-    id,
-    result: 'pass',
-    diagnosticId: 'phase1.assertion.passed',
-  }));
+function validateObservedAssertions(value, expectedIds, label) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array.`);
+  }
+  const expected = new Set(expectedIds);
+  const observed = new Map();
+  for (const entryValue of value) {
+    const entry = requireRecord(entryValue, `${label} entry`);
+    if (
+      Object.keys(entry).length !== 3 ||
+      !Object.hasOwn(entry, 'id') ||
+      !Object.hasOwn(entry, 'result') ||
+      !Object.hasOwn(entry, 'diagnosticId') ||
+      typeof entry.id !== 'string' ||
+      !expected.has(entry.id)
+    ) {
+      throw new Error(`${label} contains an unexpected result.`);
+    }
+    if (observed.has(entry.id)) {
+      throw new Error(`${label} contains duplicate result ${entry.id}.`);
+    }
+    if (entry.result !== 'pass' || entry.diagnosticId !== 'phase1.assertion.passed') {
+      throw new Error(`${label} ${entry.id} is not passing.`);
+    }
+    observed.set(entry.id, {
+      id: entry.id,
+      result: 'pass',
+      diagnosticId: 'phase1.assertion.passed',
+    });
+  }
+  const missing = expectedIds.filter((id) => !observed.has(id));
+  if (missing.length > 0 || observed.size !== expectedIds.length) {
+    throw new Error(`${label} is missing required results.`);
+  }
+  return expectedIds.map((id) => observed.get(id));
+}
+
+export function createObservedAssertionRecorder(expectedIdsValue, subject) {
+  if (
+    !Array.isArray(expectedIdsValue) ||
+    expectedIdsValue.length === 0 ||
+    expectedIdsValue.some((id) => typeof id !== 'string' || id.length === 0) ||
+    new Set(expectedIdsValue).size !== expectedIdsValue.length ||
+    typeof subject !== 'string' ||
+    subject.length === 0
+  ) {
+    throw new Error('Observed assertion recorder requires exact expected IDs and a subject.');
+  }
+  const expectedIds = [...expectedIdsValue];
+  const expected = new Set(expectedIds);
+  const observed = new Map();
+  return Object.freeze({
+    pass(id) {
+      if (!expected.has(id)) {
+        throw new Error(`Observed ${subject} assertion ${id} is unexpected.`);
+      }
+      if (observed.has(id)) {
+        throw new Error(`Observed ${subject} assertion ${id} is duplicate.`);
+      }
+      observed.set(id, {
+        id,
+        result: 'pass',
+        diagnosticId: 'phase1.assertion.passed',
+      });
+    },
+    complete() {
+      const missing = expectedIds.filter((id) => !observed.has(id));
+      if (missing.length > 0) {
+        throw new Error(`Observed ${subject} assertions are missing required results.`);
+      }
+      return expectedIds.map((id) => observed.get(id));
+    },
+  });
 }
 
 function validateContractInput(value) {
@@ -727,6 +790,20 @@ export function buildSchemaV2PlatformEvidence(inputValue) {
     ...registry.assertions.chat.common,
     ...registry.assertions.chat.platforms[platform],
   ];
+  const observedAssertions = requireRecord(
+    input.observedAssertions,
+    'Observed schema-v2 assertions',
+  );
+  const sdkAssertions = validateObservedAssertions(
+    observedAssertions.sdk,
+    registry.assertions.sdk,
+    'Observed SDK assertions',
+  );
+  const chatAssertions = validateObservedAssertions(
+    observedAssertions.chat,
+    chatIds,
+    'Observed Chat assertions',
+  );
 
   return {
     schemaVersion: 2,
@@ -752,8 +829,8 @@ export function buildSchemaV2PlatformEvidence(inputValue) {
     harness: structuredClone(harness),
     artifacts: structuredClone(artifacts),
     caveRecord,
-    sdkAssertions: passingAssertions(registry.assertions.sdk),
-    chatAssertions: passingAssertions(chatIds),
+    sdkAssertions,
+    chatAssertions,
     coverage: {
       cave: true,
       coven: true,

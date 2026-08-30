@@ -1,9 +1,5 @@
 {
-  "version": 2,
-  "validator": {
-    "repository": "OpenCoven/sdk",
-    "revision": "b42c03f00ab248504c8930564790a9744403abe5"
-  },
+  "version": 3,
   "chat": {
     "repository": "OpenCoven/chat",
     "revision": "edd4728792321771496df58bfc0e6122908a96ec",

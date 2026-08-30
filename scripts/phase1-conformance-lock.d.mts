@@ -12,7 +12,7 @@ export function createGitCheckoutEnvironment(
 ): Record<string, string>;
 export function readPhase1ConformanceLock(lockPath?: string): {
   path: string;
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   validator?: Phase1LockEntry;
   chat: Phase1LockEntry;
   sdk: Phase1LockEntry;
