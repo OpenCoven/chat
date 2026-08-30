@@ -120,6 +120,40 @@ The retained record is validated by the exact locked SDK
 `scripts/conformance-contract.mjs`. Aggregation runs on Darwin or Linux but
 requires one record for all three platforms, including Windows.
 
+## Protected schema-v2 producer
+
+The separate, manually dispatched
+`.github/workflows/client-v1-conformance.yml` workflow produces the SDK
+schema-v2 surface without replacing the hardened schema-v1 release gate. It
+requires the immutable `validator_revision` input and runs in the protected
+`client-v1-conformance` environment. The validator revision is deliberately
+not committed into `phase1-conformance.lock.json`: the protected input avoids
+a circular producer/validator pin while every cloned source, validator tree,
+contract, registry, schema, and final canonical record is verified at runtime.
+
+Run one platform only with its canonical output path:
+
+```bash
+node scripts/phase1-conformance.mjs \
+  --validator-revision <full-sdk-validator-commit> \
+  --platform darwin-arm64 \
+  --output .artifacts/client-v1-conformance-darwin-arm64.json
+```
+
+The producer records only assertions that its package, native, Cave, Coven,
+and exact observation suites actually passed; missing, duplicate, skipped, or
+failed results block publication. The selected validator parses the final
+canonical bytes before retention and the local redaction scan runs before the
+validator callback, so no OIDC/GitHub token, keyring material, private path,
+command output, prompt, message, or socket handle is retained.
+
+Linux schema-v2 execution receives only a fresh, owned Secret Service D-Bus
+session and its curated runtime environment. macOS uses an owned disposable
+keychain. All lanes use the production native adapter with an isolated
+conformance namespace; generic schema-v2 custody cleanup is limited to the
+installation entry in that namespace, while reservation-based credential
+cleanup remains capability-bound and fail-closed.
+
 ## Isolation and retained evidence
 
 Execution uses mode-`0700` process-owned roots under the real OS temporary

@@ -21,6 +21,7 @@
     "test:unit": "corepack pnpm@10.34.0 --ignore-workspace test:unit:normal && corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy",
     "test:unit:normal": "vitest run",
     "test:unit:heavy": "vitest run --config vitest.heavy.config.ts",
+    "test:phase1-conformance": "node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all",
     "test:e2e": "playwright test",
     "test:native-e2e": "cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --test phase1_native_rpc",
     "test:contract-canary": "node ./scripts/contract-canary.mjs",

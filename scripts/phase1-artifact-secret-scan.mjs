@@ -20,6 +20,48 @@ const sdkTarballNames = [
 const notCoveredScopeIds = ['cross-process-pairing', 'oauth-ui', 'remote-peer', 'write-apis'];
 const isolationRootIds = ['cave-home', 'coven-home', 'consumer-home', 'native-credential-store'];
 const operatorStateIds = ['cave-home', 'coven-home', 'native-credential-store', 'projects'];
+const schemaV2RequiredAssertionIds = [
+  'phase1.missing-cave.validated-launch',
+  'phase1.pairing.create-pending-approve-exchange',
+  'phase1.pairing.denial',
+  'phase1.pairing.expiry',
+  'phase1.pairing.wrong-secret-replay',
+  'phase1.pairing.failure-budget-retry-after',
+  'phase1.credential.restart-reuse',
+  'phase1.credential.revocation-repair',
+  'phase1.compat.api-major-min-client',
+  'phase1.hpke.endpoint-takeover',
+  'phase1.reads.bounded-canonical',
+  'phase1.reads.stale-generation-cursor-reconciliation',
+  'phase1.coven.same-user-identity',
+  'phase1.native.missing-keychain-trust',
+  'phase1.operator.homes-credentials-untouched',
+];
+const schemaV2ApprovedDiagnosticIds = [
+  'phase1.conformance.passed',
+  'phase1.conformance.failed',
+  'phase1.conformance.blocked',
+  'phase1.assertion.passed',
+  'phase1.assertion.failed',
+  'phase1.assertion.blocked',
+  'phase1.integration.native-pairing-exchange-failed',
+  'phase1.integration.native-credential-unavailable',
+  'phase1.integration.coven-identity-failed',
+  'phase1.producer.cave-launch-fixture-unavailable',
+  'phase1.producer.pairing-control-unavailable',
+  'phase1.producer.pairing-expiry-control-unavailable',
+  'phase1.producer.failure-budget-control-unavailable',
+  'phase1.producer.revocation-control-unavailable',
+  'phase1.producer.compatibility-control-unavailable',
+  'phase1.producer.hpke-takeover-control-unavailable',
+  'phase1.producer.canonical-read-fixture-unavailable',
+  'phase1.producer.stale-reconciliation-fixture-unavailable',
+  'phase1.producer.coven-identity-fixture-unavailable',
+  'phase1.producer.native-trust-fixture-unavailable',
+];
+const schemaV2RequiredAssertionSet = new Set(schemaV2RequiredAssertionIds);
+const schemaV2ApprovedDiagnosticSet = new Set(schemaV2ApprovedDiagnosticIds);
+const schemaV2Statuses = new Set(['passed', 'failed', 'blocked']);
 const prohibitedContentPatterns = [
   /"(?:pairingSecret|pairing_secret|pairing-secret)"\s*:/iu,
   /\bpairing[ _-]secret\s*[:=]/iu,
@@ -185,7 +227,7 @@ function validateIsolation(value) {
   });
 }
 
-export function validatePhase1SanitizedReport(value) {
+function validateSdkPlatformEvidence(value) {
   const report = requireRecord(value, 'Phase 1 report');
   requireExactKeys(
     report,
@@ -261,14 +303,162 @@ export function validatePhase1SanitizedReport(value) {
   return report;
 }
 
+function validateSchemaV2DiagnosticIds(value, label) {
+  if (
+    !Array.isArray(value) ||
+    value.some((id) => typeof id !== 'string' || !schemaV2ApprovedDiagnosticSet.has(id))
+  ) {
+    throw new Error(`${label} contains an unapproved diagnostic ID.`);
+  }
+}
+
+function validateSchemaV2PrimaryAssertions(value) {
+  if (!Array.isArray(value) || value.length !== schemaV2RequiredAssertionIds.length) {
+    throw new Error('Phase 1 report must contain the exact required assertion set.');
+  }
+  const observed = new Set();
+  const counts = { passed: 0, failed: 0, blocked: 0 };
+  for (const rawAssertion of value) {
+    const assertion = requireRecord(rawAssertion, 'Phase 1 report assertion');
+    requireExactKeys(assertion, ['id', 'status', 'diagnosticIds'], 'Phase 1 report assertion');
+    if (typeof assertion.id !== 'string' || !schemaV2RequiredAssertionSet.has(assertion.id)) {
+      throw new Error('Phase 1 report contains an unapproved assertion ID.');
+    }
+    if (observed.has(assertion.id) || !schemaV2Statuses.has(assertion.status)) {
+      throw new Error('Phase 1 report must contain the exact required assertion set.');
+    }
+    observed.add(assertion.id);
+    counts[assertion.status] += 1;
+    validateSchemaV2DiagnosticIds(assertion.diagnosticIds, 'Phase 1 report assertion');
+  }
+  if (
+    observed.size !== schemaV2RequiredAssertionSet.size ||
+    schemaV2RequiredAssertionIds.some((id) => !observed.has(id))
+  ) {
+    throw new Error('Phase 1 report must contain the exact required assertion set.');
+  }
+  return counts;
+}
+
+function validateSchemaV2PrimaryReport(value) {
+  const report = requireRecord(value, 'Phase 1 report');
+  requireExactKeys(
+    report,
+    [
+      'schemaVersion',
+      'completed',
+      'status',
+      'platform',
+      'versions',
+      'revisions',
+      'artifactDigests',
+      'assertions',
+      'summary',
+      'diagnosticIds',
+    ],
+    'Phase 1 report',
+  );
+  if (report.schemaVersion !== 1 || report.completed !== true) {
+    throw new Error('Phase 1 report must be a completed version-1 report.');
+  }
+  const platform = requireRecord(report.platform, 'Phase 1 report platform');
+  requireExactKeys(platform, ['os', 'arch'], 'Phase 1 report platform');
+  if (
+    !['darwin', 'linux', 'win32'].includes(platform.os) ||
+    !['arm64', 'x64'].includes(platform.arch)
+  ) {
+    throw new Error('Phase 1 report platform must use approved platform metadata.');
+  }
+  const versions = requireRecord(report.versions, 'Phase 1 report versions');
+  const allowedVersionKeys = new Set(['harness', 'node', 'rust', 'tauri']);
+  if (
+    Object.keys(versions).length === 0 ||
+    Object.entries(versions).some(
+      ([key, version]) =>
+        !allowedVersionKeys.has(key) ||
+        typeof version !== 'string' ||
+        !/^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/u.test(version),
+    )
+  ) {
+    throw new Error('Phase 1 report versions must use approved version metadata.');
+  }
+  const revisions = requireRecord(report.revisions, 'Phase 1 report revisions');
+  requireExactKeys(revisions, ['chat', 'sdk', 'cave', 'coven'], 'Phase 1 report revisions');
+  if (
+    Object.values(revisions).some(
+      (revision) => typeof revision !== 'string' || !shaPattern.test(revision),
+    )
+  ) {
+    throw new Error('Phase 1 report revisions must contain immutable commit SHAs.');
+  }
+  const artifactDigests = requireRecord(report.artifactDigests, 'Phase 1 report artifact digests');
+  if (
+    Object.entries(artifactDigests).some(
+      ([name, digest]) =>
+        !/^[a-z0-9][a-z0-9.-]{0,127}$/u.test(name) ||
+        typeof digest !== 'string' ||
+        !digestPattern.test(digest),
+    )
+  ) {
+    throw new Error('Phase 1 report artifact digests must use approved names and SHA-256 values.');
+  }
+  const counts = validateSchemaV2PrimaryAssertions(report.assertions);
+  const summary = requireRecord(report.summary, 'Phase 1 report summary');
+  requireExactKeys(
+    summary,
+    ['required', 'passed', 'failed', 'blocked', 'skipped'],
+    'Phase 1 report summary',
+  );
+  if (
+    Object.values(summary).some((count) => !Number.isSafeInteger(count) || count < 0) ||
+    summary.required !== schemaV2RequiredAssertionIds.length ||
+    summary.passed !== counts.passed ||
+    summary.failed !== counts.failed ||
+    summary.blocked !== counts.blocked ||
+    summary.skipped !== 0
+  ) {
+    throw new Error('Phase 1 report summary does not match its assertion results.');
+  }
+  const expectedStatus = counts.failed > 0 ? 'failed' : counts.blocked > 0 ? 'blocked' : 'passed';
+  if (!schemaV2Statuses.has(report.status) || report.status !== expectedStatus) {
+    throw new Error('Phase 1 report status does not match its assertion results.');
+  }
+  validateSchemaV2DiagnosticIds(report.diagnosticIds, 'Phase 1 report');
+  return report;
+}
+
+export const REQUIRED_PHASE1_ASSERTION_IDS = Object.freeze([...schemaV2RequiredAssertionIds]);
+export const APPROVED_PHASE1_DIAGNOSTIC_IDS = Object.freeze([...schemaV2ApprovedDiagnosticIds]);
+
+export function validatePhase1SanitizedReport(value) {
+  const report = requireRecord(value, 'Phase 1 report');
+  return Object.hasOwn(report, 'issue')
+    ? validateSdkPlatformEvidence(report)
+    : validateSchemaV2PrimaryReport(report);
+}
+
 function assertNoProhibitedContent(contents) {
   if (prohibitedContentPatterns.some((pattern) => pattern.test(contents))) {
     throw new Error('Phase 1 artifact contains prohibited secret or private content.');
   }
 }
 
-function scanJsonFile(path) {
-  const contents = readFileSync(path, 'utf8');
+export function scanPhase1ArtifactText(contents, options = {}) {
+  if (typeof contents !== 'string') {
+    throw new Error('Phase 1 artifact must contain UTF-8 JSON text.');
+  }
+  if (
+    options === null ||
+    typeof options !== 'object' ||
+    Array.isArray(options) ||
+    Object.keys(options).some((key) => key !== 'validateReport') ||
+    (options.validateReport !== undefined && typeof options.validateReport !== 'function')
+  ) {
+    throw new Error('Phase 1 artifact scan options may contain only validateReport.');
+  }
+  if (Buffer.byteLength(contents, 'utf8') > maxFileBytes) {
+    throw new Error('Phase 1 artifact tree exceeds scan size limits.');
+  }
   assertNoProhibitedContent(contents);
 
   let value;
@@ -278,7 +468,12 @@ function scanJsonFile(path) {
     throw new Error('Phase 1 artifact must contain valid JSON.');
   }
 
-  validatePhase1SanitizedReport(value);
+  (options.validateReport ?? validatePhase1SanitizedReport)(value, contents);
+  return value;
+}
+
+function scanJsonFile(path) {
+  scanPhase1ArtifactText(readFileSync(path, 'utf8'));
 }
 
 function scanDirectory(directoryPath, rootRealPath, state, depth) {

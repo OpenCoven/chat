@@ -115,13 +115,18 @@ function readReportSnapshot(reportPath, rootRealPath) {
   }
 }
 
-function requireSdkPlatformEvidenceRecord(snapshot) {
+function requireSdkPlatformEvidenceRecord(snapshot, validateReport) {
   let report;
 
   try {
     report = JSON.parse(snapshot.bytes.toString('utf8'));
   } catch {
     throw new Error('Sanitized report must be an SDK platform evidence record.');
+  }
+
+  if (typeof validateReport === 'function') {
+    validateReport(report, snapshot.bytes);
+    return;
   }
 
   if (
@@ -290,7 +295,17 @@ export function createProcessOwnedArtifactRoot(options) {
       trackedChildren.set(child.pid, child);
       return child;
     },
-    async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan }) {
+    async terminateChild(child) {
+      const tracked = trackedChildren.get(child?.pid);
+      if (tracked === undefined || tracked !== child) {
+        throw new Error('terminateChild requires a currently tracked ChildProcess.');
+      }
+      await terminateAndReapChild(tracked, terminationGraceMs);
+      trackedChildren.delete(child.pid);
+      cleanedChildren.push(child.pid);
+      reapedChildren.push(child.pid);
+    },
+    async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan, validateReport }) {
       if (cleaned) {
         throw new Error('Cannot retain a report after the owned artifact root is cleaned.');
       }
@@ -299,7 +314,7 @@ export function createProcessOwnedArtifactRoot(options) {
       }
 
       const firstSnapshot = readReportSnapshot(reportPath, owned.rootRealPath);
-      requireSdkPlatformEvidenceRecord(firstSnapshot);
+      requireSdkPlatformEvidenceRecord(firstSnapshot, validateReport);
 
       await secretScan({
         artifactRoot: owned.rootPath,

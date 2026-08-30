@@ -93,6 +93,19 @@ export function assertPackedFixtureMatchesCaveCheckout(
   harnessRoot: string,
   caveRoot: string,
 ): void;
+export function verifyFrozenPackedConsumer(options: {
+  chatRoot?: string;
+  sdkRoot: string;
+  caveRoot: string;
+}): {
+  releaseManifest: ContractCanaryLock['sdk']['releaseManifest'];
+  sdkArtifacts: ContractCanaryLock['sdk']['artifacts'];
+  caveArtifacts: ContractCanaryLock['cave']['artifacts'];
+  observedAssertions: {
+    sdk: readonly string[];
+    chat: readonly string[];
+  };
+};
 export function parseArgs(argv: string[]): {
   sdkRoot: string;
   caveRoot: string;

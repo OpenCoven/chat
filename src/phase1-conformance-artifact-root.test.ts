@@ -133,6 +133,33 @@ async function spawnChild(source: string) {
 }
 
 describe('process-owned artifact root', () => {
+  test('retains a caller-validated schema-v2 record without weakening atomic copy checks', async () => {
+    const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-v2-retain-test' });
+    const destinationRoot = createScratchRoot('phase1-v2-destination');
+    const reportPath = resolve(owned.rootPath, 'record.json');
+    const destinationPath = resolve(destinationRoot, 'record.json');
+    const record = {
+      schemaVersion: 2,
+      issue: 'OpenCoven/sdk#38',
+      platform: 'darwin-arm64',
+    };
+    writeFileSync(reportPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+
+    try {
+      await owned.retainSanitizedJsonReport({
+        reportPath,
+        destinationPath,
+        validateReport(value: unknown) {
+          expect(value).toEqual(record);
+        },
+        secretScan: async () => undefined,
+      });
+      expect(JSON.parse(readFileSync(destinationPath, 'utf8'))).toEqual(record);
+    } finally {
+      await owned.cleanup();
+    }
+  });
+
   test('creates a stamped mode-0700 root below the real OS temp directory', () => {
     const root = createRoot();
     const stats = lstatSync(root.rootPath);

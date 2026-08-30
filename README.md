@@ -174,8 +174,12 @@ verifies that the checked-out HEADs match the tracked lock.
 
 `phase1-conformance.lock.json` independently pins Chat, the SDK package
 candidate and evidence authority, Cave, Coven, and the canonical package
-metadata for the real-authority gate. It does not replace or loosen the Phase 0
-canary lock.
+metadata for the real-authority gate. The protected
+`.github/workflows/client-v1-conformance.yml` schema-v2 producer takes its
+separate immutable SDK validator revision as a required dispatch input, avoiding
+a circular pin while retaining both the strict schema-v1 gate and canonical
+schema-v2 platform records. Neither replaces or loosens the Phase 0 canary
+lock.
 
 ## CI coverage
 

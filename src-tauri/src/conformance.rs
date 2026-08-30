@@ -43,6 +43,7 @@ pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
 const CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING: &str = "production-keyring";
+const CONFORMANCE_NATIVE_PROVIDER_SYSTEM: &str = "system-native";
 const INTERNAL_TEST_RESERVATION_OUTPUT_ARGUMENT: &str =
     "--opencoven-internal-test-reservation-output-v1";
 const INTERNAL_TEST_RESERVATION_EOF_ARGUMENT: &str = "--opencoven-internal-test-reservation-eof-v1";
@@ -166,6 +167,8 @@ enum RpcCommand {
         capability: String,
         owner_token: String,
     },
+    ConformanceNativeCustodyState,
+    ConformanceCleanupNativeCustody,
     CaveListFamiliars {
         handle: String,
         page: NativePage,
@@ -223,6 +226,8 @@ impl RpcCommand {
                 | Self::CaveResetPairing { .. }
                 | Self::ConformancePrepareNativeCleanup { .. }
                 | Self::ConformanceDeleteNativeCredential { .. }
+                | Self::ConformanceNativeCustodyState
+                | Self::ConformanceCleanupNativeCustody
                 | Self::ResetNativeState
                 | Self::Shutdown
         )
@@ -671,6 +676,8 @@ impl Clone for RpcRuntime {
 }
 
 trait ConformanceCredentialCleanup: Send + Sync {
+    fn state(&self) -> Result<(&'static str, bool, String), KeyringError>;
+    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError>;
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError>;
     fn begin_adopt(
         &self,
@@ -703,6 +710,14 @@ trait ConformanceCredentialCleanup: Send + Sync {
 }
 
 impl ConformanceCredentialCleanup for NativeKeyring {
+    fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        self.conformance_state(&[])
+    }
+
+    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        self.cleanup_conformance_entries(&[])
+    }
+
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError> {
         self.prepare_conformance_cleanup(instance_id)
     }
@@ -788,6 +803,13 @@ impl RpcRuntime {
             }
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING => {
                 let keyring = Arc::new(NativeKeyring::for_conformance());
+                Ok(Self::with_custody(
+                    keyring.clone(),
+                    Some(keyring as Arc<dyn ConformanceCredentialCleanup>),
+                ))
+            }
+            Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_SYSTEM => {
+                let keyring = Arc::new(NativeKeyring::for_schema_v2());
                 Ok(Self::with_custody(
                     keyring.clone(),
                     Some(keyring as Arc<dyn ConformanceCredentialCleanup>),
@@ -1070,6 +1092,35 @@ impl RpcRuntime {
                         .disarm();
                 }
                 json!({ "status": "missing" })
+            }
+            RpcCommand::ConformanceNativeCustodyState => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let (backend, empty, state_sha256) =
+                    cleanup.state().map_err(|error| error.diagnostic())?;
+                json!({
+                    "backend": backend,
+                    "available": true,
+                    "empty": empty,
+                    "stateSha256": state_sha256,
+                })
+            }
+            RpcCommand::ConformanceCleanupNativeCustody => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let (backend, empty, state_sha256) = cleanup
+                    .cleanup_state()
+                    .map_err(|error| error.diagnostic())?;
+                json!({
+                    "backend": backend,
+                    "available": true,
+                    "empty": empty,
+                    "stateSha256": state_sha256,
+                })
             }
             RpcCommand::CaveListFamiliars {
                 handle,
@@ -1437,6 +1488,28 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                 capability,
                 owner_token,
             })
+        }
+        "conformance_native_custody_state" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            let instance_ids = object
+                .get("instanceIds")
+                .and_then(Value::as_array)
+                .ok_or(("invalid_native_input", false))?;
+            if !instance_ids.is_empty() {
+                return invalid();
+            }
+            Ok(RpcCommand::ConformanceNativeCustodyState)
+        }
+        "conformance_cleanup_native_custody" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            let instance_ids = object
+                .get("instanceIds")
+                .and_then(Value::as_array)
+                .ok_or(("invalid_native_input", false))?;
+            if !instance_ids.is_empty() {
+                return invalid();
+            }
+            Ok(RpcCommand::ConformanceCleanupNativeCustody)
         }
         "cave_list_familiars" => {
             expect_exact_args(object, &["handle", "operation", "page"])?;
@@ -2068,6 +2141,14 @@ mod tests {
     }
 
     impl ConformanceCredentialCleanup for RecordingEmergencyCleanup {
+        fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
         fn prepare(
             &self,
             _instance_id: &str,

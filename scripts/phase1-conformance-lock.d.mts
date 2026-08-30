@@ -6,6 +6,17 @@ export type Phase1LockEntry = {
 export function createGitEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export function createGitCheckoutEnvironment(
+  inheritedEnvironment?: NodeJS.ProcessEnv,
+): Record<string, string>;
+export function assertCleanPhase1Checkout(
+  repositoryRoot: string,
+  label?: string,
+): { staged: number; unstaged: number; untracked: number };
+export function readPhase1CheckoutIdentity(
+  repositoryRoot: string,
+  label?: string,
+): { revision: string; tree: string };
 export function readPhase1ConformanceLock(lockPath?: string): {
   path: string;
   version: 5;

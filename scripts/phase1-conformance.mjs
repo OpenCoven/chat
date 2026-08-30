@@ -34,6 +34,11 @@ import {
   validateObservedToolVersions,
   windowsSupervisorDiagnosticId,
 } from './phase1-evidence-contract.mjs';
+import {
+  CANONICAL_PLATFORM_ENVIRONMENTS,
+  createObservedAssertionRecorder,
+} from './phase1-schema-v2-evidence.mjs';
+import { runSchemaV2Conformance } from './phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
@@ -67,6 +72,12 @@ const approvedCommandFailureReasons = new Set([
 ]);
 const verifiedRunnerEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER';
 const verifiedRunnerRootEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT';
+const evidenceAuthorizationVariables = new Set([
+  'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+  'ACTIONS_ID_TOKEN_REQUEST_URL',
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+]);
 const forbiddenNodeEnvironment = [
   'NODE_OPTIONS',
   'NODE_PATH',
@@ -164,10 +175,19 @@ function defaultSourceRoot(environmentName, repositoryName) {
     : resolve(process.env[environmentName]);
 }
 
+export function scrubEvidenceAuthorizationEnvironment(environment = process.env) {
+  for (const key of Object.keys(environment)) {
+    if (evidenceAuthorizationVariables.has(key.toUpperCase())) {
+      delete environment[key];
+    }
+  }
+  return environment;
+}
+
 export class CommandExecutionError extends Error {
-  constructor(label, result) {
+  constructor(label, result, cause) {
     const reason = approvedCommandFailureReasons.has(result?.reason) ? ` (${result.reason})` : '';
-    super(`${label} failed${reason}.`);
+    super(`${label} failed${reason}.`, cause === undefined ? undefined : { cause });
     this.label = label;
     this.result = result;
   }
@@ -691,9 +711,13 @@ export function parseArgs(argv) {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
     retainSanitizedReport: defaultRetainedReport,
+    platform: undefined,
+    outputPath: undefined,
+    validatorRevision: undefined,
     chatSourceRoot: resolve(process.env.OPENCOVEN_CHAT_ROOT ?? chatRepositoryRoot),
     sdkSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_ROOT', 'sdk'),
     sdkEvidenceSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_EVIDENCE_ROOT', 'sdk'),
+    sdkValidatorSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT', 'sdk'),
     caveSourceRoot: defaultSourceRoot('OPENCOVEN_CAVE_ROOT', 'coven-cave'),
     covenSourceRoot: defaultSourceRoot('OPENCOVEN_COVEN_ROOT', 'coven'),
     windowsSupervisorPath:
@@ -708,11 +732,14 @@ export function parseArgs(argv) {
     ['--chat-root', 'chatSourceRoot'],
     ['--sdk-root', 'sdkSourceRoot'],
     ['--sdk-evidence-root', 'sdkEvidenceSourceRoot'],
+    ['--validator-root', 'sdkValidatorSourceRoot'],
     ['--cave-root', 'caveSourceRoot'],
     ['--coven-root', 'covenSourceRoot'],
     ['--windows-supervisor', 'windowsSupervisorPath'],
   ]);
 
+  let retainedReportWasSet = false;
+  let validatorRevisionWasSet = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--') {
@@ -727,13 +754,69 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (argument === '--platform') {
+      const platform = requireString(argv[index + 1], '--platform');
+      if (!Object.hasOwn(CANONICAL_PLATFORM_ENVIRONMENTS, platform)) {
+        throw new Error(`unsupported schema-v2 platform ${platform}.`);
+      }
+      options.platform = platform;
+      index += 1;
+      continue;
+    }
+    if (argument === '--validator-revision') {
+      if (validatorRevisionWasSet) {
+        throw new Error('schema-v2 --validator-revision may be supplied only once.');
+      }
+      const revision = requireString(argv[index + 1], '--validator-revision');
+      if (!/^[0-9a-f]{40}$/u.test(revision)) {
+        throw new Error(
+          '--validator-revision must be a lowercase immutable 40-character commit SHA.',
+        );
+      }
+      options.validatorRevision = revision;
+      validatorRevisionWasSet = true;
+      index += 1;
+      continue;
+    }
+    if (argument === '--output') {
+      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      index += 1;
+      continue;
+    }
     const optionName = pathFlags.get(argument);
     if (optionName !== undefined) {
       options[optionName] = resolve(requireString(argv[index + 1], argument));
+      if (argument === '--retain-sanitized-report') {
+        retainedReportWasSet = true;
+      }
       index += 1;
       continue;
     }
     throw new Error(`phase1-conformance: unknown option: ${argument}`);
+  }
+
+  if ((options.platform === undefined) !== (options.outputPath === undefined)) {
+    throw new Error('schema-v2 --platform requires --output and vice versa.');
+  }
+  if (options.platform !== undefined) {
+    if (options.validatorRevision === undefined) {
+      throw new Error('schema-v2 --platform requires --validator-revision.');
+    }
+    if (retainedReportWasSet) {
+      throw new Error(
+        'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
+      );
+    }
+    const expectedOutput = resolve(
+      projectRoot,
+      '.artifacts',
+      `client-v1-conformance-${options.platform}.json`,
+    );
+    if (options.outputPath !== expectedOutput) {
+      throw new Error('schema-v2 --output must match the platform artifact path.');
+    }
+  } else if (options.validatorRevision !== undefined) {
+    throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
   }
 
   return options;
@@ -1113,14 +1196,24 @@ async function bootstrapVerifiedRunner(options) {
       options.lockPath,
       '--scenario',
       options.scenario,
-      '--retain-sanitized-report',
-      options.retainSanitizedReport,
+      ...(options.platform === undefined
+        ? ['--retain-sanitized-report', options.retainSanitizedReport]
+        : [
+            '--validator-revision',
+            options.validatorRevision,
+            '--platform',
+            options.platform,
+            '--output',
+            options.outputPath,
+          ]),
       '--chat-root',
       options.chatSourceRoot,
       '--sdk-root',
       options.sdkSourceRoot,
       '--sdk-evidence-root',
       options.sdkEvidenceSourceRoot,
+      '--validator-root',
+      options.sdkValidatorSourceRoot,
       '--cave-root',
       options.caveSourceRoot,
       '--coven-root',
@@ -1152,12 +1245,24 @@ async function bootstrapVerifiedRunner(options) {
                 OPENCOVEN_CHAT_ROOT: options.chatSourceRoot,
                 OPENCOVEN_SDK_ROOT: options.sdkSourceRoot,
                 OPENCOVEN_SDK_EVIDENCE_ROOT: options.sdkEvidenceSourceRoot,
+                OPENCOVEN_SDK_VALIDATOR_ROOT: options.sdkValidatorSourceRoot,
                 OPENCOVEN_CAVE_ROOT: options.caveSourceRoot,
                 OPENCOVEN_COVEN_ROOT: options.covenSourceRoot,
                 OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: options.windowsSupervisorPath,
+                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT:
+                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:
+                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY,
+                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:
+                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP,
                 OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED:
                   process.env.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED,
                 PHASE1_TEST_KEYCHAIN: process.env.PHASE1_TEST_KEYCHAIN,
+                DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+                GNOME_KEYRING_CONTROL: process.env.GNOME_KEYRING_CONTROL,
+                XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+                XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+                XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
                 [verifiedRunnerEnvironment]: '1',
                 [verifiedRunnerRootEnvironment]: harnessRoot,
               }),
@@ -1429,7 +1534,7 @@ function assertLockedRegularFile(rootPath, metadata, label) {
   return path;
 }
 
-async function cloneExactCheckout({
+export async function cloneExactCheckout({
   artifactRoot,
   sourceRoot,
   destinationRoot,
@@ -3985,12 +4090,16 @@ export function wrapInfrastructureFailure(error, report) {
     const reason = approvedCommandFailureReasons.has(error.result?.reason)
       ? error.result.reason
       : undefined;
-    return new CommandExecutionError(error.label, {
-      ...(reason === undefined ? {} : { reason }),
-      report,
-    });
+    return new CommandExecutionError(
+      error.label,
+      {
+        ...(reason === undefined ? {} : { reason }),
+        report,
+      },
+      error,
+    );
   }
-  return new CommandExecutionError('Phase 1 conformance infrastructure', { report });
+  return new CommandExecutionError('Phase 1 conformance infrastructure', { report }, error);
 }
 
 function readLockedDigestFile(rootPath, metadata, label) {
@@ -4384,8 +4493,656 @@ export function finalizeOperatorSafety({
   return operatorStateAfter;
 }
 
+function parseVitestObservationReport(path, label) {
+  const stats = lstatSync(path);
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.size > 4 * 1024 * 1024) {
+    throw new Error(`${label} report is not a bounded regular file.`);
+  }
+  const report = JSON.parse(readFileSync(path, 'utf8'));
+  if (
+    report?.success !== true ||
+    !Array.isArray(report.testResults) ||
+    report.testResults.length === 0
+  ) {
+    throw new Error(`${label} did not report a complete passing test run.`);
+  }
+  const passed = new Set();
+  for (const file of report.testResults) {
+    if (!Array.isArray(file.assertionResults)) {
+      throw new Error(`${label} contained malformed test results.`);
+    }
+    for (const assertion of file.assertionResults) {
+      if (
+        assertion.status !== 'passed' ||
+        !Array.isArray(assertion.ancestorTitles) ||
+        typeof assertion.title !== 'string'
+      ) {
+        continue;
+      }
+      passed.add([...assertion.ancestorTitles, assertion.title].join(' > '));
+    }
+  }
+  return passed;
+}
+
+async function runVitestObservationSuite({
+  artifactRoot,
+  rootPath,
+  environment,
+  label,
+  files,
+  outputName,
+}) {
+  const outputPath = resolve(artifactRoot.rootPath, outputName);
+  await runCommand(
+    artifactRoot,
+    label,
+    'corepack',
+    [
+      'pnpm@10.34.0',
+      '--ignore-workspace',
+      'exec',
+      'vitest',
+      'run',
+      ...files,
+      '--reporter=json',
+      `--outputFile=${outputPath}`,
+    ],
+    {
+      cwd: rootPath,
+      env: environment,
+    },
+  );
+  return parseVitestObservationReport(outputPath, label);
+}
+
+function parseCargoPassedTests(output) {
+  const passed = new Set();
+  for (const line of output.split(/\r?\n/u)) {
+    const match = /^test ([A-Za-z0-9_:]+) \.\.\. ok$/u.exec(line.trim());
+    if (match !== null) {
+      passed.add(match[1]);
+    }
+  }
+  return passed;
+}
+
+async function runExactCargoObservationTests({
+  artifactRoot,
+  rootPath,
+  environment,
+  label,
+  tests,
+}) {
+  const passed = new Set();
+  for (const test of tests) {
+    const result = await runCommand(
+      artifactRoot,
+      `${label} ${test.name}`,
+      'cargo',
+      [...test.args, test.name, '--', '--exact'],
+      {
+        cwd: rootPath,
+        env: environment,
+        timeoutMs: cargoBuildTimeoutMs,
+      },
+    );
+    const observed = parseCargoPassedTests(result.stdout);
+    if (!observed.has(test.name)) {
+      throw new Error(`${label} did not execute ${test.name}.`);
+    }
+    passed.add(test.name);
+  }
+  return passed;
+}
+
+export function normalizeSchemaV2ObservationTests(value) {
+  const keys = ['chat', 'chatRust', 'covenRust', 'sdk'];
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join('\0') !== keys.join('\0') ||
+    keys.some((key) => !(value[key] instanceof Set))
+  ) {
+    throw new Error('Schema-v2 observation test results are incomplete or malformed.');
+  }
+  return Object.freeze({
+    sdk: value.sdk,
+    chat: value.chat,
+    chatRust: value.chatRust,
+    covenRust: value.covenRust,
+  });
+}
+
+export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+  const shortRoot =
+    process.platform === 'win32'
+      ? undefined
+      : createProcessOwnedArtifactRoot({ prefix: 'p1ot', shortPath: true });
+  const testEnvironment =
+    shortRoot === undefined
+      ? environment
+      : {
+          ...environment,
+          TMPDIR: shortRoot.rootPath,
+          TMP: shortRoot.rootPath,
+          TEMP: shortRoot.rootPath,
+        };
+  try {
+    await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    const sdkTests = await runVitestObservationSuite({
+      artifactRoot,
+      rootPath: roots.sdkRoot,
+      environment: testEnvironment,
+      label: 'SDK schema-v2 observation tests',
+      files: [
+        'tests/cave-discovery-pairing.spec.ts',
+        'tests/cave-canonical-reads.spec.ts',
+        'tests/cave-hpke-bound-v1.spec.ts',
+        'tests/cave-managed-native.spec.ts',
+        'tests/cave-managed-native-staged.spec.ts',
+        'tests/coven-discovery.spec.ts',
+        'tests/health-validation.spec.ts',
+        'tests/client-contract.spec.ts',
+        'tests/native-secret-store.spec.ts',
+      ],
+      outputName: 'sdk-observation-tests.json',
+    });
+    const chatTests = await runVitestObservationSuite({
+      artifactRoot,
+      rootPath: roots.producerRoot,
+      environment: testEnvironment,
+      label: 'Chat schema-v2 observation tests',
+      files: [
+        'src/lib/sdk/native-boundary.test.ts',
+        'src/lib/sdk/connection-controller.test.ts',
+        'src/lib/sdk/query-adapter.test.ts',
+        'src/lib/sdk/managed-credential-status.e2e.test.ts',
+      ],
+      outputName: 'chat-observation-tests.json',
+    });
+    const chatCargoArgs = [
+      'test',
+      '--locked',
+      '--manifest-path',
+      resolve(roots.producerRoot, 'src-tauri', 'Cargo.toml'),
+      '--features',
+      'phase1-conformance',
+      '--lib',
+    ];
+    const chatRustTests = await runExactCargoObservationTests({
+      artifactRoot,
+      rootPath: roots.producerRoot,
+      environment: testEnvironment,
+      label: 'Chat native schema-v2 observation tests',
+      tests: [
+        {
+          args: chatCargoArgs,
+          name: 'transport::tests::pairing_exchange_empty_post_declares_zero_content_length',
+        },
+        {
+          args: chatCargoArgs,
+          name: 'coven::tests::maps_client_failures_to_bounded_diagnostics_without_leaking_details',
+        },
+      ],
+    });
+    const covenLibraryTests =
+      platform === 'win32-x64'
+        ? [
+            'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+            'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
+            'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
+            'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+            'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
+          ]
+        : [
+            'transport::unix::tests::platform_peer_credentials_report_the_connected_process_uid',
+            'transport::unix::tests::connected_peer_uid_must_match_discovered_and_current_owner',
+          ];
+    const covenRustTests = await runExactCargoObservationTests({
+      artifactRoot,
+      rootPath: roots.covenRoot,
+      environment: testEnvironment,
+      label: 'Coven native trust observation tests',
+      tests: [
+        ...covenLibraryTests.map((name) => ({
+          args: ['test', '--locked', '-p', 'coven-client', '--lib'],
+          name,
+        })),
+        ...(platform === 'win32-x64'
+          ? []
+          : [
+              {
+                args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
+                name: 'discovers_only_an_owner_local_unix_socket',
+              },
+              {
+                args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
+                name: 'a_mutation_is_not_sent_to_a_replacement_before_that_peer_is_negotiated',
+              },
+            ]),
+      ],
+    });
+    return normalizeSchemaV2ObservationTests({
+      sdk: sdkTests,
+      chat: chatTests,
+      chatRust: chatRustTests,
+      covenRust: covenRustTests,
+    });
+  } finally {
+    if (shortRoot !== undefined) {
+      await shortRoot.cleanup();
+    }
+  }
+}
+
+function passedTest(tests, fragment) {
+  return [...tests].some((name) => name.includes(fragment));
+}
+
+function primaryPassed(report, id) {
+  return report.assertions.some(
+    (assertion) => assertion.id === id && assertion.status === 'passed',
+  );
+}
+
+function cavePassed(caveRecord, ...ids) {
+  const results = new Map(
+    caveRecord.assertions.map((assertion) => [assertion.id, assertion.result]),
+  );
+  return ids.every((id) => results.get(id) === 'pass');
+}
+
+function recordWhen(recorder, id, condition) {
+  if (condition) {
+    recorder.pass(id);
+  }
+}
+
+export function buildObservedSchemaV2Assertions({
+  registry,
+  platform,
+  packageObservations,
+  primaryReport,
+  caveRecord,
+  native,
+  coven,
+  tests,
+  scansPassed,
+}) {
+  const sdk = createObservedAssertionRecorder(registry.assertions.sdk, 'SDK');
+  const chatIds = [
+    ...registry.assertions.chat.common,
+    ...registry.assertions.chat.platforms[platform],
+  ];
+  const chat = createObservedAssertionRecorder(chatIds, 'Chat');
+  for (const id of packageObservations.sdk) {
+    sdk.pass(id);
+  }
+  for (const id of packageObservations.chat) {
+    chat.pass(id);
+  }
+
+  const sdkTest = (fragment) => passedTest(tests.sdk, fragment);
+  const chatTest = (fragment) => passedTest(tests.chat, fragment);
+  const chatRustTest = (fragment) => passedTest(tests.chatRust, fragment);
+  const covenRustTest = (fragment) => passedTest(tests.covenRust, fragment);
+
+  recordWhen(
+    sdk,
+    'sdk.cave.discovery.release-mode',
+    native.releaseDiscovery &&
+      cavePassed(caveRecord, 'health.discovery-record') &&
+      sdkTest('canonicalizes routes and validates strict discovery v2'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.discovery.stale-record-refused',
+    native.staleStateRefused && sdkTest('rejects stale or malformed discovery records'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.discovery.replaced-instance-refused',
+    native.staleStateRefused &&
+      sdkTest('invalidates an instance-replaced credential before bearer attachment'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.health.compatible',
+    native.compatibleHealth &&
+      primaryPassed(primaryReport, 'phase1.compat.api-major-min-client') &&
+      sdkTest('accepts Cave health responses when the minimum client version is compatible'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.create',
+    native.pairingCreate &&
+      cavePassed(caveRecord, 'pairing.create') &&
+      sdkTest('creates, polls, exchanges, validates, and forgets a paired credential'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.pending',
+    native.pairingPending &&
+      cavePassed(caveRecord, 'pairing.poll-pending') &&
+      sdkTest("surfaces pairing exchange errors: 'pairing_pending'"),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.exchange-once',
+    native.pairingExchange &&
+      cavePassed(caveRecord, 'pairing.exchange', 'pairing.replay-refused') &&
+      sdkTest('allows only one transport exchange across concurrent exchange attempts'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.denied',
+    native.pairingDenied &&
+      cavePassed(caveRecord, 'pairing.poll-denied', 'pairing.exchange-denied') &&
+      sdkTest("surfaces pairing exchange errors: 'pairing_denied'"),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.expired',
+    primaryPassed(primaryReport, 'phase1.pairing.expiry') &&
+      cavePassed(caveRecord, 'pairing.ttl-poll-expired', 'pairing.ttl-exchange-expired') &&
+      sdkTest("surfaces pairing exchange errors: 'pairing_expired'"),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.wrong-secret-refused',
+    cavePassed(caveRecord, 'pairing.wrong-secret'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.replay-refused',
+    cavePassed(caveRecord, 'pairing.replay-refused') &&
+      sdkTest('allows retry after a pre-send authority mismatch without replaying the secret'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.shared-failure-budget',
+    cavePassed(
+      caveRecord,
+      'pairing.budget-charges-wrong-secret-on-poll',
+      'pairing.budget-locks-out-the-holder',
+      'pairing.budget-is-shared-across-routes',
+    ),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.pairing.rate-limit',
+    cavePassed(caveRecord, 'pairing.budget-locks-out-the-holder') &&
+      sdkTest('preserves the managed contract error code and retry semantics for rate_limited'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.exchange.missing-content-length-refused',
+    cavePassed(caveRecord, 'ingress.exchange-requires-content-length'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.exchange.content-length-zero-accepted',
+    cavePassed(caveRecord, 'pairing.exchange') &&
+      chatRustTest('pairing_exchange_empty_post_declares_zero_content_length'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.proxy-rejection.distinct-envelope',
+    sdkTest('never parses a proxy rejection as a Client v1 health envelope'),
+  );
+  recordWhen(sdk, 'sdk.cave.credential.native-store-required', native.nativeStoreRoundtrip);
+  recordWhen(sdk, 'sdk.cave.credential.restart-reused', native.restartCredentialReused);
+  for (const [id, key] of [
+    ['sdk.cave.read.familiars', 'familiars'],
+    ['sdk.cave.read.projects', 'projects'],
+    ['sdk.cave.read.conversations', 'conversations'],
+    ['sdk.cave.read.conversation', 'conversation'],
+    ['sdk.cave.read.messages', 'messages'],
+  ]) {
+    recordWhen(
+      sdk,
+      id,
+      native.reads[key] &&
+        sdkTest('uses exact canonical routes, deterministic queries, encoded ids'),
+    );
+  }
+  recordWhen(
+    sdk,
+    'sdk.cave.cursor.malformed-refused',
+    sdkTest('validates page options and conversation ids before transport I/O'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.cursor.noncanonical-refused',
+    sdkTest('parses the optional top-level cursor with core canonical validation'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.cave.cursor.reconcile-required',
+    native.reconcileRequired &&
+      sdkTest('propagates reconcile_required from messages without retrying and forwards the id'),
+  );
+  for (const [id, key] of [
+    ['sdk.cave.revocation.familiars-refused', 'familiars'],
+    ['sdk.cave.revocation.projects-refused', 'projects'],
+    ['sdk.cave.revocation.conversations-refused', 'conversations'],
+    ['sdk.cave.revocation.conversation-refused', 'conversation'],
+    ['sdk.cave.revocation.messages-refused', 'messages'],
+  ]) {
+    recordWhen(
+      sdk,
+      id,
+      native.revokedReads[key] &&
+        sdkTest('preserves revoked bearer rejection without fallback or retry'),
+    );
+  }
+  recordWhen(
+    sdk,
+    'sdk.coven.discovery.owner-local',
+    coven.ownerLocal && sdkTest('prefers non-empty COVEN_HOME without invoking the CLI'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.coven.health',
+    coven.health && sdkTest('sends only the reviewed health request and parses a valid response'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.coven.structured-errors',
+    sdkTest('preserves structured daemon error fields without flattening them'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.deadline.connect-bounded',
+    sdkTest('reports connect timeout and honors cancellation'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.deadline.read-bounded',
+    sdkTest('rejects a Unix response received at its 1ms absolute deadline') ||
+      sdkTest('rejects a Windows response received at its 1ms absolute deadline'),
+  );
+  recordWhen(sdk, 'sdk.deadline.body-bounded', sdkTest("rejects 'oversized body declaration'"));
+  recordWhen(
+    sdk,
+    'sdk.deadline.frame-bounded',
+    sdkTest('rejects invalid HTTP health framing') ||
+      sdkTest('shares frame limits and structured daemon errors with Unix'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.native.keychain-missing-fails-closed',
+    native.keychainUnavailable &&
+      sdkTest('rejects missing Entry constructors as secure_store_unavailable'),
+  );
+  recordWhen(
+    sdk,
+    'sdk.native.trust-binding-missing-fails-closed',
+    coven.trustProviderUnavailable &&
+      sdkTest('fails closed before discovery when transport security is missing at runtime'),
+  );
+
+  recordWhen(chat, 'chat.cave.compatibility-before-pairing', native.compatibilityBeforePairing);
+  recordWhen(chat, 'chat.cave.pairing-secret-remains-native', native.pairingSecretNative);
+  recordWhen(chat, 'chat.cave.bearer-remains-native', native.bearerNative);
+  recordWhen(
+    chat,
+    'chat.cave.bearer-never-enters-webview',
+    native.bearerNeverCrossedBoundary &&
+      chatTest('never places secret canaries in managed command arguments or results'),
+  );
+  recordWhen(chat, 'chat.cave.native-store.roundtrip', native.nativeStoreRoundtrip);
+  recordWhen(chat, 'chat.cave.restart.credential-reused', native.restartCredentialReused);
+  recordWhen(chat, 'chat.cave.restart.no-automatic-repairing', native.noAutomaticRepairing);
+  recordWhen(chat, 'chat.cave.replacement.stale-state-refused', native.staleStateRefused);
+  for (const [id, key] of [
+    ['chat.cave.read.familiars', 'familiars'],
+    ['chat.cave.read.projects', 'projects'],
+    ['chat.cave.read.conversations', 'conversations'],
+    ['chat.cave.read.conversation', 'conversation'],
+    ['chat.cave.read.messages', 'messages'],
+  ]) {
+    recordWhen(chat, id, native.reads[key]);
+  }
+  recordWhen(
+    chat,
+    'chat.cave.reconcile.reloads-query-only',
+    native.reconcileRequired &&
+      native.reconcileDidNotPair &&
+      chatTest('surfaces reconcile_required separately from generic errors'),
+  );
+  recordWhen(
+    chat,
+    'chat.cave.revocation.transitions-state',
+    native.revocationTransition &&
+      chatTest('only revokes after a confirmed packed managed credential status'),
+  );
+  recordWhen(chat, 'chat.cave.revocation.all-reads-refused', native.allRevokedReadsRefused);
+  recordWhen(chat, 'chat.coven.discovery.owner-local', coven.ownerLocal);
+  recordWhen(chat, 'chat.coven.executable.trusted', coven.executableTrusted);
+  recordWhen(chat, 'chat.coven.health', coven.health);
+  recordWhen(
+    chat,
+    'chat.coven.structured-errors-preserved',
+    chatRustTest('maps_client_failures_to_bounded_diagnostics_without_leaking_details'),
+  );
+  recordWhen(
+    chat,
+    'chat.deadline.total-bounded',
+    chatTest('propagates a managed SDK deadline to native cancellation and caps native duration'),
+  );
+  recordWhen(chat, 'chat.native.keychain-unavailable-fails-closed', native.keychainUnavailable);
+  recordWhen(
+    chat,
+    'chat.native.trust-provider-unavailable-fails-closed',
+    coven.trustProviderUnavailable,
+  );
+  for (const id of [
+    'chat.evidence.no-prompts',
+    'chat.evidence.no-message-bodies',
+    'chat.evidence.no-attachments',
+    'chat.evidence.no-command-output',
+  ]) {
+    recordWhen(chat, id, scansPassed);
+  }
+
+  if (platform === 'win32-x64') {
+    recordWhen(chat, 'chat.coven.windows.pipe-owner', coven.ownerLocal);
+    recordWhen(chat, 'chat.coven.windows.connected-pipe-identity', coven.connectedIdentity);
+    recordWhen(
+      chat,
+      'chat.coven.windows.malicious-home-refused',
+      covenRustTest('legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.windows.constructed-pipe-refused',
+      covenRustTest('recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.windows.foreign-pipe-refused',
+      covenRustTest('recorded_daemon_status_rejects_a_stable_pipe_for_another_profile'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.windows.ownership-provider-failure-refused',
+      covenRustTest('windows_security_inspection_waits_are_finite'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.windows.executable-trust-failure-refused',
+      coven.executableTrustFailure,
+    );
+    recordWhen(
+      chat,
+      'chat.coven.windows.reparse-endpoint-refused',
+      covenRustTest('status_file_reader_allows_an_atomic_status_replacement'),
+    );
+    recordWhen(
+      chat,
+      'chat.native.windows-credential-manager.isolated',
+      native.nativeStoreRoundtrip && native.backend === 'windows-credential-manager',
+    );
+  } else {
+    recordWhen(
+      chat,
+      'chat.coven.unix.connected-peer-identity',
+      coven.connectedIdentity &&
+        covenRustTest('platform_peer_credentials_report_the_connected_process_uid'),
+    );
+    for (const id of [
+      'chat.coven.unix.malicious-home-refused',
+      'chat.coven.unix.symlink-socket-refused',
+      'chat.coven.unix.wrong-owner-refused',
+      'chat.coven.unix.wrong-mode-refused',
+    ]) {
+      recordWhen(chat, id, covenRustTest('discovers_only_an_owner_local_unix_socket'));
+    }
+    recordWhen(
+      chat,
+      'chat.coven.unix.replaced-socket-refused',
+      covenRustTest('a_mutation_is_not_sent_to_a_replacement_before_that_peer_is_negotiated'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.unix.wrong-peer-uid-refused',
+      covenRustTest('connected_peer_uid_must_match_discovered_and_current_owner'),
+    );
+    recordWhen(
+      chat,
+      'chat.coven.unix.peer-provider-failure-refused',
+      coven.trustProviderUnavailable,
+    );
+    recordWhen(
+      chat,
+      'chat.coven.unix.executable-trust-failure-refused',
+      coven.executableTrustFailure,
+    );
+    recordWhen(
+      chat,
+      platform === 'darwin-arm64'
+        ? 'chat.native.macos-keychain.isolated'
+        : 'chat.native.linux-keyring.isolated',
+      native.nativeStoreRoundtrip &&
+        native.backend === CANONICAL_PLATFORM_ENVIRONMENTS[platform].nativeCustody,
+    );
+  }
+
+  return {
+    sdk: sdk.complete(),
+    chat: chat.complete(),
+  };
+}
+
 export async function runPhase1Conformance(options = parseArgs([])) {
   assertNoNodeRuntimeInjection();
+  if (options.platform !== undefined) {
+    return runSchemaV2Conformance(options);
+  }
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );

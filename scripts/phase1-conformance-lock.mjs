@@ -66,10 +66,18 @@ const harnessAuthorityPaths = Object.freeze([
   'scripts/owned-temp-directory.mjs',
   'scripts/phase1-conformance-lock.mjs',
   'scripts/phase1-evidence-contract.mjs',
+  'scripts/phase1-evidence-runtime.mjs',
+  'scripts/phase1-schema-v2-evidence.mjs',
+  'scripts/phase1-schema-v2-producer.mjs',
+  'scripts/phase1-linux-secret-service.mjs',
+  'scripts/phase1-linux-secret-service.sh',
+  'scripts/phase1-macos-keychain.mjs',
+  'scripts/contract-canary.mjs',
   'scripts/supervised-exec.mjs',
   'scripts/supervisor-status.mjs',
   'scripts/phase1-artifact-secret-scan.mjs',
   '.github/workflows/ci.yml',
+  '.github/workflows/client-v1-conformance.yml',
 ]);
 const productionDeltaPaths = Object.freeze([
   'src-tauri/Cargo.toml',
@@ -145,6 +153,12 @@ export function createGitEnvironment(inheritedEnvironment = process.env) {
   environment.GIT_SSH_COMMAND = devNull;
   environment.GIT_TERMINAL_PROMPT = '0';
   environment.SSH_ASKPASS = devNull;
+  return environment;
+}
+
+export function createGitCheckoutEnvironment(inheritedEnvironment = process.env) {
+  const environment = createGitEnvironment(inheritedEnvironment);
+  delete environment.GIT_ATTR_SOURCE;
   return environment;
 }
 
@@ -1235,6 +1249,32 @@ function assertCleanPhase1CheckoutsWithLimits(checkoutRoots, limits) {
 
 export function assertCleanPhase1Checkouts(checkoutRoots) {
   return assertCleanPhase1CheckoutsWithLimits(checkoutRoots, defaultVerificationLimits);
+}
+
+export function assertCleanPhase1Checkout(repositoryRoot, label = 'checkout') {
+  const root = requirePathString(repositoryRoot, `${label} root`);
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    throw new Error(`${label} root must be a directory.`);
+  }
+  const context = createRepositoryVerificationContext(label, defaultVerificationLimits);
+  assertNoLocalExcludeRules(root, context);
+  assertNoLocalAttributeRules(root, context);
+  assertNoReplacementRefs(root, context);
+  assertNoHiddenIndexEntries(root, context);
+  const trackedEntries = readTrackedEntries(root, context);
+  assertNoTrackedFilterAttributes(root, context, trackedEntries);
+  return assertCleanCheckout(root, context);
+}
+
+export function readPhase1CheckoutIdentity(repositoryRoot, label = 'checkout') {
+  const root = requirePathString(repositoryRoot, `${label} root`);
+  const context = createRepositoryVerificationContext(label, defaultVerificationLimits);
+  const revision = runGit(root, ['rev-parse', 'HEAD'], context).trim();
+  const tree = runGit(root, ['rev-parse', 'HEAD^{tree}'], context).trim();
+  if (!revisionPattern.test(revision) || !revisionPattern.test(tree)) {
+    throw new Error(`${label} does not have a canonical commit and tree identity.`);
+  }
+  return Object.freeze({ revision, tree });
 }
 
 function requireLockedRevision(lock, key) {

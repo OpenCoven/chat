@@ -1,8 +1,13 @@
 #![cfg(feature = "phase1-conformance")]
 
 use std::{
-    io::{BufRead, BufReader, Write},
-    process::{ChildStdin, ChildStdout, Command, Stdio},
+    io::Write,
+    process::{Command, Stdio},
+};
+#[cfg(unix)]
+use std::{
+    io::{BufRead, BufReader},
+    process::{ChildStdin, ChildStdout},
 };
 
 use serde_json::{json, Value};
