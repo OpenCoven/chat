@@ -108,6 +108,10 @@ export function buildPlatformEvidence(options: {
   platform: string;
   commits: { sdk: string };
   coverage: Record<string, boolean>;
+  environment: {
+    nodeVersion: 'v24.18.1';
+    packageManagerVersion: 'pnpm@10.34.0';
+  };
   notCovered: Array<{ scopeId: string; diagnosticId: string }>;
   chatAssertions: CrossAssertion[];
   isolation: {

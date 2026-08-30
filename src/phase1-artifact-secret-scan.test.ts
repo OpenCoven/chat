@@ -176,8 +176,14 @@ describe('Phase 1 retained-artifact secret scan', () => {
   });
 
   test('rejects evidence produced by a different Node 24 release', async () => {
-    const report = validReport();
-    report.environment.nodeVersion = 'v24.19.0';
+    const valid = validReport();
+    const report = {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        nodeVersion: 'v24.19.0',
+      },
+    };
 
     await expect(scanReport(report)).rejects.toThrow(/environment is invalid/);
   });
