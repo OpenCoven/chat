@@ -14,7 +14,8 @@ const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const defaultLimits = Object.freeze({
   maxDepth: 16,
   maxEntries: 100_000,
-  maxBytes: 1024 * 1024 * 1024,
+  maxLogicalBytes: 1024 * 1024 * 1024 * 1024,
+  maxContentBytes: 64 * 1024 * 1024,
 });
 
 function missingPath(error) {
@@ -24,7 +25,7 @@ function missingPath(error) {
 function snapshotPath(path, limits = defaultLimits) {
   const root = resolve(path);
   const digest = createHash('sha256');
-  const state = { entries: 0, bytes: 0 };
+  const state = { entries: 0, logicalBytes: 0, contentBytes: 0 };
   const buffer = Buffer.allocUnsafe(1024 * 1024);
 
   const hashFile = (entryPath) => {
@@ -65,7 +66,9 @@ function snapshotPath(path, limits = defaultLimits) {
     }
     const normalized = relativePath.replaceAll('\\', '/');
     if (stats.isDirectory()) {
-      digest.update(`directory:${normalized}\0`);
+      digest.update(
+        `directory:${normalized}:${stats.dev}:${stats.ino}:${stats.mode & 0o777}:${stats.mtimeMs}:${stats.ctimeMs}\0`,
+      );
       for (const entry of readdirSync(entryPath, { withFileTypes: true }).sort((left, right) =>
         left.name.localeCompare(right.name),
       )) {
@@ -80,12 +83,19 @@ function snapshotPath(path, limits = defaultLimits) {
     if (!stats.isFile()) {
       throw new Error('Operator state snapshot accepts only regular files and directories.');
     }
-    state.bytes += stats.size;
-    if (state.bytes > limits.maxBytes) {
-      throw new Error('Operator state exceeds the snapshot byte limit.');
+    state.logicalBytes += stats.size;
+    if (state.logicalBytes > limits.maxLogicalBytes) {
+      throw new Error('Operator state exceeds the bounded logical-size limit.');
     }
-    digest.update(`file:${normalized}:${stats.mode & 0o777}:${stats.size}\0`);
-    hashFile(entryPath);
+    digest.update(
+      `file:${normalized}:${stats.dev}:${stats.ino}:${stats.mode & 0o777}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}\0`,
+    );
+    if (state.contentBytes + stats.size <= limits.maxContentBytes) {
+      hashFile(entryPath);
+      state.contentBytes += stats.size;
+    } else {
+      digest.update('metadata-only\0');
+    }
     digest.update('\0');
   };
 
