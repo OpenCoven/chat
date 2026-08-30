@@ -160,6 +160,7 @@ export function safeEnvironment(
   rootPath: string,
   extra?: Record<string, string>,
 ): Record<string, string>;
+export function caveBuildEnvironment(environment: Record<string, string>): Record<string, string>;
 export function snapshotOperatorState(operatorHome?: string): {
   'cave-home': string;
   'coven-home': string;
