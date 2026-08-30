@@ -817,7 +817,7 @@ mod tests {
         assert!(launcher.launches.lock().unwrap().is_empty());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn owner_current_connected_socket_health_succeeds() {
         use std::{
@@ -827,11 +827,19 @@ mod tests {
             thread,
         };
 
-        let root = std::env::current_dir()
-            .unwrap()
-            .join(format!(".c{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        #[cfg(target_os = "macos")]
+        let short_parent = std::path::Path::new("/Users/Shared");
+        #[cfg(target_os = "linux")]
+        let short_parent = std::path::Path::new("/dev/shm");
+        struct OwnedDirectory(std::path::PathBuf);
+        impl Drop for OwnedDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = short_parent.join(format!(".oc-coven-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let _owned_root = OwnedDirectory(root.clone());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let socket = root.join("coven.sock");
         let listener = UnixListener::bind(&socket).unwrap();
@@ -855,6 +863,5 @@ mod tests {
         let health = DirectCovenHealth::with_home(Arc::new(move || Ok(resolver_root.clone())));
         assert_eq!(health.health().unwrap(), CovenHealthResult { status: "ok" });
         server.join().unwrap();
-        fs::remove_dir_all(&root).unwrap();
     }
 }

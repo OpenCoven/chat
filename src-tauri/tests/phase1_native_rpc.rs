@@ -9,6 +9,60 @@ use serde_json::{json, Value};
 
 const INSTALLATION_ID: &str = "4e1d02ca-833b-4d9d-8e9f-31bb8f44f9b5";
 const MAX_LINE_BYTES: usize = 64 * 1024;
+const CONFORMANCE_SOURCE: &str = include_str!("../src/conformance.rs");
+
+fn rpc_request(
+    stdin: &mut ChildStdin,
+    stdout: &mut BufReader<ChildStdout>,
+    request: Value,
+) -> Value {
+    serde_json::to_writer(&mut *stdin, &request).expect("request must serialize");
+    stdin.write_all(b"\n").expect("request newline must write");
+    stdin.flush().expect("request must flush");
+    let mut line = String::new();
+    stdout
+        .read_line(&mut line)
+        .expect("response line must read");
+    serde_json::from_str(&line).expect("response must be JSON")
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_contains(keychain: &str, service: &str, account: Option<&str>) -> bool {
+    let mut probe = Command::new("/usr/bin/security");
+    probe.args(["find-generic-password", "-s", service]);
+    if let Some(account) = account {
+        probe.args(["-a", account]);
+    }
+    probe
+        .arg(keychain)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("keychain probe must run")
+        .success()
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_reservation_account(handle: &str) -> String {
+    format!("cleanup-reservation-v1:{handle}")
+}
+
+#[test]
+fn windows_launched_cave_is_bound_to_a_kill_on_close_job() {
+    for required in [
+        "CreateJobObjectW",
+        "SetInformationJobObject",
+        "AssignProcessToJobObject",
+        "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+        "CREATE_SUSPENDED",
+        "ResumeThread",
+    ] {
+        assert!(
+            CONFORMANCE_SOURCE.contains(required),
+            "missing Windows Cave job-object guarantee: {required}"
+        );
+    }
+}
 const NATIVE_PROVIDER_PRESET_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
 
 #[test]
@@ -234,6 +288,684 @@ fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
         String::from_utf8(output.stderr).expect("stderr must be UTF-8"),
         "phase1-native-rpc failed\n"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn subprocess_prepare_broken_pipe_removes_real_isolated_keychain_marker() {
+    use std::fs;
+
+    if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+        eprintln!("skipped: isolated Phase 1 keychain is not configured");
+        return;
+    }
+    let keychain =
+        std::env::var("PHASE1_TEST_KEYCHAIN").expect("isolated keychain path must be configured");
+    let root = std::path::PathBuf::from(
+        std::env::var_os("CARGO_TARGET_DIR")
+            .expect("isolated Cargo target root must be configured"),
+    )
+    .join("phase1-native-rpc-tests")
+    .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&root).expect("test root must be created");
+    struct RootCleanup(std::path::PathBuf);
+    impl Drop for RootCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _root_cleanup = RootCleanup(root.clone());
+    let lock_root = root.join("credential-lock");
+    let result_path = root.join("reservation.json");
+
+    {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+            .arg("--opencoven-internal-test-reservation-output-v1")
+            .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+            .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+            .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+            .env(
+                "OPENCOVEN_PHASE1_TEST_RESERVATION_RESULT_PATH",
+                &result_path,
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("phase1-native-rpc test mode must start");
+        drop(child.stdout.take().expect("child stdout must be piped"));
+        let output = child
+            .wait_with_output()
+            .expect("broken-output native RPC must exit");
+        assert!(!output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stderr).expect("stderr must be UTF-8"),
+            "phase1-native-rpc failed\n"
+        );
+
+        let reservation: Value = serde_json::from_slice(
+            &fs::read(&result_path).expect("reservation control record must exist"),
+        )
+        .expect("reservation control record must be JSON");
+        let handle = reservation["reservationHandle"]
+            .as_str()
+            .expect("reservation handle must be recorded");
+        let capability = reservation["capability"]
+            .as_str()
+            .expect("reservation capability must be recorded");
+        let owner_token = reservation["ownerToken"]
+            .as_str()
+            .expect("reservation owner token must be recorded");
+        let instance_id = reservation["instanceId"]
+            .as_str()
+            .expect("instance ID must be recorded");
+
+        let marker_account = cleanup_reservation_account(handle);
+        assert!(!keychain_contains(
+            &keychain,
+            "ai.opencoven.chat.conformance-cleanup",
+            Some(&marker_account)
+        ));
+        let target_account = format!("cave-client-v1:{instance_id}");
+        let target_status = Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-s",
+                "ai.opencoven.chat",
+                "-a",
+                &target_account,
+                &keychain,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("target status probe must run");
+        assert!(!target_status.success(), "target credential must be absent");
+
+        let mut replay = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+            .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+            .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("fresh cleanup RPC must start");
+        let mut replay_stdin = replay.stdin.take().expect("cleanup stdin must be piped");
+        writeln!(
+            replay_stdin,
+            "{}",
+            json!({
+                "id":"replay",
+                "command":"conformance_delete_native_credential",
+                "args":{"reservationHandle":handle,"capability":capability,"ownerToken":owner_token}
+            })
+        )
+        .expect("replay cleanup request must be written");
+        writeln!(
+            replay_stdin,
+            "{}",
+            json!({"id":"shutdown","command":"conformance_shutdown"})
+        )
+        .expect("shutdown request must be written");
+        drop(replay_stdin);
+        let replay_output = replay.wait_with_output().expect("cleanup RPC must exit");
+        assert!(replay_output.status.success());
+        let responses = String::from_utf8(replay_output.stdout)
+            .expect("cleanup stdout must be UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("response must be JSON"))
+            .collect::<Vec<_>>();
+        assert_eq!(responses[0]["error"]["code"], "credential_missing");
+        assert_eq!(responses[1]["result"]["status"], "shutting_down");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn subprocess_stdin_eof_removes_real_isolated_keychain_credential_and_marker() {
+    use std::fs;
+
+    if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+        eprintln!("skipped: isolated Phase 1 keychain is not configured");
+        return;
+    }
+    let keychain =
+        std::env::var("PHASE1_TEST_KEYCHAIN").expect("isolated keychain path must be configured");
+    let root = std::path::PathBuf::from(
+        std::env::var_os("CARGO_TARGET_DIR")
+            .expect("isolated Cargo target root must be configured"),
+    )
+    .join("phase1-native-rpc-tests")
+    .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&root).expect("test root must be created");
+    struct RootCleanup(std::path::PathBuf);
+    impl Drop for RootCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _root_cleanup = RootCleanup(root.clone());
+    let lock_root = root.join("credential-lock");
+    let result_path = root.join("reservation.json");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .arg("--opencoven-internal-test-reservation-eof-v1")
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .env(
+            "OPENCOVEN_PHASE1_TEST_RESERVATION_RESULT_PATH",
+            &result_path,
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("phase1-native-rpc EOF test mode must start");
+    let stdin = child.stdin.take().expect("child stdin must be piped");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout must be piped"));
+    let mut response = String::new();
+    stdout
+        .read_line(&mut response)
+        .expect("reservation response must be delivered");
+    assert_eq!(
+        serde_json::from_str::<Value>(&response).expect("reservation response must be JSON")["ok"],
+        true
+    );
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .expect("native RPC must exit after stdin EOF");
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr must be UTF-8")
+        .is_empty());
+
+    let reservation: Value = serde_json::from_slice(
+        &fs::read(&result_path).expect("reservation control record must exist"),
+    )
+    .expect("reservation control record must be JSON");
+    let handle = reservation["reservationHandle"]
+        .as_str()
+        .expect("reservation handle must be recorded");
+    let capability = reservation["capability"]
+        .as_str()
+        .expect("reservation capability must be recorded");
+    let owner_token = reservation["ownerToken"]
+        .as_str()
+        .expect("reservation owner token must be recorded");
+    let instance_id = reservation["instanceId"]
+        .as_str()
+        .expect("instance ID must be recorded");
+
+    let marker_account = cleanup_reservation_account(handle);
+    for (service, account) in [
+        (
+            "ai.opencoven.chat.conformance-cleanup",
+            Some(marker_account),
+        ),
+        (
+            "ai.opencoven.chat",
+            Some(format!("cave-client-v1:{instance_id}")),
+        ),
+    ] {
+        let mut probe = Command::new("/usr/bin/security");
+        probe.args(["find-generic-password", "-s", service]);
+        if let Some(account) = account.as_deref() {
+            probe.args(["-a", account]);
+        }
+        let status = probe
+            .arg(&keychain)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("keychain status probe must run");
+        assert!(!status.success(), "credential namespace must be empty");
+    }
+
+    let mut replay = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("fresh cleanup RPC must start");
+    {
+        let mut replay_stdin = replay.stdin.take().expect("cleanup stdin must be piped");
+        writeln!(
+            replay_stdin,
+            "{}",
+            json!({
+                "id":"replay",
+                "command":"conformance_delete_native_credential",
+                "args":{"reservationHandle":handle,"capability":capability,"ownerToken":owner_token}
+            })
+        )
+        .expect("replay cleanup request must be written");
+        writeln!(
+            replay_stdin,
+            "{}",
+            json!({"id":"shutdown","command":"conformance_shutdown"})
+        )
+        .expect("shutdown request must be written");
+    }
+    let replay_output = replay.wait_with_output().expect("cleanup RPC must exit");
+    assert!(replay_output.status.success());
+    let replay_response = String::from_utf8(replay_output.stdout)
+        .expect("cleanup stdout must be UTF-8")
+        .lines()
+        .next()
+        .map(|line| serde_json::from_str::<Value>(line).expect("response must be JSON"))
+        .expect("cleanup response must exist");
+    assert_eq!(replay_response["error"]["code"], "credential_missing");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn subprocess_reservation_handoff_preserves_then_deletes_exact_credential() {
+    use std::{
+        fs,
+        sync::{Arc, Barrier},
+        thread,
+        time::Duration,
+    };
+
+    if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+        eprintln!("skipped: isolated Phase 1 keychain is not configured");
+        return;
+    }
+    let keychain =
+        std::env::var("PHASE1_TEST_KEYCHAIN").expect("isolated keychain path must be configured");
+    let root = std::path::PathBuf::from(
+        std::env::var_os("CARGO_TARGET_DIR")
+            .expect("isolated Cargo target root must be configured"),
+    )
+    .join("phase1-native-rpc-tests")
+    .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&root).expect("test root must be created");
+    struct RootCleanup(std::path::PathBuf);
+    impl Drop for RootCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _root_cleanup = RootCleanup(root.clone());
+    let lock_root = root.join("credential-lock");
+    let result_path = root.join("reservation.json");
+
+    let mut predecessor = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .arg("--opencoven-internal-test-reservation-eof-v1")
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .env(
+            "OPENCOVEN_PHASE1_TEST_RESERVATION_RESULT_PATH",
+            &result_path,
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("predecessor RPC must start");
+    let predecessor_stdin = predecessor.stdin.take().expect("predecessor stdin");
+    let mut predecessor_stdout =
+        BufReader::new(predecessor.stdout.take().expect("predecessor stdout"));
+    let mut prepared_line = String::new();
+    predecessor_stdout
+        .read_line(&mut prepared_line)
+        .expect("prepare response must read");
+    assert_eq!(
+        serde_json::from_str::<Value>(&prepared_line).expect("prepare response JSON")["ok"],
+        true
+    );
+    let reservation: Value = serde_json::from_slice(
+        &fs::read(&result_path).expect("reservation control record must exist"),
+    )
+    .expect("reservation control record must be JSON");
+    let handle = reservation["reservationHandle"].as_str().unwrap();
+    let capability = reservation["capability"].as_str().unwrap();
+    let predecessor_owner = reservation["ownerToken"].as_str().unwrap();
+    let account = format!(
+        "cave-client-v1:{}",
+        reservation["instanceId"].as_str().unwrap()
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !keychain_contains(&keychain, "ai.opencoven.chat", Some(&account)) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "predecessor credential must be stored"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let mut successor = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("successor RPC must start");
+    let mut successor_stdin = successor.stdin.take().expect("successor stdin");
+    let mut successor_stdout = BufReader::new(successor.stdout.take().expect("successor stdout"));
+    let mut contender = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("contender RPC must start");
+    let mut contender_stdin = contender.stdin.take().expect("contender stdin");
+    let mut contender_stdout = BufReader::new(contender.stdout.take().expect("contender stdout"));
+    let barrier = Arc::new(Barrier::new(3));
+    let first_successor_owner = uuid::Uuid::new_v4().to_string();
+    let second_successor_owner = uuid::Uuid::new_v4().to_string();
+    let first_request = json!({
+      "id":"adopt",
+      "command":"conformance_begin_adopt_native_cleanup",
+      "args":{
+          "reservationHandle":handle,
+          "capability":capability,
+          "ownerToken":predecessor_owner,
+          "successorOwnerToken":first_successor_owner
+      }
+    });
+    let second_request = json!({
+    "id":"adopt",
+    "command":"conformance_begin_adopt_native_cleanup",
+    "args":{
+        "reservationHandle":handle,
+        "capability":capability,
+        "ownerToken":predecessor_owner,
+        "successorOwnerToken":second_successor_owner
+    }
+    });
+    let (mut adopted, mut stale_adoption) = thread::scope(|scope| {
+        let first_barrier = Arc::clone(&barrier);
+        let first_stdin = &mut successor_stdin;
+        let first_stdout = &mut successor_stdout;
+        let first = scope.spawn(move || {
+            first_barrier.wait();
+            rpc_request(first_stdin, first_stdout, first_request)
+        });
+        let second_barrier = Arc::clone(&barrier);
+        let second_stdin = &mut contender_stdin;
+        let second_stdout = &mut contender_stdout;
+        let second = scope.spawn(move || {
+            second_barrier.wait();
+            rpc_request(second_stdin, second_stdout, second_request)
+        });
+        barrier.wait();
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    if adopted["ok"] != true {
+        std::mem::swap(&mut successor, &mut contender);
+        std::mem::swap(&mut successor_stdin, &mut contender_stdin);
+        std::mem::swap(&mut successor_stdout, &mut contender_stdout);
+        std::mem::swap(&mut adopted, &mut stale_adoption);
+    }
+    assert_eq!(adopted["ok"], true);
+    assert_eq!(stale_adoption["error"]["code"], "keychain_failure");
+    let successor_owner = adopted["result"]["ownerToken"]
+        .as_str()
+        .expect("successor owner token")
+        .to_owned();
+    assert_ne!(successor_owner, predecessor_owner);
+    let commit_request = json!({
+        "id":"commit",
+        "command":"conformance_commit_adopt_native_cleanup",
+        "args":{
+            "reservationHandle":handle,
+            "capability":capability,
+            "ownerToken":predecessor_owner,
+            "successorOwnerToken":successor_owner
+        }
+    });
+    for _ in 0..2 {
+        let committed = rpc_request(
+            &mut successor_stdin,
+            &mut successor_stdout,
+            commit_request.clone(),
+        );
+        assert_eq!(committed["result"]["status"], "committed");
+        assert_eq!(committed["result"]["ownerToken"], successor_owner);
+    }
+    let stale_cleanup = rpc_request(
+        &mut contender_stdin,
+        &mut contender_stdout,
+        json!({
+            "id":"stale-cleanup",
+            "command":"conformance_delete_native_credential",
+            "args":{
+                "reservationHandle":handle,
+                "capability":capability,
+                "ownerToken":predecessor_owner
+            }
+        }),
+    );
+    assert_eq!(stale_cleanup["error"]["code"], "stale_cleanup_owner");
+    let _ = rpc_request(
+        &mut contender_stdin,
+        &mut contender_stdout,
+        json!({"id":"shutdown","command":"conformance_shutdown"}),
+    );
+    drop(contender_stdin);
+    assert!(contender.wait().expect("contender exit").success());
+
+    drop(predecessor_stdin);
+    assert!(predecessor.wait().expect("predecessor exit").success());
+    assert!(
+        keychain_contains(&keychain, "ai.opencoven.chat", Some(&account)),
+        "credential must survive stale predecessor cleanup"
+    );
+
+    drop(successor_stdin);
+    assert!(successor.wait().expect("successor exit").success());
+    assert!(!keychain_contains(
+        &keychain,
+        "ai.opencoven.chat",
+        Some(&account)
+    ));
+    assert!(!keychain_contains(
+        &keychain,
+        "ai.opencoven.chat.conformance-cleanup",
+        Some(&cleanup_reservation_account(handle))
+    ));
+
+    let mut replay = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+        .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("replay RPC must start");
+    let mut replay_stdin = replay.stdin.take().expect("replay stdin");
+    let mut replay_stdout = BufReader::new(replay.stdout.take().expect("replay stdout"));
+    let replay_result = rpc_request(
+        &mut replay_stdin,
+        &mut replay_stdout,
+        json!({
+            "id":"replay",
+            "command":"conformance_delete_native_credential",
+            "args":{
+                "reservationHandle":handle,
+                "capability":capability,
+                "ownerToken":successor_owner
+            }
+        }),
+    );
+    assert_eq!(replay_result["error"]["code"], "credential_missing");
+    let _ = rpc_request(
+        &mut replay_stdin,
+        &mut replay_stdout,
+        json!({"id":"shutdown","command":"conformance_shutdown"}),
+    );
+    drop(replay_stdin);
+    assert!(replay.wait().expect("replay exit").success());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn subprocess_recovers_both_adoption_commit_crash_windows() {
+    use std::{ffi::CString, fs, io::Read, sync::mpsc, thread, time::Duration};
+
+    if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+        eprintln!("skipped: isolated Phase 1 keychain is not configured");
+        return;
+    }
+    let keychain =
+        std::env::var("PHASE1_TEST_KEYCHAIN").expect("isolated keychain path must be configured");
+    let cargo_target = std::path::PathBuf::from(
+        std::env::var_os("CARGO_TARGET_DIR")
+            .expect("isolated Cargo target root must be configured"),
+    );
+    let target_root = cargo_target.join("phase1-native-rpc-tests");
+
+    for phase in ["before-commit", "after-commit"] {
+        let root = target_root.join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&root).unwrap();
+        let result_path = root.join("reservation.json");
+        let lock_root = root.join("credential-lock");
+        let mut predecessor = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+            .arg("--opencoven-internal-test-reservation-eof-v1")
+            .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+            .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+            .env(
+                "OPENCOVEN_PHASE1_TEST_RESERVATION_RESULT_PATH",
+                &result_path,
+            )
+            .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let predecessor_stdin = predecessor.stdin.take().unwrap();
+        let mut predecessor_stdout = BufReader::new(predecessor.stdout.take().unwrap());
+        let mut line = String::new();
+        predecessor_stdout.read_line(&mut line).unwrap();
+        let reservation: Value = serde_json::from_slice(&fs::read(&result_path).unwrap()).unwrap();
+        let handle = reservation["reservationHandle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let capability = reservation["capability"].as_str().unwrap().to_owned();
+        let predecessor_owner = reservation["ownerToken"].as_str().unwrap().to_owned();
+        let successor_owner = uuid::Uuid::new_v4().to_string();
+        let account = format!(
+            "cave-client-v1:{}",
+            reservation["instanceId"].as_str().unwrap()
+        );
+
+        let ready = root.join(format!("{phase}.ready"));
+        let gate = root.join(format!("{phase}.gate"));
+        for fifo in [&ready, &gate] {
+            let path = CString::new(fifo.to_str().unwrap()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        }
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let ready_thread = thread::spawn(move || {
+            let mut file = fs::File::open(ready).unwrap();
+            let mut bytes = [0_u8; 6];
+            file.read_exact(&mut bytes).unwrap();
+            ready_tx.send(()).unwrap();
+        });
+
+        let mut successor = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+            .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+            .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+            .env("OPENCOVEN_PHASE1_TEST_ADOPTION_BARRIER", phase)
+            .env("OPENCOVEN_PHASE1_TEST_ADOPTION_BARRIER_ROOT", &root)
+            .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+            .env("CARGO_TARGET_DIR", &cargo_target)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut successor_stdin = successor.stdin.take().unwrap();
+        let mut successor_stdout = BufReader::new(successor.stdout.take().unwrap());
+        let args = json!({
+            "reservationHandle":handle,
+            "capability":capability,
+            "ownerToken":predecessor_owner,
+            "successorOwnerToken":successor_owner
+        });
+        assert_eq!(
+            rpc_request(
+                &mut successor_stdin,
+                &mut successor_stdout,
+                json!({"id":"begin","command":"conformance_begin_adopt_native_cleanup","args":args.clone()})
+            )["ok"],
+            true
+        );
+        serde_json::to_writer(
+            &mut successor_stdin,
+            &json!({"id":"commit","command":"conformance_commit_adopt_native_cleanup","args":args}),
+        )
+        .unwrap();
+        successor_stdin.write_all(b"\n").unwrap();
+        successor_stdin.flush().unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        ready_thread.join().unwrap();
+        successor.kill().unwrap();
+        successor.wait().unwrap();
+
+        let mut recovery = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
+            .env(NATIVE_PROVIDER_PRESET_ENV, "production-keyring")
+            .env("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT", &lock_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut recovery_stdin = recovery.stdin.take().unwrap();
+        let mut recovery_stdout = BufReader::new(recovery.stdout.take().unwrap());
+        let mut deleted = false;
+        for owner in [&successor_owner, &predecessor_owner] {
+            let response = rpc_request(
+                &mut recovery_stdin,
+                &mut recovery_stdout,
+                json!({
+                    "id":"cleanup",
+                    "command":"conformance_delete_native_credential",
+                    "args":{
+                        "reservationHandle":handle,
+                        "capability":capability,
+                        "ownerToken":owner
+                    }
+                }),
+            );
+            if response["ok"] == true {
+                deleted = true;
+                break;
+            }
+        }
+        assert!(deleted, "one retained owner token must delete");
+        let _ = rpc_request(
+            &mut recovery_stdin,
+            &mut recovery_stdout,
+            json!({"id":"shutdown","command":"conformance_shutdown"}),
+        );
+        drop(recovery_stdin);
+        assert!(recovery.wait().unwrap().success());
+        drop(predecessor_stdin);
+        let _ = predecessor.wait();
+        assert!(!keychain_contains(
+            &keychain,
+            "ai.opencoven.chat",
+            Some(&account)
+        ));
+        assert!(!keychain_contains(
+            &keychain,
+            "ai.opencoven.chat.conformance-cleanup",
+            Some(&cleanup_reservation_account(&handle))
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]

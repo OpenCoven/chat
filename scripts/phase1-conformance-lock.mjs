@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -18,16 +18,73 @@ import { devNull } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
+import { runSupervisedSync } from './supervised-exec.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultLockPath = resolve(projectRoot, 'phase1-conformance.lock.json');
 const revisionPattern = /^[0-9a-f]{40}$/;
+const digestPattern = /^[0-9a-f]{64}$/;
 const repositoryKeys = ['chat', 'sdk', 'cave', 'coven'];
+const canonicalSdkArtifacts = Object.freeze([
+  {
+    packageName: '@opencoven/sdk-core',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+    vendorFile: 'sdk-core-0.1.0.tgz',
+  },
+  {
+    packageName: '@opencoven/cave-client',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+    vendorFile: 'cave-client-0.1.0.tgz',
+  },
+  {
+    packageName: '@opencoven/coven-client',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
+    vendorFile: 'coven-client-0.1.0.tgz',
+  },
+  {
+    packageName: '@opencoven/sdk',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
+    vendorFile: 'sdk-0.1.0.tgz',
+  },
+]);
+const productionChatAuthorityPaths = Object.freeze([
+  'src-tauri/Cargo.toml',
+  'src-tauri/Cargo.lock',
+  'src-tauri/src/bin/phase1-native-rpc.rs',
+  'src-tauri/src/conformance.rs',
+  'src-tauri/src/coven.rs',
+  'src-tauri/src/keyring.rs',
+  'src-tauri/src/lib.rs',
+]);
+const harnessAuthorityPaths = Object.freeze([
+  'scripts/phase1-conformance.mjs',
+  'scripts/phase1-conformance-launcher.sh',
+  'scripts/phase1-conformance-launcher.ps1',
+  'scripts/phase1-process-supervisor.mjs',
+  'scripts/executable-resolution.mjs',
+  'scripts/process-owned-artifact-root.mjs',
+  'scripts/owned-temp-directory.mjs',
+  'scripts/phase1-conformance-lock.mjs',
+  'scripts/phase1-evidence-contract.mjs',
+  'scripts/supervised-exec.mjs',
+  'scripts/supervisor-status.mjs',
+  'scripts/phase1-artifact-secret-scan.mjs',
+  '.github/workflows/ci.yml',
+]);
+const productionDeltaPaths = Object.freeze([
+  'src-tauri/Cargo.toml',
+  'src-tauri/src/bin/phase1-native-rpc.rs',
+  'src-tauri/src/conformance.rs',
+  'src-tauri/src/connection.rs',
+  'src-tauri/src/coven.rs',
+  'src-tauri/src/keyring.rs',
+]);
 const expectedRepositories = Object.freeze({
   chat: 'OpenCoven/chat',
   sdk: 'OpenCoven/sdk',
   cave: 'OpenCoven/coven-cave',
   coven: 'OpenCoven/coven',
+  harness: 'OpenCoven/chat',
 });
 const gitConfigurationOverrides = [
   '-c',
@@ -159,6 +216,344 @@ function normalizeLockEntry(lockData, key) {
   });
 }
 
+function normalizeArtifact(value, expected, label) {
+  const artifact = requireRecord(value, label);
+  requireExactKeys(
+    artifact,
+    ['packageName', 'releaseFile', 'vendorFile', 'size', 'sha256'],
+    `${label} must contain exact package metadata.`,
+  );
+  if (
+    artifact.packageName !== expected.packageName ||
+    artifact.releaseFile !== expected.releaseFile ||
+    artifact.vendorFile !== expected.vendorFile ||
+    !Number.isSafeInteger(artifact.size) ||
+    artifact.size <= 0 ||
+    typeof artifact.sha256 !== 'string' ||
+    !digestPattern.test(artifact.sha256)
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return Object.freeze({ ...artifact });
+}
+
+function normalizeFileArtifact(value, expectedPath, label) {
+  const artifact = requireRecord(value, label);
+  requireExactKeys(
+    artifact,
+    ['path', 'size', 'sha256'],
+    `${label} must contain exactly path, size, and sha256.`,
+  );
+  if (
+    artifact.path !== expectedPath ||
+    !Number.isSafeInteger(artifact.size) ||
+    artifact.size <= 0 ||
+    typeof artifact.sha256 !== 'string' ||
+    !digestPattern.test(artifact.sha256)
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return Object.freeze({ ...artifact });
+}
+
+function normalizeDigestFile(value, expectedPath, label) {
+  const artifact = requireRecord(value, label);
+  requireExactKeys(artifact, ['path', 'sha256'], `${label} must contain exactly path and sha256.`);
+  if (
+    artifact.path !== expectedPath ||
+    typeof artifact.sha256 !== 'string' ||
+    !digestPattern.test(artifact.sha256)
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return Object.freeze({ ...artifact });
+}
+
+function normalizeRelease(value) {
+  const release = requireRecord(value, 'phase1-conformance.lock.json release');
+  requireExactKeys(
+    release,
+    ['sdkManifest', 'sdkArtifacts', 'caveVersion', 'covenVersion', 'consumerLock', 'caveArtifacts'],
+    'phase1-conformance.lock.json release entry is invalid.',
+  );
+  const manifest = requireRecord(release.sdkManifest, 'release.sdkManifest');
+  requireExactKeys(
+    manifest,
+    ['version', 'sha256'],
+    'release.sdkManifest must contain exactly version and sha256.',
+  );
+  if (
+    manifest.version !== '0.1.0' ||
+    typeof manifest.sha256 !== 'string' ||
+    !digestPattern.test(manifest.sha256)
+  ) {
+    throw new Error('release.sdkManifest is invalid.');
+  }
+  if (
+    !Array.isArray(release.sdkArtifacts) ||
+    release.sdkArtifacts.length !== canonicalSdkArtifacts.length
+  ) {
+    throw new Error('release.sdkArtifacts must contain four packages in canonical package order.');
+  }
+  const sdkArtifacts = release.sdkArtifacts.map((artifact, index) => {
+    const expected = canonicalSdkArtifacts[index];
+    if (artifact?.packageName !== expected.packageName) {
+      throw new Error('release.sdkArtifacts must use canonical package order.');
+    }
+    return normalizeArtifact(artifact, expected, `release.sdkArtifacts[${index}]`);
+  });
+  const canonicalManifest = `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      version: manifest.version,
+      packages: sdkArtifacts.map((artifact) => ({
+        name: artifact.packageName,
+        version: manifest.version,
+        file: artifact.releaseFile,
+        size: artifact.size,
+        sha256: artifact.sha256,
+      })),
+    },
+    null,
+    2,
+  )}\n`;
+  if (createHash('sha256').update(canonicalManifest).digest('hex') !== manifest.sha256) {
+    throw new Error('release SDK manifest digest does not match canonical package metadata.');
+  }
+  if (release.caveVersion !== '0.3.11' || release.covenVersion !== '0.1.0') {
+    throw new Error('release authority versions are invalid.');
+  }
+  const consumerLock = normalizeFileArtifact(
+    release.consumerLock,
+    'pnpm-lock.yaml',
+    'release.consumerLock',
+  );
+  const caveArtifacts = requireRecord(release.caveArtifacts, 'release.caveArtifacts');
+  requireExactKeys(
+    caveArtifacts,
+    ['assertionEngine', 'contractFixture', 'hpkeVectors'],
+    'release.caveArtifacts is invalid.',
+  );
+  return Object.freeze({
+    sdkManifest: Object.freeze({ ...manifest }),
+    sdkArtifacts: Object.freeze(sdkArtifacts),
+    caveVersion: release.caveVersion,
+    covenVersion: release.covenVersion,
+    consumerLock,
+    caveArtifacts: Object.freeze({
+      assertionEngine: normalizeFileArtifact(
+        caveArtifacts.assertionEngine,
+        'scripts/client-v1-conformance.mjs',
+        'release.caveArtifacts.assertionEngine',
+      ),
+      contractFixture: normalizeFileArtifact(
+        caveArtifacts.contractFixture,
+        'src/lib/server/client-v1/contract-fixture.json',
+        'release.caveArtifacts.contractFixture',
+      ),
+      hpkeVectors: normalizeFileArtifact(
+        caveArtifacts.hpkeVectors,
+        'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+        'release.caveArtifacts.hpkeVectors',
+      ),
+    }),
+  });
+}
+
+function normalizeEvidence(value) {
+  const evidence = requireRecord(value, 'phase1-conformance.lock.json evidence');
+  requireExactKeys(
+    evidence,
+    ['repository', 'revision', 'contract', 'schema', 'assertionRegistry'],
+    'phase1-conformance.lock.json evidence entry is invalid.',
+  );
+  if (evidence.repository !== 'OpenCoven/sdk') {
+    throw new Error('evidence.repository must be OpenCoven/sdk.');
+  }
+  if (typeof evidence.revision !== 'string' || !revisionPattern.test(evidence.revision)) {
+    throw new Error('evidence.revision must be a lowercase immutable 40-character commit SHA.');
+  }
+  return Object.freeze({
+    repository: evidence.repository,
+    revision: evidence.revision,
+    contract: normalizeDigestFile(
+      evidence.contract,
+      'scripts/conformance-contract.mjs',
+      'evidence.contract',
+    ),
+    schema: normalizeDigestFile(
+      evidence.schema,
+      'conformance/client-v1-cross-repository-evidence.schema.json',
+      'evidence.schema',
+    ),
+    assertionRegistry: normalizeDigestFile(
+      evidence.assertionRegistry,
+      'conformance/client-v1-cross-repository-assertions.json',
+      'evidence.assertionRegistry',
+    ),
+  });
+}
+
+function normalizeChatAuthority(value) {
+  const authority = requireRecord(value, 'phase1-conformance.lock.json chatAuthority');
+  requireExactKeys(
+    authority,
+    ['tree', 'files'],
+    'phase1-conformance.lock.json chatAuthority entry is invalid.',
+  );
+  if (typeof authority.tree !== 'string' || !revisionPattern.test(authority.tree)) {
+    throw new Error('chatAuthority.tree must be an immutable Git tree ID.');
+  }
+
+  if (
+    !Array.isArray(authority.files) ||
+    authority.files.length !== productionChatAuthorityPaths.length
+  ) {
+    throw new Error('chatAuthority files must use canonical Chat authority file order.');
+  }
+  const files = authority.files.map((rawFile, index) => {
+    const file = requireRecord(rawFile, `chatAuthority.files[${index}]`);
+    requireExactKeys(file, ['path', 'blob', 'sha256'], `chatAuthority.files[${index}] is invalid.`);
+    if (
+      file.path !== productionChatAuthorityPaths[index] ||
+      typeof file.blob !== 'string' ||
+      !revisionPattern.test(file.blob) ||
+      typeof file.sha256 !== 'string' ||
+      !digestPattern.test(file.sha256)
+    ) {
+      throw new Error('chatAuthority files must use canonical Chat authority file order.');
+    }
+    return Object.freeze({ ...file });
+  });
+  return Object.freeze({
+    tree: authority.tree,
+    files: Object.freeze(files),
+  });
+}
+
+function normalizeAuthorityFiles(value, expectedPaths, label) {
+  if (!Array.isArray(value) || value.length !== expectedPaths.length) {
+    throw new Error(`${label} must use canonical file order.`);
+  }
+  return Object.freeze(
+    value.map((rawFile, index) => {
+      const file = requireRecord(rawFile, `${label}[${index}]`);
+      requireExactKeys(file, ['path', 'blob', 'sha256'], `${label}[${index}] is invalid.`);
+      if (
+        file.path !== expectedPaths[index] ||
+        typeof file.blob !== 'string' ||
+        !revisionPattern.test(file.blob) ||
+        typeof file.sha256 !== 'string' ||
+        !digestPattern.test(file.sha256)
+      ) {
+        throw new Error(`${label} must use canonical file order.`);
+      }
+      return Object.freeze({ ...file });
+    }),
+  );
+}
+
+function normalizeHarnessAuthority(value) {
+  const authority = requireRecord(value, 'phase1-conformance.lock.json harnessAuthority');
+  requireExactKeys(
+    authority,
+    ['revision', 'tree', 'files', 'productionDeltas'],
+    'phase1-conformance.lock.json harnessAuthority entry is invalid.',
+  );
+  if (
+    typeof authority.revision !== 'string' ||
+    !revisionPattern.test(authority.revision) ||
+    typeof authority.tree !== 'string' ||
+    !revisionPattern.test(authority.tree)
+  ) {
+    throw new Error('harnessAuthority revision and tree must be immutable Git IDs.');
+  }
+  return Object.freeze({
+    revision: authority.revision,
+    tree: authority.tree,
+    files: normalizeAuthorityFiles(
+      authority.files,
+      harnessAuthorityPaths,
+      'harnessAuthority.files',
+    ),
+    productionDeltas: normalizeAuthorityFiles(
+      authority.productionDeltas,
+      productionDeltaPaths,
+      'harnessAuthority.productionDeltas',
+    ),
+  });
+}
+
+function normalizeTools(value) {
+  const tools = requireRecord(value, 'phase1-conformance.lock.json tools');
+  requireExactKeys(tools, ['windowsSupervisor'], 'phase1-conformance.lock.json tools is invalid.');
+  const supervisor = requireRecord(tools.windowsSupervisor, 'tools.windowsSupervisor');
+  requireExactKeys(
+    supervisor,
+    ['source', 'toolchain', 'artifact'],
+    'tools.windowsSupervisor is invalid.',
+  );
+  const source = requireRecord(supervisor.source, 'tools.windowsSupervisor.source');
+  requireExactKeys(
+    source,
+    [
+      'repository',
+      'revision',
+      'path',
+      'blob',
+      'sha256',
+      'manifestSha256',
+      'lockSha256',
+      'configSha256',
+    ],
+    'tools.windowsSupervisor.source is invalid.',
+  );
+  const toolchain = requireRecord(supervisor.toolchain, 'tools.windowsSupervisor.toolchain');
+  requireExactKeys(
+    toolchain,
+    ['homebrewCoreRevision', 'packageVersion', 'bottleLayerSha256', 'linkerVersion'],
+    'tools.windowsSupervisor.toolchain is invalid.',
+  );
+  const artifact = requireRecord(supervisor.artifact, 'tools.windowsSupervisor.artifact');
+  requireExactKeys(
+    artifact,
+    ['target', 'buildInvocation', 'fileName', 'fleetPath', 'size', 'sha256'],
+    'tools.windowsSupervisor.artifact is invalid.',
+  );
+  if (
+    source.repository !== 'OpenCoven/chat' ||
+    !revisionPattern.test(source.revision) ||
+    source.path !== 'tools/phase1-process-supervisor/src/main.rs' ||
+    !revisionPattern.test(source.blob) ||
+    !digestPattern.test(source.sha256) ||
+    !digestPattern.test(source.manifestSha256) ||
+    !digestPattern.test(source.lockSha256) ||
+    !digestPattern.test(source.configSha256) ||
+    toolchain.homebrewCoreRevision !== 'cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57' ||
+    toolchain.packageVersion !== 'mingw-w64 14.0.0_3' ||
+    toolchain.bottleLayerSha256 !==
+      '0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5' ||
+    toolchain.linkerVersion !== '2.47.20260726' ||
+    artifact.target !== 'x86_64-pc-windows-gnu' ||
+    artifact.buildInvocation !==
+      'cd tools/phase1-process-supervisor && SOURCE_DATE_EPOCH=0 cargo build --target x86_64-pc-windows-gnu --release --locked' ||
+    artifact.fileName !== 'phase1-process-supervisor.exe' ||
+    artifact.fleetPath !== 'C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe' ||
+    !Number.isSafeInteger(artifact.size) ||
+    artifact.size <= 0 ||
+    !digestPattern.test(artifact.sha256)
+  ) {
+    throw new Error('tools.windowsSupervisor metadata is invalid.');
+  }
+  return Object.freeze({
+    windowsSupervisor: Object.freeze({
+      source: Object.freeze({ ...source }),
+      toolchain: Object.freeze({ ...toolchain }),
+      artifact: Object.freeze({ ...artifact }),
+    }),
+  });
+}
+
 export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
   const path = requireExistingFile(lockPath, 'Phase 1 conformance lock');
   let lockData;
@@ -172,31 +567,48 @@ export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
   requireRecord(lockData, 'phase1-conformance.lock.json');
   requireExactKeys(
     lockData,
-    ['version', ...repositoryKeys],
-    'phase1-conformance.lock.json must contain exactly version, chat, sdk, cave, and coven.',
+    [
+      'version',
+      ...repositoryKeys,
+      'harness',
+      'chatAuthority',
+      'harnessAuthority',
+      'tools',
+      'release',
+      'evidence',
+    ],
+    'phase1-conformance.lock.json must contain exactly version, chat, sdk, cave, coven, harness, chatAuthority, harnessAuthority, tools, release, and evidence.',
   );
 
-  if (lockData.version !== 1) {
-    throw new Error('phase1-conformance.lock.json version must be 1.');
+  if (lockData.version !== 5) {
+    throw new Error('phase1-conformance.lock.json version must be 5.');
   }
 
   return Object.freeze({
     path,
-    version: 1,
+    version: 5,
     chat: normalizeLockEntry(lockData, 'chat'),
     sdk: normalizeLockEntry(lockData, 'sdk'),
     cave: normalizeLockEntry(lockData, 'cave'),
     coven: normalizeLockEntry(lockData, 'coven'),
+    harness: normalizeLockEntry(lockData, 'harness'),
+    chatAuthority: normalizeChatAuthority(lockData.chatAuthority),
+    harnessAuthority: normalizeHarnessAuthority(lockData.harnessAuthority),
+    tools: normalizeTools(lockData.tools),
+    release: normalizeRelease(lockData.release),
+    evidence: normalizeEvidence(lockData.evidence),
   });
 }
 
 function normalizeCheckoutRoots(checkoutRoots) {
   const roots = requireRecord(checkoutRoots, 'Phase 1 checkout roots');
   const normalizedRoots = {};
+  const keys = [...repositoryKeys, ...(Object.hasOwn(roots, 'chatHarnessRoot') ? ['harness'] : [])];
 
-  for (const key of repositoryKeys) {
+  for (const key of keys) {
     const label = `${key} checkout root`;
-    const path = requirePathString(roots[`${key}Root`], label);
+    const property = key === 'harness' ? 'chatHarnessRoot' : `${key}Root`;
+    const path = requirePathString(roots[property], label);
 
     if (!existsSync(path)) {
       throw new Error(`${label} does not exist.`);
@@ -209,7 +621,7 @@ function normalizeCheckoutRoots(checkoutRoots) {
     normalizedRoots[key] = path;
   }
 
-  return normalizedRoots;
+  return { keys, roots: normalizedRoots };
 }
 
 function throwUnreadableGitCheckout(label) {
@@ -282,7 +694,7 @@ function runGit(repositoryRoot, args, context, input, trackedPathOutput = false)
 
   try {
     const timeout = remainingGitTimeout(context);
-    return execFileSync(
+    return runSupervisedSync(
       'git',
       [
         ...gitConfigurationOverrides,
@@ -802,10 +1214,11 @@ function assertCleanCheckout(repositoryRoot, context) {
 }
 
 function assertCleanPhase1CheckoutsWithLimits(checkoutRoots, limits) {
-  const roots = normalizeCheckoutRoots(checkoutRoots);
+  const normalized = normalizeCheckoutRoots(checkoutRoots);
+  const { keys, roots } = normalized;
   const summaries = {};
 
-  for (const key of repositoryKeys) {
+  for (const key of keys) {
     const label = `${key} checkout`;
     const context = createRepositoryVerificationContext(label, limits);
     assertNoLocalExcludeRules(roots[key], context);
@@ -836,10 +1249,11 @@ function requireLockedRevision(lock, key) {
 }
 
 function assertPhase1CheckoutHeadsWithLimits(lock, checkoutRoots, limits) {
-  const roots = normalizeCheckoutRoots(checkoutRoots);
+  const normalized = normalizeCheckoutRoots(checkoutRoots);
+  const { keys, roots } = normalized;
   const revisions = {};
 
-  for (const key of repositoryKeys) {
+  for (const key of keys) {
     const expectedRevision = requireLockedRevision(lock, key);
     const label = `${key} checkout`;
     const context = createRepositoryVerificationContext(label, limits);

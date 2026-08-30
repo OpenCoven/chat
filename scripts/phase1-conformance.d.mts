@@ -1,9 +1,3 @@
-export type Phase1Assertion = {
-  id: string;
-  status: 'passed' | 'failed' | 'blocked';
-  diagnosticIds: string[];
-};
-
 export const cargoBuildTimeoutMs: number;
 export function parseArgs(argv: string[]): {
   lockPath: string;
@@ -11,65 +5,171 @@ export function parseArgs(argv: string[]): {
   retainSanitizedReport: string;
   chatSourceRoot: string;
   sdkSourceRoot: string;
+  sdkEvidenceSourceRoot: string;
   caveSourceRoot: string;
   covenSourceRoot: string;
+  windowsSupervisorPath?: string;
 };
-export function assertExactAssertionResults(assertions: Phase1Assertion[]): Phase1Assertion[];
-export function buildPhase1Report(options: {
-  assertions: Phase1Assertion[];
-  revisions: {
-    chat: string;
-    sdk: string;
-    cave: string;
-    coven: string;
-  };
-  artifactDigests: Record<string, string>;
-  versions: Record<string, string>;
-}): {
-  schemaVersion: 1;
-  completed: true;
-  status: 'passed' | 'failed' | 'blocked';
-  platform: { os: string; arch: string };
-  versions: Record<string, string>;
-  revisions: Record<string, string>;
-  artifactDigests: Record<string, string>;
-  assertions: Phase1Assertion[];
-  summary: {
-    required: number;
-    passed: number;
-    failed: number;
-    blocked: number;
-    skipped: 0;
-  };
-  diagnosticIds: string[];
+export function observeReleaseToolVersions(): {
+  nodeVersion: 'v24.18.1';
+  packageManagerVersion: 'pnpm@10.34.0';
+  rustVersion: '1.95.0';
 };
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
+export function parsePassedRustTests(output: string): Set<string>;
+export function resolveLockedCovenDaemonCommand(
+  artifactRoot: { rootPath: string },
+  lockedCovenCheckoutRoot: string,
+  expectedCovenRevision: string,
+  covenBinaryPath: string,
+): Readonly<{
+  executable: string;
+  args: readonly ['daemon', 'serve'];
+  cwd: string;
+}>;
+export function establishNativeCleanupReservation(
+  rpc: {
+    request(command: string, args?: unknown): Promise<unknown>;
+    ok(command: string, args?: unknown): Promise<unknown>;
+  },
+  handle: string,
+): Promise<Readonly<{ reservationHandle: string; capability: string; ownerToken: string }>>;
+export function createCleanupAdoptionRecovery(reservation: {
+  reservationHandle: string;
+  capability: string;
+  ownerToken: string;
+}): {
+  predecessor: { reservationHandle: string; capability: string; ownerToken: string };
+  successor: { reservationHandle: string; capability: string; ownerToken: string };
+  deleted: boolean;
+};
+export function adoptNativeCleanupReservation(
+  rpc: {
+    request(command: string, args?: unknown): Promise<unknown>;
+    ok(command: string, args?: unknown): Promise<unknown>;
+  },
+  recovery: {
+    predecessor: { reservationHandle: string; capability: string; ownerToken: string };
+    successor: { reservationHandle: string; capability: string; ownerToken: string };
+    deleted: boolean;
+  },
+  openRecoveryRpc?: () => Promise<{
+    request(command: string, args?: unknown): Promise<unknown>;
+    ok(command: string, args?: unknown): Promise<unknown>;
+    close(): Promise<void>;
+  }>,
+): Promise<Readonly<{ reservationHandle: string; capability: string; ownerToken: string }>>;
+export function runReservedNativePairing(options: {
+  rpc: {
+    request(command: string, args?: unknown): Promise<unknown>;
+    ok(command: string, args?: unknown): Promise<unknown>;
+    operation(): unknown;
+  };
+  handle: string;
+  origin: string;
+  adminToken: string;
+  installationId: string;
+  approvePairing?: (...args: unknown[]) => Promise<unknown>;
+  onReservation?: (reservation: {
+    reservationHandle: string;
+    capability: string;
+    ownerToken: string;
+  }) => void;
+  onCredentialMayExist?: () => void;
+}): Promise<unknown>;
+export function runNativeScenarioOrchestrator<T>(options: {
+  runPairing(): Promise<T>;
+  runLifecycle(pairing: T): Promise<unknown>;
+}): Promise<unknown>;
+export function throwNativeScenarioFailures(options: {
+  scenarioFailure?: unknown;
+  cleanupFailure?: unknown;
+  rpcCleanupFailure?: unknown;
+  daemonCloseFailure?: unknown;
+}): void;
+export function bootstrapWindowsSupervisor(options: {
+  lockPath?: string;
+  windowsSupervisorPath?: string;
+}): unknown;
+export function assertNoNodeRuntimeInjection(
+  environment?: NodeJS.ProcessEnv,
+  execArgv?: string[],
+): void;
+export function assertExecutingHarnessAuthority(
+  lock: unknown,
+  executingRoot?: string,
+  environment?: NodeJS.ProcessEnv,
+): void;
+export function assertProductionAdapterAtRevision(harnessRoot: string, lock: unknown): void;
+export function finalizeOperatorSafety(options: {
+  primaryFailure?: unknown;
+  cleanupFailure?: unknown;
+  operatorStateBefore?: unknown;
+  snapshotAfter?: () => unknown;
+  compare?: (before: unknown, after: unknown) => void;
+}): unknown;
+export function runSupervisedCommandForTest(
+  artifactRoot: {
+    rootPath: string;
+    trackChild(child: import('node:child_process').ChildProcess): void;
+  },
+  command: string,
+  args: readonly string[],
+  options: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    outputLimitBytes?: number;
+  },
+): Promise<unknown>;
+export function parseSupervisorStatusFrame(bytes: Buffer | string): {
+  code: number | null;
+  signal: string | null;
+  reason: string;
+};
+export function runOwnedProcessStatusForTest(
+  command: string,
+  args: readonly string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv },
+): Promise<unknown>;
+export function validateSupervisorArtifactFile(
+  path: string,
+  metadata: { size: number; sha256: string },
+): string;
 export function assertPairingStatus(
   value: { status?: string } | null | undefined,
   expectedStatus: string,
 ): { status?: string };
-export function assertCompatibilityFailure(
-  error: { code?: string } | null | undefined,
-  preset: string,
-): { code: 'incompatible_version' };
-export function assertNativeMissingKeychainResponses(responses: unknown[]): unknown[];
 export class CommandExecutionError extends Error {
   label: string;
   result: unknown;
   constructor(label: string, result: unknown);
 }
-export function classifyCavePackageFailure(result: {
-  stdout?: string;
-  stderr?: string;
-}): string | undefined;
+export function publicPhase1FailureDiagnostic(error: unknown): string | undefined;
+export function classifyPackagingCommandFailure(baseId: string, error: unknown): string;
+export function diagnoseCovenLifecycleFailure(
+  original: unknown,
+  rerun: (testName: string) => Promise<unknown>,
+): Promise<never>;
 export class NativeRpcClient {
-  constructor(child: unknown, options?: { shutdownTimeoutMs?: number });
+  constructor(child: unknown, options?: { shutdownTimeoutMs?: number; supervised?: boolean });
+  request(command: string, args?: unknown): Promise<unknown>;
   close(): Promise<void>;
 }
 export function safeEnvironment(
   rootPath: string,
   extra?: Record<string, string>,
-  resolvedCargoPath?: string,
+): Record<string, string>;
+export function snapshotOperatorState(operatorHome?: string): {
+  'cave-home': string;
+  'coven-home': string;
+  projects: string;
+};
+export function resolveRustupHome(environment?: NodeJS.ProcessEnv): string;
+export function nativeAdapterTestEnvironment(
+  environment: Record<string, string>,
+  platform?: NodeJS.Platform,
+  operatorEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },

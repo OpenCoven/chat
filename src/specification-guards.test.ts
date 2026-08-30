@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -277,19 +278,276 @@ describe('Phase 1 specification guards', () => {
     expect(nativeSource).not.toContain('take_hook');
   });
 
-  it('checks every Rust target on a native Windows runner', () => {
+  it('checks every Rust target for the Windows GNU target in package scripts and CI', () => {
+    const packageManifest = readJson<PackageManifest>('package.json');
     const workflow = readText('.github/workflows/ci.yml');
-    const windowsRustJob = workflow.match(
-      /\n {2}windows-rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
-    )?.groups?.job;
+    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
+      ?.groups?.job;
+    if (rustJob === undefined) {
+      throw new Error('Rust CI job is missing.');
+    }
 
-    expect(windowsRustJob).toContain('name: Windows Rust');
-    expect(windowsRustJob).toContain('runs-on: windows-latest');
-    expect(windowsRustJob).toContain('toolchain: 1.95.0');
-    expect(windowsRustJob).toContain(
+    expect(packageManifest.scripts?.['cargo:check:windows-gnu']).toBe(
+      'cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets',
+    );
+    expect(rustJob).toContain(
       '- run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets',
     );
-    expect(windowsRustJob).not.toContain('rustup target add');
+    expect(rustJob).toContain('- run: rustup target add x86_64-pc-windows-gnu');
+    expect(rustJob).toContain('name: Install pinned Windows GNU toolchain');
+    expect(rustJob).toContain('HOMEBREW_BOTTLE_DOMAIN: https://ghcr.io/v2/homebrew/core');
+    expect(rustJob).toContain('HOMEBREW_NO_INSTALL_FROM_API: "1"');
+    expect(rustJob).toContain('cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57');
+    expect(rustJob).toContain('mingw-w64 14.0.0_3');
+    expect(rustJob).toContain('0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5');
+    expect(rustJob).toContain("grep -F '2.47.20260726'");
+    expect(rustJob).toContain(`formula="\${RUNNER_TEMP}/mingw-w64.rb"`);
+    expect(rustJob).toContain(
+      `https://raw.githubusercontent.com/Homebrew/homebrew-core/\${core_revision}/Formula/m/mingw-w64.rb`,
+    );
+    expect(rustJob).toContain('798631311a841e0639469f3f95a5287c8747f7a354e79a47ac39d6bf20eefe34');
+    expect(rustJob).toContain(
+      `bottle="\${RUNNER_TEMP}/mingw-w64--14.0.0_3.arm64_tahoe.bottle.tar.gz"`,
+    );
+    expect(rustJob).toContain(
+      'https://ghcr.io/v2/homebrew/core/mingw-w64/blobs/sha256:0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5',
+    );
+    expect(rustJob).toContain(`HOMEBREW_DEVELOPER=1 brew install --force-bottle "\${bottle}"`);
+    expect(rustJob).not.toMatch(/\bgit\b[^\n]*(?:checkout|reset|switch)\b/u);
+    expect(rustJob).not.toMatch(/\bbrew tap\b/u);
+    expect(rustJob).not.toContain('brew --repo homebrew/core');
+    expect(rustJob).not.toContain('HOMEBREW_INTERNAL_ALLOW_PACKAGES_FROM_PATHS');
+    expect(rustJob).not.toContain(`brew install --force-bottle "\${formula}"`);
+    expect(rustJob).not.toContain('brew install --force-bottle opencoven/frozen/mingw-w64');
+    expect(rustJob).not.toMatch(/run:\s*brew install mingw-w64\s*$/mu);
+    expect(rustJob).toContain('existing mingw-w64 installation was not removed');
+    expect(rustJob.indexOf('brew uninstall --force mingw-w64')).toBeLessThan(
+      rustJob.indexOf('HOMEBREW_DEVELOPER=1 brew install'),
+    );
+    expect(rustJob).toContain('name: Verify Windows GNU resource compiler');
+    expect(rustJob).toContain('run: command -v x86_64-w64-mingw32-windres');
+    expect(rustJob).toContain('- run: corepack pnpm cargo:check:windows-gnu');
+    expect(rustJob?.indexOf('command -v x86_64-w64-mingw32-windres')).toBeLessThan(
+      rustJob?.indexOf('corepack pnpm cargo:check:windows-gnu') ?? -1,
+    );
+  });
+
+  it('fetches full history for Rust locked-source verification', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const rustJob = workflow.match(/\n {2}rust:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)
+      ?.groups?.job;
+
+    expect(rustJob).toMatch(
+      /actions\/checkout@[0-9a-f]{40}[^\n]*\n {8}with:\n {10}fetch-depth: 0/u,
+    );
+    expect(rustJob).toContain('Windows supervisor source does not match the immutable lock.');
+  });
+
+  it('fetches full history for Web locked-harness verification', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const webJob = workflow.match(/\n {2}web:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/)?.groups
+      ?.job;
+
+    expect(webJob).toMatch(/actions\/checkout@[0-9a-f]{40}[^\n]*\n {8}with:\n {10}fetch-depth: 0/u);
+    expect(webJob).toContain('- run: pnpm test:unit');
+  });
+
+  it('uses a POSIX shell fixture without exposing Node internal descriptors to status forgery', () => {
+    const testSource = readText('src/phase1-conformance.test.ts');
+    const start = testSource.indexOf(
+      'supervisor status cannot be forged through the legacy environment or target fd3',
+    );
+    const end = testSource.indexOf(
+      'rejects a forged success frame when supervisor group kill fails',
+      start,
+    );
+    const fixture = testSource.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(fixture).toContain("runSupervisedCommandForTest(root, '/bin/sh'");
+    expect(fixture).toContain('OPENCOVEN_PHASE1_SUPERVISOR_STATUS_PATH');
+    expect(fixture).toContain('>&3');
+    expect(fixture).toContain('result: expect.objectContaining({ code: 7 })');
+    expect(fixture).toContain('expect(existsSync(legacyStatusPath)).toBe(false)');
+    expect(fixture).not.toContain('process.execPath');
+    expect(fixture).not.toContain("readlinkSync('/proc/self/fd/3')");
+    expect(fixture).not.toContain('writeSync(3');
+  });
+
+  it('checks out both authority launchers with immutable LF bytes', () => {
+    const launcherPaths = [
+      'scripts/phase1-conformance-launcher.sh',
+      'scripts/phase1-conformance-launcher.ps1',
+    ];
+    const attributes = execFileSync('git', ['check-attr', 'text', 'eol', '--', ...launcherPaths], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    });
+    const lock = readJson<{
+      harnessAuthority: { files: Array<{ path: string; sha256: string }> };
+    }>('phase1-conformance.lock.json');
+
+    for (const path of launcherPaths) {
+      expect(attributes).toContain(`${path}: text: set`);
+      expect(attributes).toContain(`${path}: eol: lf`);
+      const authority = lock.harnessAuthority.files.find((file) => file.path === path);
+      expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
+      expect(
+        createHash('sha256')
+          .update(readFileSync(resolve(projectRoot, path)))
+          .digest('hex'),
+      ).toBe(authority?.sha256);
+    }
+  });
+
+  it('keeps the frozen Windows supervisor in an isolated bin-only Cargo graph', () => {
+    const crateRoot = resolve(projectRoot, 'tools/phase1-process-supervisor');
+    const manifest = readText('tools/phase1-process-supervisor/Cargo.toml');
+    const metadata = JSON.parse(
+      execFileSync('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1'], {
+        cwd: crateRoot,
+        encoding: 'utf8',
+      }),
+    ) as { workspace_root: string; packages: Array<{ name: string }> };
+    const workflow = readText('.github/workflows/ci.yml');
+    const docs = readText('docs/phase1-conformance.md');
+    const lock = readJson<{
+      tools: { windowsSupervisor: { artifact: { buildInvocation: string } } };
+    }>('phase1-conformance.lock.json');
+
+    expect(manifest).not.toContain('[lib]');
+    expect(manifest).not.toContain('opencoven-chat');
+    expect(metadata.workspace_root).toBe(crateRoot);
+    expect(metadata.packages.map(({ name }) => name)).toEqual(['phase1-process-supervisor']);
+    expect(workflow.match(/working-directory: tools\/phase1-process-supervisor/gu)).toHaveLength(3);
+    expect(workflow).toContain(
+      'SOURCE_DATE_EPOCH=0 cargo build \\\n            --target x86_64-pc-windows-gnu',
+    );
+    expect(workflow).toContain('cargo metadata \\\n            --locked');
+    expect(workflow).toContain('cargo check --locked');
+    expect(workflow).toContain('cargo test --locked');
+    expect(workflow).toContain('cargo clippy --locked -- -D warnings');
+    expect(lock.tools.windowsSupervisor.artifact.buildInvocation).toBe(
+      'cd tools/phase1-process-supervisor && SOURCE_DATE_EPOCH=0 cargo build --target x86_64-pc-windows-gnu --release --locked',
+    );
+    for (const source of [workflow, docs, lock.tools.windowsSupervisor.artifact.buildInvocation]) {
+      expect(source).not.toMatch(
+        /--manifest-path\s+(?:tools\/phase1-process-supervisor\/)?Cargo\.toml/u,
+      );
+    }
+  }, 60_000);
+
+  it('runs the frozen supervisor behavioral gate on windows-latest', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const testSource = readText('src/phase1-windows-supervisor.test.ts');
+    const harnessSource = readText('scripts/phase1-conformance.mjs');
+    const job = workflow.match(
+      /\n {2}windows-supervisor-behavior:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
+    )?.groups?.job;
+
+    expect(job).toContain('runs-on: windows-latest');
+    expect(job).toContain('needs: [changes, rust]');
+    expect(job).toContain('actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093');
+    expect(job).toContain('dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c');
+    expect(job).toContain('C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe');
+    expect(job).toContain('372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5');
+    expect(job).toContain(
+      'corepack pnpm@10.34.0 --ignore-workspace exec vitest run --config vitest.heavy.config.ts src/phase1-windows-supervisor.test.ts',
+    );
+    expect(testSource).toContain("describe.skipIf(process.platform !== 'win32')");
+    expect(testSource).toContain(
+      'bootstrapWindowsSupervisor({ windowsSupervisorPath: helperPath })',
+    );
+    expect(testSource).toContain('function safeRunnerEnvironment()');
+    expect(testSource).toContain('normalizeWindowsRealPathForProcess(realpathSync(orderedCom))');
+    expect(testSource).toContain("'missing', 'wrong-file', 'wrong-size', 'wrong-digest'");
+    expect(testSource).toContain('await settleAbsent(marker)');
+    expect(testSource).toContain('expect(liveSeparate.signalCode).toBeNull()');
+    expect(testSource).toContain('expect(processIsOpenable(liveSeparate.pid)).toBe(true)');
+    expect(testSource).toContain('assertFleetHelperUnchanged()');
+    expect(testSource).toContain('expect(readdirSync(owned.path)).toEqual([])');
+    expect(testSource).toContain('const helperDirectory = dirname(helperPath)');
+    expect(testSource).toContain('linkSync(helperPath, backup)');
+    expect(testSource).toContain('expect(dirname(backup)).toBe(helperDirectory)');
+    expect(testSource).toContain('expect(existsSync(backup)).toBe(false)');
+    expect(testSource).toContain("['rustup', 'git', 'cargo', 'corepack']");
+    expect(testSource).toContain("['ambiguous', 'missing', 'path-injection']");
+    expect(testSource).toContain(
+      "['&', '|', '<', '>', '(', ')', '^', '%', '!', '\"', '\\r', '\\n', '\\0']",
+    );
+    expect(testSource).toContain("'valid spaced arg'");
+    expect(testSource).toContain("['exe', 'com', 'cmd', 'bat']");
+    expect(testSource).toContain('ignores malicious PATH-precedence corepack.%s');
+    expect(testSource).toContain('Explicit Windows Corepack shim requests are forbidden.');
+    expect(workflow).toContain('OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED: "1"');
+    expect(harnessSource).toMatch(
+      /export function bootstrapWindowsSupervisor\(options\)[\s\S]*configureWindowsSupervisor\(options, lock\)[\s\S]*export async function runPhase1Conformance[\s\S]*phase1\.stage\.lock\.failed[\s\S]*bootstrapWindowsSupervisor\(options\)/,
+    );
+  });
+
+  it('runs the real reservation broken-pipe probe only with the isolated macOS keychain', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const nativeRpcTest = readText('src-tauri/tests/phase1_native_rpc.rs');
+
+    expect(workflow).toContain(
+      'security default-keychain -d user | sed \'s/^[[:space:]]*"//; s/"$//\'',
+    );
+    expect(workflow).toContain('OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED: "1"');
+    expect(nativeRpcTest).toContain('#[cfg(target_os = "macos")]');
+    expect(nativeRpcTest).toContain(
+      'subprocess_prepare_broken_pipe_removes_real_isolated_keychain_marker',
+    );
+    expect(nativeRpcTest).toContain('ai.opencoven.chat.conformance-cleanup');
+    expect(nativeRpcTest).toContain('conformance_delete_native_credential');
+  });
+
+  it('allows external execution only through platform supervisor bootstraps', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    for (const path of [
+      'scripts/phase1-conformance.mjs',
+      'scripts/phase1-conformance-lock.mjs',
+      'scripts/process-owned-artifact-root.mjs',
+    ]) {
+      const source = readText(path);
+      expect(source).not.toMatch(/\bexecFile(?:Sync)?\b|\bspawnSync\b|\bsystem\b/);
+    }
+    const harness = readText('scripts/phase1-conformance.mjs');
+    expect(harness.match(/\bspawn\(/g)).toHaveLength(2);
+    const bootstrap = readText('scripts/supervised-exec.mjs');
+    expect(bootstrap).toContain('spawnSync(');
+    expect(bootstrap).toContain('phase1-process-supervisor.mjs');
+    expect(harness).toContain("from './executable-resolution.mjs'");
+    expect(bootstrap).toContain("from './executable-resolution.mjs'");
+    const resolution = readText('scripts/executable-resolution.mjs');
+    expect(resolution).toContain('quoteWindowsBatchCommand(resolved.path, args)');
+    expect(resolution).toContain(
+      "throw new Error('Canonical Windows Corepack installation is unavailable.')",
+    );
+    expect(resolution).toContain('Explicit Windows Corepack shim requests are forbidden.');
+    expect(resolution.indexOf("if (requestedBase === 'corepack')")).toBeLessThan(
+      resolution.indexOf('const resolved = resolveWindowsCommand(command, environment)'),
+    );
+    expect(resolution).not.toMatch(/\bexecFile|\bspawn|\bsystem\b/);
+    const supervisor = readText('scripts/phase1-process-supervisor.mjs');
+    expect(supervisor).toContain('writeSync(3, frame)');
+    expect(supervisor).toContain("stdio: ['inherit', 'inherit', 'inherit', 'ignore']");
+    expect(harness).not.toContain('OPENCOVEN_PHASE1_SUPERVISOR_STATUS_PATH');
+    expect(bootstrap).not.toContain('OPENCOVEN_PHASE1_SUPERVISOR_STATUS_PATH');
+    expect(harness).toContain('bootstrapVerifiedRunner(options)');
+    expect(harness).toContain('assertExecutingHarnessAuthority(lock)');
+    const posixLauncher = readText('scripts/phase1-conformance-launcher.sh');
+    const windowsLauncher = readText('scripts/phase1-conformance-launcher.ps1');
+    expect(posixLauncher).toContain('exec /usr/bin/env -i');
+    expect(posixLauncher).not.toContain('NODE_OPTIONS=');
+    expect(windowsLauncher).toContain('$start.Environment.Clear()');
+    expect(windowsLauncher).not.toContain("'NODE_OPTIONS'");
+    expect(windowsLauncher).toContain('C:\\Program Files\\PowerShell\\7\\pwsh.exe');
+    expect(windowsLauncher.indexOf('IsPathFullyQualified($rawHelper)')).toBeLessThan(
+      windowsLauncher.indexOf('GetFullPath($rawHelper)'),
+    );
+    expect(workflow).toContain('88e184d465eaf7bd6ce828dcc81ecadb11b6222f01576c56090060085820e7b2');
+    expect(workflow).toContain('99eea6108e59db9a0ac12368787fb6e6456e6af4f8cce09ee96ce117ca3f475e');
   });
 
   it('keeps the capability schema resolvable from a fresh checkout', () => {
@@ -469,7 +727,9 @@ describe('Phase 1 specification guards', () => {
     expect(packageManifest.scripts?.['install:clean']).toBe(
       'corepack pnpm install --frozen-lockfile',
     );
-    expect(packageManifest.scripts?.test).toBe('vitest run');
+    expect(packageManifest.scripts?.test).toBe(
+      'corepack pnpm@10.34.0 --ignore-workspace test:unit',
+    );
     expect(packageManifest.scripts?.preview).toContain('--port 4174');
   });
 
@@ -661,8 +921,8 @@ describe('Phase 1 specification guards', () => {
 
     expect(
       gated,
-      'E2E, Desktop build, macOS Rust, Windows Rust, and Phase 1 conformance are the jobs worth skipping',
-    ).toHaveLength(5);
+      'E2E, Desktop build, Rust, and Phase 1 conformance are the jobs worth skipping',
+    ).toHaveLength(4);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
@@ -772,7 +1032,7 @@ describe('Phase 1 specification guards', () => {
       /token: \$\{\{ secrets\.CANARY_TOKEN \|\| github\.token \}\}/g,
     );
 
-    expect(tokenLines, 'all cross-repository checkouts need the token').toHaveLength(5);
+    expect(tokenLines, 'all cross-repository checkouts need the token').toHaveLength(6);
   });
 
   it('proves the packed harness installs with no network access', () => {
@@ -866,17 +1126,20 @@ describe('Phase 1 specification guards', () => {
   it('defines the packaged Phase 1 real-authority gate and sanitized evidence upload', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const packageManifest = readJson<PackageManifest>('package.json');
-    const phase1Job = workflow.slice(
-      workflow.indexOf('  phase1-conformance:'),
-      workflow.indexOf('\n  desktop:'),
-    );
+    const phase1Job = workflow.match(
+      /\n {2}phase1-conformance:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
+    )?.groups?.job;
 
-    expect(packageManifest.scripts?.['test:phase1-conformance']).toBe(
-      'node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all',
-    );
+    expect(packageManifest.scripts?.['test:phase1-conformance']).toBeUndefined();
     expect(workflow).toMatch(/^ {2}phase1-conformance:$/m);
     expect(workflow).toMatch(/name:\s*Phase 1 real-authority conformance/);
     expect(workflow).toContain('runs-on: macos-15');
+    expect(phase1Job).toMatch(
+      /dtolnay\/rust-toolchain@[0-9a-f]{40}[\s\S]*?toolchain: 1\.95\.0[\s\S]*?components: clippy,rustfmt/u,
+    );
+    expect(readText('scripts/phase1-conformance.mjs')).toContain(
+      `resolve(rustupHome, 'toolchains', \`1.95.0-\${triple}\`, 'bin')`,
+    );
     expect(workflow).toContain(
       "import { readPhase1ConformanceLock } from './scripts/phase1-conformance-lock.mjs';",
     );
@@ -891,13 +1154,32 @@ describe('Phase 1 specification guards', () => {
         `path: .phase1-counterparts/${repository === 'cave' ? 'coven-cave' : repository}`,
       );
     }
+    expect(workflow).toContain(
+      'repository: $' + '{{ steps.phase1-revisions.outputs.evidence_repository }}',
+    );
+    expect(workflow).toContain('ref: $' + '{{ steps.phase1-revisions.outputs.evidence_revision }}');
+    expect(workflow).toContain('path: .phase1-counterparts/sdk-evidence');
+    expect(workflow).toContain(
+      'OPENCOVEN_SDK_EVIDENCE_ROOT: $' + '{{ github.workspace }}/.phase1-counterparts/sdk-evidence',
+    );
     expect(workflow).toContain('security create-keychain');
     expect(workflow).toContain('security unlock-keychain');
-    expect(phase1Job).toMatch(/toolchain: 1\.95\.0\s+components: clippy,rustfmt/);
     expect(workflow).toMatch(/name:\s*Remove isolated Phase 1 keychain[\s\S]*?if:\s*always\(\)/);
-    expect(workflow).toContain('pnpm test:phase1-conformance');
+    expect(workflow).toContain('id: phase1-keychain-cleanup');
+    expect(workflow.indexOf('name: Remove isolated Phase 1 keychain')).toBeLessThan(
+      workflow.indexOf('name: Upload sanitized Phase 1 report'),
+    );
+    expect(workflow).toContain('/bin/sh scripts/phase1-conformance-launcher.sh');
+    expect(workflow).toContain('node_path="$(command -v node)"');
+    expect(workflow).not.toContain('pnpm test:phase1-conformance');
     expect(workflow).toContain(
       'node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance',
+    );
+    expect(readText('scripts/phase1-conformance.mjs')).toContain(
+      "['pnpm@10.34.0', '--ignore-workspace', 'build']",
+    );
+    expect(readText('scripts/phase1-conformance.mjs')).toContain(
+      'TMPDIR: dirname(artifactRoot.rootPath)',
     );
     expect(workflow).toContain(
       'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
@@ -905,35 +1187,33 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain('path: test-results/phase1-conformance/report.json');
   });
 
-  it('does not persist checkout credentials into the Phase 1 execution workspace', () => {
+  it('runs Git-heavy Phase 1 Vitest files once in a serial one-worker project', () => {
+    const packageManifest = readJson<PackageManifest>('package.json');
+    const defaultConfig = readText('vitest.config.ts');
+    const heavyConfig = readText('vitest.heavy.config.ts');
     const workflow = readText('.github/workflows/ci.yml');
-    const phase1Job = workflow.slice(workflow.indexOf('  phase1-conformance:'));
 
-    expect(phase1Job.match(/persist-credentials: false/g)).toHaveLength(4);
-    expect(phase1Job).toContain('pnpm install --frozen-lockfile --ignore-scripts');
-  });
-
-  it('packages the Cave compatibility controls only for the Phase 1 harness', () => {
-    const script = readText('scripts/phase1-conformance.mjs');
-    const packageStart = script.indexOf('async function packageLockedArtifacts');
-    const packageEnd = script.indexOf('\nasync function runCaveAuthorityMatrix', packageStart);
-    const packageBody = script.slice(packageStart, packageEnd);
-
-    expect(packageStart).toBeGreaterThanOrEqual(0);
-    expect(packageEnd).toBeGreaterThan(packageStart);
-    expect(packageBody.match(/'Cave conformance package'/g)).toHaveLength(1);
-    expect(packageBody.match(/'build:conformance'/g)).toHaveLength(1);
-    expect(packageBody).not.toContain('retryCaveConformancePackage');
-    expect(packageBody).not.toContain("resolve(roots.caveRoot, '.next')");
-    for (const laterPackage of [
-      "'Chat web package'",
-      "'SDK package build'",
-      "'Chat native RPC package'",
+    expect(packageManifest.scripts?.test).toBe(
+      'corepack pnpm@10.34.0 --ignore-workspace test:unit',
+    );
+    expect(packageManifest.scripts?.['test:unit']).toBe(
+      'corepack pnpm@10.34.0 --ignore-workspace test:unit:normal && corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy',
+    );
+    expect(packageManifest.scripts?.['test:unit:heavy']).toBe(
+      'vitest run --config vitest.heavy.config.ts',
+    );
+    for (const file of [
+      'src/phase1-conformance.test.ts',
+      'src/phase1-conformance-lock.test.ts',
+      'src/phase1-conformance-artifact-root.test.ts',
+      'src/phase1-windows-supervisor.test.ts',
     ]) {
-      expect(packageBody.indexOf("'Cave conformance package'")).toBeLessThan(
-        packageBody.indexOf(laterPackage),
-      );
+      expect(defaultConfig).toContain(`'${file}'`);
+      expect(heavyConfig).toContain(`'${file}'`);
     }
+    expect(heavyConfig).toContain('fileParallelism: false');
+    expect(heavyConfig).toContain('maxWorkers: 1');
+    expect(workflow.match(/pnpm test:unit/g)).toHaveLength(1);
   });
 
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
@@ -946,11 +1226,14 @@ describe('Phase 1 specification guards', () => {
 
     for (const document of [readme, toolchains, guide]) {
       expect(document).toContain('phase1-conformance.lock.json');
-      expect(document).toContain('test:phase1-conformance');
+      expect(document).toContain('phase1-conformance-launcher');
     }
-    expect(guide).toContain('phase1.operator.homes-credentials-untouched');
+    expect(guide).toContain('phase1-native-rpc');
+    expect(guide).toContain('coven_health');
+    expect(guide).toContain('coven daemon status');
     expect(guide).toContain('secret scan');
-    expect(guide).toContain('completed');
+    expect(guide).toContain('darwin-arm64');
+    expect(guide).toContain('win32-x64');
     expect(tracker).not.toContain(
       '/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking',
     );
