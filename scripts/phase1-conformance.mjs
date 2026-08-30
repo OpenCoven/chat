@@ -2214,6 +2214,8 @@ async function runNativeScenarios({
     },
   ]);
   let rpc;
+  let handle;
+  let credentialId;
   const nativeInstanceIds = new Set();
   const platformEnvironment =
     platform === undefined ? undefined : CANONICAL_PLATFORM_ENVIRONMENTS[platform];
@@ -2305,8 +2307,6 @@ async function runNativeScenarios({
       }
     }
 
-    let handle;
-    let credentialId;
     try {
       await rpc.error(
         'cave_read_discovery',
@@ -2728,7 +2728,8 @@ async function runNativeScenarios({
     }
 
     const discoveryPath = resolve(caveHome, 'client-v1-discovery.json');
-    const discovery = JSON.parse(readFileSync(discoveryPath, 'utf8'));
+    const originalDiscovery = readFileSync(discoveryPath, 'utf8');
+    const discovery = JSON.parse(originalDiscovery);
     discovery.endpoint = 'http://127.0.0.1:1';
     writeFileSync(discoveryPath, `${JSON.stringify(discovery)}\n`, { mode: 0o600 });
     await rpc.error(
@@ -2737,15 +2738,34 @@ async function runNativeScenarios({
       'stale_discovery_handle',
     );
     observations.staleStateRefused = true;
+    writeFileSync(discoveryPath, originalDiscovery, { mode: 0o600 });
+    const restoredDiscovery = await waitForDiscovery(rpc);
+    handle = restoredDiscovery.handle;
+    const restoredHealth = await rpc.ok('cave_health', {
+      handle,
+      operation: rpc.operation(),
+    });
+    if (typeof restoredHealth.data?.instanceId === 'string') {
+      nativeInstanceIds.add(restoredHealth.data.instanceId);
+    }
     observations.bearerNeverCrossedBoundary = rpc.responsesContainNoSecrets();
   } finally {
     await withFixtureDaemon(fixtureDaemon, async () => {
       if (rpc !== undefined) {
         try {
           if (platformEnvironment !== undefined) {
+            if (typeof handle === 'string') {
+              const forgotten = await rpc.ok('cave_forget_credential', {
+                handle,
+                operation: rpc.operation(),
+              });
+              if (!['deleted', 'missing'].includes(forgotten.status)) {
+                throw new Error('Native custody forget did not reach a terminal state.');
+              }
+            }
             nativeStateAfter = validateNativeCustodyProof(
               await rpc.ok('conformance_cleanup_native_custody', {
-                instanceIds: [...nativeInstanceIds],
+                instanceIds: [],
               }),
               platformEnvironment.nativeCustody,
               'Native custody cleanup',
