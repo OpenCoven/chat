@@ -71,44 +71,47 @@ if (
   throw 'CreateProcessWithLogonW parameter names or types changed.'
 }
 
-$artifactSequence = [OpenCoven.WindowsJobSupervisor].GetMethod(
-  'ExecuteArtifactSecuritySequence',
+$quarantineSequence = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ExecuteQuarantineSecuritySequence',
   [Reflection.BindingFlags]'NonPublic,Static'
 )
-if ($null -eq $artifactSequence) {
-  throw 'The fail-closed artifact security sequence is missing.'
+if ($null -eq $quarantineSequence) {
+  throw 'The fail-closed terminal quarantine sequence is missing.'
 }
 
-function Invoke-ArtifactSequenceProbe {
+function Invoke-QuarantineSequenceProbe {
   param(
     [Parameter(Mandatory)][Collections.Generic.List[string]]$Steps,
     [Parameter(Mandatory)][Action]$DisableAccount,
     [Parameter(Mandatory)][Func[int]]$CleanupScheduledTasks,
     [Parameter(Mandatory)][Func[int]]$CleanupBitsJobs,
     [Parameter(Mandatory)][Func[int]]$DrainProcesses,
-    [Parameter(Mandatory)][Action]$SealArtifact,
+    [Action]$TerminateAndReap = ([Action]{ $Steps.Add('terminate') }),
+    [Action]$RequireJobZero = ([Action]{ $Steps.Add('job-zero') }),
+    [Action]$RequireFinalIsolation = ([Action]{ $Steps.Add('final-proof') }),
     [int]$MaximumRounds = 4
   )
 
-  $artifactSequence.Invoke(
+  $quarantineSequence.Invoke(
     $null,
     [object[]]@(
-      [Action]{ $Steps.Add('job-zero') },
+      $TerminateAndReap,
+      $RequireJobZero,
       $DisableAccount,
       $CleanupScheduledTasks,
       $CleanupBitsJobs,
       $DrainProcesses,
-      $SealArtifact,
-      [Action]{ $Steps.Add('post-seal') },
-      [Action]{ $Steps.Add('capture') },
+      $RequireFinalIsolation,
       $MaximumRounds,
+      0,
+      0,
       0
     )
   )
 }
 
 $orderedSteps = [Collections.Generic.List[string]]::new()
-Invoke-ArtifactSequenceProbe `
+Invoke-QuarantineSequenceProbe `
   -Steps $orderedSteps `
   -DisableAccount ([Action]{ $orderedSteps.Add('disable') }) `
   -CleanupScheduledTasks ([Func[int]]{
@@ -122,102 +125,187 @@ Invoke-ArtifactSequenceProbe `
   -DrainProcesses ([Func[int]]{
     $orderedSteps.Add('processes')
     return 0
-  }) `
-  -SealArtifact ([Action]{ $orderedSteps.Add('seal') })
+  })
 $expectedOrder = @(
+  'terminate',
   'job-zero',
   'disable',
   'scheduler', 'bits', 'processes',
   'scheduler', 'bits', 'processes',
   'scheduler', 'bits', 'processes',
-  'seal',
-  'post-seal',
-  'capture',
-  'post-seal'
+  'final-proof'
 )
 if ([string]::Join(',', $orderedSteps) -cne [string]::Join(',', $expectedOrder)) {
-  throw 'Artifact security ordering guard changed.'
+  throw 'Terminal quarantine ordering guard changed.'
 }
 
-function Assert-ArtifactSequenceFailure {
+function Assert-QuarantineSequenceFailure {
   param(
     [Parameter(Mandatory)][string]$Failure,
     [Parameter(Mandatory)][Action]$DisableAccount,
     [Parameter(Mandatory)][Func[int]]$CleanupScheduledTasks,
     [Parameter(Mandatory)][Func[int]]$CleanupBitsJobs,
     [Parameter(Mandatory)][Func[int]]$DrainProcesses,
-    [Parameter(Mandatory)][Action]$SealArtifact,
     [int]$MaximumRounds = 4
   )
 
   $steps = [Collections.Generic.List[string]]::new()
   $failed = $false
   try {
-    Invoke-ArtifactSequenceProbe `
+    Invoke-QuarantineSequenceProbe `
       -Steps $steps `
       -DisableAccount $DisableAccount `
       -CleanupScheduledTasks $CleanupScheduledTasks `
       -CleanupBitsJobs $CleanupBitsJobs `
       -DrainProcesses $DrainProcesses `
-      -SealArtifact $SealArtifact `
       -MaximumRounds $MaximumRounds
   } catch {
     $failed = $true
   }
-  if (-not $failed -or $steps.Contains('capture')) {
+  if (
+    -not $failed -or
+    -not $steps.Contains('scheduler') -or
+    -not $steps.Contains('bits') -or
+    -not $steps.Contains('processes') -or
+    -not $steps.Contains('final-proof')
+  ) {
     throw $Failure
   }
 }
 
-Assert-ArtifactSequenceFailure `
+Assert-QuarantineSequenceFailure `
   -Failure 'Account-disable verification failure did not fail closed.' `
   -DisableAccount ([Action]{ throw 'account disable verification failed' }) `
   -CleanupScheduledTasks ([Func[int]]{ 0 }) `
   -CleanupBitsJobs ([Func[int]]{ 0 }) `
-  -DrainProcesses ([Func[int]]{ 0 }) `
-  -SealArtifact ([Action]{})
-Assert-ArtifactSequenceFailure `
+  -DrainProcesses ([Func[int]]{ 0 })
+Assert-QuarantineSequenceFailure `
   -Failure 'Task Scheduler enumeration failure did not fail closed.' `
   -DisableAccount ([Action]{}) `
   -CleanupScheduledTasks ([Func[int]]{ throw 'scheduler enumeration failed' }) `
   -CleanupBitsJobs ([Func[int]]{ 0 }) `
-  -DrainProcesses ([Func[int]]{ 0 }) `
-  -SealArtifact ([Action]{})
-Assert-ArtifactSequenceFailure `
+  -DrainProcesses ([Func[int]]{ 0 })
+Assert-QuarantineSequenceFailure `
   -Failure 'BITS enumeration failure did not fail closed.' `
   -DisableAccount ([Action]{}) `
   -CleanupScheduledTasks ([Func[int]]{ 0 }) `
   -CleanupBitsJobs ([Func[int]]{ throw 'BITS enumeration failed' }) `
-  -DrainProcesses ([Func[int]]{ 0 }) `
-  -SealArtifact ([Action]{})
+  -DrainProcesses ([Func[int]]{ 0 })
 foreach ($processFailure in @(
   'WTS process enumeration failure did not fail closed.',
   'Matching process access failure did not fail closed.',
   'Matching process termination failure did not fail closed.'
 )) {
-  Assert-ArtifactSequenceFailure `
+  Assert-QuarantineSequenceFailure `
     -Failure $processFailure `
     -DisableAccount ([Action]{}) `
     -CleanupScheduledTasks ([Func[int]]{ 0 }) `
     -CleanupBitsJobs ([Func[int]]{ 0 }) `
-    -DrainProcesses ([Func[int]]{ throw $processFailure }) `
-    -SealArtifact ([Action]{})
+    -DrainProcesses ([Func[int]]{ throw $processFailure })
 }
-Assert-ArtifactSequenceFailure `
+Assert-QuarantineSequenceFailure `
   -Failure 'Unstable SID-wide process drain did not fail closed.' `
   -DisableAccount ([Action]{}) `
   -CleanupScheduledTasks ([Func[int]]{ 0 }) `
   -CleanupBitsJobs ([Func[int]]{ 0 }) `
   -DrainProcesses ([Func[int]]{ 1 }) `
-  -SealArtifact ([Action]{}) `
   -MaximumRounds 3
-Assert-ArtifactSequenceFailure `
-  -Failure 'Artifact ACL sealing failure did not fail closed.' `
-  -DisableAccount ([Action]{}) `
-  -CleanupScheduledTasks ([Func[int]]{ 0 }) `
-  -CleanupBitsJobs ([Func[int]]{ 0 }) `
-  -DrainProcesses ([Func[int]]{ 0 }) `
-  -SealArtifact ([Action]{ throw 'ACL sealing failed' })
+
+$artifactSequence = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ExecuteArtifactSecuritySequence',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $artifactSequence) {
+  throw 'The fail-closed artifact security sequence is missing.'
+}
+$artifactSteps = [Collections.Generic.List[string]]::new()
+$artifactSequence.Invoke(
+  $null,
+  [object[]]@(
+    [Action]{ $artifactSteps.Add('quarantine-proof') },
+    [Action]{ $artifactSteps.Add('seal') },
+    [Action]{ $artifactSteps.Add('post-seal') },
+    [Action]{ $artifactSteps.Add('capture') }
+  )
+)
+$expectedArtifactOrder = @(
+  'quarantine-proof',
+  'seal',
+  'post-seal',
+  'capture',
+  'post-seal'
+)
+if (
+  [string]::Join(',', $artifactSteps) -cne
+    [string]::Join(',', $expectedArtifactOrder)
+) {
+  throw 'Artifact security ordering guard changed.'
+}
+$artifactCaptureReached = $false
+try {
+  $artifactSequence.Invoke(
+    $null,
+    [object[]]@(
+      [Action]{},
+      [Action]{ throw 'ACL sealing failed' },
+      [Action]{},
+      [Action]{ $artifactCaptureReached = $true }
+    )
+  )
+} catch {
+}
+if ($artifactCaptureReached) {
+  throw 'Artifact ACL sealing failure did not fail closed.'
+}
+
+$aggregateSteps = [Collections.Generic.List[string]]::new()
+$aggregateFailed = $false
+try {
+  Invoke-QuarantineSequenceProbe `
+    -Steps $aggregateSteps `
+    -TerminateAndReap ([Action]{
+      $aggregateSteps.Add('terminate-failed')
+      throw 'terminate failed'
+    }) `
+    -RequireJobZero ([Action]{
+      $aggregateSteps.Add('job-zero-failed')
+      throw 'job zero failed'
+    }) `
+    -DisableAccount ([Action]{
+      $aggregateSteps.Add('disable-failed')
+      throw 'disable failed'
+    }) `
+    -CleanupScheduledTasks ([Func[int]]{
+      $aggregateSteps.Add('scheduler-failed')
+      throw 'scheduler failed'
+    }) `
+    -CleanupBitsJobs ([Func[int]]{
+      $aggregateSteps.Add('bits-failed')
+      throw 'bits failed'
+    }) `
+    -DrainProcesses ([Func[int]]{
+      $aggregateSteps.Add('processes-failed')
+      throw 'processes failed'
+    }) `
+    -RequireFinalIsolation ([Action]{
+      $aggregateSteps.Add('final-proof-failed')
+      throw 'final proof failed'
+    })
+} catch {
+  $aggregateFailed = $_.Exception.ToString().Contains('AggregateException')
+}
+if (
+  -not $aggregateFailed -or
+  -not $aggregateSteps.Contains('terminate-failed') -or
+  -not $aggregateSteps.Contains('job-zero-failed') -or
+  -not $aggregateSteps.Contains('disable-failed') -or
+  -not $aggregateSteps.Contains('scheduler-failed') -or
+  -not $aggregateSteps.Contains('bits-failed') -or
+  -not $aggregateSteps.Contains('processes-failed') -or
+  -not $aggregateSteps.Contains('final-proof-failed')
+) {
+  throw 'Terminal quarantine cleanup failures were swallowed or short-circuited.'
+}
 
 function Assert-ProcessExited {
   param([Parameter(Mandatory)][int]$ProcessId)
@@ -233,6 +321,28 @@ function Assert-ProcessExited {
     Start-Sleep -Milliseconds 100
   } while ([DateTime]::UtcNow -lt $deadline)
   throw "Process $ProcessId survived Job Object termination."
+}
+
+function Assert-ScheduledTaskAbsent {
+  param(
+    [Parameter(Mandatory)][string]$TaskPath,
+    [Parameter(Mandatory)][string]$Failure
+  )
+
+  & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
+    /Query `
+    /TN $TaskPath *>&1 | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    throw "$Failure registration survived."
+  }
+  $service = New-Object -ComObject 'Schedule.Service'
+  $service.Connect()
+  $runningTasks = $service.GetRunningTasks(1)
+  for ($index = 1; $index -le $runningTasks.Count; $index++) {
+    if ($runningTasks.Item($index).Path -ceq $TaskPath) {
+      throw "$Failure running instance survived."
+    }
+  }
 }
 
 $trustedPwsh = (Get-Process -Id $PID).Path
@@ -451,6 +561,149 @@ public static class JobAccessProbe
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
 }
+
+public static class ScmDenialProbe
+{
+    private const uint SC_MANAGER_CONNECT = 0x0001;
+    private const uint SC_MANAGER_CREATE_SERVICE = 0x0002;
+    private const uint SERVICE_QUERY_STATUS = 0x0004;
+    private const uint DELETE = 0x00010000;
+    private const uint SERVICE_WIN32_OWN_PROCESS = 0x00000010;
+    private const uint SERVICE_DEMAND_START = 0x00000003;
+    private const uint SERVICE_ERROR_NORMAL = 0x00000001;
+    private const int ERROR_ACCESS_DENIED = 5;
+    private const int ERROR_SERVICE_DOES_NOT_EXIST = 1060;
+
+    public static void Run(string serviceName, string binaryPath)
+    {
+        IntPtr createManager = OpenSCManagerW(
+            null,
+            null,
+            SC_MANAGER_CREATE_SERVICE);
+        if (createManager != IntPtr.Zero)
+        {
+            CloseServiceHandle(createManager);
+            throw new InvalidOperationException(
+                "SC_MANAGER_CREATE_SERVICE unexpectedly succeeded.");
+        }
+        int managerError = Marshal.GetLastWin32Error();
+        if (managerError != ERROR_ACCESS_DENIED)
+        {
+            throw new Win32Exception(
+                managerError,
+                "SC_MANAGER_CREATE_SERVICE was not denied with ERROR_ACCESS_DENIED.");
+        }
+
+        IntPtr manager = OpenSCManagerW(null, null, SC_MANAGER_CONNECT);
+        if (manager == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "SC_MANAGER_CONNECT could not be opened for the denial probe.");
+        }
+        try
+        {
+            IntPtr service = CreateServiceW(
+                manager,
+                serviceName,
+                serviceName,
+                SERVICE_QUERY_STATUS | DELETE,
+                SERVICE_WIN32_OWN_PROCESS,
+                SERVICE_DEMAND_START,
+                SERVICE_ERROR_NORMAL,
+                binaryPath,
+                null,
+                IntPtr.Zero,
+                null,
+                null,
+                null);
+            bool unexpectedlyCreated = service != IntPtr.Zero;
+            int createError = unexpectedlyCreated
+                ? 0
+                : Marshal.GetLastWin32Error();
+            if (unexpectedlyCreated)
+            {
+                try
+                {
+                    DeleteService(service);
+                }
+                finally
+                {
+                    CloseServiceHandle(service);
+                }
+            }
+
+            IntPtr remaining = OpenServiceW(
+                manager,
+                serviceName,
+                SERVICE_QUERY_STATUS);
+            if (remaining != IntPtr.Zero)
+            {
+                CloseServiceHandle(remaining);
+                throw new InvalidOperationException(
+                    "Denied native service creation left a registered service.");
+            }
+            int absenceError = Marshal.GetLastWin32Error();
+            if (absenceError != ERROR_SERVICE_DOES_NOT_EXIST)
+            {
+                throw new Win32Exception(
+                    absenceError,
+                    "Native service absence could not be proved.");
+            }
+            if (unexpectedlyCreated)
+            {
+                throw new InvalidOperationException(
+                    "Service creation unexpectedly succeeded for the restricted identity.");
+            }
+            if (createError != ERROR_ACCESS_DENIED)
+            {
+                throw new Win32Exception(
+                    createError,
+                    "CreateServiceW was not denied with ERROR_ACCESS_DENIED.");
+            }
+        }
+        finally
+        {
+            CloseServiceHandle(manager);
+        }
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenSCManagerW(
+        string machineName,
+        string databaseName,
+        uint desiredAccess);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateServiceW(
+        IntPtr manager,
+        string serviceName,
+        string displayName,
+        uint desiredAccess,
+        uint serviceType,
+        uint startType,
+        uint errorControl,
+        string binaryPathName,
+        string loadOrderGroup,
+        IntPtr tagId,
+        string dependencies,
+        string serviceStartName,
+        string password);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenServiceW(
+        IntPtr manager,
+        string serviceName,
+        uint desiredAccess);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteService(IntPtr service);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseServiceHandle(IntPtr handle);
+}
 '@,
     [Text.UTF8Encoding]::new($false)
   )
@@ -500,18 +753,10 @@ if (-not `$operatorDenied) {
   throw 'Restricted identity accessed supervisor-private credential root.'
 }
 `$serviceName = `$env:OPENCOVEN_DENIAL_SERVICE_NAME
-`$sc = Join-Path `$env:SystemRoot 'System32\sc.exe'
-& `$sc create `$serviceName "binPath= `$env:COMSPEC /d /c exit 0" start= demand *>&1 |
-  Out-Null
-`$serviceCreateExit = `$LASTEXITCODE
-if (`$serviceCreateExit -eq 0) {
-  & `$sc delete `$serviceName *>&1 | Out-Null
-  throw 'Service creation unexpectedly succeeded for the restricted identity.'
-}
-& `$sc query `$serviceName *>&1 | Out-Null
-if (`$LASTEXITCODE -eq 0) {
-  throw 'Denied service creation left a registered service.'
-}
+[ScmDenialProbe]::Run(
+  `$serviceName,
+  "`$env:COMSPEC /d /c exit 0"
+)
 
 `$filterName = `$env:OPENCOVEN_DENIAL_WMI_FILTER_NAME
 `$wmiDenied = `$false
@@ -922,7 +1167,7 @@ try {
       $context.User
     )
     try {
-      $result = $job.RunAsUser(
+      $result = $job.RunProducerAsUserAndQuarantine(
         $context.User,
         $trustedPwsh,
         "-NoLogo -NoProfile -NonInteractive -File `"$contextLiveRootScript`"",
@@ -1195,7 +1440,7 @@ try {
       $context.User
     )
     try {
-      $result = $job.RunAsUser(
+      $result = $job.RunProducerAsUserAndQuarantine(
         $context.User,
         $trustedPwsh,
         "-NoLogo -NoProfile -NonInteractive -File `"$scriptPath`"",
@@ -1421,12 +1666,21 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
   $serviceEscapeJob = $null
   $lateRegistrarPid = 0
   try {
-    $serviceEscapeName =
-      "OpenCoven-ServiceEscape-$([Guid]::NewGuid().ToString('N'))"
-    $lateTaskName =
-      "OpenCoven-LateEscape-$([Guid]::NewGuid().ToString('N'))"
+    $serviceEscapeNonce = [Guid]::NewGuid().ToString('N')
+    $serviceEscapeJobName =
+      "Local\OpenCoven.Chat.SupervisorTest.$serviceEscapeNonce"
+    $taskFolderRoot =
+      "OpenCoven-PrincipalOnly-$([Guid]::NewGuid().ToString('N'))"
+    $taskFolderPath = "\$taskFolderRoot\Hidden\Nested"
+    $lateTaskFolderPath = "\$taskFolderRoot\Hidden\Late"
+    $serviceEscapeName = 'PrimaryEscape'
+    $lateTaskName = 'LateEscape'
     $bitsName =
       "OpenCoven-BitsEscape-$([Guid]::NewGuid().ToString('N'))"
+    $serviceEscapeUserName = $serviceEscapeContext.User.UserName
+    $serviceEscapeProfilePath =
+      $serviceEscapeContext.User.OperatingSystemProfilePath
+    $serviceEscapeRootPath = $serviceEscapeContext.User.RootPath
     $serviceEscapeCaseRoot = Join-Path `
       $serviceEscapeContext.User.WorkspacePath `
       'service-escape'
@@ -1435,13 +1689,31 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
       '.artifacts\record.json'
     $serviceEscapeActionMarker = Join-Path `
       $serviceEscapeContext.User.TempPath `
-      'task-action-ran.txt'
+      'task-action-started.txt'
+    $serviceEscapeActionPid = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'task-action-pid.txt'
+    $serviceEscapeActionSid = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'task-action-sid.txt'
+    $serviceEscapeReady = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'producer-observed-running-task.txt'
     $lateRegistrarReady = Join-Path `
       $serviceEscapeContext.User.TempPath `
       'late-registrar-ready.txt'
     $lateRegistrationMarker = Join-Path `
       $serviceEscapeContext.User.TempPath `
       'late-task-registered.txt'
+    $lateActionMarker = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'late-task-action-started.txt'
+    $lateActionPid = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'late-task-action-pid.txt'
+    $lateActionSid = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'late-task-action-sid.txt'
     $serviceEscapeTrustedText =
       '{' + "`n" +
         '  "platform": "win32-x64",' + "`n" +
@@ -1474,16 +1746,29 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
 param(
   [Parameter(Mandatory)][string]$Record,
   [Parameter(Mandatory)][string]$Marker,
+  [Parameter(Mandatory)][string]$PidMarker,
+  [Parameter(Mandatory)][string]$SidMarker,
   [Parameter(Mandatory)][string]$ForgedBase64
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+[IO.File]::WriteAllText($Marker, 'started', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText(
+  $PidMarker,
+  [string]$PID,
+  [Text.UTF8Encoding]::new($false)
+)
+[IO.File]::WriteAllText(
+  $SidMarker,
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
+  [Text.UTF8Encoding]::new($false)
+)
 Start-Sleep -Seconds 20
 [IO.File]::WriteAllBytes($Record, [Convert]::FromBase64String($ForgedBase64))
-[IO.File]::WriteAllText($Marker, 'ran', [Text.UTF8Encoding]::new($false))
 '@,
       [Text.UTF8Encoding]::new($false)
     )
+    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)
 
     $taskHelperScript = Join-Path `
       $serviceEscapeContext.User.RootPath `
@@ -1493,22 +1778,34 @@ Start-Sleep -Seconds 20
       @'
 function Register-IsolatedInteractiveTask {
   param(
+    [Parameter(Mandatory)][string]$FolderPath,
     [Parameter(Mandatory)][string]$TaskName,
     [Parameter(Mandatory)][string]$PowerShellPath,
     [Parameter(Mandatory)][string]$ActionScript,
     [Parameter(Mandatory)][string]$Record,
     [Parameter(Mandatory)][string]$Marker,
+    [Parameter(Mandatory)][string]$PidMarker,
+    [Parameter(Mandatory)][string]$SidMarker,
     [Parameter(Mandatory)][string]$ForgedBase64,
-    [Parameter(Mandatory)][string]$UserId,
-    [Parameter(Mandatory)][int]$DelaySeconds
+    [Parameter(Mandatory)][string]$UserId
   )
 
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
   $folder = $service.GetFolder('\')
+  $currentPath = ''
+  foreach ($segment in $FolderPath.Trim('\').Split('\')) {
+    $currentPath = "$currentPath\$segment"
+    try {
+      $folder = $service.GetFolder($currentPath)
+    } catch {
+      $folder = $folder.CreateFolder($segment, $null)
+    }
+  }
   $definition = $service.NewTask(0)
-  $definition.RegistrationInfo.URI = "\$TaskName"
-  $definition.RegistrationInfo.Source = 'OpenCoven Windows supervisor runtime test'
+  $definition.RegistrationInfo.URI = "$FolderPath\$TaskName"
+  $definition.RegistrationInfo.Source =
+    "OpenCoven Windows supervisor runtime test $FolderPath"
   $definition.Principal.UserId = $UserId
   $definition.Principal.LogonType = 3
   $definition.Principal.RunLevel = 0
@@ -1516,11 +1813,6 @@ function Register-IsolatedInteractiveTask {
   $definition.Settings.Hidden = $true
   $definition.Settings.StartWhenAvailable = $true
   $definition.Settings.ExecutionTimeLimit = 'PT2M'
-  $trigger = $definition.Triggers.Create(1)
-  $trigger.StartBoundary = (Get-Date).AddSeconds($DelaySeconds).ToString(
-    'yyyy-MM-ddTHH:mm:ss'
-  )
-  $trigger.Enabled = $true
   $action = $definition.Actions.Create(0)
   $action.Path = $PowerShellPath
   $action.Arguments = @(
@@ -1533,11 +1825,15 @@ function Register-IsolatedInteractiveTask {
     "`"$Record`"",
     '-Marker',
     "`"$Marker`"",
+    '-PidMarker',
+    "`"$PidMarker`"",
+    '-SidMarker',
+    "`"$SidMarker`"",
     '-ForgedBase64',
     $ForgedBase64
   ) -join ' '
   $action.WorkingDirectory = [IO.Directory]::GetParent($ActionScript).FullName
-  $folder.RegisterTaskDefinition(
+  $registeredTask = $folder.RegisterTaskDefinition(
     $TaskName,
     $definition,
     6,
@@ -1545,11 +1841,17 @@ function Register-IsolatedInteractiveTask {
     $null,
     3,
     $null
-  ) | Out-Null
+  )
+  $runningTask = $registeredTask.Run($null)
+  return [pscustomobject]@{
+    RegisteredTask = $registeredTask
+    RunningTask = $runningTask
+  }
 }
 '@,
       [Text.UTF8Encoding]::new($false)
     )
+    $taskHelperTemplate = [IO.File]::ReadAllText($taskHelperScript)
 
     $lateRegistrarScript = Join-Path `
       $serviceEscapeContext.User.RootPath `
@@ -1627,21 +1929,30 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
   Start-Sleep -Milliseconds 1
 }
 `$taskParameters = @{
+  FolderPath = '$lateTaskFolderPath'
   TaskName = '$lateTaskName'
   PowerShellPath = '$($trustedPwsh.Replace("'", "''"))'
   ActionScript = '$($taskActionScript.Replace("'", "''"))'
   Record = '$($serviceEscapeRecord.Replace("'", "''"))'
-  Marker = '$($serviceEscapeActionMarker.Replace("'", "''"))'
+  Marker = '$($lateActionMarker.Replace("'", "''"))'
+  PidMarker = '$($lateActionPid.Replace("'", "''"))'
+  SidMarker = '$($lateActionSid.Replace("'", "''"))'
   ForgedBase64 = '$serviceEscapeForgedBase64'
   UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
-  DelaySeconds = 10
 }
-Register-IsolatedInteractiveTask @taskParameters
+`$lateTask = Register-IsolatedInteractiveTask @taskParameters
 [IO.File]::WriteAllText(
   '$($lateRegistrationMarker.Replace("'", "''"))',
   'registered-after-disable',
   [Text.UTF8Encoding]::new(`$false)
 )
+`$lateStartDeadline = [DateTime]::UtcNow.AddSeconds(10)
+while (-not [IO.File]::Exists('$($lateActionMarker.Replace("'", "''"))')) {
+  if ([DateTime]::UtcNow -ge `$lateStartDeadline) {
+    throw 'Late task action did not start.'
+  }
+  Start-Sleep -Milliseconds 10
+}
 Start-Sleep -Seconds 300
 "@,
       [Text.UTF8Encoding]::new($false)
@@ -1805,31 +2116,70 @@ Set-StrictMode -Version Latest
   [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
 )
 `$taskParameters = @{
+  FolderPath = '$taskFolderPath'
   TaskName = '$serviceEscapeName'
   PowerShellPath = '$($trustedPwsh.Replace("'", "''"))'
   ActionScript = '$($taskActionScript.Replace("'", "''"))'
   Record = '$($serviceEscapeRecord.Replace("'", "''"))'
   Marker = '$($serviceEscapeActionMarker.Replace("'", "''"))'
+  PidMarker = '$($serviceEscapeActionPid.Replace("'", "''"))'
+  SidMarker = '$($serviceEscapeActionSid.Replace("'", "''"))'
   ForgedBase64 = '$serviceEscapeForgedBase64'
   UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
-  DelaySeconds = 5
 }
-Register-IsolatedInteractiveTask @taskParameters
+`$taskProbe = Register-IsolatedInteractiveTask @taskParameters
+`$taskStartDeadline = [DateTime]::UtcNow.AddSeconds(20)
+`$runningInstanceObserved = `$false
+while (
+  -not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($serviceEscapeActionPid.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($serviceEscapeActionSid.Replace("'", "''"))') -or
+  -not `$runningInstanceObserved
+) {
+  `$runningInstanceObserved =
+    `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  if ([DateTime]::UtcNow -ge `$taskStartDeadline) {
+    if (-not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))')) {
+      throw 'Task Scheduler action did not write its started marker.'
+    }
+    if (-not `$runningInstanceObserved) {
+      throw 'Task Scheduler action did not expose a running instance.'
+    }
+    throw 'Task Scheduler action process readiness was incomplete.'
+  }
+  Start-Sleep -Milliseconds 10
+}
+`$expectedTaskSid =
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+`$actualTaskSid =
+  [IO.File]::ReadAllText('$($serviceEscapeActionSid.Replace("'", "''"))').Trim()
+if (`$actualTaskSid -cne `$expectedTaskSid) {
+  throw 'Task Scheduler action process did not run as the exact isolated SID.'
+}
+`$taskActionProcess = Get-Process -Id (
+  [int][IO.File]::ReadAllText('$($serviceEscapeActionPid.Replace("'", "''"))')
+) -ErrorAction Stop
+`$taskActionProcess.Dispose()
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
   Out-Null
 if (`$LASTEXITCODE -ne 0) {
   throw 'BITS service-mediated test job could not be created.'
 }
+[IO.File]::WriteAllText(
+  '$($serviceEscapeReady.Replace("'", "''"))',
+  'task-running-bits-created',
+  [Text.UTF8Encoding]::new(`$false)
+)
+exit 0
 "@,
       [Text.UTF8Encoding]::new($false)
     )
-    $serviceEscapeJobName =
-      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
     $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
       $serviceEscapeJobName,
       $serviceEscapeContext.User
     )
-    $serviceEscapeResult = $serviceEscapeJob.RunAsUser(
+    $serviceEscapeResult =
+      $serviceEscapeJob.RunProducerAsUserAndQuarantine(
       $serviceEscapeContext.User,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$serviceEscapeProducer`"",
@@ -1842,7 +2192,9 @@ if (`$LASTEXITCODE -ne 0) {
     if ($serviceEscapeResult.ExitCode -ne 0) {
       throw "Service escape setup failed: $($serviceEscapeResult.Stderr)"
     }
-
+    if (-not $serviceEscapeJob.IsQuarantineComplete) {
+      throw 'Successful producer terminal quarantine did not complete.'
+    }
     $serviceEscapeArtifact = $serviceEscapeJob.CaptureIsolatedArtifact(
       $serviceEscapeContext.User,
       $serviceEscapeContext.User.WorkspacePath,
@@ -1853,23 +2205,64 @@ if (`$LASTEXITCODE -ne 0) {
       -not $serviceEscapeContext.User.IsDisabled -or
       (Get-LocalUser -Name $serviceEscapeContext.User.UserName).Enabled
     ) {
-      throw 'Ephemeral account was not disabled before artifact capture.'
+      throw 'Ephemeral account was not disabled by terminal quarantine.'
+    }
+    foreach ($requiredMarker in @(
+      $serviceEscapeReady,
+      $serviceEscapeActionMarker,
+      $serviceEscapeActionPid,
+      $serviceEscapeActionSid
+    )) {
+      if (-not [IO.File]::Exists($requiredMarker)) {
+        throw 'Task Scheduler action did not write its started marker.'
+      }
     }
     if (-not [IO.File]::Exists($lateRegistrationMarker)) {
       throw 'A task registered after account disablement was not exercised.'
     }
+    if (
+      -not [IO.File]::Exists($lateActionMarker) -or
+      -not [IO.File]::Exists($lateActionPid) -or
+      -not [IO.File]::Exists($lateActionSid)
+    ) {
+      throw 'A task started after account disablement was not exercised.'
+    }
+    if (
+      [IO.File]::ReadAllText($serviceEscapeActionSid).Trim() -cne
+        $serviceEscapeContext.User.Sid
+    ) {
+      throw 'Task Scheduler action process did not run as the exact isolated SID.'
+    }
+    if (
+      [IO.File]::ReadAllText($lateActionSid).Trim() -cne
+        $serviceEscapeContext.User.Sid
+    ) {
+      throw 'A task started after account disablement did not use the isolated SID.'
+    }
+    Assert-ProcessExited -ProcessId (
+      [int][IO.File]::ReadAllText($serviceEscapeActionPid)
+    )
+    Assert-ProcessExited -ProcessId (
+      [int][IO.File]::ReadAllText($lateActionPid)
+    )
     Assert-ProcessExited -ProcessId $lateRegistrarPid
     $lateRegistrarPid = 0
-    foreach ($taskName in @($serviceEscapeName, $lateTaskName)) {
-      & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
-        /Query `
-        /TN "\$taskName" *>&1 | Out-Null
-      if ($LASTEXITCODE -eq 0) {
-        if ($taskName -eq $lateTaskName) {
-          throw 'A task registered after account disablement survived repeated cleanup.'
-        }
-        throw 'Task Scheduler escape registration survived broker cleanup.'
-      }
+    Assert-ScheduledTaskAbsent `
+      -TaskPath "$taskFolderPath\$serviceEscapeName" `
+      -Failure 'Task Scheduler escape registration survived broker cleanup.'
+    Assert-ScheduledTaskAbsent `
+      -TaskPath "$lateTaskFolderPath\$lateTaskName" `
+      -Failure 'A task registered after account disablement survived repeated cleanup.'
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    $folderSurvived = $false
+    try {
+      $scheduler.GetFolder("\$taskFolderRoot") | Out-Null
+      $folderSurvived = $true
+    } catch {
+    }
+    if ($folderSurvived) {
+      throw 'Nested Task Scheduler escape folder survived broker cleanup.'
     }
     $bitsListing = & (Join-Path $env:SystemRoot 'System32\bitsadmin.exe') `
       /list `
@@ -1879,7 +2272,6 @@ if (`$LASTEXITCODE -ne 0) {
       throw 'BITS service-mediated job survived broker cleanup.'
     }
     if (
-      [IO.File]::Exists($serviceEscapeActionMarker) -or
       $serviceEscapeArtifact.Sha256 -cne $serviceEscapeTrustedDigest -or
       [Text.UTF8Encoding]::new($false).GetString(
         $serviceEscapeArtifact.Bytes
@@ -1900,14 +2292,17 @@ if (`$LASTEXITCODE -ne 0) {
       } catch [ArgumentException] {
       }
     }
-    foreach ($taskName in @($serviceEscapeName, $lateTaskName)) {
+    foreach ($taskPath in @(
+      "$taskFolderPath\$serviceEscapeName",
+      "$lateTaskFolderPath\$lateTaskName"
+    )) {
       & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
         /End `
-        /TN "\$taskName" *>&1 | Out-Null
+        /TN $taskPath *>&1 | Out-Null
       & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
         /Delete `
         /F `
-        /TN "\$taskName" *>&1 | Out-Null
+        /TN $taskPath *>&1 | Out-Null
     }
     try {
       Import-Module BitsTransfer -ErrorAction Stop
@@ -1916,10 +2311,257 @@ if (`$LASTEXITCODE -ne 0) {
         Remove-BitsTransfer
     } catch {
     }
-    if ($null -ne $serviceEscapeJob) {
-      $serviceEscapeJob.Dispose()
+    $serviceEscapeCleanupErrors =
+      [Collections.Generic.List[Exception]]::new()
+    try {
+      Remove-IsolatedTestContext -Context $serviceEscapeContext
+    } catch {
+      $serviceEscapeCleanupErrors.Add($_.Exception)
     }
-    Remove-IsolatedTestContext -Context $serviceEscapeContext
+    if ($null -ne $serviceEscapeJob) {
+      try {
+        $serviceEscapeJob.Dispose()
+      } catch {
+        $serviceEscapeCleanupErrors.Add($_.Exception)
+      }
+    }
+    if ($serviceEscapeCleanupErrors.Count -ne 0) {
+      throw [AggregateException]::new(
+        'Scheduler regression cleanup failed.',
+        $serviceEscapeCleanupErrors
+      )
+    }
+  }
+  if (
+    $null -ne (
+      Get-LocalUser -Name $serviceEscapeUserName -ErrorAction SilentlyContinue
+    )
+  ) {
+    throw 'Scheduler-regression ephemeral local user survived cleanup.'
+  }
+  if ([IO.Directory]::Exists($serviceEscapeProfilePath)) {
+    throw 'Scheduler-regression ephemeral Windows profile survived cleanup.'
+  }
+  if ([IO.Directory]::Exists($serviceEscapeRootPath)) {
+    throw 'Scheduler-regression ephemeral bootstrap root survived cleanup.'
+  }
+
+  $failureEscapeContext =
+    New-IsolatedTestContext -Label 'service-escape-nonzero'
+  $failureEscapeJob = $null
+  try {
+    $failureEscapeNonce = [Guid]::NewGuid().ToString('N')
+    $failureEscapeJobName =
+      "Local\OpenCoven.Chat.SupervisorTest.$failureEscapeNonce"
+    $failureEscapeFolderRoot = "OpenCoven-$failureEscapeNonce"
+    $failureEscapeFolderPath =
+      "\$failureEscapeFolderRoot\Hidden\Nested"
+    $failureEscapeTaskName = 'NonzeroEscape'
+    $failureEscapeBitsName =
+      "OpenCoven-BitsNonzero-$([Guid]::NewGuid().ToString('N'))"
+    $failureEscapeUserName = $failureEscapeContext.User.UserName
+    $failureEscapeProfilePath =
+      $failureEscapeContext.User.OperatingSystemProfilePath
+    $failureEscapeRootPath = $failureEscapeContext.User.RootPath
+    $failureEscapeRecord = Join-Path `
+      $failureEscapeContext.User.WorkspacePath `
+      '.artifacts\record.json'
+    $failureEscapeStarted = Join-Path `
+      $failureEscapeContext.User.TempPath `
+      'task-started.txt'
+    $failureEscapePid = Join-Path `
+      $failureEscapeContext.User.TempPath `
+      'task-pid.txt'
+    $failureEscapeSid = Join-Path `
+      $failureEscapeContext.User.TempPath `
+      'task-sid.txt'
+    $failureEscapeReady = Join-Path `
+      $failureEscapeContext.User.TempPath `
+      'producer-ready.txt'
+    $failureActionScript = Join-Path `
+      $failureEscapeContext.User.RootPath `
+      'task-action.ps1'
+    $failureTaskHelper = Join-Path `
+      $failureEscapeContext.User.RootPath `
+      'register-task.ps1'
+    $failureProducer = Join-Path `
+      $failureEscapeContext.User.RootPath `
+      'nonzero-producer.ps1'
+    [IO.File]::WriteAllText(
+      $failureActionScript,
+      $taskActionTemplate,
+      [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+      $failureTaskHelper,
+      $taskHelperTemplate,
+      [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+      $failureProducer,
+      @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. '$($failureTaskHelper.Replace("'", "''"))'
+[IO.Directory]::CreateDirectory(
+  '$([IO.Directory]::GetParent($failureEscapeRecord).FullName.Replace("'", "''"))'
+) | Out-Null
+[IO.File]::WriteAllBytes(
+  '$($failureEscapeRecord.Replace("'", "''"))',
+  [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
+)
+`$taskParameters = @{
+  FolderPath = '$failureEscapeFolderPath'
+  TaskName = '$failureEscapeTaskName'
+  PowerShellPath = '$($trustedPwsh.Replace("'", "''"))'
+  ActionScript = '$($failureActionScript.Replace("'", "''"))'
+  Record = '$($failureEscapeRecord.Replace("'", "''"))'
+  Marker = '$($failureEscapeStarted.Replace("'", "''"))'
+  PidMarker = '$($failureEscapePid.Replace("'", "''"))'
+  SidMarker = '$($failureEscapeSid.Replace("'", "''"))'
+  ForgedBase64 = '$serviceEscapeForgedBase64'
+  UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
+}
+`$taskProbe = Register-IsolatedInteractiveTask @taskParameters
+`$deadline = [DateTime]::UtcNow.AddSeconds(20)
+`$running = `$false
+while (
+  -not [IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($failureEscapePid.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($failureEscapeSid.Replace("'", "''"))') -or
+  -not `$running
+) {
+  `$running = `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  if ([DateTime]::UtcNow -ge `$deadline) {
+    throw 'Nonzero producer task never reached a running exact-SID action.'
+  }
+  Start-Sleep -Milliseconds 10
+}
+`$expectedSid =
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if (
+  [IO.File]::ReadAllText('$($failureEscapeSid.Replace("'", "''"))').Trim() -cne
+    `$expectedSid
+) {
+  throw 'Nonzero producer task action SID changed.'
+}
+& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
+  /create `
+  '$failureEscapeBitsName' *>&1 | Out-Null
+if (`$LASTEXITCODE -ne 0) {
+  throw 'Nonzero producer BITS job could not be created.'
+}
+[IO.File]::WriteAllText(
+  '$($failureEscapeReady.Replace("'", "''"))',
+  'scheduled-action-running-and-bits-created',
+  [Text.UTF8Encoding]::new(`$false)
+)
+exit 23
+"@,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $failureEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
+      $failureEscapeJobName,
+      $failureEscapeContext.User
+    )
+    $failureEscapeResult =
+      $failureEscapeJob.RunProducerAsUserAndQuarantine(
+        $failureEscapeContext.User,
+        $trustedPwsh,
+        "-NoLogo -NoProfile -NonInteractive -File `"$failureProducer`"",
+        $failureEscapeContext.User.RootPath,
+        $failureEscapeContext.Environment,
+        [TimeSpan]::FromSeconds(30),
+        1MB,
+        1MB
+      )
+    if ($failureEscapeResult.ExitCode -ne 23) {
+      throw 'Nonzero producer result changed during terminal quarantine.'
+    }
+    if (-not $failureEscapeJob.IsQuarantineComplete) {
+      throw 'Nonzero producer terminal quarantine did not complete.'
+    }
+    foreach ($marker in @(
+      $failureEscapeReady,
+      $failureEscapeStarted,
+      $failureEscapePid,
+      $failureEscapeSid
+    )) {
+      if (-not [IO.File]::Exists($marker)) {
+        throw 'Nonzero producer scheduled action did not actually run.'
+      }
+    }
+    if (
+      [IO.File]::ReadAllText($failureEscapeSid).Trim() -cne
+        $failureEscapeContext.User.Sid
+    ) {
+      throw 'Nonzero producer scheduled action SID was not exact.'
+    }
+    Assert-ProcessExited -ProcessId (
+      [int][IO.File]::ReadAllText($failureEscapePid)
+    )
+    Assert-ScheduledTaskAbsent `
+      -TaskPath "$failureEscapeFolderPath\$failureEscapeTaskName" `
+      -Failure 'Nonzero producer Task Scheduler escape survived quarantine.'
+    $failureBitsListing = & (
+      Join-Path $env:SystemRoot 'System32\bitsadmin.exe'
+    ) /list /allusers /verbose 2>&1 | Out-String
+    if (
+      $LASTEXITCODE -ne 0 -or
+      $failureBitsListing.Contains($failureEscapeBitsName)
+    ) {
+      throw 'Nonzero producer BITS job survived terminal quarantine.'
+    }
+    $nonzeroCaptureRejected = $false
+    try {
+      $failureEscapeJob.CaptureIsolatedArtifact(
+        $failureEscapeContext.User,
+        $failureEscapeContext.User.WorkspacePath,
+        $failureEscapeRecord,
+        1MB
+      ) | Out-Null
+    } catch {
+      $nonzeroCaptureRejected = $_.Exception.ToString().Contains(
+        'successful terminal producer attempt'
+      )
+    }
+    if (-not $nonzeroCaptureRejected) {
+      throw 'Nonzero producer artifact capture was not rejected.'
+    }
+  } finally {
+    $failureEscapeCleanupErrors =
+      [Collections.Generic.List[Exception]]::new()
+    try {
+      Remove-IsolatedTestContext -Context $failureEscapeContext
+    } catch {
+      $failureEscapeCleanupErrors.Add($_.Exception)
+    }
+    if ($null -ne $failureEscapeJob) {
+      try {
+        $failureEscapeJob.Dispose()
+      } catch {
+        $failureEscapeCleanupErrors.Add($_.Exception)
+      }
+    }
+    if ($failureEscapeCleanupErrors.Count -ne 0) {
+      throw [AggregateException]::new(
+        'Nonzero producer cleanup failed.',
+        $failureEscapeCleanupErrors
+      )
+    }
+  }
+  if (
+    $null -ne (
+      Get-LocalUser -Name $failureEscapeUserName -ErrorAction SilentlyContinue
+    )
+  ) {
+    throw 'Failure-path ephemeral local user survived cleanup.'
+  }
+  if ([IO.Directory]::Exists($failureEscapeProfilePath)) {
+    throw 'Failure-path ephemeral Windows profile survived cleanup.'
+  }
+  if ([IO.Directory]::Exists($failureEscapeRootPath)) {
+    throw 'Failure-path ephemeral bootstrap root survived cleanup.'
   }
 
   $disableFailureContext = New-IsolatedTestContext -Label 'disable-failure'
@@ -1942,12 +2584,7 @@ if (`$LASTEXITCODE -ne 0) {
     Remove-LocalUser -Name $disableFailureContext.User.UserName
     $disableFailureClosed = $false
     try {
-      $disableFailureJob.CaptureIsolatedArtifact(
-        $disableFailureContext.User,
-        $disableFailureContext.User.WorkspacePath,
-        $disableFailureRecord,
-        1MB
-      ) | Out-Null
+      $disableFailureJob.QuarantineIsolatedIdentity()
     } catch {
       $disableFailureClosed = $_.Exception.ToString().Contains(
         'disablement preflight could not be queried'
@@ -1963,28 +2600,30 @@ if (`$LASTEXITCODE -ne 0) {
     Remove-IsolatedTestContext -Context $disableFailureContext
   }
 
-  $timeoutPids = Join-Path $root 'timeout-pids.txt'
-  $timeoutScript = Join-Path $root 'timeout.ps1'
-  [IO.File]::WriteAllText(
-    $timeoutScript,
-    @"
+  $timeoutContext = New-IsolatedTestContext -Label 'terminal-timeout'
+  $timeoutJob = $null
+  try {
+    $timeoutPids = Join-Path $timeoutContext.User.RootPath 'timeout-pids.txt'
+    $timeoutScript = Join-Path $timeoutContext.User.RootPath 'timeout.ps1'
+    [IO.File]::WriteAllText(
+      $timeoutScript,
+      @"
 `$grandchild = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText('$($timeoutPids.Replace("'", "''"))', "`$PID`n`$(`$grandchild.Id)`n")
 Start-Sleep -Seconds 300
 "@,
-    [Text.UTF8Encoding]::new($false)
-  )
-  $timeoutJob = [OpenCoven.WindowsJobSupervisor]::Create(
-    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
-    $isolatedUser
-  )
-  try {
-    $result = $timeoutJob.RunAsUser(
-      $isolatedUser,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $timeoutJob = [OpenCoven.WindowsJobSupervisor]::Create(
+      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+      $timeoutContext.User
+    )
+    $result = $timeoutJob.RunProducerAsUserAndQuarantine(
+      $timeoutContext.User,
       $trustedPwsh,
       "-NoLogo -NoProfile -NonInteractive -File `"$timeoutScript`"",
-      $root,
-      $childEnvironment,
+      $timeoutContext.User.RootPath,
+      $timeoutContext.Environment,
       [TimeSpan]::FromSeconds(8),
       1MB,
       1MB
@@ -1992,14 +2631,20 @@ Start-Sleep -Seconds 300
     if (-not $result.TimedOut -or $result.ExitCode -eq 0) {
       throw 'Timed-out supervised tree did not fail closed.'
     }
+    if (-not $timeoutJob.IsQuarantineComplete) {
+      throw 'Timed-out producer terminal quarantine did not complete.'
+    }
+    $timeoutTree = [IO.File]::ReadAllLines($timeoutPids)
+    if ($timeoutTree.Count -ne 2) {
+      throw 'Timed-out child/grandchild PID record is incomplete.'
+    }
+    $timeoutTree | ForEach-Object { Assert-ProcessExited -ProcessId ([int]$_) }
   } finally {
-    $timeoutJob.Dispose()
+    if ($null -ne $timeoutJob) {
+      $timeoutJob.Dispose()
+    }
+    Remove-IsolatedTestContext -Context $timeoutContext
   }
-  $timeoutTree = [IO.File]::ReadAllLines($timeoutPids)
-  if ($timeoutTree.Count -ne 2) {
-    throw 'Timed-out child/grandchild PID record is incomplete.'
-  }
-  $timeoutTree | ForEach-Object { Assert-ProcessExited -ProcessId ([int]$_) }
 
   $closePid = Join-Path $root 'close-pid.txt'
   $closeScript = Join-Path $root 'close.ps1'

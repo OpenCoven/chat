@@ -523,6 +523,18 @@ a second hard link, a parent junction, wrong record ownership, a permissive
 DACL, and an active replacement race; the success case exercises stdin
 revalidation plus create-new, owner-private publication.
 The same job retains the frozen Rust supervisor artifact behavior tests.
+The suite also runs a deterministic scheduler case that creates a hidden
+interactive-token task inside a unique nested
+Task Scheduler folder, starts it explicitly through `IRegisteredTask.Run`, and
+waits for its started marker, running instance, and exact isolated SID process
+before terminal quarantine and capture. An already-live token also waits for
+account disablement, then registers and starts a second task; the test fails
+unless both actions actually ran and quarantine removes both registrations,
+running instances, action processes, the nested folder, and the BITS job before
+capture. A separate nonzero producer recreates a running scheduled action,
+out-of-Job exact-SID action process, and BITS job, then verifies terminal
+quarantine and complete account/profile/root cleanup without allowing capture.
+A timeout producer verifies the same terminal quarantine path.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -592,16 +604,19 @@ supervisor. Windows routes around those actions through the pre-bootstrap Job
 root. Production preserves the existing native behavior and uses the pinned
 official artifact upload exactly once per matrix expansion.
 
-Windows artifact handoff is a broker-only terminal transition. After the
-supervised root exits, the broker first terminates the Job Object and verifies
-zero active Job processes. It then disables the ephemeral local account with
+Every Windows producer invocation uses a broker-only terminal transition.
+The trusted `finally` path enters idempotent identity quarantine after success,
+nonzero exit, timeout, output overflow, resource-quota failure, or exception.
+The broker first terminates and reaps the Job Object and verifies zero active
+Job processes. It then disables the ephemeral local account with
 `NetUserSetInfo` and independently re-reads the account with `NetUserGetInfo`;
 an absent or ambiguous `UF_ACCOUNTDISABLE` bit is fatal. The trusted broker
 recursively enumerates Task Scheduler folders and hidden registrations through
 `Schedule.Service`, matches exact SID and local-account principals plus
-run-root identities, stops all matching instances, deletes registrations, and
-verifies absence. It also enumerates all-user BITS jobs, cancels every job
-whose owner SID is the isolated SID, and verifies absence.
+run-root identities, stops all matching instances, deletes registrations and
+attributable nested folders, and verifies absence. It also enumerates all-user
+BITS jobs, cancels every job whose owner SID is the isolated SID, and verifies
+absence.
 
 System-wide process proof uses `WTSEnumerateProcessesExW` level 1, whose
 `WTS_PROCESS_INFO_EXW.pUserSid` is the primary-token user SID. It does not
@@ -610,9 +625,18 @@ exact-SID process must be opened, rechecked by primary token, terminated,
 waited, and reaped; enumeration, SID query, access, termination, or wait
 failures are fatal. Scheduler cleanup, BITS cleanup, and SID-wide drain repeat
 until three bounded consecutive rounds observe no attributable registration,
-running task, BITS job, or process.
+running task, folder, BITS job, or process, over a bounded observation window.
+The final proof independently rechecks the disabled account, Job count,
+scheduler state, BITS state, and SID-wide process count. Cleanup delegates,
+final proof, Job close, profile/root deletion, and account deletion are all
+attempted even when another cleanup action fails; failures are aggregated
+rather than swallowed. Job and identity `Dispose` retry quarantine if the
+terminal attempt did not complete it.
 
-Only then does the broker retain no-delete-sharing handles, replace the
+Artifact ACL sealing and capture are unavailable after an unsuccessful
+producer result and unavailable until quarantine completes. Only after a
+successful result and terminal zero proof does the broker retain
+no-delete-sharing handles, replace the
 workspace, artifact-directory, and record owner/DACL with protected
 broker/SYSTEM/Administrators-only ACLs, verify those ACLs through the handles,
 and read the record. It checks scheduler, BITS, account-disable, and SID-wide
@@ -622,7 +646,11 @@ bytes before the no-overwrite broker-private publication.
 
 The restricted standard-user token cannot create a Windows service because
 creating an SCM service requires service-control-manager create-service access,
-which the token does not have. It likewise cannot create permanent WMI
+which the token does not have. The native regression requires both
+`OpenSCManagerW(SC_MANAGER_CREATE_SERVICE)` and `CreateServiceW` through a
+connect-only SCM handle to fail with exactly `ERROR_ACCESS_DENIED`, rejects
+every other error, and requires `OpenServiceW` to prove
+`ERROR_SERVICE_DOES_NOT_EXIST`. It likewise cannot create permanent WMI
 subscriptions because writing `__EventFilter`/consumer/binding instances in
 `root/subscription` requires namespace write/provider rights absent from the
 token. The `windows-2025` runtime test executes both denied operations and
@@ -774,14 +802,19 @@ Diagnostics are stable IDs only.
   changed operator state, dirty checkout, artifact drift, scanner rejection,
   timeout, or cleanup failure produces no schema-v2 record.
 - The output path is no-overwrite. Windows publishes only handle-captured
-  bytes after verified account disablement, recursive scheduler/BITS cleanup,
-  three stable SID-wide zero-process rounds, and handle-verified ACL sealing;
-  macOS/Linux publish only after native zero-process proof and a no-follow
-  descriptor read whose identity and timestamps remain stable.
+  bytes after a successful producer result, completed terminal quarantine,
+  verified account disablement, recursive scheduler/BITS cleanup, stable
+  SID-wide zero-process proof, and handle-verified ACL sealing; macOS/Linux
+  publish only after native zero-process proof and a no-follow descriptor read
+  whose identity and timestamps remain stable.
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
   reappearance produces no artifact.
+- Windows producer success, nonzero exit, timeout, quota/output failure, and
+  exception all enter the same terminal quarantine path before identity
+  deletion. Cleanup failures are aggregated after every cleanup action has
+  been attempted.
 - Uploaded bytes that fail fresh SDK validation, differ from the validation
   digest when downloaded for attestation, or use a validator input unequal to
   the protected environment variable are never attested.
@@ -802,7 +835,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 349,422 | `f4f892a8952cf734e2f1dee46237493526f021ccc5b9ba0275a3eb0f790e8abb` |
+| `.github/workflows/client-v1-conformance.yml` | 377,149 | `bf87889821d75885fedbcb80d766156eb793239c4343097e6371eef202bdde11` |
 | `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
 | `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -811,8 +844,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
-| `scripts/windows-job-supervisor.cs` | 228,299 | `3fdb8a2046968442ca1c7538d55dfd79dc3d2fde7b2f0fd9082ee74dfd1594ab` |
-| `scripts/windows-job-supervisor.test.ps1` | 85,429 | `2aad7073de28d245fce432a0a29a2db485276788ae07cedcb289ea51a4b70cb3` |
+| `scripts/windows-job-supervisor.cs` | 249,862 | `b723d1752f926a39a39a79d56d95a7611b1ce9a2f6454ae88ae942e1ed2229db` |
+| `scripts/windows-job-supervisor.test.ps1` | 107,284 | `c8a7e261a015e792a1cc6bcbf6a0ca49b7ecf5b72a16478f65b317dcc4556171` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
 production Unix source files by the sizes and digests above before compiling or

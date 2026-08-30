@@ -790,8 +790,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'WTS_PROCESS_INFO_EXW',
         'WTSFreeMemoryExW',
         'MinimumStableIsolationRounds',
+        'ExecuteQuarantineSecuritySequence',
+        'QuarantineIsolatedIdentity',
+        'IsQuarantineComplete',
+        'RunProducerAsUserAndQuarantine',
+        'RequireQuarantineCompleted',
         'ExecuteArtifactSecuritySequence',
         'CleanupScheduledTasks',
+        'attributableScheduledTaskFolders',
+        'RememberScheduledTaskFolderChain',
         'CleanupBitsJobs',
         'DrainProcessesByPrimaryTokenSid',
         'SealArtifactSource',
@@ -859,28 +866,17 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(sequenceStart).toBeGreaterThan(-1);
       expect(sequenceEnd).toBeGreaterThan(sequenceStart);
 
-      const jobZero = sequence.indexOf('requireJobZero();');
-      const disable = sequence.indexOf('disableAccount();');
-      const scheduler = sequence.indexOf('cleanupScheduledTasks();');
-      const bits = sequence.indexOf('cleanupBitsJobs();');
-      const processes = sequence.indexOf('drainProcessesByPrimaryTokenSid();');
+      const quarantine = sequence.indexOf('requireQuarantine();');
       const seal = sequence.indexOf('sealArtifactSource();');
       const firstPostSeal = sequence.indexOf('requirePostSealIsolation();');
       const capture = sequence.indexOf('captureArtifact();');
       const secondPostSeal = sequence.indexOf('requirePostSealIsolation();', firstPostSeal + 1);
 
-      expect(jobZero).toBeGreaterThan(-1);
-      expect(disable).toBeGreaterThan(jobZero);
-      expect(scheduler).toBeGreaterThan(disable);
-      expect(bits).toBeGreaterThan(scheduler);
-      expect(processes).toBeGreaterThan(bits);
-      expect(seal).toBeGreaterThan(processes);
+      expect(quarantine).toBeGreaterThan(-1);
+      expect(seal).toBeGreaterThan(quarantine);
       expect(firstPostSeal).toBeGreaterThan(seal);
       expect(capture).toBeGreaterThan(firstPostSeal);
       expect(secondPostSeal).toBeGreaterThan(capture);
-      expect(sequence).toContain('stableRounds < MinimumStableIsolationRounds');
-      expect(sequence).toContain('stableRounds = 0;');
-      expect(sequence).toContain('throw new TimeoutException(');
 
       const captureStart = source.indexOf(
         'public WindowsValidatedArtifact CaptureIsolatedArtifact(',
@@ -891,10 +887,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       );
       const captureMethod = source.slice(captureStart, canonicalStart);
       expect(captureMethod).toContain('ExecuteArtifactSecuritySequence(');
-      expect(captureMethod).toContain('isolatedUser.DisableAndVerify()');
-      expect(captureMethod).toContain('CleanupScheduledTasks(');
-      expect(captureMethod).toContain('CleanupBitsJobs(');
-      expect(captureMethod).toContain('DrainProcessesByPrimaryTokenSid(');
+      expect(captureMethod).toContain('RequireQuarantineCompleted(isolatedUser)');
       expect(captureMethod).toContain('SealArtifactSource(');
       expect(captureMethod).toContain('RequirePostSealIsolation(');
     }
@@ -914,6 +907,117 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toBeGreaterThan(capture);
     expect(publish).toBeGreaterThan(validation);
     expect(postProduction).not.toContain('$job.RunAsUserWithStandardInput(');
+  });
+
+  test('runs terminal Windows identity quarantine after every producer outcome', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      const quarantineStart = source.indexOf(
+        'private static void ExecuteQuarantineSecuritySequence(',
+      );
+      const quarantineEnd = source.indexOf(
+        'private static void ExecuteArtifactSecuritySequence(',
+        quarantineStart,
+      );
+      const quarantine = source.slice(quarantineStart, quarantineEnd);
+      expect(quarantineStart).toBeGreaterThan(-1);
+      expect(quarantineEnd).toBeGreaterThan(quarantineStart);
+      const terminate = quarantine.indexOf('terminateAndReapJob();');
+      const jobZero = quarantine.indexOf('requireJobZero();');
+      const disable = quarantine.indexOf('disableAccount();');
+      const scheduler = quarantine.indexOf('cleanupScheduledTasks();');
+      const bits = quarantine.indexOf('cleanupBitsJobs();');
+      const processes = quarantine.indexOf('drainProcessesByPrimaryTokenSid();');
+      const finalProof = quarantine.indexOf('requireFinalIsolation();');
+      expect(terminate).toBeGreaterThan(-1);
+      expect(jobZero).toBeGreaterThan(terminate);
+      expect(disable).toBeGreaterThan(jobZero);
+      expect(scheduler).toBeGreaterThan(disable);
+      expect(bits).toBeGreaterThan(scheduler);
+      expect(processes).toBeGreaterThan(bits);
+      expect(finalProof).toBeGreaterThan(processes);
+      expect(quarantine).toContain('stableRounds < MinimumStableIsolationRounds');
+      expect(quarantine).toContain('cleanupFailures');
+      expect(source).toContain('RememberScheduledTaskFolderChain(match.FolderPath);');
+
+      const terminalStart = source.indexOf(
+        'private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(',
+      );
+      const terminalEnd = source.indexOf(
+        'private WindowsJobRunResult RunAsUserCore(',
+        terminalStart,
+      );
+      const terminal = source.slice(terminalStart, terminalEnd);
+      expect(terminalStart).toBeGreaterThan(-1);
+      expect(terminalEnd).toBeGreaterThan(terminalStart);
+      expect(terminal).toContain('finally');
+      expect(terminal).toContain('QuarantineIsolatedIdentity();');
+      expect(terminal).toContain('new AggregateException(');
+      expect(terminal).toContain('terminalProducerSucceeded =');
+
+      const captureStart = source.indexOf(
+        'public WindowsValidatedArtifact CaptureIsolatedArtifact(',
+      );
+      const captureEnd = source.indexOf(
+        'public static void RequireCanonicalSchemaV2Artifact(',
+        captureStart,
+      );
+      const capture = source.slice(captureStart, captureEnd);
+      expect(capture).toContain('RequireQuarantineCompleted(isolatedUser);');
+      expect(capture).not.toContain('isolatedUser.DisableAndVerify()');
+      expect(capture).not.toContain('CleanupScheduledTasks()');
+      expect(capture).not.toContain('CleanupBitsJobs()');
+      expect(capture).not.toContain('DrainProcessesByPrimaryTokenSid()');
+
+      const disposeStart = source.indexOf('public void Dispose()', captureEnd);
+      const disposeEnd = source.indexOf('private void ThrowIfDisposed()', disposeStart);
+      const dispose = source.slice(disposeStart, disposeEnd);
+      expect(dispose.indexOf('QuarantineIsolatedIdentity();')).toBeGreaterThan(-1);
+      expect(dispose.indexOf('TerminateJobAndWaitForZero(')).toBeGreaterThan(
+        dispose.indexOf('QuarantineIsolatedIdentity();'),
+      );
+
+      const isolatedUserStart = source.indexOf('public sealed class WindowsIsolatedUser');
+      const userDisposeStart = source.indexOf(
+        'public void Dispose()',
+        source.indexOf('private static string GetProfilesRoot()', isolatedUserStart),
+      );
+      const userDisposeEnd = source.indexOf(
+        '[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
+        userDisposeStart,
+      );
+      const userDispose = source.slice(userDisposeStart, userDisposeEnd);
+      expect(userDispose.indexOf('quarantineIsolatedIdentity();')).toBeGreaterThan(-1);
+      expect(userDispose.indexOf('DeleteOperatingSystemProfile(')).toBeGreaterThan(
+        userDispose.indexOf('quarantineIsolatedIdentity();'),
+      );
+      expect(userDispose.indexOf('DeleteDirectoryTree(RootPath)')).toBeGreaterThan(
+        userDispose.indexOf('quarantineIsolatedIdentity();'),
+      );
+      expect(userDispose.indexOf('NetUserDel(null, UserName)')).toBeGreaterThan(
+        userDispose.indexOf('quarantineIsolatedIdentity();'),
+      );
+      expect(userDispose).toContain('new AggregateException(');
+    }
+
+    const runBody = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const production = runBody.slice(runBody.indexOf('$result = $job.'));
+    expect(production).toContain('$result = $job.RunProducerAsUserAndQuarantine(');
+    expect(production.indexOf('$job.CaptureIsolatedArtifact(')).toBeGreaterThan(
+      production.indexOf('Supervised Windows production failed with exit code'),
+    );
+    const cleanup = production.slice(production.lastIndexOf('} finally {'));
+    expect(cleanup.indexOf('$isolatedUser.Dispose()')).toBeGreaterThan(-1);
+    expect(cleanup.indexOf('$job.Dispose()')).toBeGreaterThan(
+      cleanup.indexOf('$isolatedUser.Dispose()'),
+    );
   });
 
   test('uses the official eleven-parameter CreateProcessWithLogonW signature and call order', () => {
@@ -1127,7 +1231,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Task Scheduler escape action rewrote the sealed artifact.',
       'A task registered after account disablement survived repeated cleanup.',
       'BITS service-mediated job survived broker cleanup.',
-      'Ephemeral account was not disabled before artifact capture.',
+      'Ephemeral account was not disabled by terminal quarantine.',
       'Account-disable verification failure did not fail closed.',
       'Task Scheduler enumeration failure did not fail closed.',
       'BITS enumeration failure did not fail closed.',
@@ -1137,13 +1241,46 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Unstable SID-wide process drain did not fail closed.',
       'Artifact ACL sealing failure did not fail closed.',
       'Service creation unexpectedly succeeded for the restricted identity.',
+      'SC_MANAGER_CREATE_SERVICE was not denied with ERROR_ACCESS_DENIED.',
+      'CreateServiceW was not denied with ERROR_ACCESS_DENIED.',
+      'Denied native service creation left a registered service.',
       'Permanent WMI subscription creation unexpectedly succeeded.',
+      'Task Scheduler action did not write its started marker.',
+      'Task Scheduler action did not expose a running instance.',
+      'Task Scheduler action process did not run as the exact isolated SID.',
+      'Nonzero producer result changed during terminal quarantine.',
+      'Nonzero producer artifact capture was not rejected.',
+      'A task started after account disablement was not exercised.',
       'Ephemeral local user survived cleanup.',
       'Ephemeral Windows profile survived cleanup.',
       'Ephemeral bootstrap root survived cleanup.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }
+    for (const nativeScmToken of [
+      'OpenSCManagerW',
+      'CreateServiceW',
+      'OpenServiceW',
+      'SC_MANAGER_CREATE_SERVICE',
+      'ERROR_ACCESS_DENIED',
+      'ERROR_SERVICE_DOES_NOT_EXIST',
+    ]) {
+      expect(runtimeTest).toContain(nativeScmToken);
+    }
+    expect(runtimeTest).not.toContain('& `$sc create');
+    expect(runtimeTest).toContain('$definition.Principal.LogonType = 3');
+    expect(runtimeTest).toContain('.CreateFolder(');
+    expect(runtimeTest).toContain('.Run(');
+    expect(runtimeTest).toContain('.GetInstances(');
+    expect(runtimeTest).toContain('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
+    expect(runtimeTest).toContain('.RunProducerAsUserAndQuarantine(');
+    expect(runtimeTest).toContain('OpenCoven-PrincipalOnly-');
+    expect(runtimeTest).toContain(
+      '    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
+    );
+    expect(runtimeTest).not.toContain(
+      '\n$taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
+    );
   });
 
   test('creates a distinct non-admin Windows identity before supervised mutation', () => {
@@ -1152,7 +1289,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const runBody = workflowRunBody(bootstrap);
     const identityCreate = runBody.indexOf('[OpenCoven.WindowsIsolatedUser]::Create(');
     const jobCreate = runBody.indexOf('[OpenCoven.WindowsJobSupervisor]::Create(');
-    const supervisedRun = runBody.indexOf('$job.RunAsUser(');
+    const supervisedRun = runBody.indexOf('$job.RunProducerAsUserAndQuarantine(');
 
     expect(identityCreate).toBeGreaterThan(-1);
     expect(jobCreate).toBeGreaterThan(identityCreate);
@@ -1486,7 +1623,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         new RegExp(`'${label}'[\\s\\S]{0,180}\\n\\s+${limit.replace('.', '\\.')}`, 'u'),
       );
     }
-    expect(bootstrap).toContain('$job.RunAsUser(');
+    expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain('Supervised Windows production exceeded a resource quota.');
   });

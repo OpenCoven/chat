@@ -319,6 +319,8 @@ jobs:
 
                   private string password;
                   private bool accountDisabled;
+                  private Action quarantineIsolatedIdentity;
+                  private Func<bool> isQuarantineComplete;
                   private bool disposed;
 
                   private WindowsIsolatedUser(
@@ -652,6 +654,30 @@ jobs:
                       }
                   }
 
+                  internal void RegisterTerminalQuarantine(
+                      Action quarantine,
+                      Func<bool> completion)
+                  {
+                      ThrowIfDisposed();
+                      if (quarantine == null)
+                      {
+                          throw new ArgumentNullException("quarantine");
+                      }
+                      if (completion == null)
+                      {
+                          throw new ArgumentNullException("completion");
+                      }
+                      if (quarantineIsolatedIdentity != null &&
+                          (!Object.Equals(quarantineIsolatedIdentity, quarantine) ||
+                              !Object.Equals(isQuarantineComplete, completion)))
+                      {
+                          throw new InvalidOperationException(
+                              "The isolated Windows identity already has a terminal quarantine owner.");
+                      }
+                      quarantineIsolatedIdentity = quarantine;
+                      isQuarantineComplete = completion;
+                  }
+
                   private static void ValidateStandardUser(
                       string userName,
                       string passwordValue,
@@ -792,8 +818,31 @@ jobs:
                       {
                           return;
                       }
+                      List<Exception> cleanupFailures = new List<Exception>();
+                      if (quarantineIsolatedIdentity != null)
+                      {
+                          bool quarantineComplete = false;
+                          try
+                          {
+                              quarantineComplete = isQuarantineComplete();
+                          }
+                          catch (Exception error)
+                          {
+                              cleanupFailures.Add(error);
+                          }
+                          if (!quarantineComplete)
+                          {
+                              try
+                              {
+                                  quarantineIsolatedIdentity();
+                              }
+                              catch (Exception error)
+                              {
+                                  cleanupFailures.Add(error);
+                              }
+                          }
+                      }
                       disposed = true;
-                      Exception failure = null;
                       try
                       {
                           WindowsJobSupervisor.DeleteOperatingSystemProfile(
@@ -802,7 +851,7 @@ jobs:
                       }
                       catch (Exception error)
                       {
-                          failure = error;
+                          cleanupFailures.Add(error);
                       }
                       try
                       {
@@ -810,10 +859,7 @@ jobs:
                       }
                       catch (Exception error)
                       {
-                          if (failure == null)
-                          {
-                              failure = error;
-                          }
+                          cleanupFailures.Add(error);
                       }
                       try
                       {
@@ -838,28 +884,25 @@ jobs:
                       }
                       catch (Exception error)
                       {
-                          if (failure == null)
-                          {
-                              failure = error;
-                          }
+                          cleanupFailures.Add(error);
                       }
                       password = null;
                       if (Directory.Exists(OperatingSystemProfilePath))
                       {
-                          failure = failure ?? new InvalidOperationException(
-                              "Ephemeral Windows profile survived cleanup.");
+                          cleanupFailures.Add(new InvalidOperationException(
+                              "Ephemeral Windows profile survived cleanup."));
                       }
                       if (Directory.Exists(RootPath))
                       {
-                          failure = failure ?? new InvalidOperationException(
-                              "Ephemeral bootstrap root survived cleanup.");
+                          cleanupFailures.Add(new InvalidOperationException(
+                              "Ephemeral bootstrap root survived cleanup."));
                       }
                       GC.SuppressFinalize(this);
-                      if (failure != null)
+                      if (cleanupFailures.Count != 0)
                       {
                           throw new InvalidOperationException(
                               "Ephemeral Windows identity cleanup failed.",
-                              failure);
+                              new AggregateException(cleanupFailures.ToArray()));
                       }
                   }
 
@@ -1133,6 +1176,8 @@ jobs:
                   private const int MinimumStableIsolationRounds = 3;
                   private const int MaximumIsolationRounds = 120;
                   private const int IsolationRoundDelayMilliseconds = 100;
+                  private const int PostDisableSettlementMilliseconds = 3000;
+                  private const int MinimumQuarantineObservationMilliseconds = 1000;
                   private const int MaximumSchedulerCleanupPasses = 8;
                   private const int MaximumBitsCleanupPasses = 8;
                   private const int TASK_ENUM_HIDDEN = 1;
@@ -1149,7 +1194,16 @@ jobs:
                   private readonly string supervisedQualifiedUserName;
                   private readonly string supervisedRootPath;
                   private readonly string runIdentity;
+                  private readonly string runIdentityToken;
+                  private readonly WindowsIsolatedUser isolatedUser;
+                  private readonly object quarantineSync = new object();
+                  private readonly HashSet<string> attributableScheduledTaskFolders =
+                      new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                   private WindowsIsolatedUser sealedIsolatedUser;
+                  private bool terminalProducerAttempted;
+                  private bool terminalProducerSucceeded;
+                  private bool quarantineInProgress;
+                  private bool quarantineCompleted;
                   private bool artifactBoundarySealed;
                   private bool disposed;
 
@@ -1159,12 +1213,17 @@ jobs:
                       string identity)
                   {
                       jobHandle = handle;
+                      this.isolatedUser = isolatedUser;
                       supervisedSid = isolatedUser.Sid;
                       supervisedUserName = isolatedUser.UserName;
                       supervisedQualifiedUserName =
                           Environment.MachineName + "\\" + isolatedUser.UserName;
                       supervisedRootPath = isolatedUser.RootPath;
                       runIdentity = identity;
+                      int tokenSeparator = identity.LastIndexOf('.');
+                      runIdentityToken = tokenSeparator >= 0
+                          ? identity.Substring(tokenSeparator + 1)
+                          : identity;
                   }
 
                   public long AuthoritativeHandleValue
@@ -1173,6 +1232,17 @@ jobs:
                       {
                           ThrowIfDisposed();
                           return jobHandle.ToInt64();
+                      }
+                  }
+
+                  public bool IsQuarantineComplete
+                  {
+                      get
+                      {
+                          lock (quarantineSync)
+                          {
+                              return quarantineCompleted;
+                          }
                       }
                   }
 
@@ -2300,55 +2370,115 @@ jobs:
                       return new WindowsPinnedDirectory(handle);
                   }
 
-                  private static void ExecuteArtifactSecuritySequence(
+                  private static void ExecuteQuarantineSecuritySequence(
+                      Action terminateAndReapJob,
                       Action requireJobZero,
                       Action disableAccount,
                       Func<int> cleanupScheduledTasks,
                       Func<int> cleanupBitsJobs,
                       Func<int> drainProcessesByPrimaryTokenSid,
-                      Action sealArtifactSource,
-                      Action requirePostSealIsolation,
-                      Action captureArtifact,
+                      Action requireFinalIsolation,
                       int maximumRounds,
-                      int delayMilliseconds)
+                      int delayMilliseconds,
+                      int postDisableSettlementMilliseconds,
+                      int minimumObservationMilliseconds)
                   {
-                      if (requireJobZero == null ||
+                      if (terminateAndReapJob == null ||
+                          requireJobZero == null ||
                           disableAccount == null ||
                           cleanupScheduledTasks == null ||
                           cleanupBitsJobs == null ||
                           drainProcessesByPrimaryTokenSid == null ||
-                          sealArtifactSource == null ||
-                          requirePostSealIsolation == null ||
-                          captureArtifact == null)
+                          requireFinalIsolation == null)
                       {
                           throw new ArgumentNullException(
-                              "Artifact security sequence delegates may not be null.");
+                              "Quarantine security sequence delegates may not be null.");
                       }
                       if (maximumRounds < MinimumStableIsolationRounds ||
                           maximumRounds > MaximumIsolationRounds ||
                           delayMilliseconds < 0 ||
-                          delayMilliseconds > 1000)
+                          delayMilliseconds > 1000 ||
+                          postDisableSettlementMilliseconds < 0 ||
+                          postDisableSettlementMilliseconds > 10000 ||
+                          minimumObservationMilliseconds < 0 ||
+                          minimumObservationMilliseconds > 10000)
                       {
                           throw new ArgumentOutOfRangeException(
-                              "Artifact security sequence bounds are invalid.");
+                              "Quarantine security sequence bounds are invalid.");
                       }
 
-                      requireJobZero();
-                      disableAccount();
+                      List<Exception> cleanupFailures = new List<Exception>();
+                      try
+                      {
+                          terminateAndReapJob();
+                      }
+                      catch (Exception error)
+                      {
+                          cleanupFailures.Add(error);
+                      }
+                      try
+                      {
+                          requireJobZero();
+                      }
+                      catch (Exception error)
+                      {
+                          cleanupFailures.Add(error);
+                      }
+                      bool accountDisabled = false;
+                      try
+                      {
+                          disableAccount();
+                          accountDisabled = true;
+                      }
+                      catch (Exception error)
+                      {
+                          cleanupFailures.Add(error);
+                      }
+                      if (accountDisabled && postDisableSettlementMilliseconds != 0)
+                      {
+                          Thread.Sleep(postDisableSettlementMilliseconds);
+                      }
+
+                      Stopwatch observation = Stopwatch.StartNew();
                       int stableRounds = 0;
                       for (int round = 0; round < maximumRounds; round++)
                       {
-                          int scheduledTaskCount = cleanupScheduledTasks();
-                          int bitsJobCount = cleanupBitsJobs();
-                          int processCount = drainProcessesByPrimaryTokenSid();
-                          if (scheduledTaskCount < 0 ||
-                              bitsJobCount < 0 ||
-                              processCount < 0)
+                          int scheduledTaskCount = -1;
+                          int bitsJobCount = -1;
+                          int processCount = -1;
+                          bool roundFailed = false;
+                          try
                           {
-                              throw new InvalidOperationException(
-                                  "Isolation cleanup returned an invalid observation count.");
+                              scheduledTaskCount = cleanupScheduledTasks();
                           }
-                          if (scheduledTaskCount == 0 &&
+                          catch (Exception error)
+                          {
+                              cleanupFailures.Add(error);
+                              roundFailed = true;
+                          }
+                          try
+                          {
+                              bitsJobCount = cleanupBitsJobs();
+                          }
+                          catch (Exception error)
+                          {
+                              cleanupFailures.Add(error);
+                              roundFailed = true;
+                          }
+                          try
+                          {
+                              processCount = drainProcessesByPrimaryTokenSid();
+                          }
+                          catch (Exception error)
+                          {
+                              cleanupFailures.Add(error);
+                              roundFailed = true;
+                          }
+                          if (!roundFailed &&
+                              scheduledTaskCount >= 0 &&
+                              bitsJobCount >= 0 &&
+                              processCount >= 0 &&
+                              scheduledTaskCount == 0 &&
                               bitsJobCount == 0 &&
                               processCount == 0)
                           {
@@ -2358,7 +2488,9 @@ jobs:
                           {
                               stableRounds = 0;
                           }
-                          if (stableRounds >= MinimumStableIsolationRounds)
+                          if (stableRounds >= MinimumStableIsolationRounds &&
+                              observation.ElapsedMilliseconds >=
+                                  minimumObservationMilliseconds)
                           {
                               break;
                           }
@@ -2367,12 +2499,44 @@ jobs:
                               Thread.Sleep(delayMilliseconds);
                           }
                       }
-                      if (stableRounds < MinimumStableIsolationRounds)
+                      if (stableRounds < MinimumStableIsolationRounds ||
+                          observation.ElapsedMilliseconds <
+                              minimumObservationMilliseconds)
                       {
-                          throw new TimeoutException(
-                              "Isolated account persistence did not reach three stable zero rounds.");
+                          cleanupFailures.Add(new TimeoutException(
+                              "Isolated account persistence did not reach stable terminal zero proof."));
                       }
+                      try
+                      {
+                          requireFinalIsolation();
+                      }
+                      catch (Exception error)
+                      {
+                          cleanupFailures.Add(error);
+                      }
+                      if (cleanupFailures.Count != 0)
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal isolated identity quarantine failed.",
+                              new AggregateException(cleanupFailures.ToArray()));
+                      }
+                  }
 
+                  private static void ExecuteArtifactSecuritySequence(
+                      Action requireQuarantine,
+                      Action sealArtifactSource,
+                      Action requirePostSealIsolation,
+                      Action captureArtifact)
+                  {
+                      if (requireQuarantine == null ||
+                          sealArtifactSource == null ||
+                          requirePostSealIsolation == null ||
+                          captureArtifact == null)
+                      {
+                          throw new ArgumentNullException(
+                              "Artifact security sequence delegates may not be null.");
+                      }
+                      requireQuarantine();
                       sealArtifactSource();
                       requirePostSealIsolation();
                       captureArtifact();
@@ -2384,12 +2548,14 @@ jobs:
                       int observed = 0;
                       for (int pass = 0; pass < MaximumSchedulerCleanupPasses; pass++)
                       {
+                          RememberRunIdentityScheduledTaskFolders();
                           List<ScheduledTaskReference> matches =
                               EnumerateMatchingScheduledTasks(true);
                           HashSet<string> matchingPaths = new HashSet<string>(
                               StringComparer.OrdinalIgnoreCase);
                           foreach (ScheduledTaskReference match in matches)
                           {
+                              RememberScheduledTaskFolderChain(match.FolderPath);
                               matchingPaths.Add(match.Path);
                           }
                           observed = checked(
@@ -2400,6 +2566,7 @@ jobs:
                           {
                               DeleteScheduledTask(match);
                           }
+                          DeleteAttributableScheduledTaskFolders();
 
                           List<ScheduledTaskReference> remaining =
                               EnumerateMatchingScheduledTasks(false);
@@ -2407,10 +2574,12 @@ jobs:
                               StringComparer.OrdinalIgnoreCase);
                           foreach (ScheduledTaskReference match in remaining)
                           {
+                              RememberScheduledTaskFolderChain(match.FolderPath);
                               remainingPaths.Add(match.Path);
                           }
                           int running = StopMatchingRunningTasks(remainingPaths, false);
-                          if (remaining.Count == 0 && running == 0)
+                          int folders = CountAttributableScheduledTaskFolders();
+                          if (remaining.Count == 0 && running == 0 && folders == 0)
                           {
                               return observed;
                           }
@@ -2421,17 +2590,20 @@ jobs:
 
                   private int InspectScheduledTasks()
                   {
+                      RememberRunIdentityScheduledTaskFolders();
                       List<ScheduledTaskReference> registrations =
                           EnumerateMatchingScheduledTasks(false);
                       HashSet<string> paths = new HashSet<string>(
                           StringComparer.OrdinalIgnoreCase);
                       foreach (ScheduledTaskReference registration in registrations)
                       {
+                          RememberScheduledTaskFolderChain(registration.FolderPath);
                           paths.Add(registration.Path);
                       }
                       return checked(
                           registrations.Count +
-                          StopMatchingRunningTasks(paths, false));
+                          StopMatchingRunningTasks(paths, false) +
+                          CountAttributableScheduledTaskFolders());
                   }
 
                   private List<ScheduledTaskReference> EnumerateMatchingScheduledTasks(
@@ -2785,9 +2957,141 @@ jobs:
                       return value.IndexOf(
                               runIdentity,
                               StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          (runIdentityToken.Length >= 16 &&
+                              value.IndexOf(
+                                  runIdentityToken,
+                                  StringComparison.OrdinalIgnoreCase) >= 0) ||
                           value.IndexOf(
                               supervisedRootPath,
                               StringComparison.OrdinalIgnoreCase) >= 0;
+                  }
+
+                  private void RememberScheduledTaskFolderChain(string folderPath)
+                  {
+                      if (String.IsNullOrWhiteSpace(folderPath) ||
+                          !folderPath.StartsWith("\\", StringComparison.Ordinal))
+                      {
+                          throw new InvalidOperationException(
+                              "Attributable Task Scheduler folder path is ambiguous.");
+                      }
+                      string current = folderPath;
+                      while (!String.Equals(current, "\\", StringComparison.Ordinal))
+                      {
+                          attributableScheduledTaskFolders.Add(current);
+                          int separator = current.LastIndexOf('\\');
+                          current = separator <= 0
+                              ? "\\"
+                              : current.Substring(0, separator);
+                      }
+                  }
+
+                  private void RememberRunIdentityScheduledTaskFolders()
+                  {
+                      object service = null;
+                      try
+                      {
+                          service = CreateTaskService();
+                          List<string> paths = new List<string>();
+                          CollectTaskFolderPaths(service, "\\", paths);
+                          foreach (string path in paths)
+                          {
+                              if (!String.Equals(path, "\\", StringComparison.Ordinal) &&
+                                  ContainsRunIdentity(path))
+                              {
+                                  RememberScheduledTaskFolderChain(path);
+                              }
+                          }
+                      }
+                      finally
+                      {
+                          ReleaseComObject(service);
+                      }
+                  }
+
+                  private int CountAttributableScheduledTaskFolders()
+                  {
+                      RememberRunIdentityScheduledTaskFolders();
+                      object service = null;
+                      try
+                      {
+                          service = CreateTaskService();
+                          List<string> paths = new List<string>();
+                          CollectTaskFolderPaths(service, "\\", paths);
+                          HashSet<string> existing = new HashSet<string>(
+                              paths,
+                              StringComparer.OrdinalIgnoreCase);
+                          int matches = 0;
+                          foreach (string path in attributableScheduledTaskFolders)
+                          {
+                              if (existing.Contains(path))
+                              {
+                                  matches++;
+                              }
+                          }
+                          return matches;
+                      }
+                      finally
+                      {
+                          ReleaseComObject(service);
+                      }
+                  }
+
+                  private void DeleteAttributableScheduledTaskFolders()
+                  {
+                      object service = null;
+                      try
+                      {
+                          RememberRunIdentityScheduledTaskFolders();
+                          service = CreateTaskService();
+                          List<string> existingPaths = new List<string>();
+                          CollectTaskFolderPaths(service, "\\", existingPaths);
+                          HashSet<string> existing = new HashSet<string>(
+                              existingPaths,
+                              StringComparer.OrdinalIgnoreCase);
+                          List<string> paths = new List<string>();
+                          foreach (string path in attributableScheduledTaskFolders)
+                          {
+                              if (existing.Contains(path))
+                              {
+                                  paths.Add(path);
+                              }
+                          }
+                          paths.Sort(delegate(string left, string right)
+                          {
+                              return right.Length.CompareTo(left.Length);
+                          });
+                          foreach (string path in paths)
+                          {
+                              int separator = path.LastIndexOf('\\');
+                              string parentPath = separator == 0
+                                  ? "\\"
+                                  : path.Substring(0, separator);
+                              string name = path.Substring(separator + 1);
+                              object parent = null;
+                              try
+                              {
+                                  parent = InvokeComMethod(
+                                      service,
+                                      "GetFolder",
+                                      parentPath);
+                                  InvokeComMethod(parent, "DeleteFolder", name, 0);
+                              }
+                              finally
+                              {
+                                  ReleaseComObject(parent);
+                              }
+                          }
+                      }
+                      catch (Exception error)
+                      {
+                          throw new InvalidOperationException(
+                              "Attributable Task Scheduler folder could not be deleted.",
+                              error);
+                      }
+                      finally
+                      {
+                          ReleaseComObject(service);
+                      }
                   }
 
                   private static void DeleteScheduledTask(
@@ -3374,6 +3678,163 @@ jobs:
                       }
                   }
 
+                  private void RequireFinalQuarantineIsolation()
+                  {
+                      List<Exception> proofFailures = new List<Exception>();
+                      try
+                      {
+                          RequireJobHasZeroActiveProcesses();
+                      }
+                      catch (Exception error)
+                      {
+                          proofFailures.Add(error);
+                      }
+                      try
+                      {
+                          isolatedUser.RequireDisabledAndVerify();
+                      }
+                      catch (Exception error)
+                      {
+                          proofFailures.Add(error);
+                      }
+                      try
+                      {
+                          int scheduledTasks = InspectScheduledTasks();
+                          if (scheduledTasks != 0)
+                          {
+                              throw new InvalidOperationException(
+                                  "Task Scheduler terminal zero proof failed.");
+                          }
+                      }
+                      catch (Exception error)
+                      {
+                          proofFailures.Add(error);
+                      }
+                      try
+                      {
+                          int bitsJobs = InspectBitsJobs();
+                          if (bitsJobs != 0)
+                          {
+                              throw new InvalidOperationException(
+                                  "BITS terminal zero proof failed.");
+                          }
+                      }
+                      catch (Exception error)
+                      {
+                          proofFailures.Add(error);
+                      }
+                      try
+                      {
+                          int processes = CountProcessesByPrimaryTokenSid();
+                          if (processes != 0)
+                          {
+                              throw new InvalidOperationException(
+                                  "Isolated-SID process terminal zero proof failed.");
+                          }
+                      }
+                      catch (Exception error)
+                      {
+                          proofFailures.Add(error);
+                      }
+                      if (proofFailures.Count != 0)
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal isolated identity zero proof failed.",
+                              new AggregateException(proofFailures.ToArray()));
+                      }
+                  }
+
+                  public void QuarantineIsolatedIdentity()
+                  {
+                      ThrowIfDisposed();
+                      lock (quarantineSync)
+                      {
+                          if (quarantineCompleted)
+                          {
+                              return;
+                          }
+                          if (quarantineInProgress)
+                          {
+                              throw new InvalidOperationException(
+                                  "Terminal isolated identity quarantine is already in progress.");
+                          }
+                          quarantineInProgress = true;
+                          try
+                          {
+                              ExecuteQuarantineSecuritySequence(
+                                  delegate
+                                  {
+                                      TerminateJobAndWaitForZero(
+                                          jobHandle,
+                                          1,
+                                          30000);
+                                  },
+                                  delegate
+                                  {
+                                      RequireJobHasZeroActiveProcesses();
+                                  },
+                                  delegate
+                                  {
+                                      isolatedUser.DisableAndVerify();
+                                  },
+                                  delegate
+                                  {
+                                      return CleanupScheduledTasks();
+                                  },
+                                  delegate
+                                  {
+                                      return CleanupBitsJobs();
+                                  },
+                                  delegate
+                                  {
+                                      return DrainProcessesByPrimaryTokenSid();
+                                  },
+                                  delegate
+                                  {
+                                      RequireFinalQuarantineIsolation();
+                                  },
+                                  MaximumIsolationRounds,
+                                  IsolationRoundDelayMilliseconds,
+                                  PostDisableSettlementMilliseconds,
+                                  MinimumQuarantineObservationMilliseconds);
+                              quarantineCompleted = true;
+                          }
+                          finally
+                          {
+                              quarantineInProgress = false;
+                          }
+                      }
+                  }
+
+                  private void RequireQuarantineCompleted(
+                      WindowsIsolatedUser artifactOwner)
+                  {
+                      if (!Object.ReferenceEquals(artifactOwner, isolatedUser) ||
+                          !String.Equals(
+                              artifactOwner.Sid,
+                              supervisedSid,
+                              StringComparison.Ordinal))
+                      {
+                          throw new InvalidOperationException(
+                              "Artifact owner identity does not match the terminal quarantine identity.");
+                      }
+                      lock (quarantineSync)
+                      {
+                          if (!terminalProducerAttempted ||
+                              !terminalProducerSucceeded)
+                          {
+                              throw new InvalidOperationException(
+                                  "Artifact capture requires a successful terminal producer attempt.");
+                          }
+                          if (!quarantineCompleted)
+                          {
+                              throw new InvalidOperationException(
+                                  "Artifact capture requires completed terminal identity quarantine.");
+                          }
+                      }
+                      RequireFinalQuarantineIsolation();
+                  }
+
                   public WindowsValidatedArtifact CaptureIsolatedArtifact(
                       WindowsIsolatedUser isolatedUser,
                       string sourceRoot,
@@ -3386,15 +3847,7 @@ jobs:
                           throw new ArgumentNullException("isolatedUser");
                       }
                       isolatedUser.ThrowIfDisposed();
-                      isolatedUser.RequireEnabledForLogon();
-                      if (!String.Equals(
-                              isolatedUser.Sid,
-                              supervisedSid,
-                              StringComparison.Ordinal))
-                      {
-                          throw new InvalidOperationException(
-                              "Artifact owner identity does not match the supervised identity.");
-                      }
+                      RequireQuarantineCompleted(isolatedUser);
                       if (maximumBytes < 1 || maximumBytes > 16 * 1024 * 1024)
                       {
                           throw new ArgumentOutOfRangeException("maximumBytes");
@@ -3433,34 +3886,18 @@ jobs:
                           ExecuteArtifactSecuritySequence(
                           delegate
                           {
-                              RequireJobHasZeroActiveProcesses();
+                              RequireQuarantineCompleted(isolatedUser);
                           },
                           delegate
                           {
-                              isolatedUser.DisableAndVerify();
+                              sealedSource = SealArtifactSource(
+                                  isolatedUser,
+                                  fullRoot,
+                                  fullSource,
+                                  segments,
+                                  current.Value,
+                                  maximumBytes);
                           },
-                          delegate
-                          {
-                              return CleanupScheduledTasks();
-                          },
-                          delegate
-                          {
-                              return CleanupBitsJobs();
-                          },
-                          delegate
-                          {
-                              return DrainProcessesByPrimaryTokenSid();
-                          },
-                          delegate
-                              {
-                                  sealedSource = SealArtifactSource(
-                                      isolatedUser,
-                                      fullRoot,
-                                      fullSource,
-                                      segments,
-                                      current.Value,
-                                      maximumBytes);
-                              },
                           delegate
                           {
                               RequirePostSealIsolation(isolatedUser);
@@ -3468,9 +3905,7 @@ jobs:
                           delegate
                           {
                               captured = CaptureSealedArtifact(sealedSource);
-                          },
-                          MaximumIsolationRounds,
-                          IsolationRoundDelayMilliseconds);
+                          });
                           sealedIsolatedUser = isolatedUser;
                           artifactBoundarySealed = true;
                           return captured;
@@ -4821,6 +5256,158 @@ jobs:
                           null);
                   }
 
+                  public WindowsJobRunResult RunProducerAsUserAndQuarantine(
+                      WindowsIsolatedUser isolatedUser,
+                      string applicationName,
+                      string arguments,
+                      string workingDirectory,
+                      IDictionary environment,
+                      TimeSpan TotalTimeout,
+                      int MaxStdoutBytes,
+                      int MaxStderrBytes)
+                  {
+                      return RunProducerAsUserAndQuarantineCore(
+                          isolatedUser,
+                          applicationName,
+                          arguments,
+                          workingDirectory,
+                          environment,
+                          TotalTimeout,
+                          MaxStdoutBytes,
+                          MaxStderrBytes,
+                          new WindowsDirectoryQuota[0]);
+                  }
+
+                  public WindowsJobRunResult RunProducerAsUserAndQuarantine(
+                      WindowsIsolatedUser isolatedUser,
+                      string applicationName,
+                      string arguments,
+                      string workingDirectory,
+                      IDictionary environment,
+                      TimeSpan TotalTimeout,
+                      int MaxStdoutBytes,
+                      int MaxStderrBytes,
+                      WindowsDirectoryQuota[] DirectoryQuotas)
+                  {
+                      return RunProducerAsUserAndQuarantineCore(
+                          isolatedUser,
+                          applicationName,
+                          arguments,
+                          workingDirectory,
+                          environment,
+                          TotalTimeout,
+                          MaxStdoutBytes,
+                          MaxStderrBytes,
+                          DirectoryQuotas);
+                  }
+
+                  private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(
+                      WindowsIsolatedUser isolatedUser,
+                      string applicationName,
+                      string arguments,
+                      string workingDirectory,
+                      IDictionary environment,
+                      TimeSpan TotalTimeout,
+                      int MaxStdoutBytes,
+                      int MaxStderrBytes,
+                      WindowsDirectoryQuota[] DirectoryQuotas)
+                  {
+                      ThrowIfDisposed();
+                      if (isolatedUser == null)
+                      {
+                          throw new ArgumentNullException("isolatedUser");
+                      }
+                      isolatedUser.ThrowIfDisposed();
+                      if (!Object.ReferenceEquals(isolatedUser, this.isolatedUser) ||
+                          !String.Equals(
+                              isolatedUser.Sid,
+                              supervisedSid,
+                              StringComparison.Ordinal))
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal producer identity does not match the Job Object identity.");
+                      }
+                      lock (quarantineSync)
+                      {
+                          if (terminalProducerAttempted)
+                          {
+                              throw new InvalidOperationException(
+                                  "A terminal producer attempt has already been made.");
+                          }
+                          terminalProducerAttempted = true;
+                          terminalProducerSucceeded = false;
+                      }
+                      isolatedUser.RegisterTerminalQuarantine(
+                          QuarantineIsolatedIdentity,
+                          delegate
+                          {
+                              return IsQuarantineComplete;
+                          });
+
+                      WindowsJobRunResult result = null;
+                      Exception producerFailure = null;
+                      Exception quarantineFailure = null;
+                      try
+                      {
+                          result = RunAsUserCore(
+                              isolatedUser,
+                              applicationName,
+                              arguments,
+                              workingDirectory,
+                              environment,
+                              TotalTimeout,
+                              MaxStdoutBytes,
+                              MaxStderrBytes,
+                              DirectoryQuotas,
+                              null);
+                          lock (quarantineSync)
+                          {
+                              terminalProducerSucceeded =
+                                  result.ExitCode == 0 &&
+                                  !result.TimedOut &&
+                                  !result.StdoutOverflow &&
+                                  !result.StderrOverflow &&
+                                  !result.ResourceQuotaExceeded;
+                          }
+                      }
+                      catch (Exception error)
+                      {
+                          producerFailure = error;
+                      }
+                      finally
+                      {
+                          try
+                          {
+                              QuarantineIsolatedIdentity();
+                          }
+                          catch (Exception error)
+                          {
+                              quarantineFailure = error;
+                          }
+                      }
+                      if (producerFailure != null && quarantineFailure != null)
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal producer attempt and identity quarantine both failed.",
+                              new AggregateException(
+                                  producerFailure,
+                                  quarantineFailure));
+                      }
+                      if (producerFailure != null)
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal producer attempt failed.",
+                              producerFailure);
+                      }
+                      if (quarantineFailure != null)
+                      {
+                          throw new InvalidOperationException(
+                              "Terminal producer identity quarantine failed.",
+                              quarantineFailure);
+                      }
+                      return result;
+                  }
+
                   private WindowsJobRunResult RunAsUserCore(
                       WindowsIsolatedUser isolatedUser,
                       string applicationName,
@@ -5362,31 +5949,48 @@ jobs:
 
                   public void Dispose()
                   {
-                      if (!disposed)
+                      if (disposed)
                       {
-                          disposed = true;
-                          IntPtr handle = jobHandle;
-                          jobHandle = IntPtr.Zero;
-                          Exception failure = null;
-                          if (handle != IntPtr.Zero)
+                          return;
+                      }
+                      List<Exception> cleanupFailures = new List<Exception>();
+                      if (terminalProducerAttempted && !IsQuarantineComplete)
+                      {
+                          try
                           {
-                              try
-                              {
-                                  TerminateJobAndWaitForZero(handle, 1, 30000);
-                              }
-                              catch (Exception error)
-                              {
-                                  failure = error;
-                              }
-                              CloseHandle(handle);
+                              QuarantineIsolatedIdentity();
                           }
-                          GC.SuppressFinalize(this);
-                          if (failure != null)
+                          catch (Exception error)
                           {
-                              throw new InvalidOperationException(
-                                  "Job Object cleanup failed.",
-                                  failure);
+                              cleanupFailures.Add(error);
                           }
+                      }
+                      disposed = true;
+                      IntPtr handle = jobHandle;
+                      jobHandle = IntPtr.Zero;
+                      if (handle != IntPtr.Zero)
+                      {
+                          try
+                          {
+                              TerminateJobAndWaitForZero(handle, 1, 30000);
+                          }
+                          catch (Exception error)
+                          {
+                              cleanupFailures.Add(error);
+                          }
+                          if (!CloseHandle(handle))
+                          {
+                              cleanupFailures.Add(new Win32Exception(
+                                  Marshal.GetLastWin32Error(),
+                                  "Job Object handle could not be closed."));
+                          }
+                      }
+                      GC.SuppressFinalize(this);
+                      if (cleanupFailures.Count != 0)
+                      {
+                          throw new InvalidOperationException(
+                              "Job Object cleanup failed.",
+                              new AggregateException(cleanupFailures.ToArray()));
                       }
                   }
 
@@ -6935,7 +7539,7 @@ jobs:
                 10GB
               )
             )
-            $result = $job.RunAsUser(
+            $result = $job.RunProducerAsUserAndQuarantine(
               $isolatedUser,
               $trustedPwsh,
               "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$childBootstrapPath`"",
@@ -7045,9 +7649,9 @@ jobs:
             )
           } finally {
             $cleanupErrors = [Collections.Generic.List[Exception]]::new()
-            if ($null -ne $job) {
+            if ($null -ne $job -and -not $job.IsQuarantineComplete) {
               try {
-                $job.Dispose()
+                $job.QuarantineIsolatedIdentity()
               } catch {
                 $cleanupErrors.Add($_.Exception)
               }
@@ -7083,6 +7687,13 @@ jobs:
             if ($null -ne $isolatedUser) {
               try {
                 $isolatedUser.Dispose()
+              } catch {
+                $cleanupErrors.Add($_.Exception)
+              }
+            }
+            if ($null -ne $job) {
+              try {
+                $job.Dispose()
               } catch {
                 $cleanupErrors.Add($_.Exception)
               }
