@@ -320,7 +320,7 @@ function normalizeRelease(value) {
   if (createHash('sha256').update(canonicalManifest).digest('hex') !== manifest.sha256) {
     throw new Error('release SDK manifest digest does not match canonical package metadata.');
   }
-  if (release.caveVersion !== '0.3.11' || release.covenVersion !== '0.1.0') {
+  if (release.caveVersion !== '0.3.12' || release.covenVersion !== '0.1.0') {
     throw new Error('release authority versions are invalid.');
   }
   const consumerLock = normalizeFileArtifact(
