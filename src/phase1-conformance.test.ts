@@ -1505,6 +1505,16 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
   );
 
+  test('passes the observed supervisor status into missing-keychain diagnostics', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const scenario = source.slice(
+      source.indexOf('async function runNativeMissingKeychainTrustScenario'),
+      source.indexOf('async function runNativeScenarios'),
+    );
+
+    expect(scenario).toContain('supervisorStatusValid: supervisedStatusValid');
+  });
+
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {
     const primary = new Error('scenario failed');
     const cleanup = new Error('cleanup failed');

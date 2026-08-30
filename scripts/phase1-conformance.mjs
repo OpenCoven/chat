@@ -2627,7 +2627,7 @@ async function runNativeMissingKeychainTrustScenario(
     supervised,
     code,
     signal,
-    supervisorStatusValid,
+    supervisorStatusValid: supervisedStatusValid,
     terminationReason,
     killFailed: killError !== undefined,
     processFailed: processError !== undefined,
