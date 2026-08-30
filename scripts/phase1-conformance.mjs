@@ -2684,7 +2684,7 @@ async function runEmergencyNativeCredentialCleanup({
     artifactRoot,
     nativeRpcPath,
     {
-      ...environment,
+      ...nativeAdapterTestEnvironment(environment),
       OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'production-keyring',
     },
     projectRoot,

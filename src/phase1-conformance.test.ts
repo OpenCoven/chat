@@ -452,6 +452,11 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('export function resolveLockedCovenDaemonCommand'),
     );
     expect(nativeScenario).toContain('...nativeAdapterTestEnvironment(environment)');
+    const emergencyCleanupBoundary = source.slice(
+      source.indexOf('async function runEmergencyNativeCredentialCleanup'),
+      source.indexOf('const cleanupCapabilityPattern'),
+    );
+    expect(emergencyCleanupBoundary).toContain('...nativeAdapterTestEnvironment(environment)');
     const nativeStages = [
       "activeNativeStage = 'restart'",
       "activeNativeStage = 'reads'",
