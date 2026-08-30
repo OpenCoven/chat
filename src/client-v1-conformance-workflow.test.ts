@@ -777,6 +777,149 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('uses the official eleven-parameter CreateProcessWithLogonW signature and call order', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+    const normalize = (value: string) => value.replace(/\s+/gu, ' ').trim();
+
+    for (const source of sources) {
+      const declaration = source.match(
+        /private static extern bool CreateProcessWithLogonW\(([\s\S]*?)\);/u,
+      );
+      expect(declaration).not.toBeNull();
+      expect(normalize(declaration?.[1] ?? '')).toBe(
+        [
+          'string userName,',
+          'string domain,',
+          'string password,',
+          'uint logonFlags,',
+          'string applicationName,',
+          'StringBuilder commandLine,',
+          'uint creationFlags,',
+          'IntPtr environment,',
+          'string currentDirectory,',
+          'ref STARTUPINFO startupInfo,',
+          'out PROCESS_INFORMATION processInformation',
+        ].join(' '),
+      );
+
+      const invocation = source.match(/bool created = CreateProcessWithLogonW\(([\s\S]*?)\);/u);
+      expect(invocation).not.toBeNull();
+      expect(normalize(invocation?.[1] ?? '')).toBe(
+        [
+          'isolatedUser.UserName,',
+          'Environment.MachineName,',
+          'isolatedUser.Password,',
+          'LOGON_WITH_PROFILE,',
+          'applicationName,',
+          'commandLine,',
+          'CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,',
+          'environmentBlock,',
+          'workingDirectory,',
+          'ref startup,',
+          'out process',
+        ].join(' '),
+      );
+    }
+  });
+
+  test('protects the authoritative root handle before resume and tests live-root forgery attacks', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      for (const required of [
+        'PROCESS_TERMINATE',
+        'PROCESS_CREATE_THREAD',
+        'PROCESS_VM_OPERATION',
+        'PROCESS_VM_WRITE',
+        'PROCESS_DUP_HANDLE',
+        'PROCESS_SET_INFORMATION',
+        'PROCESS_SUSPEND_RESUME',
+        'ProtectRootProcess',
+        'ProtectProcessSecurity',
+        'ValidateProcessSecurity',
+        'OWNER_SECURITY_INFORMATION |',
+        'PROTECTED_DACL_SECURITY_INFORMATION',
+        'PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE',
+      ]) {
+        expect(source).toContain(required);
+      }
+
+      const created = source.indexOf('bool created = CreateProcessWithLogonW(');
+      const assigned = source.indexOf(
+        'if (!AssignProcessToJobObject(jobHandle, process.hProcess))',
+        created,
+      );
+      const protectedRoot = source.indexOf(
+        'ProtectRootProcess(process.hProcess, isolatedUser.Sid);',
+        assigned,
+      );
+      const resumed = source.indexOf('uint resumeResult = ResumeThread(process.hThread);', created);
+      expect(created).toBeGreaterThan(-1);
+      expect(assigned).toBeGreaterThan(created);
+      expect(protectedRoot).toBeGreaterThan(assigned);
+      expect(resumed).toBeGreaterThan(protectedRoot);
+
+      const protectionStart = source.indexOf('private static void ProtectProcessSecurity(');
+      const validationStart = source.indexOf(
+        'private static void ValidateProcessSecurity(',
+        protectionStart,
+      );
+      const validationEnd = source.indexOf(
+        'public static void RequireRestrictedSupervisorBoundary(',
+        validationStart,
+      );
+      const protection = source.slice(protectionStart, validationStart);
+      const validation = source.slice(validationStart, validationEnd);
+      expect(protection).toContain('string sddl = "O:" + supervisorSid + "D:P"');
+      expect(protection).toContain('SetKernelObjectSecurity(');
+      expect(protection).toContain('OWNER_SECURITY_INFORMATION |');
+      expect(protection).toContain('DACL_SECURITY_INFORMATION |');
+      expect(protection).toContain('PROTECTED_DACL_SECURITY_INFORMATION');
+      expect(validation).toContain('!EqualSid(owner, expectedOwner)');
+      expect(validation).toContain('aclInformation.AceCount != 4');
+      expect(validation).toContain('(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE)');
+      expect(validation).toContain('(ace.Mask & PROCESS_MUTATION_ACCESS) == 0');
+    }
+
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+    for (const requiredCase of [
+      'CreateProcessWithLogonW parameter count changed.',
+      'CreateProcessWithLogonW parameter names or types changed.',
+      'Root PROCESS_TERMINATE open unexpectedly succeeded.',
+      'Root TerminateProcess unexpectedly succeeded.',
+      'Root WRITE_DAC open unexpectedly succeeded.',
+      'Root WRITE_OWNER open unexpectedly succeeded.',
+      'Root PROCESS_DUP_HANDLE open unexpectedly succeeded.',
+      'Root PROCESS_VM_READ open unexpectedly succeeded.',
+      'Root PROCESS_VM_WRITE or PROCESS_VM_OPERATION open unexpectedly succeeded.',
+      'Root PROCESS_CREATE_THREAD open unexpectedly succeeded.',
+      'Root PROCESS_CREATE_PROCESS open unexpectedly succeeded.',
+      'Root PROCESS_SET_QUOTA open unexpectedly succeeded.',
+      'Root PROCESS_SET_INFORMATION open unexpectedly succeeded.',
+      'Root PROCESS_QUERY_INFORMATION open unexpectedly succeeded.',
+      'Root PROCESS_SUSPEND_RESUME open unexpectedly succeeded.',
+      'Root PROCESS_SET_LIMITED_INFORMATION open unexpectedly succeeded.',
+      'Root DELETE open unexpectedly succeeded.',
+      'Live root in-place artifact forgery was authorized.',
+      'Live root replacement artifact forgery was authorized.',
+      '[RootProcessAttack]::Run(',
+      'TerminateProcess(root, 0)',
+    ]) {
+      expect(runtimeTest).toContain(requiredCase);
+    }
+  });
+
   test('runs the native Job Object tree tests in the ordinary Windows CI job', () => {
     const workflow = readFileSync(resolve(projectRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const windowsJob = workflow.slice(workflow.indexOf('  windows-supervisor-behavior:'));

@@ -15,6 +15,62 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 
+$createProcessWithLogon = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'CreateProcessWithLogonW',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $createProcessWithLogon) {
+  throw 'CreateProcessWithLogonW declaration is missing.'
+}
+$createProcessParameters = $createProcessWithLogon.GetParameters()
+if ($createProcessParameters.Count -ne 11) {
+  throw 'CreateProcessWithLogonW parameter count changed.'
+}
+$expectedCreateProcessNames = @(
+  'userName',
+  'domain',
+  'password',
+  'logonFlags',
+  'applicationName',
+  'commandLine',
+  'creationFlags',
+  'environment',
+  'currentDirectory',
+  'startupInfo',
+  'processInformation'
+)
+$expectedCreateProcessTypes = @(
+  [string],
+  [string],
+  [string],
+  [uint32],
+  [string],
+  [Text.StringBuilder],
+  [uint32],
+  [IntPtr],
+  [string]
+)
+for ($index = 0; $index -lt $expectedCreateProcessTypes.Count; $index++) {
+  if (
+    $createProcessParameters[$index].Name -cne $expectedCreateProcessNames[$index] -or
+    $createProcessParameters[$index].ParameterType -ne $expectedCreateProcessTypes[$index]
+  ) {
+    throw 'CreateProcessWithLogonW parameter names or types changed.'
+  }
+}
+if (
+  $createProcessParameters[9].Name -cne $expectedCreateProcessNames[9] -or
+  -not $createProcessParameters[9].ParameterType.IsByRef -or
+  $createProcessParameters[9].IsOut -or
+  $createProcessParameters[9].ParameterType.GetElementType().Name -cne 'STARTUPINFO' -or
+  $createProcessParameters[10].Name -cne $expectedCreateProcessNames[10] -or
+  -not $createProcessParameters[10].ParameterType.IsByRef -or
+  -not $createProcessParameters[10].IsOut -or
+  $createProcessParameters[10].ParameterType.GetElementType().Name -cne 'PROCESS_INFORMATION'
+) {
+  throw 'CreateProcessWithLogonW parameter names or types changed.'
+}
+
 function Assert-ProcessExited {
   param([Parameter(Mandatory)][int]$ProcessId)
 
@@ -289,6 +345,390 @@ if (-not `$operatorDenied) {
   } finally {
     $accessJob.Dispose()
   }
+
+  $rootProcessAttackSource = Join-Path $root 'root-process-attack.cs'
+  [IO.File]::WriteAllText(
+    $rootProcessAttackSource,
+    @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class RootProcessAttack
+{
+    private const uint PROCESS_TERMINATE = 0x00000001;
+    private const uint PROCESS_CREATE_THREAD = 0x00000002;
+    private const uint PROCESS_VM_OPERATION = 0x00000008;
+    private const uint PROCESS_VM_READ = 0x00000010;
+    private const uint PROCESS_VM_WRITE = 0x00000020;
+    private const uint PROCESS_DUP_HANDLE = 0x00000040;
+    private const uint PROCESS_CREATE_PROCESS = 0x00000080;
+    private const uint PROCESS_SET_QUOTA = 0x00000100;
+    private const uint PROCESS_SET_INFORMATION = 0x00000200;
+    private const uint PROCESS_QUERY_INFORMATION = 0x00000400;
+    private const uint PROCESS_SUSPEND_RESUME = 0x00000800;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
+    private const uint PROCESS_SET_LIMITED_INFORMATION = 0x00002000;
+    private const uint DELETE = 0x00010000;
+    private const uint WRITE_DAC = 0x00040000;
+    private const uint WRITE_OWNER = 0x00080000;
+    private const uint SYNCHRONIZE = 0x00100000;
+    private const uint MOVEFILE_REPLACE_EXISTING = 0x00000001;
+    private const uint MOVEFILE_WRITE_THROUGH = 0x00000008;
+    private const int ERROR_ACCESS_DENIED = 5;
+
+    public static void Run(
+        int rootProcessId,
+        string artifactPath,
+        string attack,
+        string forgedText,
+        string completedPath)
+    {
+        IntPtr query = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            false,
+            checked((uint)rootProcessId));
+        if (query == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Root query-only process open was denied.");
+        }
+        CloseHandle(query);
+
+        WriteForgery(artifactPath, attack, forgedText);
+        RequireDeniedOpen(
+            rootProcessId,
+            WRITE_DAC,
+            "Root WRITE_DAC open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            WRITE_OWNER,
+            "Root WRITE_OWNER open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_DUP_HANDLE,
+            "Root PROCESS_DUP_HANDLE open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_VM_READ,
+            "Root PROCESS_VM_READ open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
+            "Root PROCESS_VM_WRITE or PROCESS_VM_OPERATION open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_CREATE_THREAD,
+            "Root PROCESS_CREATE_THREAD open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_CREATE_PROCESS,
+            "Root PROCESS_CREATE_PROCESS open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_SET_QUOTA,
+            "Root PROCESS_SET_QUOTA open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_SET_INFORMATION,
+            "Root PROCESS_SET_INFORMATION open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_QUERY_INFORMATION,
+            "Root PROCESS_QUERY_INFORMATION open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_SUSPEND_RESUME,
+            "Root PROCESS_SUSPEND_RESUME open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            PROCESS_SET_LIMITED_INFORMATION,
+            "Root PROCESS_SET_LIMITED_INFORMATION open unexpectedly succeeded.");
+        RequireDeniedOpen(
+            rootProcessId,
+            DELETE,
+            "Root DELETE open unexpectedly succeeded.");
+
+        IntPtr root = OpenProcess(
+            PROCESS_TERMINATE,
+            false,
+            checked((uint)rootProcessId));
+        if (root != IntPtr.Zero)
+        {
+            try
+            {
+                if (TerminateProcess(root, 0))
+                {
+                    throw new InvalidOperationException(
+                        "Root TerminateProcess unexpectedly succeeded.");
+                }
+            }
+            finally
+            {
+                CloseHandle(root);
+            }
+            throw new InvalidOperationException(
+                "Root PROCESS_TERMINATE open unexpectedly succeeded.");
+        }
+        if (Marshal.GetLastWin32Error() != ERROR_ACCESS_DENIED)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Root PROCESS_TERMINATE open failed for an unexpected reason.");
+        }
+
+        File.WriteAllText(
+            completedPath,
+            "protected",
+            new UTF8Encoding(false));
+    }
+
+    private static void WriteForgery(string path, string attack, string text)
+    {
+        if (String.Equals(attack, "in-place", StringComparison.Ordinal))
+        {
+            File.WriteAllText(path, text, new UTF8Encoding(false));
+            return;
+        }
+        if (String.Equals(attack, "replacement", StringComparison.Ordinal))
+        {
+            string replacement = path + ".replacement";
+            File.WriteAllText(replacement, text, new UTF8Encoding(false));
+            if (!MoveFileExW(
+                    replacement,
+                    path,
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Ordinary one-link artifact replacement failed.");
+            }
+            return;
+        }
+        throw new InvalidOperationException("Unknown live-root artifact attack.");
+    }
+
+    private static void RequireDeniedOpen(
+        int processId,
+        uint access,
+        string failureMessage)
+    {
+        IntPtr handle = OpenProcess(
+            access,
+            false,
+            checked((uint)processId));
+        if (handle != IntPtr.Zero)
+        {
+            CloseHandle(handle);
+            throw new InvalidOperationException(failureMessage);
+        }
+        if (Marshal.GetLastWin32Error() != ERROR_ACCESS_DENIED)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Dangerous root process open failed for an unexpected reason.");
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(
+        uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+        uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(IntPtr root, uint exitCode);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileExW(
+        string existingFileName,
+        string newFileName,
+        uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $rootProcessAttackScript = Join-Path $root 'root-process-attack.ps1'
+  [IO.File]::WriteAllText(
+    $rootProcessAttackScript,
+    @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText($env:OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE)
+) -Language CSharp
+[RootProcessAttack]::Run(
+  [int]$env:OPENCOVEN_ROOT_PROCESS_ID,
+  $env:OPENCOVEN_ROOT_ARTIFACT_PATH,
+  $env:OPENCOVEN_ROOT_ARTIFACT_ATTACK,
+  $env:OPENCOVEN_ROOT_FORGED_TEXT,
+  $env:OPENCOVEN_ROOT_ATTACK_COMPLETE
+)
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $liveRootScript = Join-Path $root 'live-root-handoff.ps1'
+  [IO.File]::WriteAllText(
+    $liveRootScript,
+    @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$parent = [IO.Directory]::GetParent($env:OPENCOVEN_ROOT_ARTIFACT_PATH).FullName
+[IO.Directory]::CreateDirectory($parent) | Out-Null
+[IO.File]::WriteAllText(
+  $env:OPENCOVEN_ROOT_ARTIFACT_PATH,
+  $env:OPENCOVEN_ROOT_TRUSTED_TEXT,
+  [Text.UTF8Encoding]::new($false)
+)
+$attackEnvironment = @{
+  OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE = $env:OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE
+  OPENCOVEN_ROOT_PROCESS_ID = "$PID"
+  OPENCOVEN_ROOT_ARTIFACT_PATH = $env:OPENCOVEN_ROOT_ARTIFACT_PATH
+  OPENCOVEN_ROOT_ARTIFACT_ATTACK = $env:OPENCOVEN_ROOT_ARTIFACT_ATTACK
+  OPENCOVEN_ROOT_FORGED_TEXT = $env:OPENCOVEN_ROOT_FORGED_TEXT
+  OPENCOVEN_ROOT_ATTACK_COMPLETE = $env:OPENCOVEN_ROOT_ATTACK_COMPLETE
+}
+$attack = Start-Process `
+  -FilePath $env:OPENCOVEN_WINDOWS_SYSTEM_PWSH `
+  -ArgumentList @(
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-File',
+    $env:OPENCOVEN_ROOT_PROCESS_ATTACK_SCRIPT
+  ) `
+  -Environment $attackEnvironment `
+  -RedirectStandardOutput $env:OPENCOVEN_ROOT_ATTACK_STDOUT `
+  -RedirectStandardError $env:OPENCOVEN_ROOT_ATTACK_STDERR `
+  -PassThru
+try {
+  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  while (-not [IO.File]::Exists($env:OPENCOVEN_ROOT_ATTACK_COMPLETE)) {
+    if ($attack.HasExited) {
+      throw "Root process attack failed: $(
+        [IO.File]::ReadAllText($env:OPENCOVEN_ROOT_ATTACK_STDERR)
+      )"
+    }
+    if ([DateTime]::UtcNow -ge $deadline) {
+      throw 'Root process attack did not finish.'
+    }
+    Start-Sleep -Milliseconds 20
+  }
+  $attack.WaitForExit()
+  if (
+    $attack.ExitCode -ne 0 -or
+    [IO.File]::ReadAllText($env:OPENCOVEN_ROOT_ATTACK_COMPLETE) -cne 'protected'
+  ) {
+    throw 'Root process mutation rights were not denied.'
+  }
+} finally {
+  $attack.Dispose()
+}
+[IO.File]::WriteAllText(
+  $env:OPENCOVEN_ROOT_ARTIFACT_PATH,
+  $env:OPENCOVEN_ROOT_TRUSTED_TEXT,
+  [Text.UTF8Encoding]::new($false)
+)
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $liveRootTrustedText =
+    '{' + "`n" +
+      '  "platform": "win32-x64",' + "`n" +
+      '  "rootProof": "trusted",' + "`n" +
+      '  "schemaVersion": 2' + "`n" +
+      '}' + "`n"
+  $liveRootForgedText =
+    '{' + "`n" +
+      '  "platform": "win32-x64",' + "`n" +
+      '  "rootProof": "forged",' + "`n" +
+      '  "schemaVersion": 2' + "`n" +
+      '}' + "`n"
+  $liveRootTrustedBytes =
+    [Text.UTF8Encoding]::new($false).GetBytes($liveRootTrustedText)
+  $liveRootTrustedDigest = [Convert]::ToHexString(
+    [Security.Cryptography.SHA256]::HashData($liveRootTrustedBytes)
+  ).ToLowerInvariant()
+
+  function Assert-LiveRootForgeryRejected {
+    param(
+      [Parameter(Mandatory)][string]$Label,
+      [Parameter(Mandatory)][string]$Attack,
+      [Parameter(Mandatory)][string]$Failure
+    )
+
+    $caseRoot = Join-Path (
+      $isolatedUser.WorkspacePath
+    ) "live-root-$Label-$([Guid]::NewGuid().ToString('N'))"
+    $recordPath = Join-Path $caseRoot '.artifacts\record.json'
+    $completePath = Join-Path $caseRoot 'attack-complete.txt'
+    $environment = $childEnvironment.Clone()
+    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE = $rootProcessAttackSource
+    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SCRIPT = $rootProcessAttackScript
+    $environment.OPENCOVEN_ROOT_ARTIFACT_PATH = $recordPath
+    $environment.OPENCOVEN_ROOT_ARTIFACT_ATTACK = $Attack
+    $environment.OPENCOVEN_ROOT_TRUSTED_TEXT = $liveRootTrustedText
+    $environment.OPENCOVEN_ROOT_FORGED_TEXT = $liveRootForgedText
+    $environment.OPENCOVEN_ROOT_ATTACK_COMPLETE = $completePath
+    $environment.OPENCOVEN_ROOT_ATTACK_STDOUT = Join-Path $caseRoot 'attack.stdout'
+    $environment.OPENCOVEN_ROOT_ATTACK_STDERR = Join-Path $caseRoot 'attack.stderr'
+    $job = [OpenCoven.WindowsJobSupervisor]::Create(
+      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+      $isolatedUser
+    )
+    try {
+      $result = $job.RunAsUser(
+        $isolatedUser,
+        $trustedPwsh,
+        "-NoLogo -NoProfile -NonInteractive -File `"$liveRootScript`"",
+        $isolatedUser.RootPath,
+        $environment,
+        [TimeSpan]::FromSeconds(30),
+        1MB,
+        1MB
+      )
+      if ($result.ExitCode -ne 0) {
+        throw "Protected root process did not execute normally: $($result.Stderr)"
+      }
+      $artifact = $job.CaptureIsolatedArtifact(
+        $isolatedUser,
+        $isolatedUser.WorkspacePath,
+        $recordPath,
+        1MB
+      )
+      if (
+        $artifact.Size -ne $liveRootTrustedBytes.Length -or
+        $artifact.Sha256 -cne $liveRootTrustedDigest
+      ) {
+        throw $Failure
+      }
+      [OpenCoven.WindowsJobSupervisor]::RequireCanonicalSchemaV2Artifact(
+        $artifact.Bytes,
+        $liveRootTrustedDigest,
+        'win32-x64'
+      )
+    } finally {
+      $job.Dispose()
+    }
+  }
+
+  Assert-LiveRootForgeryRejected `
+    -Label 'in-place' `
+    -Attack 'in-place' `
+    -Failure 'Live root in-place artifact forgery was authorized.'
+  Assert-LiveRootForgeryRejected `
+    -Label 'replacement' `
+    -Attack 'replacement' `
+    -Failure 'Live root replacement artifact forgery was authorized.'
 
   $handoffAttackSource = Join-Path $root 'artifact-handoff-attack.cs'
   [IO.File]::WriteAllText(

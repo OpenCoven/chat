@@ -909,12 +909,40 @@ jobs:
                   private const uint JOB_OBJECT_SET_ATTRIBUTES = 0x0002;
                   private const uint JOB_OBJECT_QUERY = 0x0004;
                   private const uint JOB_OBJECT_TERMINATE = 0x0008;
+                  private const uint PROCESS_TERMINATE = 0x00000001;
+                  private const uint PROCESS_CREATE_THREAD = 0x00000002;
+                  private const uint PROCESS_VM_OPERATION = 0x00000008;
+                  private const uint PROCESS_VM_READ = 0x00000010;
+                  private const uint PROCESS_VM_WRITE = 0x00000020;
                   private const uint PROCESS_DUP_HANDLE = 0x00000040;
+                  private const uint PROCESS_CREATE_PROCESS = 0x00000080;
+                  private const uint PROCESS_SET_QUOTA = 0x00000100;
+                  private const uint PROCESS_SET_INFORMATION = 0x00000200;
+                  private const uint PROCESS_QUERY_INFORMATION = 0x00000400;
+                  private const uint PROCESS_SUSPEND_RESUME = 0x00000800;
                   private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
+                  private const uint PROCESS_SET_LIMITED_INFORMATION = 0x00002000;
+                  private const uint DELETE = 0x00010000;
                   private const uint READ_CONTROL = 0x00020000;
                   private const uint WRITE_DAC = 0x00040000;
                   private const uint WRITE_OWNER = 0x00080000;
                   private const uint SYNCHRONIZE = 0x00100000;
+                  private const uint PROCESS_MUTATION_ACCESS =
+                      PROCESS_TERMINATE |
+                      PROCESS_CREATE_THREAD |
+                      PROCESS_VM_OPERATION |
+                      PROCESS_VM_READ |
+                      PROCESS_VM_WRITE |
+                      PROCESS_DUP_HANDLE |
+                      PROCESS_CREATE_PROCESS |
+                      PROCESS_SET_QUOTA |
+                      PROCESS_SET_INFORMATION |
+                      PROCESS_QUERY_INFORMATION |
+                      PROCESS_SUSPEND_RESUME |
+                      PROCESS_SET_LIMITED_INFORMATION |
+                      DELETE |
+                      WRITE_DAC |
+                      WRITE_OWNER;
                   private const uint GENERIC_READ = 0x80000000;
                   private const uint GENERIC_WRITE = 0x40000000;
                   private const uint PROCESS_ALL_ACCESS = 0x001fffff;
@@ -1475,7 +1503,45 @@ jobs:
                       string isolatedSid,
                       string supervisorSid)
                   {
-                      string sddl = "D:P" +
+                      ProtectProcessSecurity(
+                          GetCurrentProcess(),
+                          isolatedSid,
+                          supervisorSid,
+                          "Supervisor");
+                  }
+
+                  private static void ProtectRootProcess(
+                      IntPtr process,
+                      string isolatedSid)
+                  {
+                      SecurityIdentifier supervisor =
+                          WindowsIdentity.GetCurrent().User;
+                      if (supervisor == null)
+                      {
+                          throw new InvalidOperationException(
+                              "Supervisor Windows user SID is unavailable.");
+                      }
+                      ProtectProcessSecurity(
+                          process,
+                          isolatedSid,
+                          supervisor.Value,
+                          "Root");
+                  }
+
+                  private static void ProtectProcessSecurity(
+                      IntPtr process,
+                      string isolatedSid,
+                      string supervisorSid,
+                      string objectLabel)
+                  {
+                      if (process == IntPtr.Zero)
+                      {
+                          throw new ArgumentException(
+                              objectLabel + " process handle is invalid.",
+                              "process");
+                      }
+                      EnablePrivilege("SeRestorePrivilege");
+                      string sddl = "O:" + supervisorSid + "D:P" +
                           "(A;;0x001fffff;;;SY)" +
                           "(A;;0x001fffff;;;BA)" +
                           "(A;;0x001fffff;;;" + supervisorSid + ")" +
@@ -1490,31 +1556,38 @@ jobs:
                       {
                           throw new Win32Exception(
                               Marshal.GetLastWin32Error(),
-                              "Supervisor process security descriptor creation failed.");
+                              objectLabel + " process security descriptor creation failed.");
                       }
                       try
                       {
                           if (!SetKernelObjectSecurity(
-                                  GetCurrentProcess(),
-                                  DACL_SECURITY_INFORMATION |
+                                  process,
+                                  OWNER_SECURITY_INFORMATION |
+                                      DACL_SECURITY_INFORMATION |
                                       PROTECTED_DACL_SECURITY_INFORMATION,
                                   securityDescriptor))
                           {
                               throw new Win32Exception(
                                   Marshal.GetLastWin32Error(),
-                                  "Supervisor process DACL could not be protected.");
+                                  objectLabel + " process owner or DACL could not be protected.");
                           }
                       }
                       finally
                       {
                           LocalFree(securityDescriptor);
                       }
-                      ValidateSupervisorProcessSecurity(isolatedSid, supervisorSid);
+                      ValidateProcessSecurity(
+                          process,
+                          isolatedSid,
+                          supervisorSid,
+                          objectLabel);
                   }
 
-                  private static void ValidateSupervisorProcessSecurity(
+                  private static void ValidateProcessSecurity(
+                      IntPtr process,
                       string isolatedSid,
-                      string supervisorSid)
+                      string supervisorSid,
+                      string objectLabel)
                   {
                       IntPtr expectedOwner = ConvertSid(
                           supervisorSid,
@@ -1534,7 +1607,7 @@ jobs:
                       try
                       {
                           uint status = GetSecurityInfo(
-                              GetCurrentProcess(),
+                              process,
                               SE_KERNEL_OBJECT,
                               OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                               out owner,
@@ -1549,7 +1622,7 @@ jobs:
                               !EqualSid(owner, expectedOwner))
                           {
                               throw new InvalidOperationException(
-                                  "Supervisor process owner or DACL is not exact.");
+                                  objectLabel + " process owner or DACL is not exact.");
                           }
                           ushort control;
                           uint revision;
@@ -1557,7 +1630,7 @@ jobs:
                               (control & SE_DACL_PROTECTED) == 0)
                           {
                               throw new InvalidOperationException(
-                                  "Supervisor process DACL is not protected.");
+                                  objectLabel + " process DACL is not protected.");
                           }
                           ACL_SIZE_INFORMATION aclInformation;
                           if (!GetAclInformation(
@@ -1568,7 +1641,7 @@ jobs:
                               aclInformation.AceCount != 4)
                           {
                               throw new InvalidOperationException(
-                                  "Supervisor process DACL must contain exactly four ACEs.");
+                                  objectLabel + " process DACL must contain exactly four ACEs.");
                           }
                           bool foundSystem = false;
                           bool foundAdministrators = false;
@@ -1581,7 +1654,7 @@ jobs:
                                   acePointer == IntPtr.Zero)
                               {
                                   throw new InvalidOperationException(
-                                      "Supervisor process DACL ACE could not be read.");
+                                      objectLabel + " process DACL ACE could not be read.");
                               }
                               ACCESS_ALLOWED_ACE ace =
                                   (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
@@ -1596,7 +1669,7 @@ jobs:
                                   ace.Header.AceFlags != 0)
                               {
                                   throw new InvalidOperationException(
-                                      "Supervisor process DACL contains an unexpected ACE.");
+                                      objectLabel + " process DACL contains an unexpected ACE.");
                               }
                               if (EqualSid(aceSid, expectedSystem) &&
                                   ace.Mask == PROCESS_ALL_ACCESS &&
@@ -1619,6 +1692,7 @@ jobs:
                               else if (EqualSid(aceSid, expectedRestricted) &&
                                   ace.Mask ==
                                       (PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE) &&
+                                  (ace.Mask & PROCESS_MUTATION_ACCESS) == 0 &&
                                   !foundRestricted)
                               {
                                   foundRestricted = true;
@@ -1626,7 +1700,8 @@ jobs:
                               else
                               {
                                   throw new InvalidOperationException(
-                                      "Supervisor process DACL trustee or access mask is not exact.");
+                                      objectLabel +
+                                      " process DACL trustee or access mask is not exact.");
                               }
                           }
                           if (!foundSystem ||
@@ -1635,7 +1710,7 @@ jobs:
                               !foundRestricted)
                           {
                               throw new InvalidOperationException(
-                                  "Supervisor process DACL is incomplete.");
+                                  objectLabel + " process DACL is incomplete.");
                           }
                       }
                       finally
@@ -3388,7 +3463,6 @@ jobs:
                               LOGON_WITH_PROFILE,
                               applicationName,
                               commandLine,
-                              true,
                               CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
                               environmentBlock,
                               workingDirectory,
@@ -3422,6 +3496,7 @@ jobs:
                               throw new InvalidOperationException(
                                   "Suspended child did not enter the expected Job Object.");
                           }
+                          ProtectRootProcess(process.hProcess, isolatedUser.Sid);
 
                           stdoutTask = ReadPipeAsync(stdoutRead, MaxStdoutBytes, overflow);
                           stdoutRead = IntPtr.Zero;
@@ -4290,7 +4365,6 @@ jobs:
                       uint logonFlags,
                       string applicationName,
                       StringBuilder commandLine,
-                      bool inheritHandles,
                       uint creationFlags,
                       IntPtr environment,
                       string currentDirectory,

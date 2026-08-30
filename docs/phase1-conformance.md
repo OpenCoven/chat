@@ -400,21 +400,29 @@ conformance.
 `windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
 user and scoped profile/temp/workspace ACLs, launches every supervised probe as
 that user, proves the supervisor process and authoritative Job handle cannot be
-opened or mutated through the former same-user path, and proves the account,
-Windows profile, and root are removed. It also preserves the query-only Job
-reopen, set/assign/terminate denial, silent-breakaway denial,
-child/grandchild timeout, descendant-retained-handle, kill-on-close, quota,
-positive membership, wrong-Job membership, and native binding cases. The same
-job retains the frozen Rust supervisor artifact behavior tests. The protected
-lane executes the same process/ACL/membership preflight directly from the exact
-inline production source before its first download. macOS development can
-parse and compile the source but cannot claim those native Windows runtime
-results. The native suite also has a background supervised process replace an
-already validated record with a file symlink to a supervisor-only canary before
-exiting, and proves the handoff fails without reading or publishing the canary.
-Separate cases reject a second hard link, a parent junction, wrong record
-ownership, a permissive DACL, and an active replacement race; the success case
-exercises stdin revalidation plus create-new, owner-private publication.
+opened or mutated through the former same-user path. It checks the official
+11-parameter
+`CreateProcessWithLogonW` declaration at runtime, protects each suspended root
+process before resume with a trusted owner and an exact protected DACL, and has
+a same-isolated-SID descendant attempt terminate, duplicate-handle, ACL/owner,
+thread, VM, quota, information, suspend, and delete access. The descendant also
+tries ordinary one-link in-place and replacement artifact forgeries while the
+root is alive; the trusted root-handle exit and later handle snapshot must still
+yield only the root's final bytes. The suite proves the account, Windows
+profile, and root are removed and preserves the query-only Job reopen,
+set/assign/terminate denial, silent-breakaway denial, child/grandchild timeout,
+descendant-retained-handle, kill-on-close, quota, positive membership,
+wrong-Job membership, and native binding cases. The protected lane executes the
+same process/ACL/membership preflight directly from the exact inline production
+source before its first download. macOS development can parse and compile the
+source but cannot claim those native Windows runtime results. The native suite
+also has a background supervised process replace an already validated record
+with a file symlink to a supervisor-only canary before exiting, and proves the
+handoff fails without reading or publishing the canary. Separate cases reject
+a second hard link, a parent junction, wrong record ownership, a permissive
+DACL, and an active replacement race; the success case exercises stdin
+revalidation plus create-new, owner-private publication.
+The same job retains the frozen Rust supervisor artifact behavior tests.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -575,10 +583,10 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 260,241 | `475195251f0a82d2e1cf21b42b3e23bd05e17d94b950ca1439fe850504b7c69d` |
+| `.github/workflows/client-v1-conformance.yml` | 263,770 | `6d94e67b65188ed18ca847a232ed251f4811029cf958f301116a76e0cc193914` |
 | `scripts/phase1-conformance.mjs` | 187,069 | `1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70` |
-| `scripts/windows-job-supervisor.cs` | 161,804 | `535bb32f226dafc6ef3a940cd4d67588ac3a7bc65d5840d4aa2860148e7f2e99` |
-| `scripts/windows-job-supervisor.test.ps1` | 42,729 | `e1346bdb720b72ae9571541a3793f19d5c4c7bb181b08b6b44c8ab447405a028` |
+| `scripts/windows-job-supervisor.cs` | 164,613 | `94340862f991355263f931b7963f5ad288b53b40bf797464a421d40ccb53f9ca` |
+| `scripts/windows-job-supervisor.test.ps1` | 57,864 | `73bfdb047c64e6a0ffe062cb8a626518b835cd7fd87c8d116844adf551feda90` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Its production
 job remains `platform-conformance`; the fresh validation, OIDC attestation, and
