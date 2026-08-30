@@ -40,6 +40,7 @@ import {
   NativeRpcClient,
   nativeAdapterTestEnvironment,
   nativeMissingKeychainFailureDiagnostic,
+  nativeMissingKeychainResponsesValid,
   observeReleaseToolVersions,
   parseArgs,
   parseCaveConformanceOutput,
@@ -1512,6 +1513,20 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
 
     expect(scenario).toContain('supervisorStatusValid: supervisedStatusValid');
+  });
+
+  test('accepts exact missing-keychain responses regardless of object key order', () => {
+    const responses = [
+      JSON.parse(
+        '{"error":{"code":"secure_store_unavailable","retryable":true},"id":"installation","ok":false}',
+      ),
+      JSON.parse('{"id":"shutdown","ok":true,"result":{"status":"shutting_down"}}'),
+    ];
+
+    expect(nativeMissingKeychainResponsesValid(responses)).toBe(true);
+    expect(
+      nativeMissingKeychainResponsesValid([{ ...responses[0], extra: true }, responses[1]]),
+    ).toBe(false);
   });
 
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {

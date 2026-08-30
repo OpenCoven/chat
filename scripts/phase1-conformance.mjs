@@ -17,7 +17,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { devNull } from 'node:os';
 import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { stripVTControlCharacters } from 'node:util';
+import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
@@ -2487,6 +2487,21 @@ export function nativeMissingKeychainFailureDiagnostic({
   return undefined;
 }
 
+export function nativeMissingKeychainResponsesValid(responses) {
+  return isDeepStrictEqual(responses, [
+    {
+      id: 'installation',
+      ok: false,
+      error: { code: 'secure_store_unavailable', retryable: true },
+    },
+    {
+      id: 'shutdown',
+      ok: true,
+      result: { status: 'shutting_down' },
+    },
+  ]);
+}
+
 async function runNativeMissingKeychainTrustScenario(
   artifactRoot,
   nativeRpcPath,
@@ -2609,20 +2624,7 @@ async function runNativeMissingKeychainTrustScenario(
     responses = undefined;
   }
   const unchanged = JSON.stringify(readdirSync(trustHome)) === JSON.stringify(beforeEntries);
-  const responseValid =
-    JSON.stringify(responses) ===
-    JSON.stringify([
-      {
-        id: 'installation',
-        ok: false,
-        error: { code: 'secure_store_unavailable', retryable: true },
-      },
-      {
-        id: 'shutdown',
-        ok: true,
-        result: { status: 'shutting_down' },
-      },
-    ]);
+  const responseValid = nativeMissingKeychainResponsesValid(responses);
   const diagnostic = nativeMissingKeychainFailureDiagnostic({
     supervised,
     code,

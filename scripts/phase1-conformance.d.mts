@@ -214,6 +214,7 @@ export function nativeMissingKeychainFailureDiagnostic(options: {
   homeChanged: boolean;
   responseValid: boolean;
 }): string | undefined;
+export function nativeMissingKeychainResponsesValid(responses: unknown): boolean;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,
