@@ -33,6 +33,14 @@ export function establishNativeCleanupReservation(
     ok(command: string, args?: unknown): Promise<unknown>;
   },
   handle: string,
+  onStage?: (
+    stage:
+      | 'reservation-request'
+      | 'reservation-keychain'
+      | 'reservation-rejected'
+      | 'reservation-response'
+      | 'reservation-cleanup',
+  ) => void,
 ): Promise<Readonly<{ reservationHandle: string; capability: string; ownerToken: string }>>;
 export function createCleanupAdoptionRecovery(reservation: {
   reservationHandle: string;
@@ -78,7 +86,11 @@ export function runReservedNativePairing(options: {
   onCredentialMayExist?: () => void;
   onStage?: (
     stage:
-      | 'reservation'
+      | 'reservation-request'
+      | 'reservation-keychain'
+      | 'reservation-rejected'
+      | 'reservation-response'
+      | 'reservation-cleanup'
       | 'credential-status'
       | 'create'
       | 'pending'

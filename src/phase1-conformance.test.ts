@@ -558,7 +558,13 @@ describe('Phase 1 real-authority conformance harness', () => {
       ).toEqual([]);
       expect(approvals).toEqual([]);
       expect(credentialMayExistTransitions).toEqual([]);
-      expect(pairingStages).toEqual(['reservation']);
+      expect(pairingStages).toEqual(
+        failureMode === 'command-failure'
+          ? ['reservation-request', 'reservation-keychain']
+          : failureMode === 'malformed-response'
+            ? ['reservation-request', 'reservation-response']
+            : ['reservation-request'],
+      );
       expect(subsequentLifecycleCalls).toBe(0);
       expect(markerPresent).toBe(false);
     },

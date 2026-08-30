@@ -215,6 +215,11 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.launch',
   'phase1.native-scenarios.pairing',
   'phase1.native-scenarios.pairing-reservation',
+  'phase1.native-scenarios.pairing-reservation-request',
+  'phase1.native-scenarios.pairing-reservation-keychain',
+  'phase1.native-scenarios.pairing-reservation-rejected',
+  'phase1.native-scenarios.pairing-reservation-response',
+  'phase1.native-scenarios.pairing-reservation-cleanup',
   'phase1.native-scenarios.pairing-credential-status',
   'phase1.native-scenarios.pairing-create',
   'phase1.native-scenarios.pairing-pending',
@@ -2692,12 +2697,21 @@ async function runEmergencyNativeCredentialCleanup({
 const cleanupCapabilityPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
-export async function establishNativeCleanupReservation(rpc, handle) {
+export async function establishNativeCleanupReservation(rpc, handle, onStage = () => {}) {
   try {
+    onStage('reservation-request');
     const response = await rpc.request('conformance_prepare_native_cleanup', { handle });
+    if (response?.ok !== true) {
+      onStage(
+        response?.error?.code === 'keychain_failure'
+          ? 'reservation-keychain'
+          : 'reservation-rejected',
+      );
+      throw new Error('native cleanup reservation request was rejected');
+    }
+    onStage('reservation-response');
     const reservation = response?.result;
     if (
-      response?.ok !== true ||
       reservation === null ||
       typeof reservation !== 'object' ||
       Array.isArray(reservation) ||
@@ -2720,6 +2734,7 @@ export async function establishNativeCleanupReservation(rpc, handle) {
         throw new Error('native cleanup reservation marker remained');
       }
     } catch {
+      onStage('reservation-cleanup');
       throw new Error('Native cleanup reservation failed and marker cleanup did not complete.');
     }
     throw new Error('Native cleanup reservation could not be established.');
@@ -2813,8 +2828,7 @@ export async function runReservedNativePairing({
   onCredentialMayExist = () => {},
   onStage = () => {},
 }) {
-  onStage('reservation');
-  const reservation = await establishNativeCleanupReservation(rpc, handle);
+  const reservation = await establishNativeCleanupReservation(rpc, handle, onStage);
   onReservation(reservation);
   onStage('credential-status');
   const initialCredentialStatus = await rpc.ok('cave_credential_status', {

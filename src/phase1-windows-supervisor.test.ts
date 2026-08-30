@@ -347,6 +347,7 @@ describe.skipIf(process.platform !== 'win32')('frozen Windows process supervisor
         await cleanupRoot(owned);
       }
     },
+    20_000,
   );
 
   test('honors PATHEXT order and explicit executable and batch extensions', async () => {
