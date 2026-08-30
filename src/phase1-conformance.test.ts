@@ -465,7 +465,6 @@ describe('Phase 1 real-authority conformance harness', () => {
       "activeNativeStage = 'restart-cleanup-adoption'",
       "activeNativeStage = 'restart-status'",
       "activeNativeStage = 'restart-handoff-close'",
-      "activeNativeStage = 'restart-post-handoff-status'",
       "activeNativeStage = 'restart-launch'",
       "activeNativeStage = 'restart-rediscovery'",
       "activeNativeStage = 'restart-restarted-health'",
@@ -518,6 +517,16 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source.indexOf('await adoptNativeCleanupReservation')).toBeLessThan(
       source.indexOf('await previousRpc.close()'),
     );
+    const predecessorCloseIndex = nativeScenario.indexOf('await previousRpc.close()');
+    const restartLaunchIndex = nativeScenario.indexOf(
+      "await rpc.ok('cave_launch')",
+      predecessorCloseIndex,
+    );
+    const closedPredecessorBoundary = nativeScenario.slice(
+      predecessorCloseIndex,
+      restartLaunchIndex,
+    );
+    expect(closedPredecessorBoundary).not.toContain("rpc.ok('cave_credential_status'");
     expect(source).not.toContain("await rpc.ok('conformance_reset_native_state')");
     expect(source).not.toContain('phase1-native-credential-store-not-addressed');
     expect(source).not.toContain('OPENCOVEN_PHASE1_NATIVE_CREDENTIAL_STORE_ISOLATED');

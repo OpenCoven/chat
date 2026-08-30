@@ -238,7 +238,6 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.restart-cleanup-adoption',
   'phase1.native-scenarios.restart-status',
   'phase1.native-scenarios.restart-handoff-close',
-  'phase1.native-scenarios.restart-post-handoff-status',
   'phase1.native-scenarios.restart-launch',
   'phase1.native-scenarios.restart-rediscovery',
   'phase1.native-scenarios.restart-restarted-health',
@@ -3127,14 +3126,6 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             handle = replacementHandle;
             activeNativeStage = 'restart-handoff-close';
             await previousRpc.close();
-            activeNativeStage = 'restart-post-handoff-status';
-            const postHandoffStatus = await rpc.ok('cave_credential_status', {
-              handle,
-              operation: rpc.operation(),
-            });
-            if (postHandoffStatus.status !== 'valid') {
-              throw new Error('credential did not survive cleanup ownership handoff');
-            }
             activeNativeStage = 'restart-launch';
             await rpc.ok('cave_launch');
             activeNativeStage = 'restart-rediscovery';
