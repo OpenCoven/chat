@@ -463,6 +463,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       "activeNativeStage = 'reconciliation'",
       "activeNativeStage = 'revocation'",
       "activeNativeStage = 'credential-cleanup'",
+      "activeNativeStage = 'credential-cleanup-discovery'",
       "activeNativeStage = 'credential-cleanup-health'",
       "activeNativeStage = 'credential-cleanup-identity'",
       "activeNativeStage = 'credential-cleanup-forget'",

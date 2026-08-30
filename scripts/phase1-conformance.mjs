@@ -236,6 +236,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.reconciliation',
   'phase1.native-scenarios.revocation',
   'phase1.native-scenarios.credential-cleanup',
+  'phase1.native-scenarios.credential-cleanup-discovery',
   'phase1.native-scenarios.credential-cleanup-health',
   'phase1.native-scenarios.credential-cleanup-identity',
   'phase1.native-scenarios.credential-cleanup-forget',
@@ -3346,6 +3347,9 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
 
         activeNativeStage = 'credential-cleanup';
         if (typeof credentialId === 'string' && typeof handle === 'string') {
+          activeNativeStage = 'credential-cleanup-discovery';
+          const cleanupDiscovery = await waitForDiscovery(rpc);
+          handle = cleanupDiscovery.handle;
           activeNativeStage = 'credential-cleanup-health';
           const cleanupHealth = await rpc.ok('cave_health', {
             handle,
