@@ -1067,6 +1067,7 @@ describe('Phase 1 specification guards', () => {
     expect(checkoutSteps.length, 'CI must retain checkout steps').toBeGreaterThan(0);
     for (const checkout of checkoutSteps) {
       expect(checkout).toContain('persist-credentials: false');
+      expect(checkout.match(/persist-credentials: false/g)).toHaveLength(1);
     }
   });
 
