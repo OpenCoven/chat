@@ -127,13 +127,19 @@ describe('macOS schema-v2 Keychain runner', () => {
       prepareMacosKeychainSession({
         home,
         platform: 'darwin',
-        execute: vi.fn((_command: string, args: string[]) =>
-          args[0] === 'find-generic-password'
-            ? 'probe-secret\n'
-            : args[0] === 'default-keychain' || args[0] === 'list-keychains'
-              ? '"/operator/login.keychain-db"\n'
-              : '',
-        ),
+        execute: vi.fn((_command: string, args: string[]) => {
+          if (args[0] === 'create-keychain') {
+            writeFileSync(resolve(home, 'Library', 'Keychains', 'phase1.keychain-db'), '', {
+              mode: 0o600,
+            });
+          }
+          if (args[0] === 'delete-keychain') {
+            unlinkSync(resolve(home, 'Library', 'Keychains', 'phase1.keychain-db'));
+          }
+          return args[0] === 'default-keychain' || args[0] === 'list-keychains'
+            ? '"/operator/login.keychain-db"\n'
+            : '';
+        }),
         randomHex: () => '1'.repeat(64),
       }),
     ).toThrow(/isolated default Keychain/u);

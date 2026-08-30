@@ -71,6 +71,7 @@ export function prepareMacosKeychainSession({
   try {
     execute(SECURITY_PATH, ['create-keychain', '-p', password, keychainPath], isolatedHome);
     created = true;
+    chmodSync(keychainPath, 0o600);
     execute(SECURITY_PATH, ['set-keychain-settings', '-lut', '7200', keychainPath], isolatedHome);
     execute(SECURITY_PATH, ['unlock-keychain', '-p', password, keychainPath], isolatedHome);
     execute(SECURITY_PATH, ['default-keychain', '-d', 'user', '-s', keychainPath], isolatedHome);
