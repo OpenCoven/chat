@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -105,4 +105,24 @@ describe('Phase 1 evidence runtime isolation', () => {
       }),
     ).toThrow(/opaque/u);
   });
+
+  test.skipIf(process.platform === 'win32')(
+    'hashes operator symlink metadata without following the target',
+    () => {
+      const root = scratchRoot();
+      const covenHome = resolve(root, '.coven');
+      const caveHome = resolve(covenHome, 'cave');
+      const outside = resolve(root, 'outside');
+      mkdirSync(caveHome, { recursive: true });
+      mkdirSync(outside);
+      writeFileSync(resolve(outside, 'private.txt'), 'outside\n');
+      symlinkSync(outside, resolve(covenHome, 'linked-home'));
+
+      const before = captureOperatorFilesystemState({ caveHome, covenHome });
+      writeFileSync(resolve(outside, 'private.txt'), 'changed outside\n');
+      const after = captureOperatorFilesystemState({ caveHome, covenHome });
+
+      expect(after).toEqual(before);
+    },
+  );
 });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { closeSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readdirSync, readlinkSync, readSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const operatorStateIds = Object.freeze(['cave-home', 'coven-home', 'projects']);
@@ -57,14 +57,17 @@ function snapshotPath(path, limits = defaultLimits) {
       }
       throw error;
     }
-    if (stats.isSymbolicLink()) {
-      throw new Error('Operator state snapshot refuses symbolic links.');
-    }
     state.entries += 1;
     if (state.entries > limits.maxEntries) {
       throw new Error('Operator state exceeds the snapshot entry limit.');
     }
     const normalized = relativePath.replaceAll('\\', '/');
+    if (stats.isSymbolicLink()) {
+      digest.update(
+        `symlink:${normalized}:${stats.dev}:${stats.ino}:${stats.mode & 0o777}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}:${readlinkSync(entryPath, 'utf8')}\0`,
+      );
+      return;
+    }
     if (stats.isDirectory()) {
       digest.update(
         `directory:${normalized}:${stats.dev}:${stats.ino}:${stats.mode & 0o777}:${stats.mtimeMs}:${stats.ctimeMs}\0`,
