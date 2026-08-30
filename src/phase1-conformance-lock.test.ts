@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: '6e7b37780aefa38535312d4bc3f1a8647a31e064',
+    revision: '001f68e1dab6676951a0251f3d36d110a700c26d',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {

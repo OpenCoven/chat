@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "6e7b37780aefa38535312d4bc3f1a8647a31e064"
+    "revision": "001f68e1dab6676951a0251f3d36d110a700c26d"
   },
   "harnessAuthority": {
-    "revision": "6e7b37780aefa38535312d4bc3f1a8647a31e064",
-    "tree": "47784ab5ccd0e2ac2cd200d14f9456133b896a8f",
+    "revision": "001f68e1dab6676951a0251f3d36d110a700c26d",
+    "tree": "ecf2bcd8bdb3075f60c52eaf8f8afb6ee031f893",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -66,8 +66,8 @@
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
-        "blob": "27c3341df621faf069ae9666a9b7435004ee9114",
-        "sha256": "3ff46f3f4aac3b00044fa1fbbf99fb7f358a3f84e31c040a61a1a2707eab70e3"
+        "blob": "52dc92c85b9be811cd2ea89607fbbb17dd06a21d",
+        "sha256": "24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f"
       },
       {
         "path": "scripts/supervised-exec.mjs",
