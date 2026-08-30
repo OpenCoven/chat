@@ -13,7 +13,7 @@ const digestPattern = /^[0-9a-f]{64}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const defaultLimits = Object.freeze({
   maxDepth: 64,
-  maxEntries: 100_000,
+  maxEntries: 1_000_000,
   maxLogicalBytes: 1024 * 1024 * 1024 * 1024,
   maxContentBytes: 64 * 1024 * 1024,
 });
@@ -84,7 +84,10 @@ function snapshotPath(path, limits = defaultLimits) {
       return;
     }
     if (!stats.isFile()) {
-      throw new Error('Operator state snapshot accepts only regular files and directories.');
+      digest.update(
+        `special:${normalized}:${stats.dev}:${stats.ino}:${stats.mode}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}\0`,
+      );
+      return;
     }
     state.logicalBytes += stats.size;
     if (state.logicalBytes > limits.maxLogicalBytes) {
