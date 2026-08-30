@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "8a0e535a3507085f6ac97349d7261c5bb4c89206"
+    "revision": "6120555e8c5be9d2022a4cb8564230d7014f27f3"
   },
   "harnessAuthority": {
-    "revision": "8a0e535a3507085f6ac97349d7261c5bb4c89206",
-    "tree": "c8838270bda0f6d8234eb9ea4665516f7991d15b",
+    "revision": "6120555e8c5be9d2022a4cb8564230d7014f27f3",
+    "tree": "8cd17f4e12db9c434358bcae26c4fdea07c07adf",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "7200ae8e4185f37545cc3c9b77d4984ad82d5ed4",
-        "sha256": "520dde3d8b2283c690fba62bcc7f7aa370d6b54442759f70ad2c59814be20d3c"
+        "blob": "7df3425e24f92ba093c1674c13631e23cd77aaa2",
+        "sha256": "206cb7768aa293d02ed5691cde011fa4eda3ed4d6b5fba3227a89508b37b78df"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",

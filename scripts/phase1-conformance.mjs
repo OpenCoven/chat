@@ -235,7 +235,19 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.reads',
   'phase1.native-scenarios.reconciliation',
   'phase1.native-scenarios.revocation',
+  'phase1.native-scenarios.revocation-delete',
+  'phase1.native-scenarios.revocation-initial-status',
+  'phase1.native-scenarios.revocation-rediscovery',
+  'phase1.native-scenarios.revocation-health',
+  'phase1.native-scenarios.revocation-status',
+  'phase1.native-scenarios.revocation-repair-create',
+  'phase1.native-scenarios.revocation-repair-pending',
+  'phase1.native-scenarios.revocation-repair-approve',
+  'phase1.native-scenarios.revocation-repair-approved',
+  'phase1.native-scenarios.revocation-repair-exchange',
+  'phase1.native-scenarios.revocation-result',
   'phase1.native-scenarios.credential-cleanup',
+  'phase1.native-scenarios.credential-cleanup-discovery',
   'phase1.native-scenarios.credential-cleanup-health',
   'phase1.native-scenarios.credential-cleanup-identity',
   'phase1.native-scenarios.credential-cleanup-forget',
@@ -2912,6 +2924,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   let handle;
   let credentialId;
   let credentialMayExist = false;
+  let firstNativeAssertionFailureStage;
   let scenarioFailure;
   try {
     activeNativeStage = 'fixture';
@@ -3048,6 +3061,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           assertPairingStatus(denied, 'denied');
           addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
         } catch {
+          firstNativeAssertionFailureStage ??= activeNativeStage;
           process.stderr.write('phase1-conformance: pairing denial assertion failed.\n');
           addAssertion(results, 'phase1.pairing.denial', 'failed', 'phase1.assertion.failed');
         }
@@ -3126,6 +3140,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               'phase1.assertion.passed',
             );
           } catch {
+            firstNativeAssertionFailureStage ??= activeNativeStage;
             if (replacementRpc !== undefined && replacementRpc !== rpc) {
               await replacementRpc.close().catch(() => undefined);
             }
@@ -3203,6 +3218,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               'phase1.assertion.passed',
             );
           } catch {
+            firstNativeAssertionFailureStage ??= activeNativeStage;
             process.stderr.write('phase1-conformance: bounded read assertion failed.\n');
             addAssertion(
               results,
@@ -3264,6 +3280,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               'phase1.assertion.passed',
             );
           } catch {
+            firstNativeAssertionFailureStage ??= activeNativeStage;
             process.stderr.write('phase1-conformance: reconciliation assertion failed.\n');
             addAssertion(
               results,
@@ -3284,6 +3301,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           );
         } else {
           try {
+            activeNativeStage = 'revocation-delete';
             await adminMutation(
               origin,
               adminToken,
@@ -3293,6 +3311,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
                 reason: 'phase1-conformance',
               },
             );
+            activeNativeStage = 'revocation-initial-status';
             const initialStatus = await rpc.ok('cave_credential_status', {
               handle,
               operation: rpc.operation(),
@@ -3306,9 +3325,12 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             await new Promise((resolveWait) =>
               setTimeout(resolveWait, revocationConfirmationDelayMs),
             );
+            activeNativeStage = 'revocation-rediscovery';
             const rediscovery = await waitForDiscovery(rpc);
             handle = rediscovery.handle;
+            activeNativeStage = 'revocation-health';
             await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+            activeNativeStage = 'revocation-status';
             const status = await rpc.ok('cave_credential_status', {
               handle,
               operation: rpc.operation(),
@@ -3322,7 +3344,12 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               origin,
               adminToken,
               'phase1-installation-repaired',
+              adminMutation,
+              (stage) => {
+                activeNativeStage = `revocation-repair-${stage}`;
+              },
             );
+            activeNativeStage = 'revocation-result';
             if (typeof repaired.credentialId !== 'string') {
               throw new Error('native re-pairing did not issue a credential');
             }
@@ -3334,6 +3361,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               'phase1.assertion.passed',
             );
           } catch {
+            firstNativeAssertionFailureStage ??= activeNativeStage;
             process.stderr.write('phase1-conformance: credential revocation assertion failed.\n');
             addAssertion(
               results,
@@ -3344,8 +3372,16 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           }
         }
 
+        if (firstNativeAssertionFailureStage !== undefined) {
+          activeNativeStage = firstNativeAssertionFailureStage;
+          throw new Error('Native assertion failed before final credential cleanup.');
+        }
+
         activeNativeStage = 'credential-cleanup';
         if (typeof credentialId === 'string' && typeof handle === 'string') {
+          activeNativeStage = 'credential-cleanup-discovery';
+          const cleanupDiscovery = await waitForDiscovery(rpc);
+          handle = cleanupDiscovery.handle;
           activeNativeStage = 'credential-cleanup-health';
           const cleanupHealth = await rpc.ok('cave_health', {
             handle,
