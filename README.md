@@ -176,10 +176,16 @@ verifies that the checked-out HEADs match the tracked lock.
 candidate and evidence authority, Cave, Coven, and the canonical package
 metadata for the real-authority gate. The protected
 `.github/workflows/client-v1-conformance.yml` schema-v2 producer takes its
-separate immutable SDK validator revision as a required dispatch input, avoiding
-a circular pin while retaining both the strict schema-v1 gate and canonical
-schema-v2 platform records. Neither replaces or loosens the Phase 0 canary
-lock.
+separate immutable SDK validator revision as a required dispatch input and
+requires it to equal the protected environment's nonsecret
+`CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable, avoiding a circular pin
+while retaining both the strict schema-v1 gate and canonical schema-v2
+platform records. Producer and validator jobs have no OIDC or attestation
+authority. A fresh validator job revalidates the immutable uploaded artifacts
+and hands only their SHA-256 digests to a separate OIDC job, which downloads
+the same artifacts again, compares the digests, and attests without executing
+repository or artifact content. Neither replaces or loosens the Phase 0
+canary lock.
 
 ## CI coverage
 

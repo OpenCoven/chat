@@ -43,6 +43,185 @@ $childEnvironment = @{
   TMP = $root
 }
 try {
+  $accessProbeSource = Join-Path $root 'job-access-probe.cs'
+  [IO.File]::WriteAllText(
+    $accessProbeSource,
+    @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class JobAccessProbe
+{
+    private const uint JOB_OBJECT_ASSIGN_PROCESS = 0x0001;
+    private const uint JOB_OBJECT_SET_ATTRIBUTES = 0x0002;
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+    private const uint JOB_OBJECT_TERMINATE = 0x0008;
+    private const uint JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000;
+    private const int JobObjectExtendedLimitInformation = 9;
+    private const int ERROR_ACCESS_DENIED = 5;
+
+    public static void Run(string name)
+    {
+        IntPtr query = OpenJobObjectW(JOB_OBJECT_QUERY, false, name);
+        if (query == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Query-only Job Object reopen was denied.");
+        }
+        try
+        {
+            RequireDenied(
+                name,
+                JOB_OBJECT_SET_ATTRIBUTES,
+                "JOB_OBJECT_SET_ATTRIBUTES reopen unexpectedly succeeded.");
+            RequireDenied(
+                name,
+                JOB_OBJECT_ASSIGN_PROCESS,
+                "JOB_OBJECT_ASSIGN_PROCESS reopen unexpectedly succeeded.");
+            RequireDenied(
+                name,
+                JOB_OBJECT_TERMINATE,
+                "JOB_OBJECT_TERMINATE reopen unexpectedly succeeded.");
+
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits =
+                new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+            limits.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+            int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+            IntPtr buffer = Marshal.AllocHGlobal(length);
+            try
+            {
+                Marshal.StructureToPtr(limits, buffer, false);
+                if (SetInformationJobObject(
+                        query,
+                        JobObjectExtendedLimitInformation,
+                        buffer,
+                        (uint)length))
+                {
+                    throw new InvalidOperationException(
+                        "Enabling silent breakaway unexpectedly succeeded.");
+                }
+                if (Marshal.GetLastWin32Error() != ERROR_ACCESS_DENIED)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Silent breakaway failed for an unexpected reason.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            CloseHandle(query);
+        }
+    }
+
+    private static void RequireDenied(string name, uint access, string message)
+    {
+        IntPtr handle = OpenJobObjectW(access, false, name);
+        if (handle != IntPtr.Zero)
+        {
+            CloseHandle(handle);
+            throw new InvalidOperationException(message);
+        }
+        if (Marshal.GetLastWin32Error() != ERROR_ACCESS_DENIED)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Dangerous Job Object reopen failed for an unexpected reason.");
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        internal long PerProcessUserTimeLimit;
+        internal long PerJobUserTimeLimit;
+        internal uint LimitFlags;
+        internal UIntPtr MinimumWorkingSetSize;
+        internal UIntPtr MaximumWorkingSetSize;
+        internal uint ActiveProcessLimit;
+        internal UIntPtr Affinity;
+        internal uint PriorityClass;
+        internal uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        internal ulong ReadOperationCount;
+        internal ulong WriteOperationCount;
+        internal ulong OtherOperationCount;
+        internal ulong ReadTransferCount;
+        internal ulong WriteTransferCount;
+        internal ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        internal JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        internal IO_COUNTERS IoInfo;
+        internal UIntPtr ProcessMemoryLimit;
+        internal UIntPtr JobMemoryLimit;
+        internal UIntPtr PeakProcessMemoryUsed;
+        internal UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(uint desiredAccess, bool inherit, string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(
+        IntPtr job,
+        int informationClass,
+        IntPtr information,
+        uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $accessProbeScript = Join-Path $root 'job-access-probe.ps1'
+  [IO.File]::WriteAllText(
+    $accessProbeScript,
+    @"
+Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("'", "''"))')) -Language CSharp
+[JobAccessProbe]::Run(`$env:OPENCOVEN_ACCESS_PROBE_JOB)
+"@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $accessJobName =
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+  $accessEnvironment = $childEnvironment.Clone()
+  $accessEnvironment.OPENCOVEN_ACCESS_PROBE_JOB = $accessJobName
+  $accessJob = [OpenCoven.WindowsJobSupervisor]::Create($accessJobName)
+  try {
+    $accessResult = $accessJob.Run(
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$accessProbeScript`"",
+      $root,
+      $accessEnvironment,
+      [TimeSpan]::FromSeconds(30),
+      1MB,
+      1MB
+    )
+    if ($accessResult.ExitCode -ne 0) {
+      throw "Protected Job Object DACL runtime probe failed: $($accessResult.Stderr)"
+    }
+  } finally {
+    $accessJob.Dispose()
+  }
+
   $timeoutPids = Join-Path $root 'timeout-pids.txt'
   $timeoutScript = Join-Path $root 'timeout.ps1'
   [IO.File]::WriteAllText(

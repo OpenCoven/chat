@@ -37,9 +37,27 @@ struct CleanupGrantMarker {
     mac: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct CleanupGrantScope {
     pub(crate) service: String,
     pub(crate) accounts: Vec<String>,
+}
+
+pub(crate) struct PreparedCleanupGrant {
+    scope: CleanupGrantScope,
+    marker: marker_io::MarkerLease,
+}
+
+impl PreparedCleanupGrant {
+    pub(crate) fn scope(&self) -> &CleanupGrantScope {
+        &self.scope
+    }
+
+    pub(crate) fn consume(self) -> Result<(), KeyringError> {
+        self.marker
+            .consume()
+            .map_err(|_| KeyringError::CleanupGrantRejected)
+    }
 }
 
 pub(crate) fn issue(
@@ -85,16 +103,16 @@ pub(crate) fn issue(
     Err(KeyringError::Unavailable)
 }
 
-pub(crate) fn redeem(
+pub(crate) fn prepare(
     grant: &str,
     current_service: &str,
     process_secret: &[u8; GRANT_BYTES],
-) -> Result<CleanupGrantScope, KeyringError> {
+) -> Result<PreparedCleanupGrant, KeyringError> {
     validate_service(current_service)?;
     let grant = decode_grant(grant)?;
     let expected_grant_id = grant_id(grant.as_ref());
-    let (marker_bytes, storage_identity) =
-        marker_io::claim(&expected_grant_id).map_err(|_| KeyringError::CleanupGrantRejected)?;
+    let (marker_bytes, storage_identity, marker_lease) =
+        marker_io::hold(&expected_grant_id).map_err(|_| KeyringError::CleanupGrantRejected)?;
     if marker_bytes.len() > MAX_MARKER_BYTES {
         return Err(KeyringError::CleanupGrantRejected);
     }
@@ -130,9 +148,12 @@ pub(crate) fn redeem(
     validate_service(&marker.payload.service)?;
     validate_conformance_cleanup_accounts(&marker.payload.accounts)
         .map_err(|_| KeyringError::CleanupGrantRejected)?;
-    Ok(CleanupGrantScope {
-        service: marker.payload.service,
-        accounts: marker.payload.accounts,
+    Ok(PreparedCleanupGrant {
+        scope: CleanupGrantScope {
+            service: marker.payload.service,
+            accounts: marker.payload.accounts,
+        },
+        marker: marker_lease,
     })
 }
 
@@ -240,13 +261,62 @@ mod marker_io {
         Unavailable,
     }
 
-    pub(super) enum ClaimError {
+    pub(super) enum HoldError {
         Rejected,
     }
 
     struct MarkerDirectory {
         file: File,
         identity: String,
+    }
+
+    pub(super) struct MarkerLease {
+        directory: MarkerDirectory,
+        file: File,
+        name: String,
+        device: u64,
+        inode: u64,
+        length: u64,
+    }
+
+    impl MarkerLease {
+        pub(super) fn consume(self) -> Result<(), ()> {
+            let held = self.file.metadata().map_err(|_| ())?;
+            validate_file(&held, Some(self.length))?;
+            if held.dev() != self.device || held.ino() != self.inode {
+                return Err(());
+            }
+            let reopened = self.directory.open_file(&self.name)?;
+            let reopened_metadata = reopened.metadata().map_err(|_| ())?;
+            validate_file(&reopened_metadata, Some(self.length))?;
+            if reopened_metadata.dev() != self.device || reopened_metadata.ino() != self.inode {
+                return Err(());
+            }
+
+            let consumed_name = random_name(".consumed-")?;
+            self.directory.rename(&self.name, &consumed_name)?;
+            let consumed = match self.directory.open_file(&consumed_name) {
+                Ok(file) => file,
+                Err(()) => {
+                    let _ = self.directory.rename(&consumed_name, &self.name);
+                    let _ = self.directory.sync();
+                    return Err(());
+                }
+            };
+            let consumed_metadata = consumed.metadata().map_err(|_| ())?;
+            if validate_file(&consumed_metadata, Some(self.length)).is_err()
+                || consumed_metadata.dev() != self.device
+                || consumed_metadata.ino() != self.inode
+            {
+                let _ = self.directory.rename(&consumed_name, &self.name);
+                let _ = self.directory.sync();
+                return Err(());
+            }
+            self.directory.sync()?;
+            let _ = self.directory.unlink(&consumed_name);
+            let _ = self.directory.sync();
+            Ok(())
+        }
     }
 
     impl MarkerDirectory {
@@ -458,45 +528,43 @@ mod marker_io {
         Ok(())
     }
 
-    pub(super) fn claim(grant_id: &str) -> Result<(Vec<u8>, String), ClaimError> {
-        let directory = MarkerDirectory::open().map_err(|_| ClaimError::Rejected)?;
+    pub(super) fn hold(grant_id: &str) -> Result<(Vec<u8>, String, MarkerLease), HoldError> {
+        let directory = MarkerDirectory::open().map_err(|_| HoldError::Rejected)?;
         let source_name = marker_name(grant_id);
-        let claim_name = random_name(".claimed-").map_err(|_| ClaimError::Rejected)?;
-        directory
-            .rename(&source_name, &claim_name)
-            .map_err(|_| ClaimError::Rejected)?;
-        directory.sync().map_err(|_| ClaimError::Rejected)?;
-
-        let result = (|| {
-            let mut claimed = directory
-                .open_file(&claim_name)
-                .map_err(|_| ClaimError::Rejected)?;
-            let before = claimed.metadata().map_err(|_| ClaimError::Rejected)?;
-            validate_file(&before, None).map_err(|_| ClaimError::Rejected)?;
-            if before.len() > MAX_MARKER_BYTES as u64 {
-                return Err(ClaimError::Rejected);
-            }
-            let mut bytes = Vec::with_capacity(before.len() as usize);
-            Read::by_ref(&mut claimed)
-                .take(MAX_MARKER_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|_| ClaimError::Rejected)?;
-            let after = claimed.metadata().map_err(|_| ClaimError::Rejected)?;
-            validate_file(&after, Some(bytes.len() as u64)).map_err(|_| ClaimError::Rejected)?;
-            if before.dev() != after.dev()
-                || before.ino() != after.ino()
-                || bytes.len() > MAX_MARKER_BYTES
-            {
-                return Err(ClaimError::Rejected);
-            }
-            Ok(bytes)
-        })();
-        let removed = directory.unlink(&claim_name);
-        let synced = directory.sync();
-        if removed.is_err() || synced.is_err() {
-            return Err(ClaimError::Rejected);
+        let mut marker = directory
+            .open_file(&source_name)
+            .map_err(|_| HoldError::Rejected)?;
+        let before = marker.metadata().map_err(|_| HoldError::Rejected)?;
+        validate_file(&before, None).map_err(|_| HoldError::Rejected)?;
+        if before.len() > MAX_MARKER_BYTES as u64 {
+            return Err(HoldError::Rejected);
         }
-        result.map(|bytes| (bytes, directory.identity))
+        let mut bytes = Vec::with_capacity(before.len() as usize);
+        Read::by_ref(&mut marker)
+            .take(MAX_MARKER_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| HoldError::Rejected)?;
+        let after = marker.metadata().map_err(|_| HoldError::Rejected)?;
+        validate_file(&after, Some(bytes.len() as u64)).map_err(|_| HoldError::Rejected)?;
+        if before.dev() != after.dev()
+            || before.ino() != after.ino()
+            || bytes.len() > MAX_MARKER_BYTES
+        {
+            return Err(HoldError::Rejected);
+        }
+        let storage_identity = directory.identity.clone();
+        Ok((
+            bytes,
+            storage_identity,
+            MarkerLease {
+                directory,
+                file: marker,
+                name: source_name,
+                device: before.dev(),
+                inode: before.ino(),
+                length: before.len(),
+            },
+        ))
     }
 
     fn marker_name(grant_id: &str) -> String {
@@ -567,7 +635,7 @@ mod marker_io {
         Unavailable,
     }
 
-    pub(super) enum ClaimError {
+    pub(super) enum HoldError {
         Rejected,
     }
 
@@ -581,6 +649,51 @@ mod marker_io {
         chain: Vec<PinnedDirectory>,
         path: PathBuf,
         identity: String,
+    }
+
+    pub(super) struct MarkerLease {
+        directory: MarkerDirectory,
+        path: PathBuf,
+        file: File,
+        identity: crate::cave::WindowsPrivatePathMetadata,
+        length: u64,
+    }
+
+    impl MarkerLease {
+        pub(super) fn consume(self) -> Result<(), ()> {
+            self.directory.revalidate()?;
+            let held = validate_handle(&self.file, false)?;
+            if held != self.identity || held.links != 1 {
+                return Err(());
+            }
+            if self.file.metadata().map_err(|_| ())?.len() != self.length {
+                return Err(());
+            }
+            let reopened = open_existing(&self.path)?;
+            if validate_handle(&reopened, false)? != self.identity {
+                return Err(());
+            }
+
+            let consumed_path = self.directory.path(&random_name(".consumed-")?);
+            move_write_through(&self.path, &consumed_path).map_err(|_| ())?;
+            self.directory.revalidate()?;
+            let consumed = match open_existing(&consumed_path) {
+                Ok(file) => file,
+                Err(()) => {
+                    let _ = move_write_through(&consumed_path, &self.path);
+                    return Err(());
+                }
+            };
+            if validate_handle(&consumed, false)? != self.identity
+                || consumed.metadata().map_err(|_| ())?.len() != self.length
+            {
+                let _ = move_write_through(&consumed_path, &self.path);
+                return Err(());
+            }
+            let _ = fs::remove_file(&consumed_path);
+            let _ = self.directory.revalidate();
+            Ok(())
+        }
     }
 
     impl MarkerDirectory {
@@ -705,50 +818,47 @@ mod marker_io {
         Ok(())
     }
 
-    pub(super) fn claim(grant_id: &str) -> Result<(Vec<u8>, String), ClaimError> {
-        let directory = MarkerDirectory::open().map_err(|_| ClaimError::Rejected)?;
-        directory.revalidate().map_err(|_| ClaimError::Rejected)?;
-        test_hook("claim-pinned").map_err(|_| ClaimError::Rejected)?;
-        directory.revalidate().map_err(|_| ClaimError::Rejected)?;
+    pub(super) fn hold(grant_id: &str) -> Result<(Vec<u8>, String, MarkerLease), HoldError> {
+        let directory = MarkerDirectory::open().map_err(|_| HoldError::Rejected)?;
+        directory.revalidate().map_err(|_| HoldError::Rejected)?;
+        test_hook("claim-pinned").map_err(|_| HoldError::Rejected)?;
+        directory.revalidate().map_err(|_| HoldError::Rejected)?;
         let source_path = directory.path(&marker_name(grant_id));
-        let claim_path =
-            directory.path(&random_name(".claimed-").map_err(|_| ClaimError::Rejected)?);
-        move_write_through(&source_path, &claim_path).map_err(|_| ClaimError::Rejected)?;
-        if directory.revalidate().is_err() {
-            let _ = fs::remove_file(&claim_path);
-            return Err(ClaimError::Rejected);
+        let mut marker = open_existing(&source_path).map_err(|_| HoldError::Rejected)?;
+        let before = validate_handle(&marker, false).map_err(|_| HoldError::Rejected)?;
+        if before.links != 1 {
+            return Err(HoldError::Rejected);
         }
-        let result = (|| {
-            let mut claimed = open_existing(&claim_path).map_err(|_| ClaimError::Rejected)?;
-            let before = validate_handle(&claimed, false).map_err(|_| ClaimError::Rejected)?;
-            if before.links != 1 {
-                return Err(ClaimError::Rejected);
-            }
-            let length = claimed.metadata().map_err(|_| ClaimError::Rejected)?.len();
-            if length > MAX_MARKER_BYTES as u64 {
-                return Err(ClaimError::Rejected);
-            }
-            let mut bytes = Vec::with_capacity(length as usize);
-            Read::by_ref(&mut claimed)
-                .take(MAX_MARKER_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|_| ClaimError::Rejected)?;
-            let after = validate_handle(&claimed, false).map_err(|_| ClaimError::Rejected)?;
-            if before != after
-                || after.links != 1
-                || bytes.len() > MAX_MARKER_BYTES
-                || claimed.metadata().map_err(|_| ClaimError::Rejected)?.len() != bytes.len() as u64
-            {
-                return Err(ClaimError::Rejected);
-            }
-            directory.revalidate().map_err(|_| ClaimError::Rejected)?;
-            Ok(bytes)
-        })();
-        let removed = fs::remove_file(&claim_path);
-        if removed.is_err() || directory.revalidate().is_err() {
-            return Err(ClaimError::Rejected);
+        let length = marker.metadata().map_err(|_| HoldError::Rejected)?.len();
+        if length > MAX_MARKER_BYTES as u64 {
+            return Err(HoldError::Rejected);
         }
-        result.map(|bytes| (bytes, directory.identity))
+        let mut bytes = Vec::with_capacity(length as usize);
+        Read::by_ref(&mut marker)
+            .take(MAX_MARKER_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| HoldError::Rejected)?;
+        let after = validate_handle(&marker, false).map_err(|_| HoldError::Rejected)?;
+        if before != after
+            || after.links != 1
+            || bytes.len() > MAX_MARKER_BYTES
+            || marker.metadata().map_err(|_| HoldError::Rejected)?.len() != bytes.len() as u64
+        {
+            return Err(HoldError::Rejected);
+        }
+        directory.revalidate().map_err(|_| HoldError::Rejected)?;
+        let storage_identity = directory.identity.clone();
+        Ok((
+            bytes,
+            storage_identity,
+            MarkerLease {
+                directory,
+                path: source_path,
+                file: marker,
+                identity: before,
+                length,
+            },
+        ))
     }
 
     fn marker_name(grant_id: &str) -> String {
@@ -896,8 +1006,16 @@ mod marker_io {
         Unavailable,
     }
 
-    pub(super) enum ClaimError {
+    pub(super) enum HoldError {
         Rejected,
+    }
+
+    pub(super) struct MarkerLease;
+
+    impl MarkerLease {
+        pub(super) fn consume(self) -> Result<(), ()> {
+            Err(())
+        }
     }
 
     pub(super) fn identity() -> Result<String, PublishError> {
@@ -912,7 +1030,7 @@ mod marker_io {
         Err(PublishError::Unavailable)
     }
 
-    pub(super) fn claim(_grant_id: &str) -> Result<(Vec<u8>, String), ClaimError> {
-        Err(ClaimError::Rejected)
+    pub(super) fn hold(_grant_id: &str) -> Result<(Vec<u8>, String, MarkerLease), HoldError> {
+        Err(HoldError::Rejected)
     }
 }

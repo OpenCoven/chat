@@ -9,6 +9,9 @@ platform-evidence record.
 This is separate from `pnpm test:contract-canary`. The canary checks the packed
 SDK boundary; the Phase 1 runner checks runtime discovery, pairing, credential
 handling, canonical reads, Coven identity, cleanup, and evidence compatibility.
+No public record is written unless every primary assertion is completed and
+passes, the primary secret scan succeeds, and the exact SDK validator accepts
+the final bytes.
 
 ## Exact inputs
 
@@ -35,6 +38,13 @@ candidate and that all four candidate source package identities match the
 frozen manifest. It never rebuilds replacement per-platform SDK tarballs.
 
 Supported records are exactly `darwin-arm64`, `linux-x64`, and `win32-x64`.
+The validator remains separate from the packed SDK candidate. The required
+protected-run `validator_revision` input must exactly equal the lowercase
+40-hex commit stored in the protected environment's nonsecret
+`CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable. The harness clones that
+exact revision into process-owned roots and rejects staged, unstaged,
+untracked, ignored, hidden-index, filtered, replacement-ref, submodule, tree,
+or HEAD drift before executing committed authority and harness bytes.
 
 ## Running
 
@@ -159,27 +169,35 @@ the process-owned isolated home. The marker binds the grant identity, isolated
 service, canonical account set, storage identity, and issuing process under a
 native-only per-process MAC key without storing the raw grant.
 
-The producer immediately redeems and drops the grant. Redemption atomically
-claims the marker before deleting only the marker-bound entries, so replay,
-concurrent use, marker tampering, service/account substitution, links, and path
-swaps fail closed. The run requires the same empty-state digest afterward and
-preserves unrelated entries. A missing, malformed, or production keyring
-service is rejected before native custody access or grant issuance; missing or
-locked native services also fail the run. Reservation-based production-keyring
-credential cleanup remains capability-bound and fail-closed.
+The producer immediately redeems and drops the grant. Redemption first
+acquires the credential mutation lock, verifies that the in-process grant is
+still issued, opens and validates the exact marker without removing it, and
+holds its file identity for the transaction. It then deletes only the
+marker-bound entries, confirms every scoped entry is absent, atomically moves
+the same held marker out of the redeemable name, and finally removes the
+in-process grant. Replay, concurrent use, marker tampering, service/account
+substitution, links, and path swaps therefore fail closed. A lock, backend, or
+partial-delete failure leaves the marker and issued grant available for an
+authenticated retry with the same immutable service/account scope;
+already-absent entries make that retry idempotent. The run requires the same
+empty-state digest afterward and preserves unrelated entries. A missing,
+malformed, or production keyring service is rejected before native custody
+access or grant issuance; missing or locked native services also fail the run.
+The separate reservation/adoption protocol for production-keyring credential
+cleanup remains capability-bound, recoverable, and fail-closed.
 
-On Unix, cleanup marker creation, publication, and claiming use private
-owner-checked directories, no-follow directory-relative operations, exact
-`0700`/`0600` modes, regular-file identity and link-count checks, and file plus
-directory synchronization. On Windows, every private component from the
-isolated home through the marker directory is identity-checked and pinned with
-a non-delete-sharing handle while path-based operations run. The
-implementation revalidates the complete chain around publication and claiming,
-rejects reparse points and foreign or writable-untrusted ACLs (including
-`FILE_DELETE_CHILD`), verifies file identity and link count, and uses
-create-new files plus write-through atomic moves. These RPC controls are
-compiled only into the `phase1-conformance` binary and are not registered as
-production Tauri commands or capabilities.
+On Unix, cleanup marker creation, publication, holding, and consumption use
+private owner-checked directories, no-follow directory-relative operations,
+exact `0700`/`0600` modes, regular-file identity and link-count checks, and
+file plus directory synchronization. On Windows, every private component from
+the isolated home through the marker directory is identity-checked and pinned
+with a non-delete-sharing handle while path-based operations run. The
+implementation revalidates the complete chain around publication, marker
+holding, and final consumption, rejects reparse points and foreign or
+writable-untrusted ACLs (including `FILE_DELETE_CHILD`), verifies file identity
+and link count, and uses create-new files plus write-through atomic moves.
+These RPC controls are compiled only into the `phase1-conformance` binary and
+are not registered as production Tauri commands or capabilities.
 
 The macOS and Windows Rust jobs execute the phase1 native RPC integration
 binary. Windows coverage uses the native Credential Manager and Win32
@@ -251,15 +269,23 @@ runner image update therefore requires an explicit protected-workflow metadata
 and digest update.
 
 The inline C# P/Invoke supervisor creates a named, nonce-bound Job Object with
-only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. It calls `CreateProcessW` with
-`CREATE_SUSPENDED`, assigns the child with `AssignProcessToJobObject`, confirms
-membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-flags are not enabled. The parent retains non-delete-sharing handles for the
-bootstrap and workspace directories, captures stdout and stderr independently
-with 16 MiB bounds, applies a 55-minute total timeout, terminates the complete
-Job on timeout, overflow, launch error, or non-zero child status, reaps the
-root, and closes every native handle. Closing the final Job handle also kills
-any descendant that outlived the supervised root.
+only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Creation uses a protected DACL with
+exactly one non-inherited ACE: the current user may reopen only with
+`JOB_OBJECT_QUERY | SYNCHRONIZE`. The creator retains its original full-access
+handle, while same-user supervised code cannot reopen the name with
+`JOB_OBJECT_SET_ATTRIBUTES`, `JOB_OBJECT_ASSIGN_PROCESS`, or
+`JOB_OBJECT_TERMINATE`; attempting to enable silent breakaway through the
+query-only handle is denied. The supervisor validates the exact owner,
+protected-DACL control bit, one-ACE count, SID, flags, and access mask before
+use. It calls `CreateProcessW` with `CREATE_SUSPENDED`, assigns the child with
+`AssignProcessToJobObject`, confirms membership with `IsProcessInJob`, and only
+then calls `ResumeThread`. Breakaway flags are not enabled. The parent retains
+non-delete-sharing handles for the bootstrap and workspace directories,
+captures stdout and stderr independently with 16 MiB bounds, applies a
+55-minute total timeout, terminates the complete Job on timeout, overflow,
+launch error, or non-zero child status, reaps the root, and closes every native
+handle. Closing the final Job handle also kills any descendant that outlived
+the supervised root.
 
 The assigned child performs every Windows production operation: exact Chat
 checkout, tool acquisition, dependency installation, tool and harness
@@ -312,13 +338,15 @@ requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
 
 `scripts/windows-job-supervisor.test.ps1` is also run by the ordinary Windows
-Rust CI job. On Windows it compiles the reviewed C# source, creates a
-child/grandchild tree, proves timeout termination reaches both processes,
-proves kill-on-close reaches a surviving grandchild, and proves a mismatched
-named-Job membership check fails. The protected lane runs the same test
-against the exact inline supervisor source after checkout and while already
-inside the production Job. macOS development can parse and compile the source
-but cannot claim those native runtime results.
+Rust CI job. On Windows it compiles the reviewed C# source, proves query-only
+reopen succeeds while set/assign/terminate reopen and silent-breakaway
+mutation are denied, creates a child/grandchild tree, proves timeout
+termination reaches both processes, proves kill-on-close reaches a surviving
+grandchild, and proves a mismatched named-Job membership check fails. The
+protected lane runs the same test against the exact inline supervisor source
+after checkout and while already inside the production Job. macOS development
+can parse and compile the source but cannot claim those native runtime
+results.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -349,16 +377,45 @@ then reaped.
 
 ### Protected workflow graph
 
+The dedicated workflow uses the protected `client-v1-conformance`
+environment. It requires the reviewed deployment protection and the nonsecret
+`CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable set to the exact reviewed
+lowercase 40-hex SDK validator commit.
+
 Self-review is prevented and administrators cannot bypass the protection. The
 exact SDK workflow contract requires no application credential secret because
 all counterpart repositories are public. The manual dispatch requires one
-input, `validator_revision`, containing the full lowercase 40-character SDK
-validator commit. The workflow has only
-the three protected matrix jobs and one permissionless aggregation-confirmation
-job. macOS and Linux use the pinned official checkout, Node, and pnpm setup
-actions. Windows routes around those actions through the pre-bootstrap Job
-root. All platforms use the pinned official artifact upload and
-build-provenance attestation actions after candidate execution is complete.
+input, `validator_revision`, containing the same full lowercase 40-character
+SDK validator commit as the protected environment variable. Trusted workflow
+code rejects a missing, malformed, or unequal pair before validator execution
+and again before attestation. The workflow has three unprivileged production
+matrix expansions, one fresh unprivileged `ubuntu-24.04` validation job, one
+fresh OIDC attestation job, and one permissionless aggregation-confirmation
+job. macOS and Linux production use the pinned official checkout, Node, and
+pnpm setup actions. Windows routes around those actions through the
+pre-bootstrap Job root. Production preserves the existing native behavior and
+uses the pinned official artifact upload exactly once per matrix expansion.
+
+The producer and fresh-validation jobs have only `contents: read`; they have no
+`id-token` or `attestations` permission. The harness and all candidate
+subprocesses receive a curated environment that does not forward GitHub
+tokens, OIDC request variables, Git credentials, operator Cargo credentials,
+or ambient proxy configuration. After upload, the fresh validation runner
+downloads each immutable artifact by its exact static name, checks out the SDK
+at the protected validator revision, validates the exact SDK frozen schema
+binding, executable parser, canonical serializer, and retained-evidence
+scanner over one in-memory byte snapshot, then exports only the three SHA-256
+digests.
+
+The separate attestation job checks out no repository and runs no candidate,
+validator, Node, pnpm, Rust, Cargo, harness, or downloaded artifact content. It
+uses only pinned official download and attestation actions plus trusted inline
+shell that downloads all three artifacts again and compares each fresh SHA-256
+with the corresponding validation output. Only this job has `id-token: write`
+and `attestations: write`, and each pinned attestation action names one exact
+record path. There is no second record artifact, alternate upload path, or
+caller-selected artifact name; the aggregation job cannot download, rewrite,
+upload, attest, or substitute records.
 
 `HOME`, XDG directories, temporary directories, pnpm store, Cargo home, Cave
 home, and Coven home are isolated for the ordinary harness, checkout,
@@ -456,9 +513,11 @@ The pre-repin SDK validator is expected to reject this new workflow
 graph until that one-time metadata update is reviewed and merged. Chat-local
 tests therefore require the old validator's rejection while independently
 guarding the new graph and supervisor APIs. The later SDK change must replace
-the producer workflow size/SHA-256 and producer commit/tree metadata. Chat's
-runtime `validator_revision` model remains unchanged, and no SDK validator SHA
-is added to Chat.
+the producer workflow size/SHA-256 and producer commit/tree metadata and record
+the validation and attestation job names, static artifact names and record
+paths, pinned download and attestation actions, and protected environment
+variable prerequisite. Chat's runtime `validator_revision` model remains
+unchanged, and no SDK validator SHA is added to Chat.
 
 The selected validator commit and tree, plus its contract and schema digests,
 are recomputed from the exact clean checkout and embedded in the platform

@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -96,7 +97,18 @@ namespace OpenCoven
         private const uint STARTF_USESTDHANDLES = 0x00000100;
         private const uint HANDLE_FLAG_INHERIT = 0x00000001;
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+        private const uint JOB_OBJECT_ASSIGN_PROCESS = 0x0001;
+        private const uint JOB_OBJECT_SET_ATTRIBUTES = 0x0002;
         private const uint JOB_OBJECT_QUERY = 0x0004;
+        private const uint JOB_OBJECT_TERMINATE = 0x0008;
+        private const uint SYNCHRONIZE = 0x00100000;
+        private const uint OWNER_SECURITY_INFORMATION = 0x00000001;
+        private const uint DACL_SECURITY_INFORMATION = 0x00000004;
+        private const ushort SE_DACL_PROTECTED = 0x1000;
+        private const byte ACCESS_ALLOWED_ACE_TYPE = 0x00;
+        private const int SE_KERNEL_OBJECT = 6;
+        private const int AclSizeInformation = 2;
+        private const uint SDDL_REVISION_1 = 1;
         private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
         private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
         private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
@@ -126,43 +138,171 @@ namespace OpenCoven
                 throw new ArgumentException("Job Object name is outside the reviewed namespace.", "name");
             }
 
-            IntPtr handle = CreateJobObjectW(IntPtr.Zero, name);
-            if (handle == IntPtr.Zero)
+            SecurityIdentifier currentUser =
+                WindowsIdentity.GetCurrent().User;
+            if (currentUser == null)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateJobObjectW failed.");
+                throw new InvalidOperationException("Current Windows user SID is unavailable.");
+            }
+            string currentUserSid = currentUser.Value;
+            string sddl = "O:" + currentUserSid +
+                "D:P(A;;0x00100004;;;" + currentUserSid + ")";
+            IntPtr securityDescriptor;
+            uint securityDescriptorLength;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl,
+                    SDDL_REVISION_1,
+                    out securityDescriptor,
+                    out securityDescriptorLength))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Job Object security descriptor creation failed.");
             }
 
             try
             {
-                JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits =
-                    new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
-                IntPtr buffer = Marshal.AllocHGlobal(length);
+                SECURITY_ATTRIBUTES attributes = new SECURITY_ATTRIBUTES();
+                attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+                attributes.lpSecurityDescriptor = securityDescriptor;
+                attributes.bInheritHandle = false;
+                IntPtr handle = CreateJobObjectW(ref attributes, name);
+                if (handle == IntPtr.Zero)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "CreateJobObjectW failed.");
+                }
+
                 try
                 {
-                    Marshal.StructureToPtr(limits, buffer, false);
-                    if (!SetInformationJobObject(
-                            handle,
-                            JobObjectExtendedLimitInformation,
-                            buffer,
-                            (uint)length))
+                    ValidateJobObjectSecurity(handle, currentUserSid);
+                    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits =
+                        new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                    int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+                    IntPtr buffer = Marshal.AllocHGlobal(length);
+                    try
                     {
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "SetInformationJobObject failed.");
+                        Marshal.StructureToPtr(limits, buffer, false);
+                        if (!SetInformationJobObject(
+                                handle,
+                                JobObjectExtendedLimitInformation,
+                                buffer,
+                                (uint)length))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "SetInformationJobObject failed.");
+                        }
                     }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(buffer);
+                    }
+                    return new WindowsJobSupervisor(handle);
                 }
-                finally
+                catch
                 {
-                    Marshal.FreeHGlobal(buffer);
+                    CloseHandle(handle);
+                    throw;
                 }
-                return new WindowsJobSupervisor(handle);
             }
-            catch
+            finally
             {
-                CloseHandle(handle);
-                throw;
+                LocalFree(securityDescriptor);
+            }
+        }
+
+        private static void ValidateJobObjectSecurity(IntPtr handle, string currentUserSid)
+        {
+            IntPtr expectedSid;
+            if (!ConvertStringSidToSidW(currentUserSid, out expectedSid))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Current user SID conversion failed.");
+            }
+
+            IntPtr owner = IntPtr.Zero;
+            IntPtr dacl = IntPtr.Zero;
+            IntPtr descriptor = IntPtr.Zero;
+            try
+            {
+                uint status = GetSecurityInfo(
+                    handle,
+                    SE_KERNEL_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner,
+                    IntPtr.Zero,
+                    out dacl,
+                    IntPtr.Zero,
+                    out descriptor);
+                if (status != 0 ||
+                    owner == IntPtr.Zero ||
+                    dacl == IntPtr.Zero ||
+                    descriptor == IntPtr.Zero ||
+                    !EqualSid(owner, expectedSid))
+                {
+                    throw new InvalidOperationException(
+                        "Named Job Object owner or DACL is not the current user.");
+                }
+
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision) ||
+                    (control & SE_DACL_PROTECTED) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Named Job Object DACL is not protected.");
+                }
+
+                ACL_SIZE_INFORMATION aclInformation;
+                if (!GetAclInformation(
+                        dacl,
+                        out aclInformation,
+                        (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
+                        AclSizeInformation) ||
+                    aclInformation.AceCount != 1)
+                {
+                    throw new InvalidOperationException(
+                        "Named Job Object DACL must contain exactly one ACE.");
+                }
+
+                IntPtr acePointer;
+                if (!GetAce(dacl, 0, out acePointer) || acePointer == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        "Named Job Object DACL ACE could not be read.");
+                }
+                ACCESS_ALLOWED_ACE ace =
+                    (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(
+                        acePointer,
+                        typeof(ACCESS_ALLOWED_ACE));
+                IntPtr aceSid = new IntPtr(
+                    acePointer.ToInt64() +
+                    Marshal.OffsetOf(typeof(ACCESS_ALLOWED_ACE), "SidStart").ToInt64());
+                uint reopenedAccess = JOB_OBJECT_QUERY | SYNCHRONIZE;
+                uint prohibitedAccess = JOB_OBJECT_SET_ATTRIBUTES |
+                    JOB_OBJECT_ASSIGN_PROCESS |
+                    JOB_OBJECT_TERMINATE;
+                if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
+                    ace.Header.AceFlags != 0 ||
+                    ace.Mask != reopenedAccess ||
+                    (ace.Mask & prohibitedAccess) != 0 ||
+                    !EqualSid(aceSid, expectedSid))
+                {
+                    throw new InvalidOperationException(
+                        "Named Job Object DACL ACE is not exact query-only current-user access.");
+                }
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero)
+                {
+                    LocalFree(descriptor);
+                }
+                LocalFree(expectedSid);
             }
         }
 
@@ -875,6 +1015,30 @@ namespace OpenCoven
             internal bool bInheritHandle;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ACL_SIZE_INFORMATION
+        {
+            internal uint AceCount;
+            internal uint AclBytesInUse;
+            internal uint AclBytesFree;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ACE_HEADER
+        {
+            internal byte AceType;
+            internal byte AceFlags;
+            internal ushort AceSize;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ACCESS_ALLOWED_ACE
+        {
+            internal ACE_HEADER Header;
+            internal uint Mask;
+            internal uint SidStart;
+        }
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct STARTUPINFO
         {
@@ -964,7 +1128,60 @@ namespace OpenCoven
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr CreateJobObjectW(IntPtr attributes, string name);
+        private static extern IntPtr CreateJobObjectW(
+            ref SECURITY_ATTRIBUTES attributes,
+            string name);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            string stringSecurityDescriptor,
+            uint stringSecurityDescriptorRevision,
+            out IntPtr securityDescriptor,
+            out uint securityDescriptorSize);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertStringSidToSidW(
+            string stringSid,
+            out IntPtr sid);
+
+        [DllImport("advapi32.dll")]
+        private static extern uint GetSecurityInfo(
+            IntPtr handle,
+            int objectType,
+            uint securityInformation,
+            out IntPtr owner,
+            IntPtr group,
+            out IntPtr dacl,
+            IntPtr sacl,
+            out IntPtr securityDescriptor);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorControl(
+            IntPtr securityDescriptor,
+            out ushort control,
+            out uint revision);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetAclInformation(
+            IntPtr acl,
+            out ACL_SIZE_INFORMATION information,
+            uint informationLength,
+            int informationClass);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetAce(IntPtr acl, uint aceIndex, out IntPtr ace);
+
+        [DllImport("advapi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EqualSid(IntPtr sid1, IntPtr sid2);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

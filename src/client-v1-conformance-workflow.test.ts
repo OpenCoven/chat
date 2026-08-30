@@ -17,6 +17,11 @@ const validatorAvailable = existsSync(
 );
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
+const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
+const platformTemplateExpression = '${' + 'platform}';
+const downloadArtifactAction = 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c';
+const attestBuildProvenanceAction =
+  'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8';
 const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_IMAGE_OS: 'win25',
   OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.239.3',
@@ -88,6 +93,131 @@ function workflowStepEnvironment(step: string): string {
   return step.slice(start, end);
 }
 
+function workflowJob(workflow: string, name: string): string {
+  const marker = `  ${name}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) {
+    throw new Error(`missing workflow job: ${name}`);
+  }
+  const remainder = workflow.slice(start + marker.length);
+  const nextJob = /\n {2}[A-Za-z0-9_-]+:\n/u.exec(remainder);
+  const end = nextJob === null ? workflow.length : start + marker.length + nextJob.index;
+  return workflow.slice(start, end < 0 ? workflow.length : end);
+}
+
+function countOccurrences(value: string, expected: string): number {
+  return value.split(expected).length - 1;
+}
+
+function verifyHardenedWorkflowGraph(workflow: string): void {
+  const producer = workflowJob(workflow, 'platform-conformance');
+  const validation = workflowJob(workflow, 'validate-conformance-artifacts');
+  const attestation = workflowJob(workflow, 'attest-conformance-artifacts');
+  const aggregate = workflowJob(workflow, 'aggregate-conformance');
+
+  for (const [label, job] of [
+    ['producer', producer],
+    ['validator', validation],
+  ] as const) {
+    if (
+      job.includes('id-token: write') ||
+      job.includes('attestations: write') ||
+      !job.includes('permissions:\n      contents: read')
+    ) {
+      throw new Error(`${label} job has privileged permissions`);
+    }
+  }
+  if (
+    !producer.includes(`OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`) ||
+    !validation.includes(
+      `OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
+    ) ||
+    !attestation.includes(
+      `OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
+    ) ||
+    !producer.includes('$validatorRevision -cne $protectedValidatorRevision') ||
+    countOccurrences(
+      `${validation}\n${attestation}`,
+      '"$OPENCOVEN_VALIDATOR_REVISION_INPUT" != "$OPENCOVEN_PROTECTED_VALIDATOR_REVISION"',
+    ) !== 2
+  ) {
+    throw new Error('validator input is not bound to the protected environment variable');
+  }
+  if (
+    !producer.includes(`OPENCOVEN_VALIDATOR_REVISION: ${protectedValidatorExpression}`) ||
+    !validation.includes('repository: OpenCoven/sdk') ||
+    !validation.includes(`ref: ${protectedValidatorExpression}`) ||
+    validation.includes(`ref: ${validatorInputExpression}`)
+  ) {
+    throw new Error('validator execution does not use the protected environment revision');
+  }
+
+  const artifacts = ['darwin-arm64', 'linux-x64', 'win32-x64'];
+  if (
+    countOccurrences(workflow, 'uses: actions/upload-artifact@') !== 1 ||
+    !producer.includes(`name: client-v1-conformance-${matrixPlatformExpression}`) ||
+    validation.includes('uses: actions/upload-artifact@') ||
+    attestation.includes('uses: actions/upload-artifact@')
+  ) {
+    throw new Error('workflow has an alternate artifact upload path');
+  }
+  for (const platform of artifacts) {
+    const artifactName = `name: client-v1-conformance-${platform}`;
+    const recordPath = `.artifacts/client-v1-conformance-${platform}.json`;
+    if (
+      countOccurrences(validation, artifactName) !== 1 ||
+      countOccurrences(attestation, artifactName) !== 1 ||
+      !validation.includes(recordPath) ||
+      !attestation.includes(recordPath)
+    ) {
+      throw new Error(`workflow does not freshly download exact ${platform} artifact bytes`);
+    }
+  }
+  if (
+    countOccurrences(validation, `uses: ${downloadArtifactAction}`) !== 3 ||
+    countOccurrences(validation, 'uses: actions/download-artifact@') !== 3 ||
+    !validation.includes('name: Validate exact SDK schema, parser, and scanner') ||
+    !validation.includes(
+      `parsePlatformEvidence(text, \`${platformTemplateExpression} uploaded artifact\`, schema)`,
+    ) ||
+    !validation.includes('scanConformanceEvidence(record)') ||
+    !validation.includes("createHash('sha256').update(bytes).digest('hex')") ||
+    !validation.includes('serializeCanonicalJson(record) !== text') ||
+    validation.indexOf('name: Validate exact SDK schema, parser, and scanner') <
+      validation.lastIndexOf('\n      - ')
+  ) {
+    throw new Error('fresh validation is incomplete or followed by mutable execution');
+  }
+  if (
+    countOccurrences(attestation, `uses: ${downloadArtifactAction}`) !== 3 ||
+    countOccurrences(attestation, 'uses: actions/download-artifact@') !== 3 ||
+    countOccurrences(attestation, `uses: ${attestBuildProvenanceAction}`) !== 3 ||
+    countOccurrences(attestation, 'uses: actions/attest-build-provenance@') !== 3 ||
+    !attestation.includes('name: Compare freshly downloaded artifact digests') ||
+    countOccurrences(attestation, 'sha256sum') !== 3 ||
+    /(?:actions\/checkout|actions\/setup-node|pnpm\/action-setup|\bnode\b|\bpnpm\b|\bcargo\b|\brustc?\b|phase1-conformance|github-conformance-evidence)/u.test(
+      attestation.replaceAll(/client-v1-conformance/gu, ''),
+    )
+  ) {
+    throw new Error('attestation job executes untrusted content or skips fresh digest comparison');
+  }
+  if (
+    !attestation.includes('id-token: write') ||
+    !attestation.includes('attestations: write') ||
+    !aggregate.includes('needs: attest-conformance-artifacts')
+  ) {
+    throw new Error('attestation authority is not isolated before aggregation');
+  }
+  if (
+    countOccurrences(validation, 'name: ${{') > 0 ||
+    countOccurrences(attestation, 'name: ${{') > 0 ||
+    countOccurrences(validation, 'name: ${{ format(') > 0 ||
+    countOccurrences(attestation, 'name: ${{ format(') > 0
+  ) {
+    throw new Error('downloaded artifact names must be static');
+  }
+}
+
 async function workflowFixture() {
   const { verifyProtectedWorkflow } = await import(
     pathToFileURL(resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs')).href
@@ -157,7 +287,10 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain('        required: true');
     expect(fixture.workflow).toContain('        type: string');
     expect(fixture.workflow).toContain(
-      `          OPENCOVEN_VALIDATOR_REVISION: ${validatorInputExpression}`,
+      `          OPENCOVEN_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
+    );
+    expect(fixture.workflow).toContain(
+      `          OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
     );
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
@@ -319,6 +452,108 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
 });
 
 describe('Chat-local protected Windows conformance workflow', () => {
+  test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    expect(() => verifyHardenedWorkflowGraph(workflow)).not.toThrow();
+  });
+
+  test.each([
+    [
+      'OIDC on producer',
+      (workflow: string) =>
+        workflow.replace(
+          '  platform-conformance:\n',
+          '  platform-conformance:\n    permissions:\n      id-token: write\n',
+        ),
+    ],
+    [
+      'OIDC on validator',
+      (workflow: string) =>
+        workflow.replace(
+          '  validate-conformance-artifacts:\n',
+          '  validate-conformance-artifacts:\n    permissions:\n      id-token: write\n',
+        ),
+    ],
+    [
+      'validator input not matching protected variable',
+      (workflow: string) =>
+        workflow.replaceAll(
+          `OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
+          `OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${validatorInputExpression}`,
+        ),
+    ],
+    [
+      'validator execution in attestation',
+      (workflow: string) =>
+        workflow.replace(
+          '      - name: Compare freshly downloaded artifact digests',
+          '      - run: node validator/scripts/conformance-contract.mjs\n' +
+            '      - name: Compare freshly downloaded artifact digests',
+        ),
+    ],
+    [
+      'missing fresh attestation download',
+      (workflow: string) =>
+        workflow.replace(
+          / {6}- uses: actions\/download-artifact@[^\n]+\n {8}with:\n {10}name: client-v1-conformance-darwin-arm64\n {10}path: \.artifacts\n/u,
+          '',
+        ),
+    ],
+    [
+      'missing fresh validation download',
+      (workflow: string) => {
+        const validation = workflowJob(workflow, 'validate-conformance-artifacts');
+        return workflow.replace(
+          validation,
+          validation.replace(
+            / {6}- uses: actions\/download-artifact@[^\n]+\n {8}with:\n {10}name: client-v1-conformance-linux-x64\n {10}path: \.artifacts\n/u,
+            '',
+          ),
+        );
+      },
+    ],
+    [
+      'missing digest comparison',
+      (workflow: string) => workflow.replace('sha256sum "$record"', 'printf "%s" "$record"'),
+    ],
+    [
+      'alternate upload',
+      (workflow: string) =>
+        workflow.replace(
+          '  validate-conformance-artifacts:\n',
+          '  validate-conformance-artifacts:\n    steps:\n      - uses: actions/upload-artifact@bad\n',
+        ),
+    ],
+    [
+      'mutation after validation',
+      (workflow: string) =>
+        workflow.replace(
+          '\n  attest-conformance-artifacts:',
+          '\n      - run: node scripts/rewrite-evidence.mjs\n  attest-conformance-artifacts:',
+        ),
+    ],
+    [
+      'candidate execution in attestation',
+      (workflow: string) =>
+        workflow.replace(
+          '      - name: Compare freshly downloaded artifact digests',
+          '      - run: scripts/phase1-conformance.mjs\n' +
+            '      - name: Compare freshly downloaded artifact digests',
+        ),
+    ],
+    [
+      'dynamic downloaded artifact name',
+      (workflow: string) =>
+        workflow.replace(
+          'name: client-v1-conformance-darwin-arm64',
+          'name: $' + "{{ format('client-v1-conformance-{0}', inputs.platform) }}",
+        ),
+    ],
+  ])('rejects hardened graph negative: %s', (_label, mutate) => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    expect(() => verifyHardenedWorkflowGraph(mutate(workflow))).toThrow();
+  });
+
   test('passes validator revision only through step env and validates it before child construction', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
@@ -418,7 +653,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
 
     const platformSteps = workflow
-      .slice(stepsStart, workflow.indexOf('\n  aggregate-conformance:'))
+      .slice(stepsStart, workflow.indexOf('\n  validate-conformance-artifacts:'))
       .split('\n      - ')
       .slice(1);
     for (const step of platformSteps) {
@@ -453,6 +688,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
       for (const required of [
         'CreateProcessW',
         'CREATE_SUSPENDED',
+        'CreateJobObjectW',
+        'ConvertStringSecurityDescriptorToSecurityDescriptorW',
+        'GetSecurityDescriptorControl',
+        'GetAclInformation',
+        'GetAce',
+        'EqualSid',
+        'JOB_OBJECT_SET_ATTRIBUTES',
+        'JOB_OBJECT_ASSIGN_PROCESS',
+        'JOB_OBJECT_TERMINATE',
         'AssignProcessToJobObject',
         'IsProcessInJob',
         'ResumeThread',
@@ -493,6 +737,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(finalOutputCheck).toBeGreaterThan(finalQuotaCheck);
       expect(source).not.toContain('JOB_OBJECT_LIMIT_BREAKAWAY_OK');
       expect(source).not.toContain('JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK');
+      expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
     }
   });
 
@@ -544,6 +789,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Valid native Job binding did not reach native RPC startup.',
       'Directory quota excess did not fail closed.',
       'Successful root teardown did not terminate the retained Job handle descendant.',
+      'Query-only Job Object reopen was denied.',
+      'JOB_OBJECT_SET_ATTRIBUTES reopen unexpectedly succeeded.',
+      'JOB_OBJECT_ASSIGN_PROCESS reopen unexpectedly succeeded.',
+      'JOB_OBJECT_TERMINATE reopen unexpectedly succeeded.',
+      'Enabling silent breakaway unexpectedly succeeded.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }

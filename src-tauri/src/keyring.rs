@@ -1,12 +1,14 @@
 #[cfg(unix)]
 use std::{
     env, fs,
-    sync::{Mutex, MutexGuard},
+    sync::MutexGuard,
     time::{Duration, Instant},
 };
 
 #[cfg(any(windows, test))]
 use std::marker::PhantomData;
+#[cfg(any(unix, feature = "phase1-conformance"))]
+use std::sync::Mutex;
 use std::sync::OnceLock;
 
 #[cfg(any(windows, test, feature = "phase1-conformance"))]
@@ -646,26 +648,14 @@ impl NativeKeyring {
             return Err(KeyringError::Unavailable);
         }
         let grant_identity = crate::cleanup_grant::grant_identity(grant)?;
-        {
-            let mut issued = self
-                .issued_cleanup_grants
-                .lock()
-                .map_err(|_| KeyringError::CleanupGrantRejected)?;
-            if !issued.remove(&grant_identity) {
-                return Err(KeyringError::CleanupGrantRejected);
-            }
-        }
-        let scope =
-            crate::cleanup_grant::redeem(grant, service, self.cleanup_process_secret(false)?)?;
-        let _guard = acquire_mutation_lock()?;
-        for account in &scope.accounts {
-            let entry = Self::entry_for(scope.service.as_str(), account)?;
-            match entry.delete_credential() {
-                Ok(()) | Err(KeyringBackendError::NoEntry) => {}
-                Err(error) => return Err(map_keyring_error(error)),
-            }
-        }
-        Self::conformance_state_for_accounts(&scope.service, &scope.accounts)
+        let process_secret = self.cleanup_process_secret(false)?;
+        run_cleanup_transaction(
+            &self.issued_cleanup_grants,
+            &grant_identity,
+            acquire_mutation_lock,
+            || crate::cleanup_grant::prepare(grant, service, process_secret),
+            &mut NativeCleanupBackend,
+        )
     }
 
     fn conformance_state_for_accounts(
@@ -699,6 +689,89 @@ impl NativeKeyring {
             _ => Err(KeyringError::Failure),
         }
     }
+}
+
+#[cfg(feature = "phase1-conformance")]
+trait CleanupGrantRedemption {
+    fn scope(&self) -> &crate::cleanup_grant::CleanupGrantScope;
+    fn consume(self) -> Result<(), KeyringError>;
+}
+
+#[cfg(feature = "phase1-conformance")]
+impl CleanupGrantRedemption for crate::cleanup_grant::PreparedCleanupGrant {
+    fn scope(&self) -> &crate::cleanup_grant::CleanupGrantScope {
+        crate::cleanup_grant::PreparedCleanupGrant::scope(self)
+    }
+
+    fn consume(self) -> Result<(), KeyringError> {
+        crate::cleanup_grant::PreparedCleanupGrant::consume(self)
+    }
+}
+
+#[cfg(feature = "phase1-conformance")]
+trait CleanupBackend {
+    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError>;
+    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError>;
+}
+
+#[cfg(feature = "phase1-conformance")]
+struct NativeCleanupBackend;
+
+#[cfg(feature = "phase1-conformance")]
+impl CleanupBackend for NativeCleanupBackend {
+    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
+        let entry = NativeKeyring::entry_for(service, account)?;
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
+    }
+}
+
+#[cfg(feature = "phase1-conformance")]
+fn run_cleanup_transaction<Guard, Redemption, Acquire, Prepare, Backend>(
+    issued_cleanup_grants: &Mutex<std::collections::HashSet<String>>,
+    grant_identity: &str,
+    acquire_lock: Acquire,
+    prepare: Prepare,
+    backend: &mut Backend,
+) -> Result<(&'static str, bool, String), KeyringError>
+where
+    Acquire: FnOnce() -> Result<Guard, KeyringError>,
+    Prepare: FnOnce() -> Result<Redemption, KeyringError>,
+    Redemption: CleanupGrantRedemption,
+    Backend: CleanupBackend,
+{
+    let _mutation_guard = acquire_lock()?;
+    let mut issued = issued_cleanup_grants
+        .lock()
+        .map_err(|_| KeyringError::CleanupGrantRejected)?;
+    if !issued.contains(grant_identity) {
+        return Err(KeyringError::CleanupGrantRejected);
+    }
+
+    let redemption = prepare()?;
+    let scope = redemption.scope();
+    validate_conformance_cleanup_accounts(&scope.accounts)?;
+    for account in &scope.accounts {
+        backend.delete(&scope.service, account)?;
+    }
+    for account in &scope.accounts {
+        if backend.present(&scope.service, account)? {
+            return Err(KeyringError::Failure);
+        }
+    }
+
+    let digest = Sha256::digest(b"phase1-native-custody-empty-v1");
+    redemption.consume()?;
+    if !issued.remove(grant_identity) {
+        return Err(KeyringError::Failure);
+    }
+    Ok((native_keyring_backend(), true, format!("{digest:x}")))
 }
 
 #[cfg(feature = "phase1-conformance")]
@@ -1742,6 +1815,107 @@ mod tests {
         windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
         WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
     };
+    #[cfg(feature = "phase1-conformance")]
+    use super::{
+        run_cleanup_transaction, CleanupBackend, CleanupGrantRedemption, INSTALLATION_ID_ACCOUNT,
+    };
+    #[cfg(feature = "phase1-conformance")]
+    use crate::cleanup_grant::CleanupGrantScope;
+    #[cfg(feature = "phase1-conformance")]
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+    };
+
+    #[cfg(feature = "phase1-conformance")]
+    #[derive(Clone)]
+    struct FakeCleanupBackend {
+        entries: Arc<Mutex<HashMap<String, bool>>>,
+        delete_calls: Arc<AtomicUsize>,
+        fail_delete_call: Arc<Mutex<Option<usize>>>,
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    impl FakeCleanupBackend {
+        fn new(accounts: &[String], fail_delete_call: Option<usize>) -> Self {
+            Self {
+                entries: Arc::new(Mutex::new(
+                    accounts
+                        .iter()
+                        .cloned()
+                        .map(|account| (account, true))
+                        .collect(),
+                )),
+                delete_calls: Arc::new(AtomicUsize::new(0)),
+                fail_delete_call: Arc::new(Mutex::new(fail_delete_call)),
+            }
+        }
+
+        fn all_absent(&self) -> bool {
+            self.entries
+                .lock()
+                .expect("fake entries")
+                .values()
+                .all(|present| !present)
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    impl CleanupBackend for FakeCleanupBackend {
+        fn delete(&mut self, _service: &str, account: &str) -> Result<(), KeyringError> {
+            let call = self.delete_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            let mut failure = self.fail_delete_call.lock().expect("fake failure");
+            if *failure == Some(call) {
+                *failure = None;
+                return Err(KeyringError::Unavailable);
+            }
+            if let Some(present) = self.entries.lock().expect("fake entries").get_mut(account) {
+                *present = false;
+            }
+            Ok(())
+        }
+
+        fn present(&mut self, _service: &str, account: &str) -> Result<bool, KeyringError> {
+            Ok(*self
+                .entries
+                .lock()
+                .expect("fake entries")
+                .get(account)
+                .unwrap_or(&false))
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    struct FakeCleanupRedemption {
+        scope: CleanupGrantScope,
+        consumed: Arc<AtomicUsize>,
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    impl CleanupGrantRedemption for FakeCleanupRedemption {
+        fn scope(&self) -> &CleanupGrantScope {
+            &self.scope
+        }
+
+        fn consume(self) -> Result<(), KeyringError> {
+            self.consumed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    fn cleanup_test_scope() -> CleanupGrantScope {
+        CleanupGrantScope {
+            service: "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef".to_owned(),
+            accounts: vec![
+                INSTALLATION_ID_ACCOUNT.to_owned(),
+                "cave-client-v1:00000000-0000-4000-8000-000000000001".to_owned(),
+            ],
+        }
+    }
 
     #[cfg(feature = "phase1-conformance")]
     #[test]
@@ -1786,6 +1960,154 @@ mod tests {
             .unwrap(),
             "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
         );
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_lock_failure_preserves_the_same_authenticated_retry() {
+        let scope = cleanup_test_scope();
+        let identity = "grant-id".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let prepared = AtomicUsize::new(0);
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = FakeCleanupBackend::new(&scope.accounts, None);
+
+        assert!(matches!(
+            run_cleanup_transaction(
+                &issued,
+                &identity,
+                || Err::<(), _>(KeyringError::Unavailable),
+                || {
+                    prepared.fetch_add(1, Ordering::SeqCst);
+                    Ok(FakeCleanupRedemption {
+                        scope: scope.clone(),
+                        consumed: Arc::clone(&consumed),
+                    })
+                },
+                &mut backend,
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+        assert_eq!(prepared.load(Ordering::SeqCst), 0);
+        assert!(issued.lock().unwrap().contains(&identity));
+
+        assert!(run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || {
+                prepared.fetch_add(1, Ordering::SeqCst);
+                Ok(FakeCleanupRedemption {
+                    scope,
+                    consumed: Arc::clone(&consumed),
+                })
+            },
+            &mut backend,
+        )
+        .is_ok());
+        assert!(backend.all_absent());
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn partial_backend_delete_failure_retries_with_the_same_grant_and_scope() {
+        let scope = cleanup_test_scope();
+        let identity = "grant-id".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = FakeCleanupBackend::new(&scope.accounts, Some(2));
+
+        assert!(matches!(
+            run_cleanup_transaction(
+                &issued,
+                &identity,
+                || Ok(()),
+                || Ok(FakeCleanupRedemption {
+                    scope: scope.clone(),
+                    consumed: Arc::clone(&consumed),
+                }),
+                &mut backend,
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+        assert_eq!(consumed.load(Ordering::SeqCst), 0);
+        assert!(issued.lock().unwrap().contains(&identity));
+
+        assert!(run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || Ok(FakeCleanupRedemption {
+                scope,
+                consumed: Arc::clone(&consumed),
+            }),
+            &mut backend,
+        )
+        .is_ok());
+        assert!(backend.all_absent());
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
+        assert!(!issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn concurrent_cleanup_redeems_once_and_replay_after_success_is_rejected() {
+        let scope = cleanup_test_scope();
+        let identity = "grant-id".to_owned();
+        let issued = Arc::new(Mutex::new(HashSet::from([identity.clone()])));
+        let serial = Arc::new(Mutex::new(()));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let backend = FakeCleanupBackend::new(&scope.accounts, None);
+        let mut threads = Vec::new();
+
+        for _ in 0..2 {
+            let issued = Arc::clone(&issued);
+            let serial = Arc::clone(&serial);
+            let consumed = Arc::clone(&consumed);
+            let scope = scope.clone();
+            let identity = identity.clone();
+            let mut backend = backend.clone();
+            threads.push(std::thread::spawn(move || {
+                run_cleanup_transaction(
+                    &issued,
+                    &identity,
+                    || serial.lock().map_err(|_| KeyringError::Failure),
+                    || Ok(FakeCleanupRedemption { scope, consumed }),
+                    &mut backend,
+                )
+            }));
+        }
+        let results = threads
+            .into_iter()
+            .map(|thread| thread.join().expect("cleanup thread"))
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(KeyringError::CleanupGrantRejected)))
+                .count(),
+            1
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
+        assert!(backend.all_absent());
+
+        let mut replay_backend = backend.clone();
+        assert!(matches!(
+            run_cleanup_transaction(
+                &issued,
+                &identity,
+                || Ok(()),
+                || Ok(FakeCleanupRedemption {
+                    scope: cleanup_test_scope(),
+                    consumed: Arc::clone(&consumed),
+                }),
+                &mut replay_backend,
+            ),
+            Err(KeyringError::CleanupGrantRejected)
+        ));
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
     }
 
     #[test]
