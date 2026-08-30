@@ -40,6 +40,7 @@ import {
   captureOperatorFilesystemState,
 } from './phase1-evidence-runtime.mjs';
 import { curateLinuxSecretServiceEnvironment } from './phase1-linux-secret-service.mjs';
+import { prepareMacosKeychainSession } from './phase1-macos-keychain.mjs';
 import {
   assertSdkContractMatchesPhase1Lock,
   buildSchemaV2PlatformEvidence,
@@ -3423,6 +3424,7 @@ export async function runPhase1Conformance(options = parseArgs([])) {
   let observationTests;
   let covenProof;
   let packageObservations;
+  let macosKeychainSession;
 
   try {
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
@@ -3487,6 +3489,9 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       environment,
       results,
     });
+    if (schemaV2 && process.platform === 'darwin') {
+      macosKeychainSession = prepareMacosKeychainSession({ home: environment.HOME });
+    }
     nativeProof = await runNativeScenarios({
       artifactRoot: executionRoot,
       roots,
@@ -3518,6 +3523,19 @@ export async function runPhase1Conformance(options = parseArgs([])) {
   } catch (error) {
     infrastructureFailure = error;
     fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');
+  }
+
+  if (macosKeychainSession !== undefined) {
+    try {
+      macosKeychainSession.close();
+    } catch (error) {
+      infrastructureFailure ??= error;
+      for (const [id, assertion] of results) {
+        if (assertion.status === 'passed') {
+          results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
+        }
+      }
+    }
   }
 
   if (!results.has('phase1.native.missing-keychain-trust')) {

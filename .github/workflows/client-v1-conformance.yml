@@ -48,7 +48,7 @@ jobs:
       - name: Require frozen toolchain
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; const run = (command, args) => execFileSync(command, args, { encoding: ''utf8'' }).trim(); if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
       - name: Verify frozen harness bytes
-        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 119787 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''88cfa64a5739aac487f990d696a8a018ff6daf1ef87d366e583e123b96603089'') throw new Error(''Frozen harness bytes do not match'');"'
+        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 120390 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''28a337079dd05a6cc4eaaa0962b8ceaa3b62d50861cd9c38eff491df4a5b1032'') throw new Error(''Frozen harness bytes do not match'');"'
       - name: Produce platform evidence
         shell: bash
         env:

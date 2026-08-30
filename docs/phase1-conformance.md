@@ -109,6 +109,13 @@ ID and credential round trip, deletes the installation and credential
 entries, and requires the same empty-state digest afterward. Missing or locked
 native services fail the run.
 
+On macOS, the harness creates a temporary keychain and its User-domain
+preferences entirely below the process-owned isolated home. It selects and
+verifies that keychain as the isolated home's only default/search-list entry,
+performs an independent generic-password store/read/delete probe, and deletes
+the keychain before removing the owned root. The native RPC therefore never
+opens or mutates the operator's login keychain.
+
 The Linux workflow installs exact Ubuntu 24.04 versions of `dbus-daemon`,
 `gnome-keyring`, and `libsecret-tools`. It then creates a private mode-`0700`
 runtime root, starts a fresh `dbus-run-session` and foreground Secret Service,
@@ -118,8 +125,9 @@ deleting it. Only its validated `DBUS_SESSION_BUS_ADDRESS` and
 `XDG_RUNTIME_DIR` enter the curated harness subprocess environment.
 
 Windows runners must permit local-persistence Credential Manager entries.
-macOS runners must permit generic-password operations. No fallback to
-shared-memory custody is allowed in a schema-v2 run.
+macOS runners must provide `/usr/bin/security` and permit generic-password
+operations in the harness-created keychain. No fallback to shared-memory
+custody is allowed in a schema-v2 run.
 
 ## Protected workflow
 
