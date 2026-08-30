@@ -1471,6 +1471,17 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
   });
 
+  test('wraps operator-state comparison in the bounded isolation-proof stage', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const postRuntime = source.slice(
+      source.indexOf('const { operatorStateAfter, isolationRoots }'),
+      source.indexOf("const assertionResults = runPublicPhase1Stage('phase1.stage.assertion"),
+    );
+
+    expect(postRuntime).toContain("'phase1.stage.isolation-proof.failed'");
+    expect(postRuntime).toContain('operatorStateAfter: finalizeOperatorSafety({');
+  });
+
   test.each([
     [
       'timeout',

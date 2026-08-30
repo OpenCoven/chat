@@ -4554,20 +4554,23 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     }
   }
 
-  const operatorStateAfter = finalizeOperatorSafety({
-    primaryFailure,
-    cleanupFailure,
-    operatorStateBefore,
-  });
-  const isolationRoots = runPublicPhase1Stage('phase1.stage.isolation-proof.failed', () =>
-    isolationRootObservations.map((root) => ({
-      id: root.id,
-      ownershipVerified: root.ownershipVerified,
-      removedAfterRun:
-        typeof root.path === 'string'
-          ? !existsSync(root.path) && root.removedAfterRun !== false
-          : root.removedAfterRun === true,
-    })),
+  const { operatorStateAfter, isolationRoots } = runPublicPhase1Stage(
+    'phase1.stage.isolation-proof.failed',
+    () => ({
+      operatorStateAfter: finalizeOperatorSafety({
+        primaryFailure,
+        cleanupFailure,
+        operatorStateBefore,
+      }),
+      isolationRoots: isolationRootObservations.map((root) => ({
+        id: root.id,
+        ownershipVerified: root.ownershipVerified,
+        removedAfterRun:
+          typeof root.path === 'string'
+            ? !existsSync(root.path) && root.removedAfterRun !== false
+            : root.removedAfterRun === true,
+      })),
+    }),
   );
   const assertionResults = runPublicPhase1Stage('phase1.stage.assertion-recording.failed', () => {
     recordVerifiedIds(assertionRecorder, 'chat', evidenceChatAssertionIds);
