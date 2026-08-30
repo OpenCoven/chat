@@ -37,6 +37,7 @@ import {
   covenIdentityFailureDiagnostic,
   createCleanupAdoptionRecovery,
   diagnoseCovenLifecycleFailure,
+  extractVerifiedRunnerDiagnostic,
   finalizeOperatorSafety,
   NativeRpcClient,
   nativeAdapterTestEnvironment,
@@ -1099,6 +1100,29 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(timeout.message).toBe('Chat native RPC package failed (timeout).');
     expect(timeout.message).not.toContain('private compiler output');
+  });
+
+  test('extracts only one allowlisted verified-runner diagnostic from captured stderr', () => {
+    expect(
+      extractVerifiedRunnerDiagnostic(
+        [
+          'private compiler output',
+          'phase1-conformance: phase1.coven-identity.socket-mode',
+          'private operator path',
+        ].join('\n'),
+      ),
+    ).toBe('phase1.coven-identity.socket-mode');
+    expect(
+      extractVerifiedRunnerDiagnostic('phase1-conformance: private operator path'),
+    ).toBeUndefined();
+    expect(
+      extractVerifiedRunnerDiagnostic(
+        [
+          'phase1-conformance: phase1.coven-identity.socket-mode',
+          'phase1-conformance: phase1.stage.isolation.failed',
+        ].join('\n'),
+      ),
+    ).toBeUndefined();
   });
 
   test('classifies the failed Cave release build phase without exposing output', () => {

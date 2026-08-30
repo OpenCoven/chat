@@ -454,6 +454,21 @@ for (const [, category] of replacedProfileFailureCategories) {
 publicPhase1DiagnosticIds.add(
   'phase1.packaging.coven-client-lib-tests.lifecycle.replaced-profile.unknown',
 );
+
+export function extractVerifiedRunnerDiagnostic(stderr) {
+  if (typeof stderr !== 'string') {
+    return undefined;
+  }
+  const diagnostics = new Set();
+  for (const line of stripVTControlCharacters(stderr).split(/\r?\n/u)) {
+    const match = /^phase1-conformance: (phase1\.[a-z0-9.-]+)$/u.exec(line);
+    if (match !== null && publicPhase1DiagnosticIds.has(match[1])) {
+      diagnostics.add(match[1]);
+    }
+  }
+  return diagnostics.size === 1 ? [...diagnostics][0] : undefined;
+}
+
 export function publicPhase1FailureDiagnostic(error) {
   const pending = [error];
   const visited = new Set();
@@ -480,10 +495,9 @@ export function publicPhase1FailureDiagnostic(error) {
       'stderr' in current.result &&
       typeof current.result.stderr === 'string'
     ) {
-      for (const id of publicPhase1DiagnosticIds) {
-        if (current.result.stderr.includes(`phase1-conformance: ${id}\n`)) {
-          return id;
-        }
+      const diagnostic = extractVerifiedRunnerDiagnostic(current.result.stderr);
+      if (diagnostic !== undefined) {
+        return diagnostic;
       }
     }
   }
