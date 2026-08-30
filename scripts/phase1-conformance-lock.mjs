@@ -22,8 +22,10 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultLockPath = resolve(projectRoot, 'phase1-conformance.lock.json');
 const revisionPattern = /^[0-9a-f]{40}$/;
-const repositoryKeys = ['chat', 'sdk', 'cave', 'coven'];
+const legacyRepositoryKeys = ['chat', 'sdk', 'cave', 'coven'];
+const repositoryKeys = ['validator', ...legacyRepositoryKeys];
 const expectedRepositories = Object.freeze({
+  validator: 'OpenCoven/sdk',
   chat: 'OpenCoven/chat',
   sdk: 'OpenCoven/sdk',
   cave: 'OpenCoven/coven-cave',
@@ -91,6 +93,12 @@ export function createGitEnvironment(inheritedEnvironment = process.env) {
   return environment;
 }
 
+export function createGitCheckoutEnvironment(inheritedEnvironment = process.env) {
+  const environment = createGitEnvironment(inheritedEnvironment);
+  delete environment.GIT_ATTR_SOURCE;
+  return environment;
+}
+
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object.`);
@@ -132,12 +140,17 @@ function requireExistingFile(value, label) {
   return path;
 }
 
-function normalizeLockEntry(lockData, key) {
+function normalizeLockEntry(lockData, key, includeTree) {
   const entry = requireRecord(lockData[key], `phase1-conformance.lock.json ${key} entry`);
+  const expectedKeys = includeTree
+    ? ['repository', 'revision', 'tree']
+    : ['repository', 'revision'];
   requireExactKeys(
     entry,
-    ['repository', 'revision'],
-    `phase1-conformance.lock.json ${key} entry must contain exactly repository and revision.`,
+    expectedKeys,
+    includeTree
+      ? `phase1-conformance.lock.json ${key} entry must contain exactly repository, revision, and tree.`
+      : `phase1-conformance.lock.json ${key} entry must contain exactly repository and revision.`,
   );
 
   const expectedRepository = expectedRepositories[key];
@@ -152,10 +165,16 @@ function normalizeLockEntry(lockData, key) {
       `phase1-conformance.lock.json ${key}.revision must be a lowercase immutable 40-character commit SHA.`,
     );
   }
+  if (includeTree && (typeof entry.tree !== 'string' || !revisionPattern.test(entry.tree))) {
+    throw new Error(
+      `phase1-conformance.lock.json ${key}.tree must be a lowercase immutable 40-character tree SHA.`,
+    );
+  }
 
   return Object.freeze({
     repository: expectedRepository,
     revision: entry.revision,
+    ...(includeTree ? { tree: entry.tree } : {}),
   });
 }
 
@@ -170,31 +189,35 @@ export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
   }
 
   requireRecord(lockData, 'phase1-conformance.lock.json');
+  if (lockData.version !== 1 && lockData.version !== 2) {
+    throw new Error('phase1-conformance.lock.json version must be 1 or 2.');
+  }
+  const keys = lockData.version === 2 ? repositoryKeys : legacyRepositoryKeys;
   requireExactKeys(
     lockData,
-    ['version', ...repositoryKeys],
-    'phase1-conformance.lock.json must contain exactly version, chat, sdk, cave, and coven.',
+    ['version', ...keys],
+    lockData.version === 2
+      ? 'phase1-conformance.lock.json must contain exactly version, validator, chat, sdk, cave, and coven.'
+      : 'phase1-conformance.lock.json must contain exactly version, chat, sdk, cave, and coven.',
   );
-
-  if (lockData.version !== 1) {
-    throw new Error('phase1-conformance.lock.json version must be 1.');
-  }
-
   return Object.freeze({
     path,
-    version: 1,
-    chat: normalizeLockEntry(lockData, 'chat'),
-    sdk: normalizeLockEntry(lockData, 'sdk'),
-    cave: normalizeLockEntry(lockData, 'cave'),
-    coven: normalizeLockEntry(lockData, 'coven'),
+    version: lockData.version,
+    ...Object.fromEntries(
+      keys.map((key) => [
+        key,
+        normalizeLockEntry(lockData, key, lockData.version === 2 && key !== 'validator'),
+      ]),
+    ),
   });
 }
 
 function normalizeCheckoutRoots(checkoutRoots) {
   const roots = requireRecord(checkoutRoots, 'Phase 1 checkout roots');
   const normalizedRoots = {};
+  const keys = Object.hasOwn(roots, 'validatorRoot') ? repositoryKeys : legacyRepositoryKeys;
 
-  for (const key of repositoryKeys) {
+  for (const key of keys) {
     const label = `${key} checkout root`;
     const path = requirePathString(roots[`${key}Root`], label);
 
@@ -329,7 +352,14 @@ function runGit(repositoryRoot, args, context, input, trackedPathOutput = false)
 function readGitStatus(repositoryRoot, context) {
   return runGit(
     repositoryRoot,
-    ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+    [
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+      '--ignored=matching',
+      '--ignore-submodules=none',
+    ],
     context,
   );
 }
@@ -339,6 +369,7 @@ function summarizeGitStatus(statusOutput) {
     staged: 0,
     unstaged: 0,
     untracked: 0,
+    ignored: 0,
   };
   const records = statusOutput.split('\0');
 
@@ -353,6 +384,10 @@ function summarizeGitStatus(statusOutput) {
 
     if (indexStatus === '?' && worktreeStatus === '?') {
       summary.untracked += 1;
+      continue;
+    }
+    if (indexStatus === '!' && worktreeStatus === '!') {
+      summary.ignored += 1;
       continue;
     }
 
@@ -393,6 +428,9 @@ function formatDirtySummary(summary) {
   }
   if (summary.untracked > 0) {
     parts.push(formatBoundedCount(summary.untracked, 'untracked item', 'untracked items'));
+  }
+  if (summary.ignored > 0) {
+    parts.push(formatBoundedCount(summary.ignored, 'ignored item', 'ignored items'));
   }
 
   return parts.join(', ');
@@ -794,7 +832,12 @@ function assertNoTrackedFilterAttributes(repositoryRoot, context, trackedEntries
 function assertCleanCheckout(repositoryRoot, context) {
   const summary = summarizeGitStatus(readGitStatus(repositoryRoot, context));
 
-  if (summary.staged !== 0 || summary.unstaged !== 0 || summary.untracked !== 0) {
+  if (
+    summary.staged !== 0 ||
+    summary.unstaged !== 0 ||
+    summary.untracked !== 0 ||
+    summary.ignored !== 0
+  ) {
     throw new Error(`${context.label} is dirty (${formatDirtySummary(summary)}).`);
   }
 
@@ -805,7 +848,7 @@ function assertCleanPhase1CheckoutsWithLimits(checkoutRoots, limits) {
   const roots = normalizeCheckoutRoots(checkoutRoots);
   const summaries = {};
 
-  for (const key of repositoryKeys) {
+  for (const key of Object.keys(roots)) {
     const label = `${key} checkout`;
     const context = createRepositoryVerificationContext(label, limits);
     assertNoLocalExcludeRules(roots[key], context);
@@ -824,6 +867,32 @@ export function assertCleanPhase1Checkouts(checkoutRoots) {
   return assertCleanPhase1CheckoutsWithLimits(checkoutRoots, defaultVerificationLimits);
 }
 
+export function assertCleanPhase1Checkout(repositoryRoot, label = 'checkout') {
+  const root = requirePathString(repositoryRoot, `${label} root`);
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    throw new Error(`${label} root must be a directory.`);
+  }
+  const context = createRepositoryVerificationContext(label, defaultVerificationLimits);
+  assertNoLocalExcludeRules(root, context);
+  assertNoLocalAttributeRules(root, context);
+  assertNoReplacementRefs(root, context);
+  assertNoHiddenIndexEntries(root, context);
+  const trackedEntries = readTrackedEntries(root, context);
+  assertNoTrackedFilterAttributes(root, context, trackedEntries);
+  return assertCleanCheckout(root, context);
+}
+
+export function readPhase1CheckoutIdentity(repositoryRoot, label = 'checkout') {
+  const root = requirePathString(repositoryRoot, `${label} root`);
+  const context = createRepositoryVerificationContext(label, defaultVerificationLimits);
+  const revision = runGit(root, ['rev-parse', 'HEAD'], context).trim();
+  const tree = runGit(root, ['rev-parse', 'HEAD^{tree}'], context).trim();
+  if (!revisionPattern.test(revision) || !revisionPattern.test(tree)) {
+    throw new Error(`${label} does not have a canonical commit and tree identity.`);
+  }
+  return Object.freeze({ revision, tree });
+}
+
 function requireLockedRevision(lock, key) {
   const lockData = requireRecord(lock, 'Phase 1 conformance lock');
   const entry = requireRecord(lockData[key], `Phase 1 conformance lock ${key} entry`);
@@ -832,15 +901,28 @@ function requireLockedRevision(lock, key) {
     throw new Error(`Phase 1 conformance lock ${key} revision is invalid.`);
   }
 
-  return entry.revision;
+  if (
+    lockData.version === 2 &&
+    key !== 'validator' &&
+    (typeof entry.tree !== 'string' || !revisionPattern.test(entry.tree))
+  ) {
+    throw new Error(`Phase 1 conformance lock ${key} tree is invalid.`);
+  }
+
+  return {
+    revision: entry.revision,
+    tree: entry.tree,
+  };
 }
 
 function assertPhase1CheckoutHeadsWithLimits(lock, checkoutRoots, limits) {
   const roots = normalizeCheckoutRoots(checkoutRoots);
   const revisions = {};
+  const lockData = requireRecord(lock, 'Phase 1 conformance lock');
+  const keys = lockData.version === 2 ? repositoryKeys : legacyRepositoryKeys;
 
-  for (const key of repositoryKeys) {
-    const expectedRevision = requireLockedRevision(lock, key);
+  for (const key of keys) {
+    const expected = requireLockedRevision(lockData, key);
     const label = `${key} checkout`;
     const context = createRepositoryVerificationContext(label, limits);
     assertNoLocalExcludeRules(roots[key], context);
@@ -852,10 +934,18 @@ function assertPhase1CheckoutHeadsWithLimits(lock, checkoutRoots, limits) {
     assertCleanCheckout(roots[key], context);
     const actualRevision = runGit(roots[key], ['rev-parse', 'HEAD'], context).trim();
 
-    if (actualRevision !== expectedRevision) {
+    if (actualRevision !== expected.revision) {
       throw new Error(
-        `${key} checkout HEAD ${actualRevision} does not match expected ${expectedRevision}.`,
+        `${key} checkout HEAD ${actualRevision} does not match expected ${expected.revision}.`,
       );
+    }
+    if (expected.tree !== undefined) {
+      const actualTree = runGit(roots[key], ['rev-parse', 'HEAD^{tree}'], context).trim();
+      if (actualTree !== expected.tree) {
+        throw new Error(
+          `${key} checkout tree ${actualTree} does not match expected ${expected.tree}.`,
+        );
+      }
     }
 
     revisions[key] = actualRevision;

@@ -23,6 +23,7 @@ import * as phase1ConformanceLock from '../scripts/phase1-conformance-lock.mjs';
 const {
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
+  createGitCheckoutEnvironment,
   createGitEnvironment,
   phase1ConformanceTestOnly,
   readPhase1ConformanceLock,
@@ -311,8 +312,31 @@ describe('Phase 1 conformance lock', () => {
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     expect(readPhase1ConformanceLock()).toEqual({
       path: resolve(projectRoot, 'phase1-conformance.lock.json'),
-      version: 1,
-      ...expectedEntries,
+      version: 2,
+      validator: {
+        repository: 'OpenCoven/sdk',
+        revision: 'b42c03f00ab248504c8930564790a9744403abe5',
+      },
+      chat: {
+        repository: 'OpenCoven/chat',
+        revision: 'edd4728792321771496df58bfc0e6122908a96ec',
+        tree: 'c373902b48b06520450f520e669a34f72b64a35d',
+      },
+      sdk: {
+        repository: 'OpenCoven/sdk',
+        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        tree: '643be6db60736dc8bd7b01873dcd1c14f26d93ef',
+      },
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+        revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
+        tree: '5f5a2711552746695ffba6ff7a9e8af81647f194',
+      },
+      coven: {
+        repository: 'OpenCoven/coven',
+        revision: '721437b84026c042e431b0882dcd14fdb29ac07d',
+        tree: '7cc5988b5a06f3f279e5c034cf2228775bd2b0e0',
+      },
     });
   });
 
@@ -424,14 +448,25 @@ describe('Phase 1 checkout verification', () => {
     expect(environment.SSH_ASKPASS).toBe(devNull);
   });
 
+  test('omits HEAD-bound attribute resolution while creating a detached checkout', () => {
+    const environment = createGitCheckoutEnvironment({
+      PATH: process.env.PATH,
+      GIT_ATTR_SOURCE: 'hostile',
+    });
+
+    expect(environment.GIT_ATTR_SOURCE).toBeUndefined();
+    expect(environment.GIT_NO_LAZY_FETCH).toBe('1');
+    expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
+  });
+
   gitTest('accepts four clean checkouts at their locked revisions', () => {
     const fixture = createCheckoutFixture();
 
     expect(assertCleanPhase1Checkouts(fixture.roots)).toEqual({
-      chat: { staged: 0, unstaged: 0, untracked: 0 },
-      sdk: { staged: 0, unstaged: 0, untracked: 0 },
-      cave: { staged: 0, unstaged: 0, untracked: 0 },
-      coven: { staged: 0, unstaged: 0, untracked: 0 },
+      chat: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      sdk: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      cave: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      coven: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
     });
     expect(assertPhase1CheckoutHeads(fixture.lock, fixture.roots)).toEqual(fixture.revisions);
   });
@@ -461,6 +496,7 @@ appendFileSync(${JSON.stringify(markerPath)}, 'executed\\n');
       staged: 0,
       unstaged: 0,
       untracked: 0,
+      ignored: 0,
     });
     expect(existsSync(markerPath)).toBe(false);
     expect(assertPhase1CheckoutHeads(fixture.lock, fixture.roots).chat).toBe(
@@ -733,10 +769,10 @@ setInterval(() => {}, 1_000);
     writeFileSync(excludePath, '# local comments are allowed\n\n   \n# another comment\n');
 
     expect(assertCleanPhase1Checkouts(fixture.roots)).toEqual({
-      chat: { staged: 0, unstaged: 0, untracked: 0 },
-      sdk: { staged: 0, unstaged: 0, untracked: 0 },
-      cave: { staged: 0, unstaged: 0, untracked: 0 },
-      coven: { staged: 0, unstaged: 0, untracked: 0 },
+      chat: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      sdk: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      cave: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      coven: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
     });
     expect(assertPhase1CheckoutHeads(fixture.lock, fixture.roots)).toEqual(fixture.revisions);
   });
@@ -922,10 +958,10 @@ setInterval(() => {}, 1_000);
     writeFileSync(attributesPath, '# local comments are allowed\n\n\t \n# another comment\n');
 
     expect(assertCleanPhase1Checkouts(fixture.roots)).toEqual({
-      chat: { staged: 0, unstaged: 0, untracked: 0 },
-      sdk: { staged: 0, unstaged: 0, untracked: 0 },
-      cave: { staged: 0, unstaged: 0, untracked: 0 },
-      coven: { staged: 0, unstaged: 0, untracked: 0 },
+      chat: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      sdk: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      cave: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
+      coven: { staged: 0, unstaged: 0, untracked: 0, ignored: 0 },
     });
     expect(assertPhase1CheckoutHeads(fixture.lock, fixture.roots)).toEqual(fixture.revisions);
   });
@@ -1049,33 +1085,30 @@ setInterval(() => {}, 1_000);
     gitIntegrationTestTimeout,
   );
 
-  gitTest('allows committed gitignore rules', () => {
+  gitTest('rejects ignored files even when the ignore rule is committed', () => {
     const fixture = createCheckoutFixture();
     const ignoredName = 'committed-ignore-canary.txt';
     writeFileSync(resolve(fixture.roots.chatRoot, '.gitignore'), `${ignoredName}\n`);
     runGit(['add', '.gitignore'], fixture.roots.chatRoot);
     runGit(['commit', '-m', 'add reviewed ignore rule'], fixture.roots.chatRoot);
     const lockedRevision = runGit(['rev-parse', 'HEAD'], fixture.roots.chatRoot);
-    const lock = {
-      ...fixture.lock,
-      chat: {
-        repository: expectedEntries.chat.repository,
-        revision: lockedRevision,
-      },
-    };
-    const revisions = {
-      ...fixture.revisions,
-      chat: lockedRevision,
-    };
     writeFileSync(resolve(fixture.roots.chatRoot, ignoredName), 'reviewed ignored content\n');
 
-    expect(assertCleanPhase1Checkouts(fixture.roots)).toEqual({
-      chat: { staged: 0, unstaged: 0, untracked: 0 },
-      sdk: { staged: 0, unstaged: 0, untracked: 0 },
-      cave: { staged: 0, unstaged: 0, untracked: 0 },
-      coven: { staged: 0, unstaged: 0, untracked: 0 },
-    });
-    expect(assertPhase1CheckoutHeads(lock, fixture.roots)).toEqual(revisions);
+    expect(() => assertCleanPhase1Checkouts(fixture.roots)).toThrow(
+      'chat checkout is dirty (1 ignored item).',
+    );
+    expect(() =>
+      assertPhase1CheckoutHeads(
+        {
+          ...fixture.lock,
+          chat: {
+            repository: expectedEntries.chat.repository,
+            revision: lockedRevision,
+          },
+        },
+        fixture.roots,
+      ),
+    ).toThrow('chat checkout is dirty (1 ignored item).');
   });
 
   gitTest('does not let command-scope Git config hide untracked files', () => {
@@ -1908,6 +1941,46 @@ PATH=${JSON.stringify(originalPath)} exec git "$@"
     },
     gitIntegrationTestTimeout,
   );
+
+  gitTest('rejects a committed tree mismatch after the locked HEAD matches', () => {
+    const fixture = createCheckoutFixture();
+    const lock = {
+      version: 2,
+      validator: {
+        repository: 'OpenCoven/sdk',
+        revision: fixture.revisions.chat,
+      },
+      ...Object.fromEntries(
+        repositoryKeys.map((key) => [
+          key,
+          {
+            repository: expectedEntries[key].repository,
+            revision: fixture.revisions[key],
+            tree:
+              key === 'chat'
+                ? '0'.repeat(40)
+                : runGit(['rev-parse', 'HEAD^{tree}'], fixture.roots[`${key}Root`]),
+          },
+        ]),
+      ),
+    };
+
+    expect(() =>
+      assertPhase1CheckoutHeads(
+        {
+          ...lock,
+          validator: {
+            repository: 'OpenCoven/sdk',
+            revision: fixture.revisions.chat,
+          },
+        },
+        {
+          validatorRoot: fixture.roots.chatRoot,
+          ...fixture.roots,
+        },
+      ),
+    ).toThrow(/chat checkout tree/u);
+  });
 
   gitTest('rejects missing and non-path checkout roots explicitly', () => {
     const fixture = createCheckoutFixture();

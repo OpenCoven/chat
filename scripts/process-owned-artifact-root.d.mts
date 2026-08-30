@@ -14,6 +14,7 @@ export type ProcessOwnedArtifactRoot = {
     reportPath: string;
     destinationPath: string;
     secretScan(options: { artifactRoot: string; reportPath: string }): Promise<void>;
+    validateReport?(value: unknown, bytes: Buffer): void;
   }): Promise<string>;
   cleanup(): Promise<void>;
 };

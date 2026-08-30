@@ -5,14 +5,20 @@ export type Phase1Assertion = {
 };
 
 export const cargoBuildTimeoutMs: number;
+export function scrubEvidenceAuthorizationEnvironment<T extends NodeJS.ProcessEnv>(
+  environment?: T,
+): T;
 export function parseArgs(argv: string[]): {
   lockPath: string;
   scenario: 'all';
   retainSanitizedReport: string;
+  platform?: 'darwin-arm64' | 'linux-x64' | 'win32-x64';
+  outputPath?: string;
   chatSourceRoot: string;
-  sdkSourceRoot: string;
-  caveSourceRoot: string;
-  covenSourceRoot: string;
+  sdkSourceRoot?: string;
+  sdkValidatorSourceRoot?: string;
+  caveSourceRoot?: string;
+  covenSourceRoot?: string;
 };
 export function assertExactAssertionResults(assertions: Phase1Assertion[]): Phase1Assertion[];
 export function buildPhase1Report(options: {
@@ -62,6 +68,19 @@ export function classifyCavePackageFailure(result: {
   stdout?: string;
   stderr?: string;
 }): string | undefined;
+export function cloneExactCheckout(options: {
+  artifactRoot: {
+    rootPath: string;
+    trackChild(child: unknown, options?: { processGroup?: boolean }): unknown;
+    terminateChild(child: unknown): Promise<void>;
+  };
+  sourceRoot?: string;
+  destinationRoot: string;
+  repository: string;
+  revision: string;
+  environment: NodeJS.ProcessEnv;
+  label: string;
+}): Promise<void>;
 export class NativeRpcClient {
   constructor(child: unknown, options?: { shutdownTimeoutMs?: number });
   close(): Promise<void>;

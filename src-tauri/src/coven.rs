@@ -827,9 +827,7 @@ mod tests {
             thread,
         };
 
-        let root = std::env::current_dir()
-            .unwrap()
-            .join(format!(".c{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(".c{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();

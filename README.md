@@ -172,9 +172,12 @@ Local explicit-root canary runs still use
 and the script rejects staged, unstaged, or untracked changes before it
 verifies that the checked-out HEADs match the tracked lock.
 
-`phase1-conformance.lock.json` independently pins Chat, SDK, Cave, and Coven
-for the packaged real-authority gate. It does not replace or loosen the Phase 0
-canary lock.
+`phase1-conformance.lock.json` independently pins the SDK validator, packed SDK
+candidate, Chat source, Cave authority, and Coven producer for the packaged
+real-authority gate. The manual
+`.github/workflows/client-v1-conformance.yml` matrix reuses that journey and
+publishes only SDK-validated canonical schema-v2 platform records. It does not
+replace or loosen the Phase 0 canary lock.
 
 ## CI coverage
 

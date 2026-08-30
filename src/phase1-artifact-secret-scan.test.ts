@@ -7,6 +7,7 @@ import {
   APPROVED_PHASE1_DIAGNOSTIC_IDS,
   REQUIRED_PHASE1_ASSERTION_IDS,
   scanPhase1Artifacts,
+  scanPhase1ArtifactText,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   createProcessOwnedArtifactRoot,
@@ -82,6 +83,28 @@ async function scanReport(report: unknown) {
 }
 
 describe('Phase 1 retained-artifact secret scan', () => {
+  test('applies the primary redaction scan to a caller-validated schema-v2 record', () => {
+    const record = {
+      schemaVersion: 2,
+      issue: 'OpenCoven/sdk#38',
+      platform: 'darwin-arm64',
+    };
+    expect(
+      scanPhase1ArtifactText(`${JSON.stringify(record)}\n`, {
+        validateReport(value) {
+          expect(value).toEqual(record);
+        },
+      }),
+    ).toEqual(record);
+    expect(() =>
+      scanPhase1ArtifactText(`${JSON.stringify({ ...record, prompt: 'private user content' })}\n`, {
+        validateReport() {
+          throw new Error('the redaction scan must run first');
+        },
+      }),
+    ).toThrow(/prohibited secret or private content/u);
+  });
+
   test('accepts only the approved secret-free report schema', async () => {
     expect(APPROVED_PHASE1_DIAGNOSTIC_IDS).toContain('phase1.conformance.passed');
     const result = await scanReport(validReport());

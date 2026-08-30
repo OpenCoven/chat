@@ -1,0 +1,660 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { describe, expect, test } from 'vitest';
+
+import {
+  REQUIRED_PHASE1_ASSERTION_IDS,
+  validatePhase1SanitizedReport,
+} from '../scripts/phase1-artifact-secret-scan.mjs';
+import {
+  buildSchemaV2PlatformEvidence,
+  loadSdkEvidenceContract,
+  serializeValidatedSchemaV2PlatformEvidence,
+} from '../scripts/phase1-schema-v2-evidence.mjs';
+
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const validatorRoot =
+  process.env.OPENCOVEN_SDK_VALIDATOR_ROOT ??
+  resolve(projectRoot, '..', 'build-conformance-contract');
+const validatorAvailable = existsSync(
+  resolve(validatorRoot, 'scripts', 'conformance-contract.mjs'),
+);
+
+type JsonRecord = Record<string, unknown>;
+
+function sha256(bytes: string | Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function metadata(path: string, bytes: string | Buffer) {
+  const value = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, 'utf8');
+  return {
+    path,
+    size: value.byteLength,
+    sha256: sha256(value),
+  };
+}
+
+function passingPrimaryReport() {
+  return validatePhase1SanitizedReport({
+    schemaVersion: 1,
+    completed: true,
+    status: 'passed',
+    platform: { os: 'darwin', arch: 'arm64' },
+    versions: {
+      harness: '2.0.0',
+      node: '24.18.1',
+      rust: '1.95.0',
+      tauri: '2.11.4',
+    },
+    revisions: {
+      chat: 'f'.repeat(40),
+      sdk: 'a'.repeat(40),
+      cave: 'b'.repeat(40),
+      coven: 'c'.repeat(40),
+    },
+    artifactDigests: {
+      'sdk-core': '1'.repeat(64),
+      'sdk-cave': '2'.repeat(64),
+      'sdk-coven': '3'.repeat(64),
+      'sdk-root': '4'.repeat(64),
+    },
+    assertions: REQUIRED_PHASE1_ASSERTION_IDS.map((id) => ({
+      id,
+      status: 'passed',
+      diagnosticIds: ['phase1.assertion.passed'],
+    })),
+    summary: {
+      required: REQUIRED_PHASE1_ASSERTION_IDS.length,
+      passed: REQUIRED_PHASE1_ASSERTION_IDS.length,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+    },
+    diagnosticIds: ['phase1.conformance.passed'],
+  });
+}
+
+function reverseObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(reverseObjectKeys);
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .reverse()
+      .map(([key, nested]) => [key, reverseObjectKeys(nested)]),
+  );
+}
+
+async function fixture() {
+  const contract = await import(
+    pathToFileURL(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs')).href
+  );
+  const schemaText = readFileSync(
+    resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-evidence.schema.json'),
+    'utf8',
+  );
+  const registryText = readFileSync(
+    resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-assertions.json'),
+    'utf8',
+  );
+  const frozenLock = JSON.parse(
+    readFileSync(
+      resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-lock.json'),
+      'utf8',
+    ),
+  ) as JsonRecord;
+  const registry = contract.parseAssertionRegistry(
+    registryText,
+    'test assertion registry',
+  ) as JsonRecord;
+  const chat = {
+    repository: 'OpenCoven/chat',
+    commit: 'f'.repeat(40),
+    tree: 'e'.repeat(40),
+  };
+  const producer = {
+    status: 'compatible',
+    repository: 'OpenCoven/chat',
+    commit: chat.commit,
+    tree: chat.tree,
+    packageManifest: {
+      path: 'package.json',
+      size: 3_500,
+      sha256: '9'.repeat(64),
+    },
+    harness: {
+      path: 'scripts/phase1-conformance.mjs',
+      version: '2.0.0',
+      size: 120_000,
+      sha256: '8'.repeat(64),
+    },
+    command: 'test:phase1-conformance',
+    recordSchemaVersion: 2,
+    workflow: {
+      name: 'client-v1 conformance',
+      path: '.github/workflows/client-v1-conformance.yml',
+      size: 4_000,
+      sha256: '7'.repeat(64),
+      job: 'platform-conformance',
+      jobNameTemplate: 'platform-conformance ({platform})',
+      aggregationJob: 'aggregate-conformance',
+      aggregationJobName: 'aggregate-conformance',
+      aggregationRunnerLabels: ['ubuntu-24.04'],
+      environment: 'client-v1-conformance',
+      environmentId: '1',
+      artifactNameTemplate: 'client-v1-conformance-{platform}',
+      recordPathTemplate: '.artifacts/client-v1-conformance-{platform}.json',
+      sourceRef: 'refs/heads/main',
+      runnerLabels: {
+        'darwin-arm64': ['macos-14'],
+        'linux-x64': ['ubuntu-24.04'],
+        'win32-x64': ['windows-2025'],
+      },
+      signerWorkflow: 'OpenCoven/chat/.github/workflows/client-v1-conformance.yml',
+      signerDigest: chat.commit,
+      sourceDigest: chat.commit,
+      predicateType: 'https://slsa.dev/provenance/v1',
+      denySelfHostedRunners: true,
+    },
+  };
+  const compatibleLock = {
+    ...frozenLock,
+    sources: {
+      ...(frozenLock.sources as JsonRecord),
+      chat: {
+        ...((frozenLock.sources as JsonRecord).chat as JsonRecord),
+        ...chat,
+      },
+    },
+    evidenceProducer: producer,
+  };
+  const lockText = contract.serializeCanonicalJson(compatibleLock);
+  const parsedLock = contract.parseFrozenConformanceLock(
+    lockText,
+    'test compatible lock',
+  ) as JsonRecord;
+  const candidate = parsedLock.candidate as JsonRecord;
+  const sources = parsedLock.sources as {
+    cave: JsonRecord;
+    coven: JsonRecord;
+    chat: JsonRecord;
+  };
+  const assertions = registry.assertions as {
+    cave: string[];
+    sdk: string[];
+    chat: {
+      common: string[];
+      platforms: Record<string, string[]>;
+    };
+  };
+  const startedAt = '2026-08-29T04:00:00.000Z';
+  const completedAt = '2026-08-29T04:00:01.000Z';
+  const caveRecord = {
+    harness: 'scripts/client-v1-conformance.mjs',
+    issues: ['OpenCoven/coven-cave#4832', 'OpenCoven/coven-cave#4838'],
+    scope: 'cave-only',
+    ranAt: startedAt,
+    caveVersion: sources.cave.releaseVersion,
+    commit: sources.cave.commit,
+    platform: 'darwin-arm64',
+    nodeVersion: 'v24.18.1',
+    includeTtl: true,
+    authorityTakeover: {
+      authorityMode: 'enforce',
+      discoveryVersion: 2,
+      mechanism: 'hpke-bound-v1',
+    },
+    notCovered: [
+      'The SDK and Chat halves of #4838. Both live in other repositories; this run is the Cave half only.',
+      'The production Coven daemon. /familiars is served from a loopback fixture daemon in hub mode.',
+      'A genuinely remote peer. Off-machine ingress is exercised by making the listener classify a loopback request as forwarded.',
+      'The write scopes. Nothing enforces them yet — there are no write routes on this surface.',
+      'OAuth-backed flows and the desktop consent UI. Approval is driven through the admin HTTP route.',
+      'Cross-process pairing state. The pairing store is in-memory and process-local by contract.',
+    ],
+    findings: [
+      {
+        id: 'backslash-refusal-is-unreachable',
+        where: 'docs/api/client-v1.md — Reaching the API at all',
+        says: 'a malformed/noncanonical escaped target, backslash target, or escaped non-conversation target is answered 400 {"ok":false,"error":"invalid client v1 path"}',
+        measured:
+          'the "%" half holds; a "\\" is normalised to "/" by Next and answered 308 to the normalised target before proxy.ts runs, and that target is then refused 401 by the ordinary gate',
+        severity: 'documentation',
+        why: 'no handler is reached and nothing is served, so the gate still holds; the doc describes an answer no client will observe',
+      },
+      {
+        id: 'admin-unauthorized-envelope-is-unreachable',
+        where: 'docs/api/client-v1.md — Administrator routes, Authentication',
+        says: 'a mismatched or absent x-coven-cave-token is 401 unauthorized from requireClientV1Admin',
+        measured:
+          'the proxy\'s sidecar-token gate answers first, so the wire carries 401 {"ok":false,"error":"unauthorized"} and requireClientV1Admin\'s envelope is never produced on a Cave with a token configured',
+        severity: 'documentation',
+        why: 'the refusal is correct and same-status; only its body differs from the documented one, which a handler-level test cannot see',
+      },
+    ],
+    summary: {
+      total: assertions.cave.length,
+      passed: assertions.cave.length,
+      failed: 0,
+      skipped: 0,
+      status: 'passed',
+    },
+    assertions: assertions.cave.map((id) => ({
+      id,
+      result: 'pass',
+      detail: id === 'harness.assertion-coverage' ? 'complete' : '',
+    })),
+  };
+  const primaryReport = passingPrimaryReport();
+  primaryReport.revisions = {
+    chat: String(sources.chat.commit),
+    sdk: String(candidate.commit),
+    cave: String(sources.cave.commit),
+    coven: String(sources.coven.commit),
+  };
+  primaryReport.artifactDigests = {
+    'sdk-core': String((candidate.sdkPackages as Array<JsonRecord>)[0]?.sha256),
+    'sdk-cave': String((candidate.sdkPackages as Array<JsonRecord>)[1]?.sha256),
+    'sdk-coven': String((candidate.sdkPackages as Array<JsonRecord>)[2]?.sha256),
+    'sdk-root': String((candidate.sdkPackages as Array<JsonRecord>)[3]?.sha256),
+  };
+
+  const evidenceSchema = parsedLock.evidenceSchema as JsonRecord;
+  const contractBytes = readFileSync(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs'));
+  const validator = {
+    repository: 'OpenCoven/sdk',
+    commit: 'd'.repeat(40),
+    tree: 'c'.repeat(40),
+    contract: metadata('scripts/conformance-contract.mjs', contractBytes),
+    schema: {
+      path: evidenceSchema.path,
+      size: evidenceSchema.size,
+      sha256: evidenceSchema.sha256,
+    },
+  };
+  const artifacts = {
+    frozenLock: metadata('conformance/client-v1-cross-repository-lock.json', lockText),
+    assertionRegistry: metadata(
+      'conformance/client-v1-cross-repository-assertions.json',
+      registryText,
+    ),
+    releaseManifest: candidate.releaseManifest,
+    sdkPackages: candidate.sdkPackages,
+    candidateCaveFiles: candidate.cavePackageFiles,
+    caveAuthorityFiles: sources.cave.files,
+    consumerLock: sources.chat.consumerLock,
+    chatVendorFiles: sources.chat.vendorFiles,
+  };
+  const input = {
+    primaryReport,
+    caveRecord,
+    platform: 'darwin-arm64',
+    timing: { startedAt, completedAt },
+    sdkContract: {
+      frozenLock: parsedLock,
+      frozenLockText: lockText,
+      registry,
+      registryText,
+      schema: JSON.parse(schemaText),
+      contract,
+      validatorIdentity: {
+        repository: validator.repository,
+        commit: validator.commit,
+        tree: validator.tree,
+      },
+    },
+    verified: {
+      validator,
+      candidate: {
+        repository: candidate.repository,
+        commit: candidate.commit,
+        tree: candidate.tree,
+      },
+      cave: {
+        repository: sources.cave.repository,
+        commit: sources.cave.commit,
+        tree: sources.cave.tree,
+      },
+      coven: {
+        repository: sources.coven.repository,
+        commit: sources.coven.commit,
+        tree: sources.coven.tree,
+      },
+      chat: {
+        repository: sources.chat.repository,
+        commit: sources.chat.commit,
+        tree: sources.chat.tree,
+      },
+      harness: {
+        name: 'scripts/phase1-conformance.mjs',
+        version: '2.0.0',
+        repository: 'OpenCoven/chat',
+        commit: producer.commit,
+        tree: producer.tree,
+        invocationId: '123e4567-e89b-42d3-a456-426614174000',
+      },
+      artifacts,
+      environment: {
+        os: 'darwin',
+        arch: 'arm64',
+        nodeVersion: 'v24.18.1',
+        pnpmVersion: 'pnpm@10.34.0',
+        rustVersion: '1.95.0',
+        tauriVersion: '2.11.4',
+        nativeCustody: {
+          backend: 'macos-keychain',
+          available: true,
+        },
+        covenIdentity: {
+          backend: 'unix-peer-credentials',
+          available: true,
+        },
+      },
+      isolation: {
+        strategy: 'process-owned-temporary-roots',
+        network: 'loopback-only',
+        sourceCheckoutDependency: false,
+        workspaceLinkDependency: false,
+        retainedPrivatePaths: false,
+        retainedSocketHandles: false,
+        roots: ['cave-home', 'coven-home', 'consumer-home', 'native-credential-store'].map(
+          (id, index) => ({
+            id,
+            opaqueId: `${index + 1}`.repeat(32),
+            ownershipVerified: true,
+            removedAfterRun: true,
+          }),
+        ),
+        operatorState: ['cave-home', 'coven-home', 'native-credential-store', 'projects'].map(
+          (id, index) => ({
+            id,
+            beforeSha256: `${index + 5}`.repeat(64),
+            afterSha256: `${index + 5}`.repeat(64),
+          }),
+        ),
+      },
+    },
+  };
+
+  return { contract, input, registry };
+}
+
+describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', () => {
+  test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
+    const loaded = await loadSdkEvidenceContract({
+      validatorRoot,
+      validatorIdentity: {
+        repository: 'OpenCoven/sdk',
+        commit: 'b42c03f00ab248504c8930564790a9744403abe5',
+        tree: 'ae2f67e696e32ecd09d8527fdb863414e0621fd0',
+      },
+    });
+
+    expect(loaded.validator.commit).toBe('b42c03f00ab248504c8930564790a9744403abe5');
+    expect(loaded.frozenLock.schemaVersion).toBe(2);
+    expect(loaded.registry.schemaVersion).toBe(2);
+    expect(loaded.schema.$id).toBe(
+      'urn:opencoven:schema:client-v1-cross-repository-platform-evidence:2',
+    );
+    expect(loaded.validator.contract.path).toBe('scripts/conformance-contract.mjs');
+    expect(() =>
+      loaded.contract.assertEvidenceProducerCompatibility(loaded.frozenLock as never),
+    ).toThrow(/no schema-v2 platform evidence producer/u);
+  });
+
+  test('rejects a validator checkout at the wrong commit or tree', async () => {
+    await expect(
+      loadSdkEvidenceContract({
+        validatorRoot,
+        validatorIdentity: {
+          repository: 'OpenCoven/sdk',
+          commit: '0'.repeat(40),
+          tree: 'ae2f67e696e32ecd09d8527fdb863414e0621fd0',
+        },
+      }),
+    ).rejects.toThrow(/validator commit/u);
+    await expect(
+      loadSdkEvidenceContract({
+        validatorRoot,
+        validatorIdentity: {
+          repository: 'OpenCoven/sdk',
+          commit: 'b42c03f00ab248504c8930564790a9744403abe5',
+          tree: '0'.repeat(40),
+        },
+      }),
+    ).rejects.toThrow(/validator tree/u);
+  });
+
+  test('adapts a complete passing schema-v1 result into SDK-accepted canonical bytes', async () => {
+    const { contract, input, registry } = await fixture();
+    const evidence = buildSchemaV2PlatformEvidence(input);
+    const bytes = serializeValidatedSchemaV2PlatformEvidence(evidence, {
+      contract,
+      schema: input.sdkContract.schema,
+    });
+
+    expect(
+      contract.parsePlatformEvidence(bytes, 'chat platform evidence', input.sdkContract.schema),
+    ).toEqual(evidence);
+    expect(evidence.sdkAssertions.map(({ id }: { id: string }) => id)).toEqual(
+      (registry.assertions as { sdk: string[] }).sdk,
+    );
+    expect(evidence.chatAssertions.map(({ id }: { id: string }) => id)).toEqual([
+      ...(registry.assertions as { chat: { common: string[] } }).chat.common,
+      ...((registry.assertions as { chat: { platforms: Record<string, string[]> } }).chat.platforms[
+        'darwin-arm64'
+      ] ?? []),
+    ]);
+    expect(
+      [...evidence.sdkAssertions, ...evidence.chatAssertions].every(
+        ({ result }: { result: string }) => result === 'pass',
+      ),
+    ).toBe(true);
+    expect(bytes.endsWith('\n')).toBe(true);
+  });
+
+  test.each(['missing', 'duplicate', 'unexpected', 'skip', 'fail'])(
+    'rejects %s primary assertion outcomes',
+    async (kind) => {
+      const { input } = await fixture();
+      const assertions = input.primaryReport.assertions.map((entry) => ({
+        ...entry,
+        diagnosticIds: [...entry.diagnosticIds],
+      }));
+      const first = assertions[0];
+      if (first === undefined) {
+        throw new Error('primary assertion fixture is empty');
+      }
+      if (kind === 'missing') {
+        assertions.pop();
+      } else if (kind === 'duplicate') {
+        assertions.push({ ...first, diagnosticIds: [...first.diagnosticIds] });
+      } else if (kind === 'unexpected') {
+        assertions[0] = {
+          id: 'phase1.unexpected',
+          status: 'passed',
+          diagnosticIds: ['phase1.assertion.passed'],
+        };
+      } else if (kind === 'skip') {
+        assertions[0] = { ...first, status: 'skipped' as never };
+      } else {
+        assertions[0] = {
+          ...first,
+          status: 'failed',
+          diagnosticIds: ['phase1.assertion.failed'],
+        };
+      }
+
+      expect(() =>
+        buildSchemaV2PlatformEvidence({
+          ...input,
+          primaryReport: {
+            ...input.primaryReport,
+            assertions,
+            status: kind === 'fail' ? 'failed' : input.primaryReport.status,
+          },
+        }),
+      ).toThrow();
+    },
+  );
+
+  test.each([
+    ['candidate commit', ['candidate', 'commit']],
+    ['candidate tree', ['candidate', 'tree']],
+    ['validator commit', ['validator', 'commit']],
+    ['validator tree', ['validator', 'tree']],
+    ['Cave commit', ['cave', 'commit']],
+    ['Coven tree', ['coven', 'tree']],
+    ['Chat commit', ['chat', 'commit']],
+    ['harness tree', ['harness', 'tree']],
+  ])('rejects wrong %s provenance', async (_label, path) => {
+    const { input } = await fixture();
+    const verified = structuredClone(input.verified) as JsonRecord;
+    const [section, field] = path;
+    if (typeof section !== 'string' || typeof field !== 'string') {
+      throw new Error('invalid provenance mutation fixture');
+    }
+    (verified[section] as JsonRecord)[field] = '0'.repeat(40);
+
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified,
+      } as never),
+    ).toThrow();
+  });
+
+  test.each([
+    ['release manifest', ['releaseManifest']],
+    ['SDK tarball', ['sdkPackages', 0]],
+    ['candidate fixture', ['candidateCaveFiles', 0]],
+    ['Cave vector', ['caveAuthorityFiles', 4]],
+    ['consumer lock', ['consumerLock']],
+    ['Chat vendor tarball', ['chatVendorFiles', 3]],
+  ])('rejects %s drift', async (_label, path) => {
+    const { input } = await fixture();
+    const artifacts = structuredClone(input.verified.artifacts) as JsonRecord;
+    const [section, index] = path;
+    if (typeof section !== 'string') {
+      throw new Error('invalid artifact mutation fixture');
+    }
+    const target =
+      path.length === 1
+        ? (artifacts[section] as JsonRecord)
+        : ((artifacts[section] as JsonRecord[])[Number(index)] as JsonRecord);
+    target.sha256 = '0'.repeat(64);
+
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified: {
+          ...input.verified,
+          artifacts,
+        },
+      } as never),
+    ).toThrow();
+  });
+
+  test('rejects platform, backend, availability, and isolation mismatches', async () => {
+    const { input } = await fixture();
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified: {
+          ...input.verified,
+          environment: {
+            ...input.verified.environment,
+            arch: 'x64',
+          },
+        },
+      } as never),
+    ).toThrow(/platform|environment/u);
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified: {
+          ...input.verified,
+          environment: {
+            ...input.verified.environment,
+            nativeCustody: {
+              backend: 'linux-keyring',
+              available: true,
+            },
+          },
+        },
+      } as never),
+    ).toThrow(/backend|environment/u);
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified: {
+          ...input.verified,
+          environment: {
+            ...input.verified.environment,
+            covenIdentity: {
+              ...input.verified.environment.covenIdentity,
+              available: false,
+            },
+          },
+        },
+      } as never),
+    ).toThrow(/available|environment/u);
+    const isolation = structuredClone(input.verified.isolation);
+    const firstState = isolation.operatorState[0];
+    if (firstState === undefined) {
+      throw new Error('operator state fixture is empty');
+    }
+    firstState.afterSha256 = '0'.repeat(64);
+    expect(() =>
+      buildSchemaV2PlatformEvidence({
+        ...input,
+        verified: {
+          ...input.verified,
+          isolation,
+        },
+      }),
+    ).toThrow(/operator state|isolation/u);
+  });
+
+  test('rejects retained private values through the SDK scanner', async () => {
+    const { contract, input } = await fixture();
+    const evidence = buildSchemaV2PlatformEvidence(input);
+    const firstAssertion = evidence.caveRecord.assertions[0];
+    if (firstAssertion === undefined) {
+      throw new Error('Cave assertion fixture is empty');
+    }
+    firstAssertion.detail = '/Users/operator/private.json';
+
+    expect(() =>
+      serializeValidatedSchemaV2PlatformEvidence(evidence, {
+        contract,
+        schema: input.sdkContract.schema,
+      }),
+    ).toThrow(/private path|private/u);
+  });
+
+  test('is canonical and reproducible across input and object key ordering', async () => {
+    const { contract, input } = await fixture();
+    const first = serializeValidatedSchemaV2PlatformEvidence(buildSchemaV2PlatformEvidence(input), {
+      contract,
+      schema: input.sdkContract.schema,
+    });
+    const reordered = reverseObjectKeys(input) as typeof input;
+    const second = serializeValidatedSchemaV2PlatformEvidence(
+      buildSchemaV2PlatformEvidence(reordered),
+      {
+        contract,
+        schema: input.sdkContract.schema,
+      },
+    );
+
+    expect(second).toBe(first);
+  });
+});

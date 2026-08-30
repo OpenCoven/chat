@@ -562,7 +562,7 @@ describe('packed Cave authority artifact validation', () => {
     expect(() =>
       assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
     ).not.toThrow();
-  }, 10_000);
+  }, 30_000);
 
   test('rejects mutated installed Cave fixture bytes', () => {
     const fixture = createCaveAuthorityFixture();
@@ -579,7 +579,7 @@ describe('packed Cave authority artifact validation', () => {
     expect(() =>
       assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
     ).toThrow('Packed Cave fixture bytes did not match their pinned historical producer.');
-  }, 10_000);
+  }, 30_000);
 
   test('rejects mutated installed HPKE vector bytes', () => {
     const fixture = createCaveAuthorityFixture();
@@ -589,7 +589,7 @@ describe('packed Cave authority artifact validation', () => {
     expect(() =>
       assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
     ).toThrow('Packed Cave HPKE vectors did not match the reviewed producer revision.');
-  }, 10_000);
+  }, 30_000);
 
   test('rejects invalid Cave provenance JSON', () => {
     const fixture = createCaveAuthorityFixture();
@@ -599,7 +599,7 @@ describe('packed Cave authority artifact validation', () => {
     expect(() =>
       assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
     ).toThrow(SyntaxError);
-  }, 10_000);
+  }, 30_000);
 
   test('rejects a Cave provenance digest mismatch', () => {
     const fixture = createCaveAuthorityFixture();
@@ -612,7 +612,7 @@ describe('packed Cave authority artifact validation', () => {
     expect(() =>
       assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
     ).toThrow('Packed Cave fixture provenance was invalid.');
-  }, 10_000);
+  }, 30_000);
 
   test('rejects an unavailable Cave provenance commit', () => {
     const fixture = createCaveAuthorityFixture();
@@ -627,7 +627,7 @@ describe('packed Cave authority artifact validation', () => {
     ).toThrow(
       'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
     );
-  }, 10_000);
+  }, 30_000);
 
   test('rejects a valid but non-ancestor Cave provenance commit', () => {
     const fixture = createCaveAuthorityFixture();
@@ -642,7 +642,7 @@ describe('packed Cave authority artifact validation', () => {
     ).toThrow(
       'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
     );
-  }, 10_000);
+  }, 30_000);
 });
 
 describe('generated SDK release manifest validation', () => {

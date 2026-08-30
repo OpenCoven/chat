@@ -1,19 +1,27 @@
 {
-  "version": 1,
+  "version": 2,
+  "validator": {
+    "repository": "OpenCoven/sdk",
+    "revision": "b42c03f00ab248504c8930564790a9744403abe5"
+  },
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "20633346c444ded9e05ca5a3db45d74c28918d69"
+    "revision": "edd4728792321771496df58bfc0e6122908a96ec",
+    "tree": "c373902b48b06520450f520e669a34f72b64a35d"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "acc38488f00860d246c3c553375634d64806eabb"
+    "revision": "acc38488f00860d246c3c553375634d64806eabb",
+    "tree": "643be6db60736dc8bd7b01873dcd1c14f26d93ef"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "086b6421d8f5daa814e2ad1b3c47605d1ffb542b"
+    "revision": "2a0ff9237e94e652e477b22f60fd6d721b9e6451",
+    "tree": "5f5a2711552746695ffba6ff7a9e8af81647f194"
   },
   "coven": {
     "repository": "OpenCoven/coven",
-    "revision": "721437b84026c042e431b0882dcd14fdb29ac07d"
+    "revision": "721437b84026c042e431b0882dcd14fdb29ac07d",
+    "tree": "7cc5988b5a06f3f279e5c034cf2228775bd2b0e0"
   }
 }

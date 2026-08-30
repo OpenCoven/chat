@@ -5,11 +5,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "phase1-conformance")]
+use std::env as process_env;
 #[cfg(any(windows, test))]
 use std::marker::PhantomData;
 use std::sync::OnceLock;
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "phase1-conformance"))]
 use sha2::{Digest, Sha256};
 
 #[cfg(unix)]
@@ -23,6 +25,10 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::cave::NativeDiagnostic;
 
 const SERVICE: &str = "ai.opencoven.chat";
+#[cfg(feature = "phase1-conformance")]
+const CONFORMANCE_SERVICE_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE";
+#[cfg(any(feature = "phase1-conformance", test))]
+const CONFORMANCE_SERVICE_PREFIX: &str = "ai.opencoven.chat.phase1.";
 const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
 const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
 #[cfg(unix)]
@@ -30,6 +36,41 @@ const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
+
+#[cfg(any(feature = "phase1-conformance", test))]
+fn service_name_from_value(value: Option<&str>) -> Result<String, KeyringError> {
+    match value {
+        None => Ok(SERVICE.to_owned()),
+        Some(value)
+            if value
+                .strip_prefix(CONFORMANCE_SERVICE_PREFIX)
+                .is_some_and(|suffix| {
+                    suffix.len() == 32
+                        && suffix
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                }) =>
+        {
+            Ok(value.to_owned())
+        }
+        Some(_) => Err(KeyringError::Unavailable),
+    }
+}
+
+fn service_name() -> Result<String, KeyringError> {
+    #[cfg(feature = "phase1-conformance")]
+    {
+        match process_env::var(CONFORMANCE_SERVICE_ENV) {
+            Ok(value) => service_name_from_value(Some(&value)),
+            Err(process_env::VarError::NotPresent) => service_name_from_value(None),
+            Err(process_env::VarError::NotUnicode(_)) => Err(KeyringError::Unavailable),
+        }
+    }
+    #[cfg(not(feature = "phase1-conformance"))]
+    {
+        Ok(SERVICE.to_owned())
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum KeyringError {
@@ -949,10 +990,11 @@ impl NativeKeyring {
             }
             let _ = STORE_INITIALIZED.set(());
         }
+        let service = service_name()?;
         #[cfg(windows)]
         {
             return Entry::new_with_modifiers(
-                SERVICE,
+                &service,
                 account,
                 &std::collections::HashMap::from([("persistence", "Local")]),
             )
@@ -960,7 +1002,7 @@ impl NativeKeyring {
         }
         #[cfg(not(windows))]
         {
-            Entry::new(SERVICE, account).map_err(map_keyring_error)
+            Entry::new(&service, account).map_err(map_keyring_error)
         }
     }
 
@@ -974,6 +1016,94 @@ impl NativeKeyring {
         }
         Self::entry(&format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"))
     }
+
+    #[cfg(feature = "phase1-conformance")]
+    fn conformance_entry_present(entry: &Entry) -> Result<bool, KeyringError> {
+        match entry.get_secret() {
+            Ok(mut value) => {
+                value.zeroize();
+                Ok(true)
+            }
+            Err(KeyringBackendError::NoEntry) => Ok(false),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    fn validate_conformance_instance_id(instance_id: &str) -> Result<(), KeyringError> {
+        if instance_id.is_empty()
+            || instance_id.len() > 128
+            || instance_id.chars().any(char::is_control)
+        {
+            return Err(KeyringError::Failure);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    pub(crate) fn conformance_state(
+        &self,
+        instance_ids: &[String],
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let mut occupied = Self::conformance_entry_present(&Self::installation_id_entry()?)?;
+        for instance_id in instance_ids {
+            Self::validate_conformance_instance_id(instance_id)?;
+            occupied |= Self::conformance_entry_present(&Self::credential_entry(instance_id)?)?;
+        }
+        let digest = Sha256::digest(if occupied {
+            b"phase1-native-custody-occupied-v1".as_slice()
+        } else {
+            b"phase1-native-custody-empty-v1".as_slice()
+        });
+        Ok((native_keyring_backend(), !occupied, format!("{digest:x}")))
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    pub(crate) fn cleanup_conformance_entries(
+        &self,
+        instance_ids: &[String],
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        for entry in std::iter::once(Self::installation_id_entry()?).chain(
+            instance_ids
+                .iter()
+                .map(|instance_id| {
+                    Self::validate_conformance_instance_id(instance_id)?;
+                    Self::credential_entry(instance_id)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ) {
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => {}
+                Err(error) => return Err(map_keyring_error(error)),
+            }
+        }
+        drop(_guard);
+        self.conformance_state(instance_ids)
+    }
+}
+
+#[cfg(target_os = "macos")]
+const fn native_keyring_backend() -> &'static str {
+    "macos-keychain"
+}
+
+#[cfg(target_os = "linux")]
+const fn native_keyring_backend() -> &'static str {
+    "linux-keyring"
+}
+
+#[cfg(target_os = "windows")]
+const fn native_keyring_backend() -> &'static str {
+    "windows-credential-manager"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+const fn native_keyring_backend() -> &'static str {
+    "unsupported"
 }
 
 fn initialize_store() -> bool {
@@ -1020,10 +1150,34 @@ mod tests {
     use super::acquire_mutation_lock_with_timeout;
     use super::{
         acquire_windows_mutex, decode_legacy_windows_password, legacy_windows_mutex_name,
-        parse_stored_credential, validate_installation_id, windows_mutex_name,
-        windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
-        WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+        parse_stored_credential, service_name_from_value, validate_installation_id,
+        windows_mutex_name, windows_persistence_action, KeyringError, WindowsMutexApi,
+        WindowsMutexWait, WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
     };
+
+    #[test]
+    fn conformance_keyring_service_names_are_isolated_and_bounded() {
+        assert_eq!(service_name_from_value(None).unwrap(), "ai.opencoven.chat");
+        assert_eq!(
+            service_name_from_value(Some(
+                "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
+            ))
+            .unwrap(),
+            "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
+        );
+        for value in [
+            "",
+            "ai.opencoven.chat",
+            "ai.opencoven.chat.phase1.short",
+            "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef.extra",
+            "ai.opencoven.chat.phase1.0123456789ABCDEF0123456789ABCDEF",
+        ] {
+            assert!(matches!(
+                service_name_from_value(Some(value)),
+                Err(KeyringError::Unavailable)
+            ));
+        }
+    }
 
     #[test]
     fn accepts_canonical_lowercase_v4_installation_ids() {

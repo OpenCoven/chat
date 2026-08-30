@@ -39,7 +39,26 @@ pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_P
 pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
 pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+const CONFORMANCE_NATIVE_PROVIDER_SYSTEM: &str = "system-native";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeProviderMode {
+    Memory,
+    SystemNative,
+    MissingKeychainTrust,
+}
+
+fn native_provider_mode(value: Option<&str>) -> NativeResult<NativeProviderMode> {
+    match value {
+        None => Ok(NativeProviderMode::Memory),
+        Some(CONFORMANCE_NATIVE_PROVIDER_SYSTEM) => Ok(NativeProviderMode::SystemNative),
+        Some(CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST) => {
+            Ok(NativeProviderMode::MissingKeychainTrust)
+        }
+        Some(_) => Err(NativeDiagnostic::new("invalid_native_input", false)),
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -124,6 +143,12 @@ enum RpcCommand {
         page: NativePage,
         operation: NativeOperationInput,
     },
+    ConformanceNativeCustodyState {
+        instance_ids: Vec<String>,
+    },
+    ConformanceCleanupNativeCustody {
+        instance_ids: Vec<String>,
+    },
     ResetNativeState,
     Shutdown,
 }
@@ -153,6 +178,8 @@ impl RpcCommand {
             self,
             Self::CaveLaunch
                 | Self::CaveResetPairing { .. }
+                | Self::ConformanceNativeCustodyState { .. }
+                | Self::ConformanceCleanupNativeCustody { .. }
                 | Self::ResetNativeState
                 | Self::Shutdown
         )
@@ -435,6 +462,7 @@ impl CaveLauncher for ConformanceCaveLauncher {
 #[derive(Clone)]
 pub struct RpcRuntime {
     custody: Arc<dyn CredentialCustody>,
+    native_keyring: Option<NativeKeyring>,
     state: NativeConnectionState,
 }
 
@@ -449,6 +477,18 @@ impl RpcRuntime {
         Self {
             state: state_with_custody(Arc::clone(&custody), operations, mutations),
             custody,
+            native_keyring: None,
+        }
+    }
+
+    fn with_native_keyring(keyring: NativeKeyring) -> Self {
+        let custody: Arc<dyn CredentialCustody> = Arc::new(keyring.clone());
+        let operations = Arc::new(NativeOperationRegistry::default());
+        let mutations = Arc::new(NativeMutationQueue::default());
+        Self {
+            state: state_with_custody(Arc::clone(&custody), operations, mutations),
+            custody,
+            native_keyring: Some(keyring),
         }
     }
 
@@ -461,20 +501,26 @@ impl RpcRuntime {
             state: state_with_custody(Arc::clone(&custody), operations, mutations)
                 .using_test_coven_health(coven_health),
             custody,
+            native_keyring: None,
         }
     }
 
     fn from_environment() -> Result<Self, NativeDiagnostic> {
-        match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
-            Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
-                Ok(Self::with_custody(Arc::new(
-                    NativeKeyring::with_provider_preset(NativeProviderPreset::MissingKeychainTrust),
-                )))
+        let value = match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
+            Ok(value) => Some(value),
+            Err(env::VarError::NotPresent) => None,
+            Err(env::VarError::NotUnicode(_)) => {
+                return Err(NativeDiagnostic::new("invalid_native_input", false));
             }
-            Ok(_) | Err(env::VarError::NotUnicode(_)) => {
-                Err(NativeDiagnostic::new("invalid_native_input", false))
+        };
+        match native_provider_mode(value.as_deref())? {
+            NativeProviderMode::Memory => Ok(Self::new()),
+            NativeProviderMode::SystemNative => {
+                Ok(Self::with_native_keyring(NativeKeyring::default()))
             }
-            Err(env::VarError::NotPresent) => Ok(Self::new()),
+            NativeProviderMode::MissingKeychainTrust => Ok(Self::with_custody(Arc::new(
+                NativeKeyring::with_provider_preset(NativeProviderPreset::MissingKeychainTrust),
+            ))),
         }
     }
 
@@ -676,6 +722,36 @@ impl RpcRuntime {
                         )
                         .await
                 }))?
+            }
+            RpcCommand::ConformanceNativeCustodyState { instance_ids } => {
+                let keyring = self
+                    .native_keyring
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let (backend, empty, state_sha256) = keyring
+                    .conformance_state(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
+                json!({
+                    "backend": backend,
+                    "available": true,
+                    "empty": empty,
+                    "stateSha256": state_sha256,
+                })
+            }
+            RpcCommand::ConformanceCleanupNativeCustody { instance_ids } => {
+                let keyring = self
+                    .native_keyring
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let (backend, empty, state_sha256) = keyring
+                    .cleanup_conformance_entries(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
+                json!({
+                    "backend": backend,
+                    "available": true,
+                    "empty": empty,
+                    "stateSha256": state_sha256,
+                })
             }
             RpcCommand::ResetNativeState => {
                 self.reset_native_state();
@@ -914,6 +990,18 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                 operation: required_operation(object)?,
             })
         }
+        "conformance_native_custody_state" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            Ok(RpcCommand::ConformanceNativeCustodyState {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
+        }
+        "conformance_cleanup_native_custody" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            Ok(RpcCommand::ConformanceCleanupNativeCustody {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
+        }
         "conformance_reset_native_state" => {
             expect_exact_args(object, &[])?;
             Ok(RpcCommand::ResetNativeState)
@@ -1014,6 +1102,33 @@ fn required_pairing_request_id(
         return Err(("invalid_native_input", false));
     }
     Ok(value)
+}
+
+fn required_instance_ids(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, (&'static str, bool)> {
+    let values = object
+        .get(key)
+        .and_then(Value::as_array)
+        .filter(|values| values.len() <= 8)
+        .ok_or(("invalid_native_input", false))?;
+    let mut seen = std::collections::HashSet::new();
+    let mut instance_ids = Vec::with_capacity(values.len());
+    for value in values {
+        let instance_id = value
+            .as_str()
+            .filter(|value| {
+                !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+            })
+            .ok_or(("invalid_native_input", false))?
+            .to_owned();
+        if !seen.insert(instance_id.clone()) {
+            return Err(("invalid_native_input", false));
+        }
+        instance_ids.push(instance_id);
+    }
+    Ok(instance_ids)
 }
 
 fn required_page(object: &Map<String, Value>) -> Result<NativePage, (&'static str, bool)> {
@@ -1237,9 +1352,10 @@ mod tests {
     };
 
     use super::{
-        parse_command, parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher,
-        RpcCommand, RpcRuntime, SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID,
-        CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
+        native_provider_mode, parse_command, parse_request_line, read_bounded_line, BoundedLine,
+        ConformanceCaveLauncher, NativeProviderMode, RpcCommand, RpcRuntime,
+        SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NODE_PATH_ENV,
+        INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
         cave::{CaveLauncher, NativeDiagnostic, NativeResult},
@@ -1256,6 +1372,26 @@ mod tests {
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     #[test]
+    fn schema_v2_native_provider_mode_is_explicit_and_fail_closed() {
+        assert_eq!(
+            native_provider_mode(None).unwrap(),
+            NativeProviderMode::Memory
+        );
+        assert_eq!(
+            native_provider_mode(Some("system-native")).unwrap(),
+            NativeProviderMode::SystemNative
+        );
+        assert_eq!(
+            native_provider_mode(Some("missing-keychain-trust")).unwrap(),
+            NativeProviderMode::MissingKeychainTrust
+        );
+        assert_eq!(
+            native_provider_mode(Some("unsupported")).unwrap_err(),
+            NativeDiagnostic::new("invalid_native_input", false)
+        );
+    }
+
+    #[test]
     fn parses_the_bounded_coven_health_rpc_command() {
         let command = parse_command(
             "coven_health",
@@ -1269,6 +1405,49 @@ mod tests {
         .expect("coven health should be registered");
 
         assert!(matches!(command, RpcCommand::CovenHealth { .. }));
+    }
+
+    #[test]
+    fn parses_only_bounded_native_custody_proof_commands() {
+        let state = parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [INSTANCE_ID]})),
+        )
+        .expect("native custody state should be registered");
+        let cleanup = parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({"instanceIds": [INSTANCE_ID]})),
+        )
+        .expect("native custody cleanup should be registered");
+
+        assert!(matches!(
+            state,
+            RpcCommand::ConformanceNativeCustodyState { .. }
+        ));
+        assert!(matches!(
+            cleanup,
+            RpcCommand::ConformanceCleanupNativeCustody { .. }
+        ));
+        assert!(parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID
+            ]})),
+        )
+        .is_err());
+        assert!(parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({"instanceIds": [""]})),
+        )
+        .is_err());
     }
 
     #[test]

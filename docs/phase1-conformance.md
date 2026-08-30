@@ -1,72 +1,152 @@
 # Phase 1 real-authority conformance
 
-`pnpm test:phase1-conformance` is the release gate for the Phase 1 read-only
-desktop client. It packages exact reviewed Chat and SDK artifacts, builds the
-locked Cave and Coven authorities, drives the headless native RPC against a
-real isolated Cave, and retains one sanitized JSON report.
+Chat has one real-authority journey with two evidence surfaces:
 
-This gate is separate from `pnpm test:contract-canary`. The Phase 0 canary
-checks the frozen SDK package and contract boundary. The Phase 1 harness checks
-runtime discovery, pairing, credential handling, canonical reads, authority
-binding, daemon identity, and cleanup.
+- `pnpm test:phase1-conformance` keeps the strict schema-v1 report used by the
+  original Phase 1 gate.
+- `.github/workflows/client-v1-conformance.yml` invokes the same harness with
+  `--platform` and `--output`, adapts only a complete passing primary run, and
+  retains one canonical SDK schema-v2 platform record.
 
-## Prerequisites
+The schema-v2 path does not convert failures, blocks, skips, missing backends,
+or missing authorities into passes. It writes no public record unless every
+primary assertion is completed and passes, the primary secret scan succeeds,
+and the exact SDK validator accepts the final bytes.
 
-- Node.js `24.18.1`
-- pnpm `10.34.0` through Corepack
-- Rust `1.95.0`
-- clean local source repositories containing the revisions in
-  `phase1-conformance.lock.json`
-- macOS for the CI keychain lane
+## Frozen inputs
 
-Run:
+`phase1-conformance.lock.json` version 2 pins:
 
-```bash
-pnpm test:phase1-conformance
-```
+- temporary SDK validator revision
+  `b42c03f00ab248504c8930564790a9744403abe5`;
+- SDK package candidate
+  `acc38488f00860d246c3c553375634d64806eabb` and tree;
+- Cave authority
+  `2a0ff9237e94e652e477b22f60fd6d721b9e6451` and tree;
+- Coven producer
+  `721437b84026c042e431b0882dcd14fdb29ac07d` and tree; and
+- Chat production source
+  `edd4728792321771496df58bfc0e6122908a96ec` and tree.
 
-Override source repositories without moving them:
+The validator is separate from the packed SDK candidate. The harness clones
+the exact revisions into process-owned roots, rejects staged, unstaged,
+untracked, ignored, hidden-index, filtered, replacement-ref, submodule, tree,
+or HEAD drift, and executes only committed authority and harness bytes.
 
-```bash
-pnpm test:phase1-conformance -- \
-  --chat-root /path/to/chat \
-  --sdk-root /path/to/sdk \
-  --cave-root /path/to/coven-cave \
-  --coven-root /path/to/coven
-```
-
-The harness makes isolated detached clones at the exact locked revisions. It
-rejects dirty, substituted, hidden-index, filtered, replacement-ref,
-submodule, oversized, or timed-out checkouts before building anything.
-
-## Owned execution and evidence
-
-Execution uses process-created mode-`0700` roots under the real OS temporary
-directory. Cleanup verifies device, inode, real path, and an unpredictable
-ownership stamp; it never follows symlinks. Only direct `ChildProcess`
-instances started by the harness are terminated and reaped.
-
-`HOME`, XDG directories, temporary directories, the pnpm store, Cargo home,
-Cave home, and Coven home all point inside process-owned roots. The harness
-resolves the locked Rust toolchain binaries before isolation, places those
-binaries first on `PATH`, and does not expose the operator's `RUSTUP_HOME` or
-Cargo credentials to producer builds.
-
-Caller-selected paths are never recursively deleted or overwritten. The only
-retained file is:
+The validator checkout supplies these authoritative files at runtime:
 
 ```text
-test-results/phase1-conformance/report.json
+conformance/client-v1-cross-repository-lock.json
+conformance/client-v1-cross-repository-assertions.json
+conformance/client-v1-cross-repository-evidence.schema.json
+scripts/conformance-contract.mjs
+scripts/github-conformance-evidence.mjs
 ```
 
-The destination must not already exist. The report is copied atomically only
-after it is complete, unchanged across the scan, and the whole evidence root
-passes the secret scan.
+Chat does not copy or relax their validators.
 
-## Required assertions
+## Local commands
 
-Every ID must occur exactly once. Missing, duplicate, unexpected, or skipped
-IDs fail the run.
+The legacy internal report remains:
+
+```bash
+corepack pnpm@10.34.0 --ignore-workspace test:phase1-conformance
+```
+
+A schema-v2 platform run must use its exact output path:
+
+```bash
+node scripts/phase1-conformance.mjs \
+  --platform darwin-arm64 \
+  --output .artifacts/client-v1-conformance-darwin-arm64.json
+```
+
+Replace the platform with `linux-x64` or `win32-x64` on the matching native
+host. Platform and host OS/architecture mismatches fail before authority work.
+
+Public counterpart repositories are fetched from GitHub when local roots are
+not supplied. Operators may instead provide exact local repositories:
+
+```text
+OPENCOVEN_CHAT_ROOT
+OPENCOVEN_SDK_ROOT
+OPENCOVEN_SDK_VALIDATOR_ROOT
+OPENCOVEN_CAVE_ROOT
+OPENCOVEN_COVEN_ROOT
+```
+
+The corresponding command-line overrides are `--chat-root`, `--sdk-root`,
+`--validator-root`, `--cave-root`, and `--coven-root`. Overrides select a Git
+object source only; the harness still creates and verifies detached clean
+checkouts at the lock revisions.
+
+## Platform prerequisites
+
+Every lane requires:
+
+- Node.js `24.18.1`;
+- pnpm `10.34.0`;
+- Rust `1.95.0`;
+- Tauri CLI `2.11.4`;
+- outbound HTTPS access to the four public OpenCoven repositories when local
+  roots are absent; and
+- enough time and resources for the real five-minute Cave TTL leg plus Cave,
+  Chat native RPC, and Coven builds.
+
+Native custody must be genuinely available:
+
+| Platform | Runner | Custody backend | Coven identity backend |
+| --- | --- | --- | --- |
+| `darwin-arm64` | `macos-14` | macOS Keychain | Unix peer credentials |
+| `linux-x64` | `ubuntu-24.04` | Secret Service-backed Linux keyring | Unix peer credentials |
+| `win32-x64` | `windows-2025` | Windows Credential Manager | connected named-pipe client identity |
+
+The schema-v2 run gives the native RPC a random, bounded keyring service
+namespace. It proves that namespace is empty, performs the real installation
+ID and credential round trip, deletes the installation and credential
+entries, and requires the same empty-state digest afterward. Missing or locked
+native services fail the run.
+
+Linux runners must expose a working Secret Service session. Windows runners
+must permit local-persistence Credential Manager entries. macOS runners must
+permit generic-password operations. No fallback to shared-memory custody is
+allowed in a schema-v2 run.
+
+## Protected workflow
+
+The dedicated workflow is manually dispatchable and uses the protected
+environment `client-v1-conformance`. That environment must have:
+
+- required reviewers; and
+- deployment branch rules restricted to protected branches.
+
+The exact SDK workflow contract currently requires no application credential
+secret because all counterpart repositories are public. The workflow has only
+the three protected matrix jobs and one permissionless aggregation-confirmation
+job. It uses only the pinned official checkout, Node, pnpm, artifact upload,
+and build-provenance attestation actions required by the SDK validator.
+
+The harness and all candidate subprocesses receive a curated environment that
+does not forward GitHub tokens, OIDC request variables, Git credentials,
+operator Cargo credentials, or ambient proxy configuration. The official
+attestation action is the only step that consumes the job's OIDC capability.
+
+Each successful matrix expansion creates exactly one artifact:
+
+| Platform | Artifact | Record path |
+| --- | --- | --- |
+| `darwin-arm64` | `client-v1-conformance-darwin-arm64` | `.artifacts/client-v1-conformance-darwin-arm64.json` |
+| `linux-x64` | `client-v1-conformance-linux-x64` | `.artifacts/client-v1-conformance-linux-x64.json` |
+| `win32-x64` | `client-v1-conformance-win32-x64` | `.artifacts/client-v1-conformance-win32-x64.json` |
+
+Artifacts are retained for 30 days and attested with GitHub build provenance.
+The aggregation job cannot download, rewrite, upload, attest, or substitute
+records.
+
+## Evidence construction
+
+The schema-v1 report remains the primary outcome authority. It still requires
+these 15 IDs exactly once:
 
 1. `phase1.missing-cave.validated-launch`
 2. `phase1.pairing.create-pending-approve-exchange`
@@ -84,60 +164,86 @@ IDs fail the run.
 14. `phase1.native.missing-keychain-trust`
 15. `phase1.operator.homes-credentials-untouched`
 
-The runner uses Cave's packaged socket conformance for expiry, wrong-secret,
-shared-budget, `Retry-After`, replay, and HPKE listener-takeover evidence. The
-locked Chat `phase1-native-rpc` drives discovery, validated launch, pairing,
-credential reuse, revocation, and bounded reads. The locked Coven CLI runs a
-real foreground daemon and authenticates its same-user Unix-socket or Windows
-named-pipe status probe.
+For schema v2, all 15 must be `passed`. The adapter then:
 
-The native trust assertion launches a separate `phase1-native-rpc` subprocess
-with `OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET=missing-keychain-trust`.
-This finite, feature-gated preset selects the production `NativeKeyring`
-credential-custody boundary and rejects provider access as
-`secure_store_unavailable`; omitting the variable preserves the shared-memory
-conformance custody used by all other Phase 1 scenarios.
+1. retains Cave's exact `renderConformanceRecord` output from the locked Cave
+   engine, including every frozen Cave assertion in order;
+2. emits every frozen SDK assertion and every common plus platform Chat
+   assertion exactly once, in registry order, as `pass`;
+3. recomputes validator, candidate, Cave, Coven, Chat, harness, manifest,
+   tarball, fixture, vector, lockfile, registry, consumer-lock, and vendor
+   identities from exact checkout or artifact bytes;
+4. records exact toolchain and native backend metadata;
+5. records opaque process-owned root IDs and before/after operator-state
+   digests; and
+6. uses the SDK recursive canonical serializer: sorted object keys, preserved
+   array order, two-space JSON, LF endings, and one trailing newline.
 
-## Secret scan and report schema
+The schema-v2 path consumes Chat's frozen vendored SDK tarballs on every
+platform. It does not rebuild SDK tarballs per platform. The existing packed
+consumer verifier installs those exact tarballs in a workspace-independent
+consumer, verifies public exports, source/workspace exclusion, fixture
+ancestry, and HPKE vector bytes, then the real-authority journey proceeds.
 
-The scanner rejects pairing secrets, bearers, authorization headers, raw
-keychain values, protected request or response plaintext, user prompts,
-message bodies, attachments, private paths, and socket handles. Symlinks,
-non-JSON files, oversized trees, unknown fields, and unapproved identifiers
-also fail.
+## Isolation and redaction
 
-The retained schema allows only:
+Execution and report staging use process-created mode-`0700` roots under the
+real OS temporary directory. Cleanup verifies device, inode, real path, and an
+unpredictable ownership stamp, terminates only tracked child processes, and
+does not follow symlinks.
 
-- `schemaVersion`, `completed`, and pass/fail/block status;
-- OS, architecture, and tool versions;
-- exact Chat, SDK, Cave, and Coven revisions;
-- packaged artifact SHA-256 digests;
-- required assertion IDs and approved diagnostic IDs;
-- numeric pass/fail/block totals.
+Before execution and after cleanup, the harness hashes the operator's real
+Cave home, Coven home, and Cave project index with bounded traversal. Any
+change fails the run. Retained evidence contains only the resulting SHA-256
+values, never the paths or contents.
 
-Re-scan an existing evidence directory with:
+Before writing or retaining schema-v2 bytes:
 
-```bash
-node ./scripts/phase1-artifact-secret-scan.mjs \
-  --artifact-root ./test-results/phase1-conformance
+1. Chat's `phase1-artifact-secret-scan` rejects secret/private content; and
+2. the exact validator checkout runs the SDK schema, executable parser,
+   canonicalizer, and retained-evidence scanner.
+
+The record cannot contain a pairing secret, bearer, authorization header,
+prompt, message or attachment body, command output, private cause, raw path,
+URL, socket or pipe handle, operator identifier, or credential metadata.
+Diagnostics are stable IDs only.
+
+## Failure behavior
+
+- Missing, duplicate, unexpected, skipped, failed, or blocked primary
+  assertions produce no schema-v2 record.
+- A platform mismatch, unavailable native keyring, failed peer/pipe proof,
+  changed operator state, dirty checkout, artifact drift, scanner rejection,
+  timeout, or cleanup failure produces no schema-v2 record.
+- The output path is no-overwrite and is published only after a second
+  byte/inode snapshot confirms it did not change after scanning.
+- Partial subprocess output and skipped controls are never accepted as passes.
+
+At the temporary validator revision, the SDK frozen lock deliberately records
+the old Chat source as `blocked`. Therefore the protected workflow is expected
+to fail closed and **no platform evidence is claimed yet**. Before a real
+matrix run can pass, SDK #74 must contain a compatible producer entry naming
+the reviewed Chat producer commit, harness bytes, workflow bytes, protected
+environment, and artifact conventions.
+
+## SDK aggregation handoff
+
+After one protected run attempt successfully produces all three artifacts, the
+SDK-side reviewer records the run, job, deployment, artifact, and attestation
+identities in the reviewed evidence index. SDK release readiness downloads the
+artifacts itself, verifies the exact protected workflow and environment,
+verifies each attestation, re-renders the Cave record, and aggregates only the
+downloaded canonical bytes. Chat does not create or commit a synthetic
+aggregate.
+
+## Pending SDK #74 merge pin
+
+After SDK #74 merges with the compatible Chat producer entry, update only:
+
+```text
+phase1-conformance.lock.json → validator.revision
 ```
 
-## Failure interpretation
-
-- `failed` means a supported real path ran and did not satisfy its assertion.
-- `blocked` means the exact locked producer has no safe external control for
-  the required scenario. The harness does not replace that absence with a mock.
-- `passed` means the packaged path ran against the locked authority and the
-  retained evidence scanned clean.
-- A failed or timed-out producer subprocess is an infrastructure failure.
-  Partial stdout is never accepted as passing assertion evidence.
-
-At this revision the exact locked native RPC has no mode that uses the real OS
-keychain and Cave has no release-mode override for API-major or
-minimum-client incompatibility. Those assertions therefore block with
-`phase1.producer.native-trust-fixture-unavailable` and
-`phase1.producer.compatibility-control-unavailable` until producer support is
-reviewed and locked.
-
-The production surface remains read-only. Demo-only write interactions are not
-part of this gate and are not evidence for a production mutation path.
+from the temporary PR head to the SDK merge commit. The validator tree and
+contract/schema metadata are recomputed from that exact clean checkout, so no
+producer code or workflow surgery is required.

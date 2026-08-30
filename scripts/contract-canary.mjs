@@ -464,15 +464,48 @@ function assertFrozenArtifactDigests(lock, tarballs) {
   }
 }
 
-function frozenTarballs(lock) {
+function frozenTarballs(lock, chatRoot = root) {
   const tarballs = {};
   for (const [key, artifact] of Object.entries(SDK_ARTIFACTS)) {
-    const path = resolve(root, 'vendor', 'opencoven-sdk', lock.sdk.artifacts[key].vendorFile);
+    const path = resolve(chatRoot, 'vendor', 'opencoven-sdk', lock.sdk.artifacts[key].vendorFile);
     requirePath(path, `Frozen ${artifact.packageName} artifact`);
     tarballs[key] = path;
   }
   assertFrozenArtifactDigests(lock, tarballs);
   return tarballs;
+}
+
+export function verifyFrozenPackedConsumer({ chatRoot = root, sdkRoot, caveRoot }) {
+  requirePath(chatRoot, 'Chat root');
+  requirePath(sdkRoot, 'SDK root');
+  requirePath(caveRoot, 'Cave root');
+  const lock = readContractCanaryLock(resolve(chatRoot, 'contract-canary.lock.json'));
+  assertCleanContractCanaryCheckouts({ sdkRoot, caveRoot });
+  assertContractCanaryCheckoutHeads(lock, { sdkRoot, caveRoot });
+
+  let artifactContext;
+  try {
+    artifactContext = createOwnedTempDirectory({
+      prefix: 'opencoven-chat-frozen-consumer',
+    });
+    const harnessRoot = resolve(artifactContext.rootPath, 'chat-harness');
+    const frozen = frozenTarballs(lock, chatRoot);
+    createHarness(harnessRoot, frozen);
+    installHarnessOfflineAfterWarming(harnessRoot);
+    assertIsolatedPackedInstall(harnessRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot);
+    runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
+    runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
+    return Object.freeze({
+      releaseManifest: lock.sdk.releaseManifest,
+      sdkArtifacts: lock.sdk.artifacts,
+      caveArtifacts: lock.cave.artifacts,
+    });
+  } finally {
+    if (artifactContext !== undefined) {
+      cleanupOwnedTempRoot(artifactContext);
+    }
+  }
 }
 
 function safeTarEntries(tarball) {

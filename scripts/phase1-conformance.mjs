@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -14,22 +15,40 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
-import { devNull } from 'node:os';
-import { delimiter, dirname, resolve } from 'node:path';
+import { devNull, homedir } from 'node:os';
+import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   APPROVED_PHASE1_DIAGNOSTIC_IDS,
   REQUIRED_PHASE1_ASSERTION_IDS,
   scanPhase1Artifacts,
+  scanPhase1ArtifactText,
   validatePhase1SanitizedReport,
 } from './phase1-artifact-secret-scan.mjs';
 import {
+  assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
+  createGitCheckoutEnvironment,
   createGitEnvironment,
+  readPhase1CheckoutIdentity,
   readPhase1ConformanceLock,
 } from './phase1-conformance-lock.mjs';
+import {
+  buildIsolationEvidence,
+  captureOperatorFilesystemState,
+} from './phase1-evidence-runtime.mjs';
+import {
+  assertSdkContractMatchesPhase1Lock,
+  buildSchemaV2PlatformEvidence,
+  CANONICAL_PLATFORM_ENVIRONMENTS,
+  collectFrozenEvidenceArtifacts,
+  loadSdkEvidenceContract,
+  PHASE1_SCHEMA_V2_HARNESS_VERSION,
+  serializeValidatedSchemaV2PlatformEvidence,
+  verifySchemaV2ProducerCheckout,
+} from './phase1-schema-v2-evidence.mjs';
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,6 +91,21 @@ const approvedCommandFailureReasons = new Set([
   'turbopack-plugin-timeout',
   'worker-exited',
 ]);
+const evidenceAuthorizationVariables = new Set([
+  'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+  'ACTIONS_ID_TOKEN_REQUEST_URL',
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+]);
+
+export function scrubEvidenceAuthorizationEnvironment(environment = process.env) {
+  for (const key of Object.keys(environment)) {
+    if (evidenceAuthorizationVariables.has(key.toUpperCase())) {
+      delete environment[key];
+    }
+  }
+  return environment;
+}
 
 function killUntrackedOwnedChild(child) {
   if (ownedProcessGroupsSupported && child.exitCode === null && child.signalCode === null) {
@@ -86,9 +120,11 @@ function killUntrackedOwnedChild(child) {
 }
 
 function defaultSourceRoot(environmentName, repositoryName) {
-  return process.env[environmentName] === undefined
-    ? resolve(repositoriesParent, repositoryName)
-    : resolve(process.env[environmentName]);
+  if (process.env[environmentName] !== undefined) {
+    return resolve(process.env[environmentName]);
+  }
+  const candidate = resolve(repositoriesParent, repositoryName);
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 export class CommandExecutionError extends Error {
@@ -130,17 +166,22 @@ export function parseArgs(argv) {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
     retainSanitizedReport: defaultRetainedReport,
-    chatSourceRoot: resolve(process.env.OPENCOVEN_CHAT_ROOT ?? chatRepositoryRoot),
+    platform: undefined,
+    outputPath: undefined,
+    chatSourceRoot: resolve(process.env.OPENCOVEN_CHAT_ROOT ?? projectRoot),
     sdkSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_ROOT', 'sdk'),
+    sdkValidatorSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT', 'sdk'),
     caveSourceRoot: defaultSourceRoot('OPENCOVEN_CAVE_ROOT', 'coven-cave'),
     covenSourceRoot: defaultSourceRoot('OPENCOVEN_COVEN_ROOT', 'coven'),
   };
+  let retainedReportWasSet = false;
 
   const pathFlags = new Map([
     ['--lock', 'lockPath'],
     ['--retain-sanitized-report', 'retainSanitizedReport'],
     ['--chat-root', 'chatSourceRoot'],
     ['--sdk-root', 'sdkSourceRoot'],
+    ['--validator-root', 'sdkValidatorSourceRoot'],
     ['--cave-root', 'caveSourceRoot'],
     ['--coven-root', 'covenSourceRoot'],
   ]);
@@ -159,13 +200,49 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (argument === '--platform') {
+      const platform = requireString(argv[index + 1], '--platform');
+      if (!Object.hasOwn(CANONICAL_PLATFORM_ENVIRONMENTS, platform)) {
+        throw new Error(`unsupported schema-v2 platform ${platform}.`);
+      }
+      options.platform = platform;
+      index += 1;
+      continue;
+    }
+    if (argument === '--output') {
+      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      index += 1;
+      continue;
+    }
     const optionName = pathFlags.get(argument);
     if (optionName !== undefined) {
       options[optionName] = resolve(requireString(argv[index + 1], argument));
+      if (argument === '--retain-sanitized-report') {
+        retainedReportWasSet = true;
+      }
       index += 1;
       continue;
     }
     throw new Error(`phase1-conformance: unknown option: ${argument}`);
+  }
+
+  if ((options.platform === undefined) !== (options.outputPath === undefined)) {
+    throw new Error('schema-v2 --platform requires --output and vice versa.');
+  }
+  if (options.platform !== undefined) {
+    if (retainedReportWasSet) {
+      throw new Error(
+        'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
+      );
+    }
+    const expectedOutput = resolve(
+      projectRoot,
+      '.artifacts',
+      `client-v1-conformance-${options.platform}.json`,
+    );
+    if (options.outputPath !== expectedOutput) {
+      throw new Error('schema-v2 --output must match the platform artifact path.');
+    }
   }
 
   return options;
@@ -526,6 +603,68 @@ function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+function verifiedCheckoutIdentity(lock, key, rootPath) {
+  const identity = readPhase1CheckoutIdentity(rootPath, `${key} checkout`);
+  return {
+    repository: lock[key].repository,
+    commit: identity.revision,
+    tree: identity.tree,
+  };
+}
+
+function resolveOperatorHomes() {
+  const operatorHome = process.env.HOME ?? process.env.USERPROFILE ?? homedir();
+  if (typeof operatorHome !== 'string' || operatorHome.length === 0 || !isAbsolute(operatorHome)) {
+    throw new Error('Schema-v2 evidence requires an absolute operator home.');
+  }
+  const covenHome = process.env.COVEN_HOME ?? resolve(operatorHome, '.coven');
+  const caveHome = process.env.COVEN_CAVE_HOME ?? resolve(covenHome, 'cave');
+  if (!isAbsolute(covenHome) || !isAbsolute(caveHome)) {
+    throw new Error('Schema-v2 evidence requires absolute operator Cave and Coven homes.');
+  }
+  return { caveHome, covenHome };
+}
+
+async function collectToolchainMetadata(artifactRoot, environment, expected) {
+  const pnpm = await runCommand(
+    artifactRoot,
+    'pnpm version verification',
+    'corepack',
+    ['pnpm@10.34.0', '--version'],
+    {
+      cwd: projectRoot,
+      env: environment,
+      timeoutMs: 30_000,
+    },
+  );
+  const rust = await runCommand(artifactRoot, 'Rust version verification', 'rustc', ['--version'], {
+    cwd: projectRoot,
+    env: environment,
+    timeoutMs: 30_000,
+  });
+  const tauri = await runCommand(
+    artifactRoot,
+    'Tauri version verification',
+    'corepack',
+    ['pnpm@10.34.0', '--ignore-workspace', 'exec', 'tauri', '--version'],
+    {
+      cwd: projectRoot,
+      env: environment,
+      timeoutMs: 30_000,
+    },
+  );
+  const metadata = {
+    nodeVersion: process.version,
+    pnpmVersion: `pnpm@${pnpm.stdout.trim()}`,
+    rustVersion: /^rustc (\d+\.\d+\.\d+) /u.exec(rust.stdout.trim())?.[1],
+    tauriVersion: /^tauri-cli (\d+\.\d+\.\d+)$/u.exec(tauri.stdout.trim())?.[1],
+  };
+  if (JSON.stringify(metadata) !== JSON.stringify(expected)) {
+    throw new Error('Observed toolchain does not match the SDK frozen contract.');
+  }
+  return metadata;
+}
+
 function sha256Tree(rootPath) {
   const digest = createHash('sha256');
   const visit = (directoryPath, relativeRoot = '') => {
@@ -554,51 +693,153 @@ function sha256Tree(rootPath) {
   return digest.digest('hex');
 }
 
-async function cloneExactCheckout({
+export async function cloneExactCheckout({
   artifactRoot,
   sourceRoot,
   destinationRoot,
+  repository,
   revision,
   environment,
   label,
 }) {
-  if (!statSync(sourceRoot).isDirectory()) {
-    throw new Error(`${label} source root is unavailable.`);
-  }
-  await runCommand(
-    artifactRoot,
-    `${label} clone`,
-    'git',
-    [
-      '-c',
-      'credential.helper=',
-      '-c',
-      `core.hooksPath=${devNull}`,
-      '-c',
-      'protocol.file.allow=always',
-      'clone',
-      '--shared',
-      '--no-checkout',
-      '--quiet',
-      sourceRoot,
-      destinationRoot,
-    ],
-    {
-      cwd: projectRoot,
-      env: {
-        ...environment,
-        ...createGitEnvironment(environment),
-        GIT_ALLOW_PROTOCOL: 'file',
+  const localSource =
+    typeof sourceRoot === 'string' && existsSync(sourceRoot) && statSync(sourceRoot).isDirectory()
+      ? sourceRoot
+      : undefined;
+  const source = localSource ?? `https://github.com/${repository}.git`;
+  const checkoutEnvironment = createGitCheckoutEnvironment(environment);
+  if (localSource !== undefined) {
+    await runCommand(
+      artifactRoot,
+      `${label} local clone`,
+      'git',
+      [
+        '-c',
+        `core.hooksPath=${devNull}`,
+        'clone',
+        '--local',
+        '--no-hardlinks',
+        '--no-checkout',
+        '--quiet',
+        localSource,
+        destinationRoot,
+      ],
+      {
+        cwd: projectRoot,
+        env: {
+          ...environment,
+          ...checkoutEnvironment,
+          GIT_ALLOW_PROTOCOL: 'file',
+        },
       },
-    },
-  );
+    );
+  } else {
+    mkdirSync(destinationRoot, { mode: 0o700 });
+    await runCommand(
+      artifactRoot,
+      `${label} repository initialization`,
+      'git',
+      ['-c', `core.hooksPath=${devNull}`, 'init', '--quiet'],
+      {
+        cwd: destinationRoot,
+        env: {
+          ...environment,
+          ...checkoutEnvironment,
+        },
+      },
+    );
+    await runCommand(
+      artifactRoot,
+      `${label} origin configuration`,
+      'git',
+      ['-c', `core.hooksPath=${devNull}`, 'remote', 'add', 'origin', source],
+      {
+        cwd: destinationRoot,
+        env: {
+          ...environment,
+          ...checkoutEnvironment,
+        },
+      },
+    );
+    await runCommand(
+      artifactRoot,
+      `${label} fetch`,
+      'git',
+      [
+        '-c',
+        'credential.helper=',
+        '-c',
+        `core.hooksPath=${devNull}`,
+        '-c',
+        'protocol.https.allow=always',
+        'fetch',
+        '--quiet',
+        '--no-tags',
+        '--depth=1',
+        'origin',
+        revision,
+      ],
+      {
+        cwd: destinationRoot,
+        env: {
+          ...environment,
+          ...checkoutEnvironment,
+          GIT_ALLOW_PROTOCOL: 'https',
+        },
+      },
+    );
+  }
   await runCommand(
     artifactRoot,
     `${label} checkout`,
     'git',
-    ['-c', `core.hooksPath=${devNull}`, 'checkout', '--detach', '--force', revision],
-    { cwd: destinationRoot, env: { ...environment, ...createGitEnvironment(environment) } },
+    [
+      '-c',
+      `core.hooksPath=${devNull}`,
+      'checkout',
+      '--detach',
+      '--force',
+      localSource === undefined ? 'FETCH_HEAD' : revision,
+    ],
+    { cwd: destinationRoot, env: { ...environment, ...checkoutEnvironment } },
   );
+}
+
+function currentProducerIdentity() {
+  const environment = createGitEnvironment(process.env);
+  const run = (value) =>
+    execFileSync('git', ['-C', projectRoot, 'rev-parse', value], {
+      encoding: 'utf8',
+      env: environment,
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    }).trim();
+  return {
+    revision: run('HEAD'),
+    tree: run('HEAD^{tree}'),
+  };
+}
+
+async function cloneProducerCheckout(artifactRoot, environment) {
+  const identity = currentProducerIdentity();
+  const producerRoot = resolve(artifactRoot.rootPath, 'checkouts', 'producer');
+  await cloneExactCheckout({
+    artifactRoot,
+    sourceRoot: projectRoot,
+    destinationRoot: producerRoot,
+    repository: 'OpenCoven/chat',
+    revision: identity.revision,
+    environment,
+    label: 'Chat evidence producer',
+  });
+  assertCleanPhase1Checkout(producerRoot, 'Chat evidence producer checkout');
+  const cloned = readPhase1CheckoutIdentity(producerRoot, 'Chat evidence producer checkout');
+  if (cloned.revision !== identity.revision || cloned.tree !== identity.tree) {
+    throw new Error('Chat evidence producer checkout identity changed during cloning.');
+  }
+  return { producerRoot, producerIdentity: cloned };
 }
 
 async function createExactCheckouts(artifactRoot, options, lock, environment) {
@@ -610,10 +851,23 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     caveRoot: resolve(checkoutsRoot, 'cave'),
     covenRoot: resolve(checkoutsRoot, 'coven'),
   };
+  if (options.platform !== undefined) {
+    roots.validatorRoot = resolve(checkoutsRoot, 'validator');
+    await cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.sdkValidatorSourceRoot,
+      destinationRoot: roots.validatorRoot,
+      repository: lock.validator.repository,
+      revision: lock.validator.revision,
+      environment,
+      label: 'SDK validator',
+    });
+  }
   await cloneExactCheckout({
     artifactRoot,
     sourceRoot: options.chatSourceRoot,
     destinationRoot: roots.chatRoot,
+    repository: lock.chat.repository,
     revision: lock.chat.revision,
     environment,
     label: 'Chat',
@@ -622,6 +876,7 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     artifactRoot,
     sourceRoot: options.sdkSourceRoot,
     destinationRoot: roots.sdkRoot,
+    repository: lock.sdk.repository,
     revision: lock.sdk.revision,
     environment,
     label: 'SDK',
@@ -630,6 +885,7 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     artifactRoot,
     sourceRoot: options.caveSourceRoot,
     destinationRoot: roots.caveRoot,
+    repository: lock.cave.repository,
     revision: lock.cave.revision,
     environment,
     label: 'Cave',
@@ -638,12 +894,26 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     artifactRoot,
     sourceRoot: options.covenSourceRoot,
     destinationRoot: roots.covenRoot,
+    repository: lock.coven.repository,
     revision: lock.coven.revision,
     environment,
     label: 'Coven',
   });
   assertCleanPhase1Checkouts(roots);
-  assertPhase1CheckoutHeads(lock, roots);
+  const verificationLock =
+    options.platform === undefined
+      ? {
+          version: 1,
+          chat: lock.chat,
+          sdk: lock.sdk,
+          cave: lock.cave,
+          coven: lock.coven,
+        }
+      : lock;
+  assertPhase1CheckoutHeads(verificationLock, roots);
+  if (options.platform !== undefined) {
+    Object.assign(roots, await cloneProducerCheckout(artifactRoot, environment));
+  }
   return roots;
 }
 
@@ -662,13 +932,42 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   );
 }
 
-async function packageLockedArtifacts(artifactRoot, roots, environment) {
+async function packageLockedArtifacts(artifactRoot, roots, environment, { schemaV2 = false } = {}) {
+  if (schemaV2) {
+    const verifierPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer.mjs');
+    writeFileSync(
+      verifierPath,
+      [
+        `import { verifyFrozenPackedConsumer } from ${JSON.stringify(
+          pathToFileURL(resolve(projectRoot, 'scripts', 'contract-canary.mjs')).href,
+        )};`,
+        `verifyFrozenPackedConsumer(${JSON.stringify({
+          chatRoot: roots.chatRoot,
+          sdkRoot: roots.sdkRoot,
+          caveRoot: roots.caveRoot,
+        })});`,
+        '',
+      ].join('\n'),
+      { mode: 0o600 },
+    );
+    await runCommand(
+      artifactRoot,
+      'Frozen packed SDK consumer verification',
+      process.execPath,
+      [verifierPath],
+      {
+        cwd: projectRoot,
+        env: environment,
+        timeoutMs: commandTimeoutMs,
+      },
+    );
+  }
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
   await runCommand(
     artifactRoot,
     'Cave conformance package',
     'corepack',
-    ['pnpm@10.34.0', 'build:conformance'],
+    ['pnpm@10.34.0', 'build'],
     {
       cwd: roots.caveRoot,
       env: environment,
@@ -680,32 +979,6 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
     cwd: roots.chatRoot,
     env: environment,
   });
-
-  await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK');
-  const sdkTarballsRoot = resolve(artifactRoot.rootPath, 'packages', 'sdk');
-  mkdirSync(sdkTarballsRoot, { recursive: true, mode: 0o700 });
-  const sdkPackResult = resolve(artifactRoot.rootPath, 'sdk-pack-result.json');
-  const sdkPackWrapper = resolve(artifactRoot.rootPath, 'pack-sdk.mjs');
-  writeFileSync(
-    sdkPackWrapper,
-    [
-      `import { writeFileSync } from 'node:fs';`,
-      `import { packPublicPackages } from ${JSON.stringify(
-        pathToFileURL(resolve(roots.sdkRoot, 'scripts', 'package-artifacts.mjs')).href,
-      )};`,
-      `const tarballs = packPublicPackages({ root: ${JSON.stringify(
-        roots.sdkRoot,
-      )}, destinationRoot: ${JSON.stringify(sdkTarballsRoot)}, build: true });`,
-      `writeFileSync(${JSON.stringify(sdkPackResult)}, JSON.stringify(tarballs));`,
-      '',
-    ].join('\n'),
-    { mode: 0o600 },
-  );
-  await runCommand(artifactRoot, 'SDK package build', process.execPath, [sdkPackWrapper], {
-    cwd: roots.sdkRoot,
-    env: environment,
-  });
-  const packedTarballs = JSON.parse(readFileSync(sdkPackResult, 'utf8'));
 
   const packageNames = {
     core: 'sdk-core-0.1.0.tgz',
@@ -719,32 +992,59 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
       resolve(roots.chatRoot, 'vendor', 'opencoven-sdk', name),
     ]),
   );
-  const compareWrapper = resolve(artifactRoot.rootPath, 'compare-sdk.mjs');
-  writeFileSync(
-    compareWrapper,
-    [
-      `import { assertPackedPackageContentsMatch } from ${JSON.stringify(
-        pathToFileURL(resolve(roots.chatRoot, 'scripts', 'contract-canary.mjs')).href,
-      )};`,
-      `assertPackedPackageContentsMatch(${JSON.stringify(
-        packedTarballs,
-      )}, ${JSON.stringify(frozenTarballs)}, ${JSON.stringify(
-        resolve(artifactRoot.rootPath, 'sdk-compare'),
-      )});`,
-      '',
-    ].join('\n'),
-    { mode: 0o600 },
-  );
-  await runCommand(
-    artifactRoot,
-    'SDK packed artifact comparison',
-    process.execPath,
-    [compareWrapper],
-    {
-      cwd: roots.chatRoot,
+  if (!schemaV2) {
+    await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK');
+    const sdkTarballsRoot = resolve(artifactRoot.rootPath, 'packages', 'sdk');
+    mkdirSync(sdkTarballsRoot, { recursive: true, mode: 0o700 });
+    const sdkPackResult = resolve(artifactRoot.rootPath, 'sdk-pack-result.json');
+    const sdkPackWrapper = resolve(artifactRoot.rootPath, 'pack-sdk.mjs');
+    writeFileSync(
+      sdkPackWrapper,
+      [
+        `import { writeFileSync } from 'node:fs';`,
+        `import { packPublicPackages } from ${JSON.stringify(
+          pathToFileURL(resolve(roots.sdkRoot, 'scripts', 'package-artifacts.mjs')).href,
+        )};`,
+        `const tarballs = packPublicPackages({ root: ${JSON.stringify(
+          roots.sdkRoot,
+        )}, destinationRoot: ${JSON.stringify(sdkTarballsRoot)}, build: true });`,
+        `writeFileSync(${JSON.stringify(sdkPackResult)}, JSON.stringify(tarballs));`,
+        '',
+      ].join('\n'),
+      { mode: 0o600 },
+    );
+    await runCommand(artifactRoot, 'SDK package build', process.execPath, [sdkPackWrapper], {
+      cwd: roots.sdkRoot,
       env: environment,
-    },
-  );
+    });
+    const packedTarballs = JSON.parse(readFileSync(sdkPackResult, 'utf8'));
+    const compareWrapper = resolve(artifactRoot.rootPath, 'compare-sdk.mjs');
+    writeFileSync(
+      compareWrapper,
+      [
+        `import { assertPackedPackageContentsMatch } from ${JSON.stringify(
+          pathToFileURL(resolve(roots.chatRoot, 'scripts', 'contract-canary.mjs')).href,
+        )};`,
+        `assertPackedPackageContentsMatch(${JSON.stringify(
+          packedTarballs,
+        )}, ${JSON.stringify(frozenTarballs)}, ${JSON.stringify(
+          resolve(artifactRoot.rootPath, 'sdk-compare'),
+        )});`,
+        '',
+      ].join('\n'),
+      { mode: 0o600 },
+    );
+    await runCommand(
+      artifactRoot,
+      'SDK packed artifact comparison',
+      process.execPath,
+      [compareWrapper],
+      {
+        cwd: roots.chatRoot,
+        env: environment,
+      },
+    );
+  }
 
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
@@ -756,14 +1056,14 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
       'build',
       '--locked',
       '--manifest-path',
-      resolve(roots.chatRoot, 'src-tauri', 'Cargo.toml'),
+      resolve(schemaV2 ? roots.producerRoot : roots.chatRoot, 'src-tauri', 'Cargo.toml'),
       '--features',
       'phase1-conformance',
       '--bin',
       'phase1-native-rpc',
     ],
     {
-      cwd: roots.chatRoot,
+      cwd: schemaV2 ? roots.producerRoot : roots.chatRoot,
       env: { ...environment, CARGO_TARGET_DIR: chatTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
@@ -813,12 +1113,15 @@ async function packageLockedArtifacts(artifactRoot, roots, environment) {
 }
 
 async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
+  const caveRecordPath = resolve(artifactRoot.rootPath, 'cave-authority-record.json');
   const result = await runCommand(
     artifactRoot,
     'Cave real-authority conformance',
     process.execPath,
     [
       resolve(caveRoot, 'scripts', 'client-v1-conformance.mjs'),
+      '--out',
+      caveRecordPath,
       '--include-ttl',
       '--include-authority-takeover',
     ],
@@ -828,7 +1131,11 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
       timeoutMs: caveConformanceTimeoutMs,
     },
   );
-  return parseCaveConformanceOutput(result.stdout);
+  const caveRecord = JSON.parse(readFileSync(caveRecordPath, 'utf8'));
+  return {
+    assertions: parseCaveConformanceOutput(result.stdout),
+    caveRecord,
+  };
 }
 
 function requestJson(origin, { method = 'GET', path, headers = {}, body }) {
@@ -1583,7 +1890,27 @@ function collection(result, name) {
   return items;
 }
 
-async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environment, results }) {
+function validateNativeCustodyProof(value, expectedBackend, label) {
+  if (
+    value?.backend !== expectedBackend ||
+    value?.available !== true ||
+    value?.empty !== true ||
+    typeof value?.stateSha256 !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(value.stateSha256)
+  ) {
+    throw new Error(`${label} did not prove an empty available ${expectedBackend} backend`);
+  }
+  return value;
+}
+
+async function runNativeScenarios({
+  artifactRoot,
+  roots,
+  nativeRpcPath,
+  environment,
+  results,
+  platform,
+}) {
   const isolatedHome = resolve(artifactRoot.rootPath, 'native-authority-home');
   const covenHome = resolve(isolatedHome, 'coven');
   const caveHome = resolve(covenHome, 'cave');
@@ -1596,6 +1923,13 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     },
   ]);
   let rpc;
+  const nativeInstanceIds = new Set();
+  const platformEnvironment =
+    platform === undefined ? undefined : CANONICAL_PLATFORM_ENVIRONMENTS[platform];
+  const nativeServiceOpaqueId =
+    platformEnvironment === undefined ? undefined : randomBytes(16).toString('hex');
+  let nativeStateBefore;
+  let nativeStateAfter;
   try {
     writeNativeFixture(caveHome, covenHome, fixtureDaemon.url);
     const portServer = createServer();
@@ -1618,8 +1952,31 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH: realpathSync(process.execPath),
       OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH: resolve(roots.caveRoot, 'server.mjs'),
       NODE_ENV: 'production',
+      ...(platformEnvironment === undefined
+        ? {}
+        : {
+            OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'system-native',
+            OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE: `ai.opencoven.chat.phase1.${nativeServiceOpaqueId}`,
+          }),
     };
     rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
+    let installationId = 'phase1-installation-1';
+    if (platformEnvironment !== undefined) {
+      nativeStateBefore = validateNativeCustodyProof(
+        await rpc.ok('conformance_native_custody_state', { instanceIds: [] }),
+        platformEnvironment.nativeCustody,
+        'Native custody preflight',
+      );
+      installationId = await rpc.ok('app_installation_id');
+      if (
+        typeof installationId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          installationId,
+        )
+      ) {
+        throw new Error('native custody returned a non-canonical installation ID');
+      }
+    }
 
     let handle;
     let credentialId;
@@ -1638,6 +1995,9 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       });
       if (health.apiVersion !== '1.0' || health.data?.pairingRequired !== true) {
         throw new Error('launched Cave returned an invalid health envelope');
+      }
+      if (typeof health.data.instanceId === 'string') {
+        nativeInstanceIds.add(health.data.instanceId);
       }
       addAssertion(
         results,
@@ -1661,7 +2021,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
       if (typeof handle !== 'string') {
         throw new Error('no native authority handle');
       }
-      const paired = await pairNative(rpc, handle, origin, adminToken, 'phase1-installation-1');
+      const paired = await pairNative(rpc, handle, origin, adminToken, installationId);
       credentialId = paired.credentialId;
       addAssertion(
         results,
@@ -1684,7 +2044,10 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
           await rpc.ok('cave_reset_pairing', { handle });
           const discovery = await waitForDiscovery(rpc);
           handle = discovery.handle;
-          await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+          const health = await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+          if (typeof health.data?.instanceId === 'string') {
+            nativeInstanceIds.add(health.data.instanceId);
+          }
         }
       } catch {
         // The denial leg below will record an independent failure if recovery
@@ -1736,7 +2099,10 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         await rpc.ok('cave_launch');
         const discovery = await waitForDiscovery(rpc);
         handle = discovery.handle;
-        await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+        const health = await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+        if (typeof health.data?.instanceId === 'string') {
+          nativeInstanceIds.add(health.data.instanceId);
+        }
         const status = await rpc.ok('cave_credential_status', {
           handle,
           operation: rpc.operation(),
@@ -1925,7 +2291,10 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         await new Promise((resolveWait) => setTimeout(resolveWait, revocationConfirmationDelayMs));
         const rediscovery = await waitForDiscovery(rpc);
         handle = rediscovery.handle;
-        await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+        const health = await rpc.ok('cave_health', { handle, operation: rpc.operation() });
+        if (typeof health.data?.instanceId === 'string') {
+          nativeInstanceIds.add(health.data.instanceId);
+        }
         const status = await rpc.ok('cave_credential_status', {
           handle,
           operation: rpc.operation(),
@@ -1979,14 +2348,49 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   } finally {
     await withFixtureDaemon(fixtureDaemon, async () => {
       if (rpc !== undefined) {
-        await rpc.close();
+        try {
+          if (platformEnvironment !== undefined) {
+            nativeStateAfter = validateNativeCustodyProof(
+              await rpc.ok('conformance_cleanup_native_custody', {
+                instanceIds: [...nativeInstanceIds],
+              }),
+              platformEnvironment.nativeCustody,
+              'Native custody cleanup',
+            );
+          }
+        } finally {
+          await rpc.close();
+        }
       }
     });
   }
   await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
+  if (platformEnvironment === undefined) {
+    return undefined;
+  }
+  if (
+    nativeStateBefore === undefined ||
+    nativeStateAfter === undefined ||
+    nativeStateBefore.stateSha256 !== nativeStateAfter.stateSha256
+  ) {
+    throw new Error('Native custody state changed after isolated cleanup.');
+  }
+  return {
+    backend: platformEnvironment.nativeCustody,
+    available: true,
+    beforeSha256: nativeStateBefore.stateSha256,
+    afterSha256: nativeStateAfter.stateSha256,
+    opaqueId: nativeServiceOpaqueId,
+  };
 }
 
-async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environment, results) {
+async function runCovenIdentityScenario(
+  artifactRoot,
+  covenBinaryPath,
+  nativeRpcPath,
+  environment,
+  results,
+) {
   const covenRoot = createProcessOwnedArtifactRoot({ prefix: 'p1cv', shortPath: true });
   return withOwnedArtifactRoot(covenRoot, async () => {
     const covenHome = resolve(covenRoot.rootPath, 'cv');
@@ -1998,6 +2402,7 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
     });
     await once(child, 'spawn');
     covenRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
+    let rpc;
     try {
       let running = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -2028,6 +2433,18 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
       if (!running) {
         throw new Error('Coven daemon did not authenticate its same-user transport');
       }
+      rpc = await startNativeRpc(
+        artifactRoot,
+        nativeRpcPath,
+        { ...environment, COVEN_HOME: covenHome },
+        covenHome,
+      );
+      const health = await rpc.ok('coven_health', {
+        operation: rpc.operation(),
+      });
+      if (health.status !== 'ok') {
+        throw new Error('Chat native Coven health did not return the canonical status');
+      }
       await triggerAndWaitForChildClose(child, () =>
         runCommand(
           artifactRoot,
@@ -2051,6 +2468,10 @@ async function runCovenIdentityScenario(artifactRoot, covenBinaryPath, environme
         'failed',
         'phase1.integration.coven-identity-failed',
       );
+    } finally {
+      if (rpc !== undefined) {
+        await rpc.close();
+      }
     }
   });
 }
@@ -2121,38 +2542,98 @@ function fillMissingAssertions(results, status, diagnosticId) {
 }
 
 export async function runPhase1Conformance(options = parseArgs([])) {
+  scrubEvidenceAuthorizationEnvironment();
   const lock = readPhase1ConformanceLock(options.lockPath);
+  const schemaV2 = options.platform !== undefined;
+  if (schemaV2 && lock.version !== 2) {
+    throw new Error('Schema-v2 evidence requires Phase 1 lock version 2.');
+  }
+  if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
+    throw new Error(
+      `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
+    );
+  }
+  const startedAt = new Date().toISOString();
+  const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
+  const operatorBefore =
+    operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes);
   const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
   const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
   const environment = safeEnvironment(executionRoot.rootPath);
   const results = new Map();
   let artifactDigests = {};
   let infrastructureFailure;
+  let caveRecord;
+  let nativeProof;
+  let roots;
+  let sdkContract;
+  let producer;
+  let evidenceArtifacts;
+  let toolchain;
+  let verifiedIdentities;
 
   try {
-    const roots = await createExactCheckouts(executionRoot, options, lock, environment);
-    const packaged = await packageLockedArtifacts(executionRoot, roots, environment);
+    roots = await createExactCheckouts(executionRoot, options, lock, environment);
+    if (schemaV2) {
+      sdkContract = await loadSdkEvidenceContract({
+        validatorRoot: roots.validatorRoot,
+        validatorIdentity: {
+          repository: lock.validator.repository,
+          commit: lock.validator.revision,
+        },
+      });
+      sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock);
+      assertSdkContractMatchesPhase1Lock(sdkContract, lock);
+      producer = await verifySchemaV2ProducerCheckout({
+        producerRoot: roots.producerRoot,
+        producerIdentity: roots.producerIdentity,
+        sdkContract,
+      });
+      evidenceArtifacts = collectFrozenEvidenceArtifacts({ roots, sdkContract });
+      verifiedIdentities = {
+        candidate: verifiedCheckoutIdentity(lock, 'sdk', roots.sdkRoot),
+        cave: verifiedCheckoutIdentity(lock, 'cave', roots.caveRoot),
+        coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
+        chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
+      };
+      toolchain = await collectToolchainMetadata(
+        executionRoot,
+        environment,
+        sdkContract.frozenLock.toolchain,
+      );
+    }
+    const packaged = await packageLockedArtifacts(executionRoot, roots, environment, {
+      schemaV2,
+    });
     artifactDigests = packaged.artifactDigests;
 
     try {
-      const caveAssertions = await runCaveAuthorityMatrix(
+      const caveAuthority = await runCaveAuthorityMatrix(
         executionRoot,
         roots.caveRoot,
         environment,
       );
-      recordCaveBackedAssertions(results, caveAssertions);
+      caveRecord = caveAuthority.caveRecord;
+      recordCaveBackedAssertions(results, caveAuthority.assertions);
     } catch (error) {
       infrastructureFailure ??= recordCaveMatrixFailure(results, error);
     }
 
-    await runNativeScenarios({
+    nativeProof = await runNativeScenarios({
       artifactRoot: executionRoot,
       roots,
       nativeRpcPath: packaged.nativeRpcPath,
       environment,
       results,
+      platform: options.platform,
     });
-    await runCovenIdentityScenario(executionRoot, packaged.covenBinaryPath, environment, results);
+    await runCovenIdentityScenario(
+      executionRoot,
+      packaged.covenBinaryPath,
+      packaged.nativeRpcPath,
+      environment,
+      results,
+    );
 
     await runCompatibilityScenarios({
       artifactRoot: executionRoot,
@@ -2217,10 +2698,124 @@ export async function runPhase1Conformance(options = parseArgs([])) {
       },
       artifactDigests,
       versions: {
-        harness: '1.0.0',
+        harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
         node: process.versions.node,
+        ...(schemaV2 && toolchain !== undefined
+          ? {
+              rust: toolchain.rustVersion,
+              tauri: toolchain.tauriVersion,
+            }
+          : {}),
       },
     });
+    scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`);
+
+    if (schemaV2) {
+      if (
+        infrastructureFailure !== undefined ||
+        sdkContract === undefined ||
+        producer === undefined ||
+        evidenceArtifacts === undefined ||
+        toolchain === undefined ||
+        caveRecord === undefined ||
+        nativeProof === undefined ||
+        roots === undefined ||
+        verifiedIdentities === undefined ||
+        operatorBefore === undefined ||
+        operatorHomes === undefined
+      ) {
+        throw wrapInfrastructureFailure(
+          infrastructureFailure ?? new Error('Schema-v2 evidence prerequisites were incomplete.'),
+          completedReport,
+        );
+      }
+      const operatorAfter = captureOperatorFilesystemState(operatorHomes);
+      const isolation = buildIsolationEvidence({
+        operatorBefore,
+        operatorAfter,
+        nativeBeforeSha256: nativeProof.beforeSha256,
+        nativeAfterSha256: nativeProof.afterSha256,
+        opaqueIds: [
+          randomBytes(16).toString('hex'),
+          randomBytes(16).toString('hex'),
+          randomBytes(16).toString('hex'),
+          nativeProof.opaqueId,
+        ],
+      });
+      const evidence = buildSchemaV2PlatformEvidence({
+        primaryReport: completedReport,
+        caveRecord,
+        platform: options.platform,
+        timing: {
+          startedAt,
+          completedAt: new Date().toISOString(),
+        },
+        sdkContract,
+        verified: {
+          validator: sdkContract.validator,
+          ...verifiedIdentities,
+          harness: {
+            ...producer.harness,
+            invocationId: randomUUID(),
+          },
+          artifacts: evidenceArtifacts,
+          environment: {
+            os: process.platform,
+            arch: process.arch,
+            ...toolchain,
+            nativeCustody: {
+              backend: nativeProof.backend,
+              available: true,
+            },
+            covenIdentity: {
+              backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
+              available: true,
+            },
+          },
+          isolation,
+        },
+      });
+      const canonical = serializeValidatedSchemaV2PlatformEvidence(evidence, {
+        contract: sdkContract.contract,
+        schema: sdkContract.schema,
+      });
+      scanPhase1ArtifactText(canonical, {
+        validateReport(_value, contents) {
+          sdkContract.contract.parsePlatformEvidence(
+            contents,
+            'Chat retained schema-v2 platform evidence',
+            sdkContract.schema,
+          );
+        },
+      });
+      const reportPath = resolve(reportRoot.rootPath, 'record.json');
+      writeFileSync(reportPath, canonical, { mode: 0o600 });
+      await reportRoot.retainSanitizedJsonReport({
+        reportPath,
+        destinationPath: options.outputPath,
+        validateReport(_value, bytes) {
+          sdkContract.contract.parsePlatformEvidence(
+            bytes.toString('utf8'),
+            'Chat retained schema-v2 platform evidence',
+            sdkContract.schema,
+          );
+        },
+        secretScan: ({ reportPath: scannedPath }) => {
+          const contents = readFileSync(scannedPath, 'utf8');
+          scanPhase1ArtifactText(contents, {
+            validateReport() {
+              sdkContract.contract.parsePlatformEvidence(
+                contents,
+                'Chat retained schema-v2 platform evidence',
+                sdkContract.schema,
+              );
+            },
+          });
+        },
+      });
+      return evidence;
+    }
+
     const reportPath = resolve(reportRoot.rootPath, 'report.json');
     writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
     await reportRoot.retainSanitizedJsonReport({
@@ -2240,6 +2835,12 @@ export async function runPhase1Conformance(options = parseArgs([])) {
 async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const report = await runPhase1Conformance(options);
+  if (report.schemaVersion === 2) {
+    process.stdout.write(
+      `phase1-conformance: passed (${report.platform}, ${report.sdkAssertions.length} SDK assertions, ${report.chatAssertions.length} Chat assertions)\n`,
+    );
+    return;
+  }
   process.stdout.write(
     `phase1-conformance: ${report.status} (${report.summary.passed} passed, ${report.summary.failed} failed, ${report.summary.blocked} blocked)\n`,
   );

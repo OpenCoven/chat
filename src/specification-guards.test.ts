@@ -231,7 +231,12 @@ describe('Phase 1 specification guards', () => {
     const library = readText('src-tauri/src/lib.rs');
     const commands = readText('src-tauri/src/commands.rs');
     const capability = readText('src-tauri/capabilities/default.json');
-    const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
+    const controls = [
+      'conformance_native_custody_state',
+      'conformance_cleanup_native_custody',
+      'conformance_reset_native_state',
+      'conformance_shutdown',
+    ];
 
     expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
     const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
@@ -922,7 +927,7 @@ describe('Phase 1 specification guards', () => {
     expect(packageStart).toBeGreaterThanOrEqual(0);
     expect(packageEnd).toBeGreaterThan(packageStart);
     expect(packageBody.match(/'Cave conformance package'/g)).toHaveLength(1);
-    expect(packageBody.match(/'build:conformance'/g)).toHaveLength(1);
+    expect(packageBody).toMatch(/'Cave conformance package'[\s\S]*?\['pnpm@10\.34\.0', 'build'\]/);
     expect(packageBody).not.toContain('retryCaveConformancePackage');
     expect(packageBody).not.toContain("resolve(roots.caveRoot, '.next')");
     for (const laterPackage of [

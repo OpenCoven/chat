@@ -1,11 +1,20 @@
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, test } from 'vitest';
-
+import { verifyFrozenPackedConsumer } from '../scripts/contract-canary.mjs';
 import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   assertCompatibilityFailure,
@@ -16,15 +25,18 @@ import {
   CommandExecutionError,
   cargoBuildTimeoutMs,
   classifyCavePackageFailure,
+  cloneExactCheckout,
   NativeRpcClient,
   parseArgs,
   parseCaveConformanceOutput,
   recordCaveMatrixFailure,
   safeEnvironment,
+  scrubEvidenceAuthorizationEnvironment,
   withFixtureDaemon,
   withOwnedArtifactRoot,
   wrapInfrastructureFailure,
 } from '../scripts/phase1-conformance.mjs';
+import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 class SynchronousCloseChild extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -84,6 +96,78 @@ function assertionAt(assertions: ReturnType<typeof passingAssertions>, index: nu
 }
 
 describe('Phase 1 real-authority conformance harness', () => {
+  test.skipIf(process.platform === 'win32')(
+    'clones local sources without invoking their upload-pack hook',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-local-source-'));
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-local-clone-test' });
+      const marker = join(source, 'upload-pack-hook-ran');
+      const hook = join(source, 'upload-pack-hook.sh');
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'fixture'], { cwd: source });
+        writeFileSync(
+          hook,
+          `#!/bin/sh\nprintf ran > ${JSON.stringify(marker)}\nexec git pack-objects "$@"\n`,
+        );
+        chmodSync(hook, 0o755);
+        execFileSync('git', ['config', 'uploadpack.packObjectsHook', hook], {
+          cwd: source,
+        });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        const destination = join(owned.rootPath, 'checkout');
+
+        await cloneExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: source,
+          destinationRoot: destination,
+          repository: 'OpenCoven/chat',
+          revision,
+          environment: process.env,
+          label: 'local source fixture',
+        });
+
+        expect(existsSync(marker)).toBe(false);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: destination,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(revision);
+      } finally {
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('scrubs OIDC and GitHub bearer variables before evidence work begins', () => {
+    const environment = {
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-token',
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://token.actions.invalid',
+      GH_TOKEN: 'gh-token',
+      GITHUB_TOKEN: 'github-token',
+      PATH: '/trusted/bin',
+    };
+
+    expect(scrubEvidenceAuthorizationEnvironment(environment)).toEqual({
+      PATH: '/trusted/bin',
+    });
+  });
+
+  test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
+    expect(verifyFrozenPackedConsumer).toBeTypeOf('function');
+  });
+
   test('requires every assertion ID exactly once with no skipped result', () => {
     const assertions = passingAssertions();
     expect(assertExactAssertionResults(assertions)).toEqual(assertions);
@@ -169,6 +253,39 @@ describe('Phase 1 real-authority conformance harness', () => {
       /only --scenario all is supported/,
     );
     expect(() => parseArgs(['--unknown'])).toThrow(/unknown option/);
+  });
+
+  test('parses the protected schema-v2 platform invocation without legacy output flags', () => {
+    expect(
+      parseArgs([
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+      ]),
+    ).toMatchObject({
+      platform: 'darwin-arm64',
+      outputPath: expect.stringContaining('.artifacts/client-v1-conformance-darwin-arm64.json'),
+    });
+    expect(() => parseArgs(['--platform', 'linux-x64'])).toThrow(/requires --output/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-linux-x64.json',
+      ]),
+    ).toThrow(/must match the platform/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+        '--retain-sanitized-report',
+        './legacy.json',
+      ]),
+    ).toThrow(/cannot combine/u);
   });
 
   test('parses Cave assertion output without retaining diagnostic prose', () => {

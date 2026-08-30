@@ -260,8 +260,22 @@ function assertNoProhibitedContent(contents) {
   }
 }
 
-function scanJsonFile(path) {
-  const contents = readFileSync(path, 'utf8');
+export function scanPhase1ArtifactText(contents, options = {}) {
+  if (typeof contents !== 'string') {
+    throw new Error('Phase 1 artifact must contain UTF-8 JSON text.');
+  }
+  if (
+    options === null ||
+    typeof options !== 'object' ||
+    Array.isArray(options) ||
+    Object.keys(options).some((key) => key !== 'validateReport') ||
+    (options.validateReport !== undefined && typeof options.validateReport !== 'function')
+  ) {
+    throw new Error('Phase 1 artifact scan options may contain only validateReport.');
+  }
+  if (Buffer.byteLength(contents, 'utf8') > maxFileBytes) {
+    throw new Error('Phase 1 artifact tree exceeds scan size limits.');
+  }
   assertNoProhibitedContent(contents);
 
   let value;
@@ -271,7 +285,12 @@ function scanJsonFile(path) {
     throw new Error('Phase 1 artifact must contain valid JSON.');
   }
 
-  validatePhase1SanitizedReport(value);
+  (options.validateReport ?? validatePhase1SanitizedReport)(value, contents);
+  return value;
+}
+
+function scanJsonFile(path) {
+  scanPhase1ArtifactText(readFileSync(path, 'utf8'));
 }
 
 function scanDirectory(directoryPath, rootRealPath, state, depth) {

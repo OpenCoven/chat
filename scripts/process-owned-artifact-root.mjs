@@ -115,13 +115,18 @@ function readReportSnapshot(reportPath, rootRealPath) {
   }
 }
 
-function requireCompletedJsonReport(snapshot) {
+function requireCompletedJsonReport(snapshot, validateReport) {
   let report;
 
   try {
     report = JSON.parse(snapshot.bytes.toString('utf8'));
   } catch {
     throw new Error('Sanitized report must be a completed JSON report.');
+  }
+
+  if (typeof validateReport === 'function') {
+    validateReport(report, snapshot.bytes);
+    return;
   }
 
   if (
@@ -390,7 +395,7 @@ export function createProcessOwnedArtifactRoot(options) {
       cleanedChildren.push(child.pid);
       reapedChildren.push(child.pid);
     },
-    async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan }) {
+    async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan, validateReport }) {
       if (cleaned) {
         throw new Error('Cannot retain a report after the owned artifact root is cleaned.');
       }
@@ -399,7 +404,7 @@ export function createProcessOwnedArtifactRoot(options) {
       }
 
       const firstSnapshot = readReportSnapshot(reportPath, owned.rootRealPath);
-      requireCompletedJsonReport(firstSnapshot);
+      requireCompletedJsonReport(firstSnapshot, validateReport);
 
       await secretScan({
         artifactRoot: owned.rootPath,
