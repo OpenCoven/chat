@@ -726,102 +726,121 @@ async function runExactCargoObservationTests({
   return passed;
 }
 
-async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
-  await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
-  await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
-  const sdkTests = await runVitestObservationSuite({
-    artifactRoot,
-    rootPath: roots.sdkRoot,
-    environment,
-    label: 'SDK schema-v2 observation tests',
-    files: [
-      'tests/cave-discovery-pairing.spec.ts',
-      'tests/cave-canonical-reads.spec.ts',
-      'tests/cave-managed-native.spec.ts',
-      'tests/cave-managed-native-staged.spec.ts',
-      'tests/coven-discovery.spec.ts',
-      'tests/health-validation.spec.ts',
-      'tests/client-contract.spec.ts',
-      'tests/native-secret-store.spec.ts',
-    ],
-    outputName: 'sdk-observation-tests.json',
-  });
-  const chatTests = await runVitestObservationSuite({
-    artifactRoot,
-    rootPath: roots.producerRoot,
-    environment,
-    label: 'Chat schema-v2 observation tests',
-    files: [
-      'src/lib/sdk/native-boundary.test.ts',
-      'src/lib/sdk/connection-controller.test.ts',
-      'src/lib/sdk/query-adapter.test.ts',
-      'src/lib/sdk/managed-credential-status.e2e.test.ts',
-    ],
-    outputName: 'chat-observation-tests.json',
-  });
-  const chatCargoArgs = [
-    'test',
-    '--locked',
-    '--manifest-path',
-    resolve(roots.producerRoot, 'src-tauri', 'Cargo.toml'),
-    '--features',
-    'phase1-conformance',
-    '--lib',
-  ];
-  const chatRustTests = await runExactCargoObservationTests({
-    artifactRoot,
-    rootPath: roots.producerRoot,
-    environment,
-    label: 'Chat native schema-v2 observation tests',
-    tests: [
-      {
-        args: chatCargoArgs,
-        name: 'transport::tests::pairing_exchange_empty_post_declares_zero_content_length',
-      },
-      {
-        args: chatCargoArgs,
-        name: 'coven::tests::maps_client_failures_to_bounded_diagnostics_without_leaking_details',
-      },
-    ],
-  });
-  const covenLibraryTests =
-    platform === 'win32-x64'
-      ? [
-          'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
-          'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
-          'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
-          'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
-          'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
-        ]
-      : [
-          'transport::unix::tests::platform_peer_credentials_report_the_connected_process_uid',
-          'transport::unix::tests::connected_peer_uid_must_match_discovered_and_current_owner',
-        ];
-  const covenRustTests = await runExactCargoObservationTests({
-    artifactRoot,
-    rootPath: roots.covenRoot,
-    environment,
-    label: 'Coven native trust observation tests',
-    tests: [
-      ...covenLibraryTests.map((name) => ({
-        args: ['test', '--locked', '-p', 'coven-client', '--lib'],
-        name,
-      })),
-      ...(platform === 'win32-x64'
-        ? []
+export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+  const shortRoot =
+    process.platform === 'win32'
+      ? undefined
+      : createProcessOwnedArtifactRoot({ prefix: 'p1ot', shortPath: true });
+  const testEnvironment =
+    shortRoot === undefined
+      ? environment
+      : {
+          ...environment,
+          TMPDIR: shortRoot.rootPath,
+          TMP: shortRoot.rootPath,
+          TEMP: shortRoot.rootPath,
+        };
+  try {
+    await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    const sdkTests = await runVitestObservationSuite({
+      artifactRoot,
+      rootPath: roots.sdkRoot,
+      environment: testEnvironment,
+      label: 'SDK schema-v2 observation tests',
+      files: [
+        'tests/cave-discovery-pairing.spec.ts',
+        'tests/cave-canonical-reads.spec.ts',
+        'tests/cave-managed-native.spec.ts',
+        'tests/cave-managed-native-staged.spec.ts',
+        'tests/coven-discovery.spec.ts',
+        'tests/health-validation.spec.ts',
+        'tests/client-contract.spec.ts',
+        'tests/native-secret-store.spec.ts',
+      ],
+      outputName: 'sdk-observation-tests.json',
+    });
+    const chatTests = await runVitestObservationSuite({
+      artifactRoot,
+      rootPath: roots.producerRoot,
+      environment: testEnvironment,
+      label: 'Chat schema-v2 observation tests',
+      files: [
+        'src/lib/sdk/native-boundary.test.ts',
+        'src/lib/sdk/connection-controller.test.ts',
+        'src/lib/sdk/query-adapter.test.ts',
+        'src/lib/sdk/managed-credential-status.e2e.test.ts',
+      ],
+      outputName: 'chat-observation-tests.json',
+    });
+    const chatCargoArgs = [
+      'test',
+      '--locked',
+      '--manifest-path',
+      resolve(roots.producerRoot, 'src-tauri', 'Cargo.toml'),
+      '--features',
+      'phase1-conformance',
+      '--lib',
+    ];
+    const chatRustTests = await runExactCargoObservationTests({
+      artifactRoot,
+      rootPath: roots.producerRoot,
+      environment: testEnvironment,
+      label: 'Chat native schema-v2 observation tests',
+      tests: [
+        {
+          args: chatCargoArgs,
+          name: 'transport::tests::pairing_exchange_empty_post_declares_zero_content_length',
+        },
+        {
+          args: chatCargoArgs,
+          name: 'coven::tests::maps_client_failures_to_bounded_diagnostics_without_leaking_details',
+        },
+      ],
+    });
+    const covenLibraryTests =
+      platform === 'win32-x64'
+        ? [
+            'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+            'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
+            'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
+            'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+            'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
+          ]
         : [
-            {
-              args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
-              name: 'discovers_only_an_owner_local_unix_socket',
-            },
-            {
-              args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
-              name: 'a_mutation_is_not_sent_to_a_replacement_before_that_peer_is_negotiated',
-            },
-          ]),
-    ],
-  });
-  return { sdkTests, chatTests, chatRustTests, covenRustTests };
+            'transport::unix::tests::platform_peer_credentials_report_the_connected_process_uid',
+            'transport::unix::tests::connected_peer_uid_must_match_discovered_and_current_owner',
+          ];
+    const covenRustTests = await runExactCargoObservationTests({
+      artifactRoot,
+      rootPath: roots.covenRoot,
+      environment: testEnvironment,
+      label: 'Coven native trust observation tests',
+      tests: [
+        ...covenLibraryTests.map((name) => ({
+          args: ['test', '--locked', '-p', 'coven-client', '--lib'],
+          name,
+        })),
+        ...(platform === 'win32-x64'
+          ? []
+          : [
+              {
+                args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
+                name: 'discovers_only_an_owner_local_unix_socket',
+              },
+              {
+                args: ['test', '--locked', '-p', 'coven-client', '--test', 'health'],
+                name: 'a_mutation_is_not_sent_to_a_replacement_before_that_peer_is_negotiated',
+              },
+            ]),
+      ],
+    });
+    return { sdkTests, chatTests, chatRustTests, covenRustTests };
+  } finally {
+    if (shortRoot !== undefined) {
+      await shortRoot.cleanup();
+    }
+  }
 }
 
 function sha256File(path) {
