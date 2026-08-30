@@ -216,8 +216,9 @@ export function nativeMissingKeychainFailureDiagnostic(options: {
 }): string | undefined;
 export function nativeMissingKeychainResponsesValid(responses: unknown): boolean;
 export function runtimeScenarioFailureDiagnostic(
-  results: ReadonlyMap<string, { status?: unknown }>,
+  results: ReadonlyMap<string, { status?: unknown; diagnosticIds?: unknown }>,
 ): string | undefined;
+export function covenIdentityFailureDiagnostic(stage: unknown): string;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,

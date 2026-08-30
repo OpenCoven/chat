@@ -34,6 +34,7 @@ import {
   cargoBuildTimeoutMs,
   caveBuildEnvironment,
   classifyPackagingCommandFailure,
+  covenIdentityFailureDiagnostic,
   createCleanupAdoptionRecovery,
   diagnoseCovenLifecycleFailure,
   finalizeOperatorSafety,
@@ -1576,6 +1577,74 @@ describe('Phase 1 real-authority conformance harness', () => {
       results.set(id, { status: 'passed' });
     }
     expect(runtimeScenarioFailureDiagnostic(results)).toBeUndefined();
+  });
+
+  test.each([
+    'rpc-start',
+    'unavailable-health',
+    'daemon-spawn',
+    'daemon-ready',
+    'malicious-home',
+    'wrong-mode-home',
+    'symlink-socket-home',
+    'socket-mode',
+    'result',
+  ])('classifies the fixed Coven identity %s stage', (stage) => {
+    const diagnosticId = covenIdentityFailureDiagnostic(stage);
+    expect(diagnosticId).toBe(`phase1.coven-identity.${stage}`);
+    expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
+    expect(
+      runtimeScenarioFailureDiagnostic(
+        new Map([
+          ['phase1.missing-cave.validated-launch', { status: 'passed' }],
+          ['phase1.pairing.create-pending-approve-exchange', { status: 'passed' }],
+          ['phase1.pairing.denial', { status: 'passed' }],
+          ['phase1.pairing.expiry', { status: 'passed' }],
+          ['phase1.pairing.wrong-secret-replay', { status: 'passed' }],
+          ['phase1.pairing.failure-budget-retry-after', { status: 'passed' }],
+          ['phase1.credential.restart-reuse', { status: 'passed' }],
+          ['phase1.credential.revocation-repair', { status: 'passed' }],
+          ['phase1.hpke.endpoint-takeover', { status: 'passed' }],
+          ['phase1.reads.bounded-canonical', { status: 'passed' }],
+          ['phase1.reads.stale-generation-cursor-reconciliation', { status: 'passed' }],
+          ['phase1.coven.same-user-identity', { status: 'failed', diagnosticIds: [diagnosticId] }],
+        ]),
+      ),
+    ).toBe(diagnosticId);
+  });
+
+  test('bounds unknown Coven identity failure stages', () => {
+    const diagnosticId = covenIdentityFailureDiagnostic('private stage detail');
+    expect(diagnosticId).toBe('phase1.coven-identity.unknown');
+    expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
+  });
+
+  test('records the active fixed Coven identity stage on failure', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const scenario = source.slice(
+      source.indexOf('async function runCovenIdentityScenario'),
+      source.indexOf('function recordCaveBackedAssertions'),
+    );
+
+    for (const stage of [
+      'rpc-start',
+      'unavailable-health',
+      'daemon-spawn',
+      'daemon-ready',
+      'malicious-home',
+      'wrong-mode-home',
+      'symlink-socket-home',
+      'socket-mode',
+      'result',
+    ]) {
+      expect(scenario).toContain(`activeCovenIdentityStage = '${stage}'`);
+    }
+    expect(scenario).toContain(
+      'const diagnosticId = covenIdentityFailureDiagnostic(activeCovenIdentityStage)',
+    );
+    expect(scenario).toContain(
+      "addAssertion(results, 'phase1.coven.same-user-identity', 'failed', diagnosticId)",
+    );
   });
 
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {

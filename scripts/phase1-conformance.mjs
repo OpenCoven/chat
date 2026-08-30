@@ -203,6 +203,20 @@ const runtimeScenarioDiagnosticIds = new Map([
     'phase1.runtime-assertions.native-missing-keychain-trust',
   ],
 ]);
+const covenIdentityFailureStages = new Set([
+  'rpc-start',
+  'unavailable-health',
+  'daemon-spawn',
+  'daemon-ready',
+  'malicious-home',
+  'wrong-mode-home',
+  'symlink-socket-home',
+  'socket-mode',
+  'result',
+]);
+const covenIdentityDiagnosticIds = new Set(
+  [...covenIdentityFailureStages, 'unknown'].map((stage) => `phase1.coven-identity.${stage}`),
+);
 
 const publicPhase1DiagnosticIds = new Set([
   'phase1.operator-fingerprint.failed',
@@ -309,6 +323,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.missing-keychain-response',
   'phase1.native-scenarios.isolation-proof',
   'phase1.stage.coven-identity.failed',
+  ...covenIdentityDiagnosticIds,
   'phase1.stage.runtime-assertions.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
@@ -3776,14 +3791,18 @@ async function runCovenIdentityScenario({
     mkdirSync(covenHome, { recursive: true, mode: 0o700 });
     ownershipVerified = verifyOwnedDirectory(covenHome);
     let rpc;
+    let activeCovenIdentityStage = 'rpc-start';
     try {
+      activeCovenIdentityStage = 'rpc-start';
       rpc = await startNativeRpc(
         artifactRoot,
         nativeRpcPath,
         { ...environment, COVEN_HOME: covenHome },
         projectRoot,
       );
+      activeCovenIdentityStage = 'unavailable-health';
       await rpc.error('coven_health', { operation: rpc.operation() }, 'service_unavailable');
+      activeCovenIdentityStage = 'daemon-spawn';
       const { child } = spawnOwnedProcess(covenCommand.executable, covenCommand.args, {
         cwd: covenCommand.cwd,
         env: { ...environment, COVEN_HOME: covenHome },
@@ -3792,6 +3811,7 @@ async function runCovenIdentityScenario({
       await once(child, 'spawn');
       covenRoot.trackChild(child);
 
+      activeCovenIdentityStage = 'daemon-ready';
       let health;
       for (let attempt = 0; attempt < 80 && health === undefined; attempt += 1) {
         try {
@@ -3805,6 +3825,7 @@ async function runCovenIdentityScenario({
       }
 
       if (process.platform !== 'win32') {
+        activeCovenIdentityStage = 'malicious-home';
         const maliciousHome = resolve(covenRoot.rootPath, 'malicious-home');
         symlinkSync(covenHome, maliciousHome, 'dir');
         await expectCovenHealthFailure(
@@ -3815,6 +3836,7 @@ async function runCovenIdentityScenario({
           'reconcile_required',
         );
 
+        activeCovenIdentityStage = 'wrong-mode-home';
         const wrongModeHome = resolve(covenRoot.rootPath, 'wrong-mode-home');
         mkdirSync(wrongModeHome, { mode: 0o700 });
         chmodSync(wrongModeHome, 0o755);
@@ -3826,6 +3848,7 @@ async function runCovenIdentityScenario({
           'reconcile_required',
         );
 
+        activeCovenIdentityStage = 'symlink-socket-home';
         const symlinkSocketHome = resolve(covenRoot.rootPath, 'symlink-socket-home');
         mkdirSync(symlinkSocketHome, { mode: 0o700 });
         symlinkSync(resolve(covenHome, 'coven.sock'), resolve(symlinkSocketHome, 'coven.sock'));
@@ -3837,6 +3860,7 @@ async function runCovenIdentityScenario({
           'reconcile_required',
         );
 
+        activeCovenIdentityStage = 'socket-mode';
         const socketPath = resolve(covenHome, 'coven.sock');
         chmodSync(socketPath, 0o666);
         try {
@@ -3857,15 +3881,12 @@ async function runCovenIdentityScenario({
         );
       }
 
+      activeCovenIdentityStage = 'result';
       addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
     } catch {
-      process.stderr.write('phase1-conformance: Coven native identity assertion failed.\n');
-      addAssertion(
-        results,
-        'phase1.coven.same-user-identity',
-        'failed',
-        'phase1.integration.coven-identity-failed',
-      );
+      const diagnosticId = covenIdentityFailureDiagnostic(activeCovenIdentityStage);
+      process.stderr.write(`phase1-conformance: ${diagnosticId}\n`);
+      addAssertion(results, 'phase1.coven.same-user-identity', 'failed', diagnosticId);
     } finally {
       if (rpc !== undefined) {
         await rpc.close();
@@ -3879,6 +3900,12 @@ async function runCovenIdentityScenario({
     verifiedSdkAssertions,
     verifiedChatAssertions,
   };
+}
+
+export function covenIdentityFailureDiagnostic(stage) {
+  return covenIdentityFailureStages.has(stage)
+    ? `phase1.coven-identity.${stage}`
+    : 'phase1.coven-identity.unknown';
 }
 
 function recordCaveBackedAssertions(results, caveAssertions) {
@@ -4243,7 +4270,15 @@ function platformCovenTestProofs(platform, passedTests) {
 
 export function runtimeScenarioFailureDiagnostic(results) {
   for (const [id, diagnosticId] of runtimeScenarioDiagnosticIds) {
-    if (results.get(id)?.status !== 'passed') {
+    const assertion = results.get(id);
+    if (assertion?.status !== 'passed') {
+      const recordedDiagnostic = assertion?.diagnosticIds?.[0];
+      if (
+        id === 'phase1.coven.same-user-identity' &&
+        covenIdentityDiagnosticIds.has(recordedDiagnostic)
+      ) {
+        return recordedDiagnostic;
+      }
       return diagnosticId;
     }
   }
