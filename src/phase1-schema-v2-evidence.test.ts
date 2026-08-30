@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -24,6 +25,16 @@ const validatorRoot =
 const validatorAvailable = existsSync(
   resolve(validatorRoot, 'scripts', 'conformance-contract.mjs'),
 );
+const validatorCommit = validatorAvailable
+  ? execFileSync('git', ['-C', validatorRoot, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim()
+  : '';
+const validatorTree = validatorAvailable
+  ? execFileSync('git', ['-C', validatorRoot, 'rev-parse', 'HEAD^{tree}'], {
+      encoding: 'utf8',
+    }).trim()
+  : '';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -548,21 +559,27 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       validatorRoot,
       validatorIdentity: {
         repository: 'OpenCoven/sdk',
-        commit: 'b42c03f00ab248504c8930564790a9744403abe5',
-        tree: 'ae2f67e696e32ecd09d8527fdb863414e0621fd0',
+        commit: validatorCommit,
+        tree: validatorTree,
       },
     });
 
-    expect(loaded.validator.commit).toBe('b42c03f00ab248504c8930564790a9744403abe5');
+    expect(loaded.validator.commit).toBe(validatorCommit);
     expect(loaded.frozenLock.schemaVersion).toBe(2);
     expect(loaded.registry.schemaVersion).toBe(2);
     expect(loaded.schema.$id).toBe(
       'urn:opencoven:schema:client-v1-cross-repository-platform-evidence:2',
     );
     expect(loaded.validator.contract.path).toBe('scripts/conformance-contract.mjs');
-    expect(() =>
+    expect(
       loaded.contract.assertEvidenceProducerCompatibility(loaded.frozenLock as never),
-    ).toThrow(/no schema-v2 platform evidence producer/u);
+    ).toMatchObject({
+      status: 'compatible',
+      repository: 'OpenCoven/chat',
+      workflow: {
+        environmentId: '20863036831',
+      },
+    });
   });
 
   test('rejects a validator checkout at the wrong commit or tree', async () => {
@@ -572,7 +589,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
         validatorIdentity: {
           repository: 'OpenCoven/sdk',
           commit: '0'.repeat(40),
-          tree: 'ae2f67e696e32ecd09d8527fdb863414e0621fd0',
+          tree: validatorTree,
         },
       }),
     ).rejects.toThrow(/validator commit/u);
@@ -581,7 +598,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
         validatorRoot,
         validatorIdentity: {
           repository: 'OpenCoven/sdk',
-          commit: 'b42c03f00ab248504c8930564790a9744403abe5',
+          commit: validatorCommit,
           tree: '0'.repeat(40),
         },
       }),

@@ -127,7 +127,7 @@ The dedicated workflow is manually dispatchable and uses the protected
 environment `client-v1-conformance`, GitHub environment ID `20863036831`.
 That environment must have:
 
-- required reviewers; and
+- required reviewer user ID `68980965`;
 - deployment branch rules restricted to protected branches.
 
 Self-review is prevented and administrators cannot bypass the protection. The
