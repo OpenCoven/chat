@@ -88,7 +88,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '2a0ff9237e94e652e477b22f60fd6d721b9e6451',
+    revision: 'e74078a147c084bd761d929654f0990df66ef99f',
   },
   coven: {
     repository: 'OpenCoven/coven',
@@ -203,7 +203,7 @@ const expectedEntries = {
         sha256: 'eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f',
       },
     ],
-    caveVersion: '0.3.11',
+    caveVersion: '0.3.12',
     covenVersion: '0.1.0',
     consumerLock: {
       path: 'pnpm-lock.yaml',
@@ -213,13 +213,13 @@ const expectedEntries = {
     caveArtifacts: {
       assertionEngine: {
         path: 'scripts/client-v1-conformance.mjs',
-        size: 141424,
-        sha256: '27d0e898931e6b01a67cbfa20f1d72ba0f988f19772c0e5ca3ccb239a56eba02',
+        size: 146432,
+        sha256: 'b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd',
       },
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
-        size: 16210,
-        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+        size: 16695,
+        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',

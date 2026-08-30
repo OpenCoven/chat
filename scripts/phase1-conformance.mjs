@@ -218,9 +218,15 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.cave-authority.spawn',
   'phase1.cave-authority.supervisor',
   'phase1.cave-authority.exit-nonzero',
+  'phase1.cave-authority.assertion.admin',
   'phase1.cave-authority.assertion.discovery',
+  'phase1.cave-authority.assertion.health',
+  'phase1.cave-authority.assertion.ingress',
   'phase1.cave-authority.assertion.pairing',
   'phase1.cave-authority.assertion.reads',
+  'phase1.cave-authority.assertion.revocation',
+  'phase1.cave-authority.assertion.takeover',
+  'phase1.cave-authority.assertion.harness',
   'phase1.cave-authority.assertion.hpke',
   'phase1.cave-authority.assertion.multiple',
   'phase1.cave-authority.assertion.unknown',
@@ -414,9 +420,9 @@ export function classifyPackagingCommandFailure(baseId, error) {
         `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
       ).replaceAll('\r\n', '\n');
       let phase = 'unknown';
-      if (output.includes('> coven-cave@0.3.11 postbuild')) {
+      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild$/mu.test(output)) {
         phase = 'postbuild';
-      } else if (output.includes('> coven-cave@0.3.11 build:server')) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server$/mu.test(output)) {
         phase = 'server-bundle';
       } else if (output.includes('Creating an optimized production build')) {
         phase = /\bEAGAIN\b/u.test(output)
@@ -436,7 +442,7 @@ export function classifyPackagingCommandFailure(baseId, error) {
                       : output.includes('Compiled successfully')
                         ? 'next-build.typescript'
                         : 'next-build.compile';
-      } else if (output.includes('> coven-cave@0.3.11 prebuild')) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild$/mu.test(output)) {
         phase = 'prebuild';
       }
       return `${baseId}.phase.${phase}`;
@@ -1862,7 +1868,20 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
           [...assertions.entries()]
             .filter(([, status]) => status === 'failed')
             .map(([id]) => id.split(/[./]/u, 1)[0])
-            .filter((category) => ['discovery', 'pairing', 'reads', 'hpke'].includes(category)),
+            .filter((category) =>
+              [
+                'admin',
+                'discovery',
+                'health',
+                'ingress',
+                'pairing',
+                'reads',
+                'revocation',
+                'takeover',
+                'harness',
+                'hpke',
+              ].includes(category),
+            ),
         );
         const diagnostic =
           categories.size > 1

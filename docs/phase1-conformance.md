@@ -17,7 +17,7 @@ handling, canonical reads, Coven identity, cleanup, and evidence compatibility.
 - Chat production `20633346c444ded9e05ca5a3db45d74c28918d69`, the
   expected missing-keychain trust-control successor to `dbbcf3a`;
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `2a0ff9237e94e652e477b22f60fd6d721b9e6451`;
+- Cave authority `e74078a147c084bd761d929654f0990df66ef99f`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support
   `b8537aabc2dddb62a8423c41cab83a6291f26de7`;
