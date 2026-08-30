@@ -53,6 +53,8 @@ const commandOutputLimit = 16 * 1024 * 1024;
 const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
+const caveBuildNodeOptions = '--max-old-space-size=6144';
+const caveBuildReportedCpuTotal = '3';
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedCommandFailureReasons = new Set([
@@ -773,6 +775,14 @@ export function safeEnvironment(rootPath, extra = {}) {
     }
   }
   return environment;
+}
+
+export function caveBuildEnvironment(environment) {
+  return {
+    ...environment,
+    NODE_OPTIONS: caveBuildNodeOptions,
+    CIRCLE_NODE_TOTAL: caveBuildReportedCpuTotal,
+  };
 }
 
 export function validateSupervisorArtifactFile(path, metadata) {
@@ -1691,7 +1701,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
       ['pnpm@10.34.0', '--ignore-workspace', 'build'],
       {
         cwd: roots.caveRoot,
-        env: environment,
+        env: caveBuildEnvironment(environment),
       },
     ),
   );

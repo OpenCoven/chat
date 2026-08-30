@@ -1179,6 +1179,12 @@ describe('Phase 1 specification guards', () => {
       "['pnpm@10.34.0', '--ignore-workspace', 'build']",
     );
     expect(readText('scripts/phase1-conformance.mjs')).toContain(
+      'NODE_OPTIONS: caveBuildNodeOptions',
+    );
+    expect(readText('scripts/phase1-conformance.mjs')).toContain(
+      'CIRCLE_NODE_TOTAL: caveBuildReportedCpuTotal',
+    );
+    expect(readText('scripts/phase1-conformance.mjs')).toContain(
       'TMPDIR: dirname(artifactRoot.rootPath)',
     );
     expect(workflow).toContain(

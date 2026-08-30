@@ -43,6 +43,11 @@ Prerequisites are Node.js `24.18.1`, pnpm `10.34.0` through Corepack, Rust
 containing the locked commits. The runner observes and rejects any Node, pnpm,
 or Rust version drift before creating evidence.
 
+The locked Cave release build receives a fixed 6 GiB V8 old-space allowance
+and a two-worker Next.js CPU profile. Inherited Node runtime options are still
+rejected; these build-only limits keep the exact production build reproducible
+on the release runner without changing the artifact contract.
+
 ```bash
 /bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"
 ```

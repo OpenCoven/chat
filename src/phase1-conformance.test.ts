@@ -32,6 +32,7 @@ import {
   assertProductionAdapterAtRevision,
   CommandExecutionError,
   cargoBuildTimeoutMs,
+  caveBuildEnvironment,
   classifyPackagingCommandFailure,
   createCleanupAdoptionRecovery,
   diagnoseCovenLifecycleFailure,
@@ -1630,6 +1631,20 @@ describe('Phase 1 real-authority conformance harness', () => {
     } finally {
       rmSync(root, { recursive: true });
     }
+  });
+
+  test('uses fixed resource limits for the Cave release build', () => {
+    expect(
+      caveBuildEnvironment({
+        PATH: '/safe/bin',
+        NODE_OPTIONS: '--require=/private/injection.cjs',
+        CIRCLE_NODE_TOTAL: '999',
+      }),
+    ).toEqual({
+      PATH: '/safe/bin',
+      NODE_OPTIONS: '--max-old-space-size=6144',
+      CIRCLE_NODE_TOTAL: '3',
+    });
   });
 
   test('uses the operator home only for isolated macOS keychain process tests', () => {
