@@ -322,6 +322,15 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
       $jobA = [OpenCoven.WindowsJobSupervisor]::Create($jobAName)
       $jobB = [OpenCoven.WindowsJobSupervisor]::Create($jobBName)
       try {
+        $unsupervisedNativeEnvironment = $childEnvironment.Clone()
+        $unsupervisedNativeEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
+        $unsupervisedNativeEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+        $unsupervisedNativeEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $jobANonce
+        $unsupervisedNativeEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $jobAName
+        Assert-NativeBindingRejected `
+          -Label 'Unsupervised native process with valid existing Job A binding' `
+          -Result (Invoke-NativeRpcUnsupervised -Environment $unsupervisedNativeEnvironment)
+
         $wrongNativeEnvironment = $childEnvironment.Clone()
         $wrongNativeEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
         $wrongNativeEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'

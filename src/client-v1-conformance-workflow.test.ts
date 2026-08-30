@@ -500,6 +500,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Malformed native evidence mode',
       'Malformed native Job binding',
       'Nonexistent native Job binding',
+      'Unsupervised native process with valid existing Job A binding',
       'Wrong existing native Job binding',
       'Valid native Job binding did not reach native RPC startup.',
       'Directory quota excess did not fail closed.',
