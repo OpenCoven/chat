@@ -930,13 +930,27 @@ describe('Phase 1 specification guards', () => {
     expect(phase1Job).toContain('timeout-minutes: 120');
   });
 
-  it('compiles the phase1 native cleanup grant implementation on Windows', () => {
+  it('executes the phase1 native cleanup grant integration suite on Windows', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const windowsRust = workflow.slice(workflow.indexOf('  windows-supervisor-behavior:'));
 
     expect(windowsRust).toContain(
       'cargo check --manifest-path src-tauri/Cargo.toml --all-targets --all-features',
     );
+    expect(windowsRust).toContain('corepack pnpm test:native-e2e');
+  });
+
+  it('treats FILE_DELETE_CHILD as an unsafe Windows directory mutation right', () => {
+    const cave = readText('src-tauri/src/cave.rs');
+    const rights = cave.slice(
+      cave.indexOf('    fn writable_file_rights() -> u32 {'),
+      cave.indexOf(
+        '\n    fn trusted_writer(',
+        cave.indexOf('    fn writable_file_rights() -> u32 {'),
+      ),
+    );
+
+    expect(rights).toContain('| FILE_DELETE_CHILD');
   });
 
   it('skips the expensive jobs for a branch that changed only prose', () => {

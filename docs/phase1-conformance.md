@@ -171,11 +171,21 @@ credential cleanup remains capability-bound and fail-closed.
 On Unix, cleanup marker creation, publication, and claiming use private
 owner-checked directories, no-follow directory-relative operations, exact
 `0700`/`0600` modes, regular-file identity and link-count checks, and file plus
-directory synchronization. On Windows, the corresponding path checks reject
-reparse points and foreign or writable-untrusted ACLs, verify file identity and
-link count, and use create-new files plus write-through atomic moves. These RPC
-controls are compiled only into the `phase1-conformance` binary and are not
-registered as production Tauri commands or capabilities.
+directory synchronization. On Windows, every private component from the
+isolated home through the marker directory is identity-checked and pinned with
+a non-delete-sharing handle while path-based operations run. The
+implementation revalidates the complete chain around publication and claiming,
+rejects reparse points and foreign or writable-untrusted ACLs (including
+`FILE_DELETE_CHILD`), verifies file identity and link count, and uses
+create-new files plus write-through atomic moves. These RPC controls are
+compiled only into the `phase1-conformance` binary and are not registered as
+production Tauri commands or capabilities.
+
+The macOS and Windows Rust jobs execute the phase1 native RPC integration
+binary. Windows coverage uses the native Credential Manager and Win32
+filesystem/ACL behavior for exact cleanup, replay and scope rejection, marker
+identity/link checks, DACL and reparse rejection, parent-chain substitution,
+and preservation of unrelated credentials.
 
 ## Isolation and retained evidence
 

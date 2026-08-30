@@ -968,6 +968,550 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
     );
 }
 
+#[cfg(windows)]
+mod windows_cleanup {
+    use std::{
+        collections::{BTreeSet, HashMap},
+        fs,
+        io::{BufRead, BufReader},
+        path::{Path, PathBuf},
+        process::{Child, ChildStdin, ChildStdout},
+        sync::atomic::{AtomicU64, Ordering},
+        thread,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    use keyring_core::{api::CredentialStoreApi, Entry, Error as KeyringError};
+    use windows_native_keyring_store::Store;
+
+    use super::*;
+
+    const INSTALLATION_ACCOUNT: &str = "installation-id-v1";
+    const TARGET_A: &str = "00000000-0000-4000-8000-000000000001";
+    const TARGET_B: &str = "00000000-0000-4000-8000-000000000002";
+    const UNRELATED: &str = "00000000-0000-4000-8000-000000000003";
+    const CLEANUP_HOOK_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_TEST_HOOK";
+    const CLEANUP_HOOK_DIRECTORY_ENV: &str =
+        "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_TEST_HOOK_DIRECTORY";
+
+    fn credential_account(instance_id: &str) -> String {
+        format!("cave-client-v1:{instance_id}")
+    }
+
+    fn nonce() -> u128 {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock must follow Unix epoch")
+            .as_nanos()
+            ^ u128::from(std::process::id())
+            ^ u128::from(COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn service_name() -> String {
+        format!("ai.opencoven.chat.phase1.{:032x}", nonce())
+    }
+
+    fn credential_entry(service: &str, account: &str) -> Entry {
+        let store = Store::new().expect("Windows Credential Manager store must initialize");
+        store
+            .build(
+                service,
+                account,
+                Some(&HashMap::from([("persistence", "Local")])),
+            )
+            .expect("Windows credential entry must build")
+    }
+
+    struct CredentialCleanup(Vec<(String, String)>);
+
+    impl CredentialCleanup {
+        fn set(&mut self, service: &str, account: &str, value: &[u8]) {
+            let entry = credential_entry(service, account);
+            entry
+                .set_secret(value)
+                .expect("Windows credential must be stored");
+            self.0.push((service.to_owned(), account.to_owned()));
+        }
+    }
+
+    impl Drop for CredentialCleanup {
+        fn drop(&mut self) {
+            for (service, account) in self.0.iter().rev() {
+                let _ = credential_entry(service, account).delete_credential();
+            }
+        }
+    }
+
+    fn entry_present(service: &str, account: &str) -> bool {
+        match credential_entry(service, account).get_secret() {
+            Ok(_) => true,
+            Err(KeyringError::NoEntry) => false,
+            Err(error) => panic!("Windows credential lookup failed: {error:?}"),
+        }
+    }
+
+    struct HomeCleanup {
+        profile: PathBuf,
+        path: PathBuf,
+    }
+
+    impl Drop for HomeCleanup {
+        fn drop(&mut self) {
+            if self.path.parent() == Some(self.profile.as_path())
+                && self
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("opencoven-phase1-cleanup-"))
+            {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
+    }
+
+    fn isolated_home() -> (PathBuf, HomeCleanup) {
+        let profile =
+            PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE must be set"));
+        let path = profile.join(format!("opencoven-phase1-cleanup-{:032x}", nonce()));
+        fs::create_dir(&path).expect("isolated Windows home must be created");
+        (path.clone(), HomeCleanup { profile, path })
+    }
+
+    struct RpcProcess {
+        child: Child,
+        stdin: ChildStdin,
+        stdout: BufReader<ChildStdout>,
+        finished: bool,
+    }
+
+    impl RpcProcess {
+        fn spawn(home: &Path, service: &str, hook: Option<(&str, &Path)>) -> Self {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"));
+            command
+                .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
+                .env(CONFORMANCE_SERVICE_ENV, service)
+                .env("HOME", home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if let Some((name, directory)) = hook {
+                command
+                    .env(CLEANUP_HOOK_ENV, name)
+                    .env(CLEANUP_HOOK_DIRECTORY_ENV, directory);
+            }
+            let mut child = command.spawn().expect("phase1-native-rpc must start");
+            let stdin = child.stdin.take().expect("child stdin must be piped");
+            let stdout = BufReader::new(child.stdout.take().expect("child stdout must be piped"));
+            Self {
+                child,
+                stdin,
+                stdout,
+                finished: false,
+            }
+        }
+
+        fn send(&mut self, value: Value) {
+            serde_json::to_writer(&mut self.stdin, &value).expect("request must serialize");
+            self.stdin
+                .write_all(b"\n")
+                .expect("request delimiter must write");
+            self.stdin.flush().expect("request must flush");
+        }
+
+        fn receive(&mut self) -> Value {
+            let mut line = String::new();
+            self.stdout
+                .read_line(&mut line)
+                .expect("response must be readable");
+            serde_json::from_str(&line).expect("response must be JSON")
+        }
+
+        fn request(&mut self, value: Value) -> Value {
+            self.send(value);
+            self.receive()
+        }
+
+        fn issue_response(&mut self, instance_ids: &[&str]) -> Value {
+            self.request(json!({
+                "id": "issue",
+                "command": "conformance_issue_native_custody_cleanup",
+                "args": {"instanceIds": instance_ids},
+            }))
+        }
+
+        fn issue(&mut self, instance_ids: &[&str]) -> String {
+            let response = self.issue_response(instance_ids);
+            assert_eq!(
+                response["ok"], true,
+                "cleanup grant issuance must succeed: {response}"
+            );
+            response["result"]["grant"]
+                .as_str()
+                .expect("cleanup grant must be returned")
+                .to_owned()
+        }
+
+        fn cleanup(&mut self, grant: &str) -> Value {
+            self.request(json!({
+                "id": "cleanup",
+                "command": "conformance_cleanup_native_custody",
+                "args": {"grant": grant},
+            }))
+        }
+
+        fn reject_cleanup(&mut self, grant: &str) {
+            assert_eq!(
+                self.cleanup(grant),
+                json!({
+                    "id": "cleanup",
+                    "ok": false,
+                    "error": {"code": "cleanup_grant_rejected", "retryable": false},
+                }),
+            );
+        }
+
+        fn shutdown(&mut self) {
+            assert_eq!(
+                self.request(json!({"id":"shutdown","command":"conformance_shutdown"})),
+                json!({
+                    "id": "shutdown",
+                    "ok": true,
+                    "result": {"status": "shutting_down"},
+                }),
+            );
+            let status = self.child.wait().expect("phase1-native-rpc must exit");
+            assert!(status.success());
+            self.finished = true;
+        }
+    }
+
+    impl Drop for RpcProcess {
+        fn drop(&mut self) {
+            if !self.finished {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+    }
+
+    fn marker_directory(home: &Path) -> PathBuf {
+        home.join(".coven")
+            .join("chat")
+            .join("phase1-cleanup-grants-v1")
+    }
+
+    fn marker_files(home: &Path) -> BTreeSet<PathBuf> {
+        match fs::read_dir(marker_directory(home)) {
+            Ok(entries) => entries
+                .map(|entry| entry.expect("marker entry must be readable").path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("grant-") && name.ends_with(".json"))
+                })
+                .collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+            Err(error) => panic!("marker directory must be readable: {error}"),
+        }
+    }
+
+    fn issue_with_marker(
+        rpc: &mut RpcProcess,
+        home: &Path,
+        instance_ids: &[&str],
+    ) -> (String, PathBuf) {
+        let before = marker_files(home);
+        let grant = rpc.issue(instance_ids);
+        let after = marker_files(home);
+        let created = after.difference(&before).cloned().collect::<Vec<_>>();
+        assert_eq!(created.len(), 1, "issuance must publish one marker");
+        (grant, created[0].clone())
+    }
+
+    fn rewrite_marker(path: &Path, mutate: impl FnOnce(&mut Value)) {
+        let mut marker: Value =
+            serde_json::from_slice(&fs::read(path).expect("marker must be readable"))
+                .expect("marker must be JSON");
+        mutate(&mut marker);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .expect("marker must be writable");
+        serde_json::to_writer(&file, &marker).expect("marker must serialize");
+        file.sync_all().expect("marker must sync");
+    }
+
+    fn set_cleanup_entries(cleanup: &mut CredentialCleanup, service: &str, instance_ids: &[&str]) {
+        cleanup.set(service, INSTALLATION_ACCOUNT, INSTALLATION_ID.as_bytes());
+        for instance_id in instance_ids {
+            cleanup.set(
+                service,
+                &credential_account(instance_id),
+                br#"{"bearer":"secret","credential_id":"credential","origin":"http://127.0.0.1:4310/"}"#,
+            );
+        }
+    }
+
+    fn wait_for_hook(directory: &Path, name: &str) {
+        let ready = directory.join(format!("{name}.ready"));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !ready.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "cleanup hook {name} must become ready"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn release_hook(directory: &Path, name: &str) {
+        fs::write(directory.join(format!("{name}.release")), b"release")
+            .expect("cleanup hook must be released");
+    }
+
+    #[test]
+    fn native_cleanup_is_exact_single_use_bound_and_preserves_unrelated_credentials() {
+        let (home, _home_cleanup) = isolated_home();
+        let service = service_name();
+        let unrelated_service = format!("opencoven.phase1.unrelated.{:032x}", nonce());
+        let unrelated_account = format!("unrelated-{:032x}", nonce());
+        let mut credential_cleanup = CredentialCleanup(Vec::new());
+        set_cleanup_entries(
+            &mut credential_cleanup,
+            &service,
+            &[TARGET_A, TARGET_B, UNRELATED],
+        );
+        credential_cleanup.set(&unrelated_service, &unrelated_account, b"preserve");
+        let mut rpc = RpcProcess::spawn(&home, &service, None);
+
+        let (grant, _) = issue_with_marker(&mut rpc, &home, &[TARGET_B, TARGET_A, TARGET_B]);
+        rpc.reject_cleanup("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+        assert_eq!(
+            rpc.request(json!({
+                "id": "cleanup",
+                "command": "conformance_cleanup_native_custody",
+                "args": {"grant": grant, "instanceIds": [UNRELATED]},
+            }))["error"],
+            json!({"code": "invalid_native_input", "retryable": false}),
+        );
+        assert_eq!(
+            rpc.request(json!({
+                "id": "cleanup",
+                "command": "conformance_cleanup_native_custody",
+                "args": {"grant": grant, "service": "ai.opencoven.chat"},
+            }))["error"],
+            json!({"code": "invalid_native_input", "retryable": false}),
+        );
+        assert_eq!(rpc.cleanup(&grant)["ok"], true);
+        rpc.reject_cleanup(&grant);
+        for account in [
+            INSTALLATION_ACCOUNT.to_owned(),
+            credential_account(TARGET_A),
+            credential_account(TARGET_B),
+        ] {
+            assert!(!entry_present(&service, &account));
+        }
+        assert!(entry_present(&service, &credential_account(UNRELATED)));
+        assert!(entry_present(&unrelated_service, &unrelated_account));
+
+        set_cleanup_entries(&mut credential_cleanup, &service, &[TARGET_A]);
+        let (account_grant, account_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        rewrite_marker(&account_marker, |marker| {
+            marker["payload"]["accounts"][1] = Value::String(credential_account(UNRELATED));
+        });
+        rpc.reject_cleanup(&account_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+
+        let (service_grant, service_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        rewrite_marker(&service_marker, |marker| {
+            marker["payload"]["service"] = Value::String(
+                "ai.opencoven.chat.phase1.ffffffffffffffffffffffffffffffff".to_owned(),
+            );
+        });
+        rpc.reject_cleanup(&service_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+
+        let (link_grant, link_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        let link_alias = link_marker.with_extension("alias");
+        fs::hard_link(&link_marker, &link_alias).expect("marker hard link must be created");
+        rpc.reject_cleanup(&link_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+
+        let (identity_grant, identity_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        let (_substitute_grant, substitute_marker) =
+            issue_with_marker(&mut rpc, &home, &[UNRELATED]);
+        fs::remove_file(&identity_marker).expect("original marker must be removed");
+        fs::rename(&substitute_marker, &identity_marker)
+            .expect("substitute marker must be installed");
+        rpc.reject_cleanup(&identity_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+
+        let final_grant = rpc.issue(&[TARGET_A]);
+        assert_eq!(rpc.cleanup(&final_grant)["ok"], true);
+        assert!(!entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(!entry_present(&service, &credential_account(TARGET_A)));
+        assert!(entry_present(&service, &credential_account(UNRELATED)));
+        assert!(entry_present(&unrelated_service, &unrelated_account));
+        rpc.shutdown();
+    }
+
+    #[test]
+    fn native_cleanup_rejects_delete_child_acl_and_reparse_directory_substitution() {
+        let (home, _home_cleanup) = isolated_home();
+        let service = service_name();
+        let mut credential_cleanup = CredentialCleanup(Vec::new());
+        set_cleanup_entries(&mut credential_cleanup, &service, &[TARGET_A]);
+        let mut rpc = RpcProcess::spawn(&home, &service, None);
+
+        let (acl_grant, _) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        let marker_root = marker_directory(&home);
+        let grant_acl = Command::new("icacls")
+            .arg(&marker_root)
+            .args(["/grant", "*S-1-1-0:(DC)"])
+            .output()
+            .expect("icacls must run");
+        assert!(
+            grant_acl.status.success(),
+            "FILE_DELETE_CHILD ACE must be installed: {}",
+            String::from_utf8_lossy(&grant_acl.stderr)
+        );
+        rpc.reject_cleanup(&acl_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+        let remove_acl = Command::new("icacls")
+            .arg(&marker_root)
+            .args(["/remove:g", "*S-1-1-0"])
+            .output()
+            .expect("icacls must run");
+        assert!(
+            remove_acl.status.success(),
+            "test ACE must be removed: {}",
+            String::from_utf8_lossy(&remove_acl.stderr)
+        );
+
+        let (reparse_grant, reparse_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+        let marker_root = reparse_marker
+            .parent()
+            .expect("marker must have a parent")
+            .to_owned();
+        let saved_root = marker_root.with_extension("saved");
+        fs::rename(&marker_root, &saved_root).expect("marker directory must move aside");
+        let junction = Command::new("cmd")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&marker_root)
+            .arg(&saved_root)
+            .output()
+            .expect("mklink must run");
+        assert!(
+            junction.status.success(),
+            "marker junction must be created: {}",
+            String::from_utf8_lossy(&junction.stderr)
+        );
+        rpc.reject_cleanup(&reparse_grant);
+        assert!(entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(entry_present(&service, &credential_account(TARGET_A)));
+        fs::remove_dir(&marker_root).expect("marker junction must be removed");
+        fs::rename(&saved_root, &marker_root).expect("marker directory must be restored");
+
+        let final_grant = rpc.issue(&[TARGET_A]);
+        assert_eq!(rpc.cleanup(&final_grant)["ok"], true);
+        rpc.shutdown();
+    }
+
+    #[test]
+    fn native_cleanup_rejects_parent_chain_substitution_between_identity_and_publication() {
+        let (home, _home_cleanup) = isolated_home();
+        let service = service_name();
+        let hook_directory = home.join("cleanup-hooks");
+        fs::create_dir(&hook_directory).expect("cleanup hook directory must be created");
+        let mut rpc = RpcProcess::spawn(
+            &home,
+            &service,
+            Some(("issue-storage-identity", &hook_directory)),
+        );
+
+        rpc.send(json!({
+            "id": "issue",
+            "command": "conformance_issue_native_custody_cleanup",
+            "args": {"instanceIds": [TARGET_A]},
+        }));
+        wait_for_hook(&hook_directory, "issue-storage-identity");
+        let coven = home.join(".coven");
+        let saved_coven = home.join(".coven-parent-substitute");
+        fs::rename(&coven, &saved_coven).expect("original .coven directory must move aside");
+        fs::create_dir(&coven).expect("substitute .coven directory must be created");
+        fs::create_dir(coven.join("chat")).expect("substitute chat directory must be created");
+        fs::rename(
+            saved_coven.join("chat").join("phase1-cleanup-grants-v1"),
+            coven.join("chat").join("phase1-cleanup-grants-v1"),
+        )
+        .expect("original marker directory identity must move under substitute parents");
+        release_hook(&hook_directory, "issue-storage-identity");
+        assert_eq!(
+            rpc.receive()["error"],
+            json!({"code": "secure_store_unavailable", "retryable": true}),
+            "publication must reject a replaced parent chain even when the marker directory identity is retained",
+        );
+        rpc.shutdown();
+    }
+
+    #[test]
+    fn native_cleanup_pins_parent_chain_during_publication_and_claim() {
+        for (hook, operation) in [("publish-pinned", "issue"), ("claim-pinned", "cleanup")] {
+            let (home, _home_cleanup) = isolated_home();
+            let service = service_name();
+            let hook_directory = home.join("cleanup-hooks");
+            fs::create_dir(&hook_directory).expect("cleanup hook directory must be created");
+            let mut rpc = RpcProcess::spawn(&home, &service, Some((hook, &hook_directory)));
+            let grant = if operation == "cleanup" {
+                Some(rpc.issue(&[TARGET_A]))
+            } else {
+                None
+            };
+
+            if let Some(grant) = grant.as_deref() {
+                rpc.send(json!({
+                    "id": "cleanup",
+                    "command": "conformance_cleanup_native_custody",
+                    "args": {"grant": grant},
+                }));
+            } else {
+                rpc.send(json!({
+                    "id": "issue",
+                    "command": "conformance_issue_native_custody_cleanup",
+                    "args": {"instanceIds": [TARGET_A]},
+                }));
+            }
+            wait_for_hook(&hook_directory, hook);
+            let coven = home.join(".coven");
+            let saved_coven = home.join(format!(".coven-{hook}-substitute"));
+            let rename = fs::rename(&coven, &saved_coven);
+            if rename.is_ok() {
+                fs::rename(&saved_coven, &coven)
+                    .expect("unexpectedly movable parent must be restored");
+            }
+            assert!(
+                rename.is_err(),
+                "{hook} must retain non-delete-sharing handles for every parent"
+            );
+            release_hook(&hook_directory, hook);
+            assert_eq!(
+                rpc.receive()["ok"],
+                true,
+                "{hook} operation must complete under the pinned chain"
+            );
+            rpc.shutdown();
+        }
+    }
+}
+
 #[test]
 fn subprocess_rejects_unknown_native_provider_preset_without_falling_back() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))

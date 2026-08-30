@@ -50,6 +50,8 @@ pub(crate) fn issue(
     validate_service(service)?;
     validate_conformance_cleanup_accounts(accounts)?;
     let storage_identity = marker_io::identity().map_err(|_| KeyringError::Unavailable)?;
+    #[cfg(windows)]
+    marker_io::test_hook("issue-storage-identity").map_err(|_| KeyringError::Unavailable)?;
 
     for _ in 0..4 {
         let mut grant = Zeroizing::new([0_u8; GRANT_BYTES]);
@@ -540,16 +542,25 @@ mod marker_io {
         io::{Read, Write},
         os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
         path::{Component, Path, PathBuf},
+        thread,
+        time::{Duration, Instant},
     };
 
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, MOVEFILE_WRITE_THROUGH,
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS},
+        Storage::FileSystem::{
+            MoveFileExW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_FLAG_WRITE_THROUGH, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            MOVEFILE_WRITE_THROUGH,
+        },
     };
 
     use super::MAX_MARKER_BYTES;
 
     const DIRECTORY_NAMES: [&str; 3] = [".coven", "chat", "phase1-cleanup-grants-v1"];
+    const TEST_HOOK_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_TEST_HOOK";
+    const TEST_HOOK_DIRECTORY_ENV: &str =
+        "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_TEST_HOOK_DIRECTORY";
 
     pub(super) enum PublishError {
         Collision,
@@ -560,7 +571,14 @@ mod marker_io {
         Rejected,
     }
 
+    struct PinnedDirectory {
+        path: PathBuf,
+        file: File,
+        identity: crate::cave::WindowsPrivatePathMetadata,
+    }
+
     struct MarkerDirectory {
+        chain: Vec<PinnedDirectory>,
         path: PathBuf,
         identity: String,
     }
@@ -576,7 +594,7 @@ mod marker_io {
             {
                 return Err(());
             }
-            validate_path(&home, true)?;
+            let mut chain = vec![pin_directory(home.clone())?];
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
@@ -585,17 +603,35 @@ mod marker_io {
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err(()),
                 }
-                validate_path(&current, true)?;
+                chain.push(pin_directory(current.clone())?);
             }
-            let metadata = crate::cave::validate_windows_private_path(&current, true)?;
-            Ok(Self {
+            let identity = chain_identity(&chain);
+            let directory = Self {
+                chain,
                 path: current,
-                identity: format!("{:x}:{:x}", metadata.volume_serial, metadata.file_index),
-            })
+                identity,
+            };
+            directory.revalidate()?;
+            Ok(directory)
         }
 
         fn path(&self, name: &str) -> PathBuf {
             self.path.join(name)
+        }
+
+        fn revalidate(&self) -> Result<(), ()> {
+            for pinned in &self.chain {
+                let held = validate_directory_handle(&pinned.file)?;
+                if held != pinned.identity {
+                    return Err(());
+                }
+                let reopened = open_directory(&pinned.path)?;
+                let reopened_identity = validate_directory_handle(&reopened)?;
+                if reopened_identity != pinned.identity {
+                    return Err(());
+                }
+            }
+            Ok(())
         }
     }
 
@@ -614,27 +650,41 @@ mod marker_io {
         if !super::constant_time_eq(directory.identity.as_bytes(), expected_identity.as_bytes()) {
             return Err(PublishError::Unavailable);
         }
+        directory
+            .revalidate()
+            .map_err(|_| PublishError::Unavailable)?;
+        test_hook("publish-pinned").map_err(|_| PublishError::Unavailable)?;
+        directory
+            .revalidate()
+            .map_err(|_| PublishError::Unavailable)?;
         let final_path = directory.path(&marker_name(grant_id));
-        if final_path.exists() {
-            return Err(PublishError::Collision);
-        }
         let temporary_path =
             directory.path(&random_name(".pending-").map_err(|_| PublishError::Unavailable)?);
         let mut temporary = open_new(&temporary_path).map_err(|_| PublishError::Unavailable)?;
+        directory
+            .revalidate()
+            .map_err(|_| PublishError::Unavailable)?;
         temporary
             .write_all(marker)
             .and_then(|()| temporary.sync_all())
             .map_err(|_| PublishError::Unavailable)?;
         let temporary_identity =
             validate_handle(&temporary, false).map_err(|_| PublishError::Unavailable)?;
-        move_write_through(&temporary_path, &final_path).map_err(|_| {
-            let _ = fs::remove_file(&temporary_path);
-            if final_path.exists() {
-                PublishError::Collision
-            } else {
-                PublishError::Unavailable
+        match move_write_through(&temporary_path, &final_path) {
+            Ok(()) => {}
+            Err(MoveError::Collision) => {
+                let _ = fs::remove_file(&temporary_path);
+                return Err(PublishError::Collision);
             }
-        })?;
+            Err(MoveError::Unavailable) => {
+                let _ = fs::remove_file(&temporary_path);
+                return Err(PublishError::Unavailable);
+            }
+        }
+        if directory.revalidate().is_err() {
+            let _ = fs::remove_file(&final_path);
+            return Err(PublishError::Unavailable);
+        }
         let published = open_existing(&final_path).map_err(|_| PublishError::Unavailable)?;
         let published_identity =
             validate_handle(&published, false).map_err(|_| PublishError::Unavailable)?;
@@ -649,15 +699,25 @@ mod marker_io {
             let _ = fs::remove_file(&final_path);
             return Err(PublishError::Unavailable);
         }
+        directory
+            .revalidate()
+            .map_err(|_| PublishError::Unavailable)?;
         Ok(())
     }
 
     pub(super) fn claim(grant_id: &str) -> Result<(Vec<u8>, String), ClaimError> {
         let directory = MarkerDirectory::open().map_err(|_| ClaimError::Rejected)?;
+        directory.revalidate().map_err(|_| ClaimError::Rejected)?;
+        test_hook("claim-pinned").map_err(|_| ClaimError::Rejected)?;
+        directory.revalidate().map_err(|_| ClaimError::Rejected)?;
         let source_path = directory.path(&marker_name(grant_id));
         let claim_path =
             directory.path(&random_name(".claimed-").map_err(|_| ClaimError::Rejected)?);
         move_write_through(&source_path, &claim_path).map_err(|_| ClaimError::Rejected)?;
+        if directory.revalidate().is_err() {
+            let _ = fs::remove_file(&claim_path);
+            return Err(ClaimError::Rejected);
+        }
         let result = (|| {
             let mut claimed = open_existing(&claim_path).map_err(|_| ClaimError::Rejected)?;
             let before = validate_handle(&claimed, false).map_err(|_| ClaimError::Rejected)?;
@@ -681,10 +741,11 @@ mod marker_io {
             {
                 return Err(ClaimError::Rejected);
             }
+            directory.revalidate().map_err(|_| ClaimError::Rejected)?;
             Ok(bytes)
         })();
         let removed = fs::remove_file(&claim_path);
-        if removed.is_err() {
+        if removed.is_err() || directory.revalidate().is_err() {
             return Err(ClaimError::Rejected);
         }
         result.map(|bytes| (bytes, directory.identity))
@@ -719,8 +780,40 @@ mod marker_io {
             .map_err(|_| ())
     }
 
-    fn validate_path(path: &Path, directory: bool) -> Result<(), ()> {
-        crate::cave::validate_windows_private_path(path, directory).map(|_| ())
+    fn open_directory(path: &Path) -> Result<File, ()> {
+        OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .map_err(|_| ())
+    }
+
+    fn pin_directory(path: PathBuf) -> Result<PinnedDirectory, ()> {
+        let file = open_directory(&path)?;
+        let identity = validate_directory_handle(&file)?;
+        Ok(PinnedDirectory {
+            path,
+            file,
+            identity,
+        })
+    }
+
+    fn chain_identity(chain: &[PinnedDirectory]) -> String {
+        let mut identity = String::with_capacity(chain.len() * 34);
+        for pinned in chain {
+            identity.push_str(&format!(
+                "{:x}:{:x};",
+                pinned.identity.volume_serial, pinned.identity.file_index
+            ));
+        }
+        identity
+    }
+
+    fn validate_directory_handle(
+        file: &File,
+    ) -> Result<crate::cave::WindowsPrivatePathMetadata, ()> {
+        crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
     }
 
     fn validate_handle(
@@ -730,7 +823,12 @@ mod marker_io {
         crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, directory)
     }
 
-    fn move_write_through(source: &Path, destination: &Path) -> Result<(), ()> {
+    enum MoveError {
+        Collision,
+        Unavailable,
+    }
+
+    fn move_write_through(source: &Path, destination: &Path) -> Result<(), MoveError> {
         let mut source = source.as_os_str().encode_wide().collect::<Vec<_>>();
         source.push(0);
         let mut destination = destination.as_os_str().encode_wide().collect::<Vec<_>>();
@@ -743,10 +841,51 @@ mod marker_io {
             )
         } == 0
         {
-            Err(())
+            match unsafe { GetLastError() } {
+                ERROR_ALREADY_EXISTS | ERROR_FILE_EXISTS => Err(MoveError::Collision),
+                _ => Err(MoveError::Unavailable),
+            }
         } else {
             Ok(())
         }
+    }
+
+    pub(super) fn test_hook(checkpoint: &str) -> Result<(), ()> {
+        if env::var(TEST_HOOK_ENV).ok().as_deref() != Some(checkpoint) {
+            return Ok(());
+        }
+        let directory = env::var_os(TEST_HOOK_DIRECTORY_ENV)
+            .map(PathBuf::from)
+            .ok_or(())?;
+        if !directory.is_absolute() {
+            return Err(());
+        }
+        crate::cave::validate_windows_private_path(&directory, true)?;
+        let ready = directory.join(format!("{checkpoint}.ready"));
+        let release = directory.join(format!("{checkpoint}.release"));
+        let mut ready_file = open_new(&ready)?;
+        ready_file.write_all(b"ready").map_err(|_| ())?;
+        ready_file.sync_all().map_err(|_| ())?;
+        drop(ready_file);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match open_existing(&release) {
+                Ok(file) => {
+                    validate_handle(&file, false)?;
+                    break;
+                }
+                Err(()) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(()) => {
+                    let _ = fs::remove_file(&ready);
+                    return Err(());
+                }
+            }
+        }
+        fs::remove_file(&release).map_err(|_| ())?;
+        fs::remove_file(&ready).map_err(|_| ())
     }
 }
 
