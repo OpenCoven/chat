@@ -106,6 +106,106 @@ function reverseObjectKeys(value: unknown): unknown {
   );
 }
 
+function validatorModuleFixture() {
+  const scratchParent = resolve(projectRoot, '.artifacts');
+  mkdirSync(scratchParent, { recursive: true });
+  const root = mkdtempSync(resolve(scratchParent, 'schema-v2-validator-modules-'));
+  const producerRoot = resolve(root, 'producer');
+  const contractPath = resolve(root, 'scripts', 'conformance-contract.mjs');
+  const githubContractPath = resolve(root, 'scripts', 'github-conformance-evidence.mjs');
+  const contractBytes = Buffer.from(`
+export const marker = 'committed-contract';
+export function parseFrozenConformanceLock(text) {
+  return JSON.parse(text);
+}
+export function validateFrozenConformanceBindings(lock, schemaText, registryText) {
+  return {
+    lock,
+    schema: JSON.parse(schemaText),
+    registry: JSON.parse(registryText),
+  };
+}
+export function assertEvidenceProducerCompatibility(lock) {
+  return lock.evidenceProducer;
+}
+`);
+  const githubContractBytes = Buffer.from(`
+import { marker } from './github-conformance-helper.mjs';
+export function verifyProtectedWorkflow() {
+  if (marker !== 'committed-helper') {
+    throw new Error('mutable GitHub contract dependency executed');
+  }
+}
+`);
+  const packageBytes = Buffer.from('{"name":"validator-module-fixture"}\n');
+  const harnessBytes = Buffer.from('export {};\n');
+  const workflowBytes = Buffer.from('name: validator module fixture\n');
+  const producer = {
+    status: 'compatible',
+    repository: 'OpenCoven/chat',
+    commit: 'a'.repeat(40),
+    tree: 'b'.repeat(40),
+    packageManifest: metadata('package.json', packageBytes),
+    harness: {
+      ...metadata('scripts/phase1-conformance.mjs', harnessBytes),
+      version: '2.0.0',
+    },
+    workflow: metadata('.github/workflows/client-v1-conformance.yml', workflowBytes),
+  };
+  const files = new Map<string, string | Buffer>([
+    ['scripts/conformance-contract.mjs', contractBytes],
+    ['scripts/github-conformance-evidence.mjs', githubContractBytes],
+    ['scripts/github-conformance-helper.mjs', "export const marker = 'committed-helper';\n"],
+    [
+      'conformance/client-v1-cross-repository-lock.json',
+      `${JSON.stringify({ evidenceProducer: producer, toolchain: {} })}\n`,
+    ],
+    ['conformance/client-v1-cross-repository-evidence.schema.json', '{}\n'],
+    ['conformance/client-v1-cross-repository-assertions.json', '{}\n'],
+    ['producer/package.json', packageBytes],
+    ['producer/scripts/phase1-conformance.mjs', harnessBytes],
+    ['producer/.github/workflows/client-v1-conformance.yml', workflowBytes],
+  ]);
+  for (const [relativePath, bytes] of files) {
+    const path = resolve(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, bytes);
+  }
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=OpenCoven Tests',
+      '-c',
+      'user.email=tests@opencoven.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'validator module fixture',
+    ],
+    { cwd: root },
+  );
+
+  return {
+    root,
+    producerRoot,
+    producer,
+    contractPath,
+    githubContractPath,
+    contractBytes,
+    commit: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim(),
+    tree: execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim(),
+  };
+}
+
 async function fixture() {
   const contract = await import(
     pathToFileURL(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs')).href
@@ -556,31 +656,184 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
   });
 
   test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
-    const loaded = await loadSdkEvidenceContract({
-      validatorRoot,
-      validatorIdentity: {
-        repository: 'OpenCoven/sdk',
-        commit: validatorCommit,
-        tree: validatorTree,
-      },
-    });
+    const loaded = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+            const {
+              loadSdkEvidenceContract,
+            } = await import(process.argv[1]);
+            const loaded = await loadSdkEvidenceContract({
+              validatorRoot: process.argv[2],
+              validatorIdentity: {
+                repository: 'OpenCoven/sdk',
+                commit: process.argv[3],
+                tree: process.argv[4],
+              },
+            });
+            process.stdout.write(JSON.stringify({
+              validator: loaded.validator,
+              frozenLockSchemaVersion: loaded.frozenLock.schemaVersion,
+              registrySchemaVersion: loaded.registry.schemaVersion,
+              schemaId: loaded.schema.$id,
+              producer: loaded.contract.assertEvidenceProducerCompatibility(
+                loaded.frozenLock,
+              ),
+            }));
+          `,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          validatorRoot,
+          validatorCommit,
+          validatorTree,
+        ],
+        { encoding: 'utf8' },
+      ),
+    ) as {
+      validator: JsonRecord;
+      frozenLockSchemaVersion: number;
+      registrySchemaVersion: number;
+      schemaId: string;
+      producer: JsonRecord;
+    };
 
     expect(loaded.validator.commit).toBe(validatorCommit);
-    expect(loaded.frozenLock.schemaVersion).toBe(2);
-    expect(loaded.registry.schemaVersion).toBe(2);
-    expect(loaded.schema.$id).toBe(
+    expect(loaded.frozenLockSchemaVersion).toBe(2);
+    expect(loaded.registrySchemaVersion).toBe(2);
+    expect(loaded.schemaId).toBe(
       'urn:opencoven:schema:client-v1-cross-repository-platform-evidence:2',
     );
-    expect(loaded.validator.contract.path).toBe('scripts/conformance-contract.mjs');
-    expect(
-      loaded.contract.assertEvidenceProducerCompatibility(loaded.frozenLock as never),
-    ).toMatchObject({
+    expect((loaded.validator.contract as JsonRecord).path).toBe('scripts/conformance-contract.mjs');
+    expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
       workflow: {
         environmentId: '20863036831',
       },
     });
+  });
+
+  test('executes the committed contract bytes after its checkout path mutates', async () => {
+    const validator = validatorModuleFixture();
+    try {
+      const result = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              import { writeFileSync } from 'node:fs';
+              const {
+                createVerifiedValidatorModuleSnapshot,
+              } = await import(process.argv[1]);
+              const snapshot = createVerifiedValidatorModuleSnapshot({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              writeFileSync(
+                process.argv[5],
+                "export const marker = 'mutated-contract';\\n",
+              );
+              const contract = await snapshot.importModule(
+                'scripts/conformance-contract.mjs',
+              );
+              process.stdout.write(JSON.stringify({
+                marker: contract.marker,
+                metadata: snapshot.metadata(
+                  'scripts/conformance-contract.mjs',
+                ),
+              }));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+            validator.contractPath,
+          ],
+          { encoding: 'utf8' },
+        ),
+      ) as JsonRecord;
+
+      expect(result.marker).toBe('committed-contract');
+      expect(result.metadata).toEqual(
+        metadata('scripts/conformance-contract.mjs', validator.contractBytes),
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('executes the snapshotted GitHub contract after its checkout path mutates', async () => {
+    const validator = validatorModuleFixture();
+    try {
+      const result = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              import { writeFileSync } from 'node:fs';
+              const {
+                loadSdkEvidenceContract,
+                verifySchemaV2ProducerCheckout,
+              } = await import(process.argv[1]);
+              const sdkContract = await loadSdkEvidenceContract({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              writeFileSync(
+                process.argv[5],
+                [
+                  'export function verifyProtectedWorkflow() {',
+                  "  throw new Error('mutable GitHub contract executed');",
+                  '}',
+                  '',
+                ].join('\\n'),
+              );
+              const result = await verifySchemaV2ProducerCheckout({
+                producerRoot: process.argv[6],
+                producerIdentity: JSON.parse(process.argv[7]),
+                sdkContract,
+              });
+              process.stdout.write(JSON.stringify(result));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+            validator.githubContractPath,
+            validator.producerRoot,
+            JSON.stringify({
+              revision: validator.producer.commit,
+              tree: validator.producer.tree,
+            }),
+          ],
+          { encoding: 'utf8' },
+        ),
+      ) as JsonRecord;
+
+      expect(result).toMatchObject({
+        identity: {
+          repository: 'OpenCoven/chat',
+          commit: validator.producer.commit,
+          tree: validator.producer.tree,
+        },
+      });
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
   });
 
   test('rejects a file that mutates during its evidence snapshot', async () => {

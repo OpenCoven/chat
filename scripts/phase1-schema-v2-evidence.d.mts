@@ -38,6 +38,28 @@ export function readConsistentEvidenceFile(
   };
 };
 
+export function createVerifiedValidatorModuleSnapshot(options: {
+  validatorRoot: string;
+  validatorIdentity: {
+    repository: 'OpenCoven/sdk';
+    commit: string;
+    tree: string;
+  };
+}): Readonly<{
+  identity: Readonly<{
+    repository: 'OpenCoven/sdk';
+    commit: string;
+    tree: string;
+  }>;
+  graphSha256: string;
+  metadata(path: string): Readonly<{
+    path: string;
+    size: number;
+    sha256: string;
+  }>;
+  importModule(path: string): Promise<Record<string, unknown>>;
+}>;
+
 export function loadSdkEvidenceContract(options: {
   validatorRoot: string;
   validatorIdentity: {

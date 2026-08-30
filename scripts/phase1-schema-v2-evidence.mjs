@@ -9,6 +9,7 @@ import {
   readSync,
   realpathSync,
 } from 'node:fs';
+import { registerHooks } from 'node:module';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -57,7 +58,11 @@ const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const MAXIMUM_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024;
 const EVIDENCE_READ_CHUNK_BYTES = 64 * 1024;
+const MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES = 64 * 1024 * 1024;
+const MAXIMUM_VALIDATOR_MODULE_LIST_BYTES = 4 * 1024 * 1024;
+const validatorModulePathPattern = /^scripts\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.mjs$/u;
 const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
+const validatorModuleSnapshots = new WeakMap();
 
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -187,6 +192,202 @@ export function readConsistentEvidenceFile(root, relativePath, label) {
       closeSync(descriptor);
     }
   }
+}
+
+function readCommittedValidatorModules(validatorRoot, identity) {
+  const treeEntries = execFileSync(
+    'git',
+    ['-C', validatorRoot, 'ls-tree', '-r', '-z', '-l', identity.commit, '--', 'scripts'],
+    {
+      env: createGitEnvironment(process.env),
+      maxBuffer: MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    },
+  )
+    .toString('utf8')
+    .split('\0')
+    .filter((entry) => entry.length > 0);
+  const modules = new Map();
+  let totalSize = 0;
+
+  for (const treeEntry of treeEntries) {
+    const match = /^(100644|100755) blob ([0-9a-f]{40}) +([0-9]+)\t(.+)$/u.exec(treeEntry);
+    if (match === null) {
+      continue;
+    }
+    const [, , objectId, sizeText, path] = match;
+    if (!path.endsWith('.mjs')) {
+      continue;
+    }
+    if (!validatorModulePathPattern.test(path)) {
+      throw new Error(`SDK validator module path is unsafe: ${path}`);
+    }
+    const size = Number(sizeText);
+    if (
+      !Number.isSafeInteger(size) ||
+      size < 1 ||
+      size > MAXIMUM_EVIDENCE_FILE_BYTES ||
+      totalSize + size > MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES
+    ) {
+      throw new Error('SDK validator module graph exceeds the evidence size limit.');
+    }
+    const bytes = execFileSync('git', ['-C', validatorRoot, 'cat-file', 'blob', objectId], {
+      env: createGitEnvironment(process.env),
+      maxBuffer: size + 1,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    });
+    if (bytes.byteLength !== size) {
+      throw new Error(`Committed SDK validator module ${path} changed while it was read.`);
+    }
+    totalSize += size;
+    modules.set(path, {
+      bytes: Buffer.from(bytes),
+      metadata: Object.freeze({
+        path,
+        size,
+        sha256: sha256(bytes),
+      }),
+    });
+  }
+
+  for (const path of [
+    'scripts/conformance-contract.mjs',
+    'scripts/github-conformance-evidence.mjs',
+  ]) {
+    if (!modules.has(path)) {
+      throw new Error(`Committed SDK validator module is missing: ${path}`);
+    }
+  }
+
+  return modules;
+}
+
+export function createVerifiedValidatorModuleSnapshot(optionsValue) {
+  const options = requireRecord(optionsValue, 'SDK validator module snapshot options');
+  if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
+    throw new Error('SDK validator root must be a non-empty path.');
+  }
+  const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
+  if (
+    expectedValue.repository !== 'OpenCoven/sdk' ||
+    !gitOidPattern.test(expectedValue.commit ?? '') ||
+    !gitOidPattern.test(expectedValue.tree ?? '')
+  ) {
+    throw new Error('Frozen SDK validator identity is invalid.');
+  }
+
+  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+  const identity = Object.freeze({
+    repository: 'OpenCoven/sdk',
+    commit: expectedValue.commit,
+    tree: expectedValue.tree,
+  });
+  const actual = readGitIdentity(validatorRoot);
+  if (actual.commit !== identity.commit) {
+    throw new Error(`SDK validator commit ${actual.commit} does not match ${identity.commit}.`);
+  }
+  if (actual.tree !== identity.tree) {
+    throw new Error(`SDK validator tree ${actual.tree} does not match ${identity.tree}.`);
+  }
+
+  const modules = readCommittedValidatorModules(validatorRoot, identity);
+  const graphHash = createHash('sha256');
+  for (const [path, module] of [...modules.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    graphHash.update(path, 'utf8');
+    graphHash.update('\0');
+    graphHash.update(module.bytes);
+    graphHash.update('\0');
+  }
+  const graphSha256 = graphHash.digest('hex');
+  const virtualRoot = new URL(
+    `${
+      pathToFileURL(
+        resolve(
+          validatorRoot,
+          '.opencoven-verified-validator-modules',
+          `${process.pid}-${identity.commit}-${identity.tree}-${graphSha256}`,
+        ),
+      ).href
+    }/`,
+  );
+  const modulesByUrl = new Map(
+    [...modules.entries()].map(([path, module]) => [new URL(path, virtualRoot).href, module]),
+  );
+
+  return Object.freeze({
+    identity,
+    graphSha256,
+    metadata(path) {
+      const module = modules.get(path);
+      if (module === undefined) {
+        throw new Error(`SDK validator module is not in the verified snapshot: ${path}`);
+      }
+      return module.metadata;
+    },
+    async importModule(path) {
+      const module = modules.get(path);
+      if (module === undefined) {
+        throw new Error(`SDK validator module is not in the verified snapshot: ${path}`);
+      }
+      if (
+        module.bytes.byteLength !== module.metadata.size ||
+        sha256(module.bytes) !== module.metadata.sha256
+      ) {
+        throw new Error(`Verified SDK validator module bytes changed: ${path}`);
+      }
+      const entryUrl = new URL(path, virtualRoot).href;
+      const hooks = registerHooks({
+        resolve(specifier, context, nextResolve) {
+          if (modulesByUrl.has(specifier)) {
+            return { shortCircuit: true, url: specifier };
+          }
+          if (context.parentURL !== undefined && modulesByUrl.has(context.parentURL)) {
+            if (specifier.startsWith('./') || specifier.startsWith('../')) {
+              const resolvedUrl = new URL(specifier, context.parentURL).href;
+              if (!modulesByUrl.has(resolvedUrl)) {
+                throw new Error(
+                  `SDK validator relative module is outside the verified snapshot: ${specifier}`,
+                );
+              }
+              return { shortCircuit: true, url: resolvedUrl };
+            }
+            if (!specifier.startsWith('node:')) {
+              throw new Error(`SDK validator module import is not allowed: ${specifier}`);
+            }
+          }
+          return nextResolve(specifier, context);
+        },
+        load(url, context, nextLoad) {
+          const verifiedModule = modulesByUrl.get(url);
+          if (verifiedModule !== undefined) {
+            if (
+              verifiedModule.bytes.byteLength !== verifiedModule.metadata.size ||
+              sha256(verifiedModule.bytes) !== verifiedModule.metadata.sha256
+            ) {
+              throw new Error(`Verified SDK validator module bytes changed: ${url}`);
+            }
+            return {
+              format: 'module',
+              shortCircuit: true,
+              source: Buffer.from(verifiedModule.bytes),
+            };
+          }
+          return nextLoad(url, context);
+        },
+      });
+      try {
+        return await import(entryUrl);
+      } finally {
+        hooks.deregister();
+      }
+    },
+  });
 }
 
 function metadataForExpectedFile(root, expected, label) {
@@ -373,9 +574,12 @@ export async function verifySchemaV2ProducerCheckout({
     },
     'Producer workflow',
   );
-  const githubContract = await import(
-    pathToFileURL(resolve(sdkContract.validatorRoot, 'scripts/github-conformance-evidence.mjs'))
-      .href
+  const validatorModules = validatorModuleSnapshots.get(sdkContract);
+  if (validatorModules === undefined) {
+    throw new Error('SDK validator module snapshot is unavailable.');
+  }
+  const githubContract = await validatorModules.importModule(
+    'scripts/github-conformance-evidence.mjs',
   );
   githubContract.verifyProtectedWorkflow(
     workflow.bytes.toString('utf8'),
@@ -438,11 +642,10 @@ export async function loadSdkEvidenceContract(optionsValue) {
     throw new Error(`SDK validator tree ${actual.tree} does not match ${expected.tree}.`);
   }
 
-  const contractFile = readConsistentEvidenceFile(
+  const validatorModules = createVerifiedValidatorModuleSnapshot({
     validatorRoot,
-    'scripts/conformance-contract.mjs',
-    'SDK executable contract',
-  );
+    validatorIdentity: actual,
+  });
   const schemaFile = readConsistentEvidenceFile(
     validatorRoot,
     'conformance/client-v1-cross-repository-evidence.schema.json',
@@ -458,7 +661,7 @@ export async function loadSdkEvidenceContract(optionsValue) {
     'conformance/client-v1-cross-repository-lock.json',
     'SDK frozen conformance lock',
   );
-  const contract = await import(pathToFileURL(contractFile.path).href);
+  const contract = await validatorModules.importModule('scripts/conformance-contract.mjs');
   const frozenLockText = lockFile.bytes.toString('utf8');
   const schemaText = schemaFile.bytes.toString('utf8');
   const registryText = registryFile.bytes.toString('utf8');
@@ -468,7 +671,7 @@ export async function loadSdkEvidenceContract(optionsValue) {
   );
   const bindings = contract.validateFrozenConformanceBindings(frozenLock, schemaText, registryText);
 
-  return Object.freeze({
+  const sdkContract = Object.freeze({
     validatorRoot,
     contract,
     frozenLock: bindings.lock,
@@ -479,11 +682,13 @@ export async function loadSdkEvidenceContract(optionsValue) {
     schemaText,
     validator: {
       ...actual,
-      contract: contractFile.metadata,
+      contract: validatorModules.metadata('scripts/conformance-contract.mjs'),
       schema: schemaFile.metadata,
     },
     validatorIdentity: actual,
   });
+  validatorModuleSnapshots.set(sdkContract, validatorModules);
+  return sdkContract;
 }
 
 function requireIdentity(value, label, repository) {
