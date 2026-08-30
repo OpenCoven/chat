@@ -104,7 +104,15 @@ function readRegularFile(root, relativePath, label) {
 
 function metadataForExpectedFile(root, expected, label) {
   const file = readRegularFile(root, expected.path, label);
-  assertMetadataMatches(file.metadata, expected, label);
+  assertMetadataMatches(
+    file.metadata,
+    {
+      path: expected.path,
+      size: expected.size,
+      sha256: expected.sha256,
+    },
+    label,
+  );
   return file.metadata;
 }
 

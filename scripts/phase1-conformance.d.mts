@@ -78,7 +78,7 @@ export function assertNativeMissingKeychainResponses(responses: unknown[]): unkn
 export class CommandExecutionError extends Error {
   label: string;
   result: unknown;
-  constructor(label: string, result: unknown);
+  constructor(label: string, result: unknown, cause?: unknown);
 }
 export function classifyCavePackageFailure(result: {
   stdout?: string;

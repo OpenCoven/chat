@@ -453,6 +453,16 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(wrapped.message).toBe('Cave real-authority conformance failed (timeout).');
     expect(wrapped.result).toEqual({ reason: 'timeout', report });
+    expect(wrapped.cause).toBe(original);
+  });
+
+  test('preserves a private infrastructure cause only on the in-memory error object', () => {
+    const cause = new Error('/private/operator/path should not be retained');
+    const wrapped = wrapInfrastructureFailure(cause, { status: 'failed' });
+
+    expect(wrapped.message).toBe('Phase 1 conformance infrastructure failed.');
+    expect(wrapped.cause).toBe(cause);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
   });
 
   test('cleans an owned root when setup fails before its child starts', async () => {

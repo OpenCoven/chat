@@ -130,9 +130,9 @@ function defaultSourceRoot(environmentName, repositoryName) {
 }
 
 export class CommandExecutionError extends Error {
-  constructor(label, result) {
+  constructor(label, result, cause) {
     const reason = approvedCommandFailureReasons.has(result?.reason) ? ` (${result.reason})` : '';
-    super(`${label} failed${reason}.`);
+    super(`${label} failed${reason}.`, cause === undefined ? undefined : { cause });
     this.label = label;
     this.result = result;
   }
@@ -3343,12 +3343,16 @@ export function wrapInfrastructureFailure(error, report) {
     const reason = approvedCommandFailureReasons.has(error.result?.reason)
       ? error.result.reason
       : undefined;
-    return new CommandExecutionError(error.label, {
-      ...(reason === undefined ? {} : { reason }),
-      report,
-    });
+    return new CommandExecutionError(
+      error.label,
+      {
+        ...(reason === undefined ? {} : { reason }),
+        report,
+      },
+      error,
+    );
   }
-  return new CommandExecutionError('Phase 1 conformance infrastructure', { report });
+  return new CommandExecutionError('Phase 1 conformance infrastructure', { report }, error);
 }
 
 function fillMissingAssertions(results, status, diagnosticId) {
