@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
     "revision": "20633346c444ded9e05ca5a3db45d74c28918d69"
@@ -10,10 +10,261 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "086b6421d8f5daa814e2ad1b3c47605d1ffb542b"
+    "revision": "e74078a147c084bd761d929654f0990df66ef99f"
   },
   "coven": {
     "repository": "OpenCoven/coven",
     "revision": "721437b84026c042e431b0882dcd14fdb29ac07d"
+  },
+  "harness": {
+    "repository": "OpenCoven/chat",
+    "revision": "b24eaa7eb6886a5ef07af6b459ab57e0335fd20f"
+  },
+  "harnessAuthority": {
+    "revision": "b24eaa7eb6886a5ef07af6b459ab57e0335fd20f",
+    "tree": "09c94b64b31fcfceebabef156df3228fa5fb231a",
+    "files": [
+      {
+        "path": "scripts/phase1-conformance.mjs",
+        "blob": "e0493b886c3ee088fd61b1f94fae0b3a4f6836a3",
+        "sha256": "27d565ed7602befca09045d6e48811b5ff4c7e61e10e6e5eb807f9a2e9eac217"
+      },
+      {
+        "path": "scripts/phase1-conformance-launcher.sh",
+        "blob": "6df0add5f79d6d80bb8ad14ae98f4fd96929b636",
+        "sha256": "88e184d465eaf7bd6ce828dcc81ecadb11b6222f01576c56090060085820e7b2"
+      },
+      {
+        "path": "scripts/phase1-conformance-launcher.ps1",
+        "blob": "3b3883d9e74d503bbe4647fdc7478ca31c102ab6",
+        "sha256": "99eea6108e59db9a0ac12368787fb6e6456e6af4f8cce09ee96ce117ca3f475e"
+      },
+      {
+        "path": "scripts/phase1-process-supervisor.mjs",
+        "blob": "40801149e13df8661333387d521e6a1a464b9107",
+        "sha256": "a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5"
+      },
+      {
+        "path": "scripts/executable-resolution.mjs",
+        "blob": "18e903f2a33928e1820f650032064ba9f71fce4b",
+        "sha256": "65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d"
+      },
+      {
+        "path": "scripts/process-owned-artifact-root.mjs",
+        "blob": "bba0f6c01729a3cf98e71c8ebc895400ee5137dd",
+        "sha256": "82a0c8e38c1b13b705dfef9b8e891dc61c68e879f1934e409455a168a48d81ca"
+      },
+      {
+        "path": "scripts/owned-temp-directory.mjs",
+        "blob": "e5677dc8751b713284334635683d7dd89847402e",
+        "sha256": "a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095"
+      },
+      {
+        "path": "scripts/phase1-conformance-lock.mjs",
+        "blob": "6e7ab9ccaefec34325cbfaaeda1f5cb048c8e2b3",
+        "sha256": "c428285b69bdae2127277cd34ae9fc5a23c83488bce8c1e014a81254e162017d"
+      },
+      {
+        "path": "scripts/phase1-evidence-contract.mjs",
+        "blob": "52dc92c85b9be811cd2ea89607fbbb17dd06a21d",
+        "sha256": "24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f"
+      },
+      {
+        "path": "scripts/supervised-exec.mjs",
+        "blob": "16da6c76ce21e9bb5490ccd1cc4e822b671b8464",
+        "sha256": "149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b"
+      },
+      {
+        "path": "scripts/supervisor-status.mjs",
+        "blob": "5fef25ec0d2c8178566c0dd59365713169267d6e",
+        "sha256": "ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e"
+      },
+      {
+        "path": "scripts/phase1-artifact-secret-scan.mjs",
+        "blob": "7e9879c3a60aa0234bcdce59155a1df6051b9645",
+        "sha256": "165ee596b555f3872bca900f15153ca58f5687e8a6ea9addc87d2669968eb974"
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "blob": "735ac374b96659fadeb06372b8592822489d36b9",
+        "sha256": "784aef7a3f0be0978dae500db9cdcb0af29bdee06be13610f4f2ed27c9f50f37"
+      }
+    ],
+    "productionDeltas": [
+      {
+        "path": "src-tauri/Cargo.toml",
+        "blob": "16c74629b9bf1927061c52c0069b60462ece7e8b",
+        "sha256": "a6ae7962bc5e50f0cb19b58a1e4ccb9ca0fb2e71688839aa866e0f5173d5a599"
+      },
+      {
+        "path": "src-tauri/src/bin/phase1-native-rpc.rs",
+        "blob": "eb209dbbd54089a61d7c72a6ab571d4f83574831",
+        "sha256": "adfe422281e056ba5b9ab526c5889fc4c52601d5ac8538d1da7b5d56fdf90ec1"
+      },
+      {
+        "path": "src-tauri/src/conformance.rs",
+        "blob": "10287d93bf3adba45557e4781efd72d1a728495a",
+        "sha256": "0eeca76e49f3c6649ccf871f9cb9d213d974e4c8ce7ef4250b5a134eb6151a68"
+      },
+      {
+        "path": "src-tauri/src/connection.rs",
+        "blob": "65ea88062020460b8bd402b91a874a99355660fb",
+        "sha256": "83b45bbb128bfc83f85c6b8d6e471866978effce1919485b6491c8503a7caee1"
+      },
+      {
+        "path": "src-tauri/src/coven.rs",
+        "blob": "553592580a4ab7b667e3a6752b42aaeecda881e9",
+        "sha256": "fb50ed35404765b5ad3e01c22f873bbf839db1da57f0e612b2884176d8e7ac33"
+      },
+      {
+        "path": "src-tauri/src/keyring.rs",
+        "blob": "b6116866799b7f8e9aa5f70907ffbd38c0f3ec5d",
+        "sha256": "3e4ac7771406d5dfb2088d2a3c639d4be2c4d176c5d3088941f602fba1f1f07b"
+      }
+    ]
+  },
+  "chatAuthority": {
+    "tree": "72de37ed3c1afd36dcbd2824570f0a00b46459c6",
+    "files": [
+      {
+        "path": "src-tauri/Cargo.toml",
+        "blob": "75a54c604d5d8b88b661f5a2427c3f9494e3a374",
+        "sha256": "92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf"
+      },
+      {
+        "path": "src-tauri/Cargo.lock",
+        "blob": "4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a",
+        "sha256": "50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca"
+      },
+      {
+        "path": "src-tauri/src/bin/phase1-native-rpc.rs",
+        "blob": "0fbf0dcd1d2f1a49a556a9319b3121990cf53946",
+        "sha256": "a479704ea719138967f4828707bca04fb2a3de7fd2d2d2b9c7282831ec4bdf09"
+      },
+      {
+        "path": "src-tauri/src/conformance.rs",
+        "blob": "e0997e45a2371cc231bc3923a55d9d62d7cff2a0",
+        "sha256": "32c1b24e2ce27fb666af5ffe73a42d626f258285dd0d680852014799054d953d"
+      },
+      {
+        "path": "src-tauri/src/coven.rs",
+        "blob": "b904e5eeded97aa624140b56c5141daebea772b2",
+        "sha256": "09ca4871fc95d818cb642764ceaba3b1a8d6adba62e7552e69f0d0ac47662ff6"
+      },
+      {
+        "path": "src-tauri/src/keyring.rs",
+        "blob": "a33c68672b87a5cfa39cba37d4629619408309a4",
+        "sha256": "3d9215c4ba388d9180c43dea573fc839e6bfd6a214876cff7f836c9d7ad50c52"
+      },
+      {
+        "path": "src-tauri/src/lib.rs",
+        "blob": "d9c97b4fb24e73fb103330fa9a8f778ccad42a3a",
+        "sha256": "f42a987b0dcb61b7c98f9dcdbf264d079134defe4bbe63e5019d4560ea967e21"
+      }
+    ]
+  },
+  "tools": {
+    "windowsSupervisor": {
+      "source": {
+        "repository": "OpenCoven/chat",
+        "revision": "6bee23b645c0edb1dcb0afd4f8cc18d2d0e6bec6",
+        "path": "tools/phase1-process-supervisor/src/main.rs",
+        "blob": "6a95b4db7612ed0a502e91c4c21a7df5cbfe9021",
+        "sha256": "fa4c4759c0b01ce7f9bbd662ed3073b0aeed42dc7da0001026703482a5b9708a",
+        "manifestSha256": "3d3964b144599835006248fcc40eee0437b06c268a180a373c15fea44bf4bf8b",
+        "lockSha256": "e31803e60e80d9d0a68cf043786cb1f516b425c185465785216aa5b05dd6fa88",
+        "configSha256": "79d370b49837a1c4ec84231eb7fa13422e5e18a569c2b2eebf97ab3ec333d49c"
+      },
+      "toolchain": {
+        "homebrewCoreRevision": "cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57",
+        "packageVersion": "mingw-w64 14.0.0_3",
+        "bottleLayerSha256": "0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5",
+        "linkerVersion": "2.47.20260726"
+      },
+      "artifact": {
+        "target": "x86_64-pc-windows-gnu",
+        "buildInvocation": "cd tools/phase1-process-supervisor && SOURCE_DATE_EPOCH=0 cargo build --target x86_64-pc-windows-gnu --release --locked",
+        "fileName": "phase1-process-supervisor.exe",
+        "fleetPath": "C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe",
+        "size": 333824,
+        "sha256": "372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5"
+      }
+    }
+  },
+  "release": {
+    "sdkManifest": {
+      "version": "0.1.0",
+      "sha256": "b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c"
+    },
+    "sdkArtifacts": [
+      {
+        "packageName": "@opencoven/sdk-core",
+        "releaseFile": "tarballs/core/opencoven-sdk-core-0.1.0.tgz",
+        "vendorFile": "sdk-core-0.1.0.tgz",
+        "size": 33284,
+        "sha256": "9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe"
+      },
+      {
+        "packageName": "@opencoven/cave-client",
+        "releaseFile": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
+        "vendorFile": "cave-client-0.1.0.tgz",
+        "size": 81543,
+        "sha256": "c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0"
+      },
+      {
+        "packageName": "@opencoven/coven-client",
+        "releaseFile": "tarballs/coven/opencoven-coven-client-0.1.0.tgz",
+        "vendorFile": "coven-client-0.1.0.tgz",
+        "size": 33009,
+        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+      },
+      {
+        "packageName": "@opencoven/sdk",
+        "releaseFile": "tarballs/sdk/opencoven-sdk-0.1.0.tgz",
+        "vendorFile": "sdk-0.1.0.tgz",
+        "size": 15833,
+        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+      }
+    ],
+    "caveVersion": "0.3.12",
+    "covenVersion": "0.1.0",
+    "consumerLock": {
+      "path": "pnpm-lock.yaml",
+      "size": 56222,
+      "sha256": "d2f0db8eca64112324e861bb7cbd2b645ed9ae4aad836200855b3477f3ea49ae"
+    },
+    "caveArtifacts": {
+      "assertionEngine": {
+        "path": "scripts/client-v1-conformance.mjs",
+        "size": 146432,
+        "sha256": "b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd"
+      },
+      "contractFixture": {
+        "path": "src/lib/server/client-v1/contract-fixture.json",
+        "size": 16695,
+        "sha256": "c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186"
+      },
+      "hpkeVectors": {
+        "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",
+        "size": 4041,
+        "sha256": "f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797"
+      }
+    }
+  },
+  "evidence": {
+    "repository": "OpenCoven/sdk",
+    "revision": "4736bf2e0d5b16272d79ecf7784c75f376b39b94",
+    "contract": {
+      "path": "scripts/conformance-contract.mjs",
+      "sha256": "50b1012b3c4c22f518c1a611fb5210a5675ee976a9b194b502f6125bc48f5111"
+    },
+    "schema": {
+      "path": "conformance/client-v1-cross-repository-evidence.schema.json",
+      "sha256": "ca338cdbb33c46a97fe8430d95e04f6b30a2db453a7fff2184b335e33ea4f790"
+    },
+    "assertionRegistry": {
+      "path": "conformance/client-v1-cross-repository-assertions.json",
+      "sha256": "fb56d7cadaf194126fd9a7f090d8af600c04f7161cab1e2ebb3419df49fbcbe0"
+    }
   }
 }

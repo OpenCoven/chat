@@ -9,7 +9,7 @@ use std::{
 use std::marker::PhantomData;
 use std::sync::OnceLock;
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "phase1-conformance"))]
 use sha2::{Digest, Sha256};
 
 #[cfg(unix)]
@@ -28,6 +28,12 @@ const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
 #[cfg(unix)]
 const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
+#[cfg(feature = "phase1-conformance")]
+const CONFORMANCE_CLEANUP_SERVICE: &str = "ai.opencoven.chat.conformance-cleanup";
+#[cfg(feature = "phase1-conformance")]
+const CONFORMANCE_CLEANUP_ACCOUNT_PREFIX: &str = "cleanup-reservation-v1";
+#[cfg(feature = "phase1-conformance")]
+const CONFORMANCE_HARNESS_IDENTITY: &str = "phase1-native-rpc-v1";
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -128,6 +134,51 @@ pub(crate) trait CredentialCustody: Send + Sync {
 pub(crate) struct NativeKeyring {
     #[cfg(feature = "phase1-conformance")]
     provider_preset: Option<NativeProviderPreset>,
+    #[cfg(feature = "phase1-conformance")]
+    reservation_required: bool,
+    #[cfg(feature = "phase1-conformance")]
+    prepared_instance: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    #[cfg(feature = "phase1-conformance")]
+    prepared_cleanup: std::sync::Arc<std::sync::Mutex<Option<ConformanceCleanupReservation>>>,
+}
+
+#[cfg(feature = "phase1-conformance")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConformanceCleanupReservation {
+    pub(crate) reservation_handle: String,
+    pub(crate) capability: String,
+    pub(crate) owner_token: String,
+}
+
+#[cfg(feature = "phase1-conformance")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConformanceCleanupOutcome {
+    Deleted,
+    Transferred,
+}
+
+#[cfg(feature = "phase1-conformance")]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ConformanceCleanupMarker {
+    version: u8,
+    store_schema_version: u8,
+    run_id: String,
+    harness_identity: String,
+    instance_id: String,
+    target_account: String,
+    capability_sha256: String,
+    owner_token: String,
+    pending_owner_token: Option<String>,
+}
+
+#[cfg(feature = "phase1-conformance")]
+fn conformance_sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(feature = "phase1-conformance")]
@@ -141,6 +192,14 @@ impl NativeKeyring {
     pub(crate) fn with_provider_preset(preset: NativeProviderPreset) -> Self {
         Self {
             provider_preset: Some(preset),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn for_conformance() -> Self {
+        Self {
+            reservation_required: true,
+            ..Self::default()
         }
     }
 
@@ -148,6 +207,344 @@ impl NativeKeyring {
         match self.provider_preset {
             Some(NativeProviderPreset::MissingKeychainTrust) => Err(KeyringError::Unavailable),
             None => Ok(()),
+        }
+    }
+
+    fn conformance_reservation_entry(handle: &str) -> Result<Entry, KeyringError> {
+        validate_installation_id(handle)?;
+        Self::entry_for(
+            CONFORMANCE_CLEANUP_SERVICE,
+            &format!("{CONFORMANCE_CLEANUP_ACCOUNT_PREFIX}:{handle}"),
+        )
+    }
+
+    pub(crate) fn prepare_conformance_cleanup(
+        &self,
+        instance_id: &str,
+    ) -> Result<ConformanceCleanupReservation, KeyringError> {
+        self.reject_provider_if_configured()?;
+        validate_installation_id(instance_id)?;
+        let _guard = acquire_mutation_lock()?;
+        match Self::credential_entry(instance_id)?.get_secret() {
+            Err(KeyringBackendError::NoEntry) => {}
+            Ok(mut value) => {
+                value.zeroize();
+                return Err(KeyringError::Failure);
+            }
+            Err(error) => return Err(map_keyring_error(error)),
+        }
+        if self
+            .prepared_instance
+            .lock()
+            .map_err(|_| KeyringError::Failure)?
+            .is_some()
+        {
+            return Err(KeyringError::Failure);
+        }
+        let handle = Uuid::new_v4().to_string();
+        let capability = Uuid::new_v4().to_string();
+        let owner_token = Uuid::new_v4().to_string();
+        let entry = Self::conformance_reservation_entry(&handle)?;
+        match entry.get_secret() {
+            Err(KeyringBackendError::NoEntry) => {}
+            Ok(mut value) => {
+                value.zeroize();
+                return Err(KeyringError::Failure);
+            }
+            Err(error) => return Err(map_keyring_error(error)),
+        }
+        let marker = ConformanceCleanupMarker {
+            version: 2,
+            store_schema_version: 1,
+            run_id: handle.clone(),
+            harness_identity: CONFORMANCE_HARNESS_IDENTITY.to_owned(),
+            instance_id: instance_id.to_owned(),
+            target_account: format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"),
+            capability_sha256: conformance_sha256_hex(capability.as_bytes()),
+            owner_token: owner_token.clone(),
+            pending_owner_token: None,
+        };
+        let bytes = Zeroizing::new(serde_json::to_vec(&marker).map_err(|_| KeyringError::Failure)?);
+        entry
+            .set_secret(bytes.as_slice())
+            .map_err(map_keyring_error)?;
+        let reservation = ConformanceCleanupReservation {
+            reservation_handle: handle,
+            capability,
+            owner_token,
+        };
+        *self
+            .prepared_cleanup
+            .lock()
+            .map_err(|_| KeyringError::Failure)? = Some(reservation.clone());
+        *self
+            .prepared_instance
+            .lock()
+            .map_err(|_| KeyringError::Failure)? = Some(instance_id.to_owned());
+        Ok(reservation)
+    }
+
+    pub(crate) fn cleanup_conformance_credential(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+    ) -> Result<ConformanceCleanupOutcome, KeyringError> {
+        self.reject_provider_if_configured()?;
+        validate_installation_id(handle)?;
+        validate_installation_id(capability)?;
+        validate_installation_id(owner_token)?;
+        let _guard = acquire_mutation_lock()?;
+        let marker_entry = Self::conformance_reservation_entry(handle)?;
+        let marker_bytes = match marker_entry.get_secret() {
+            Ok(value) => Zeroizing::new(value),
+            Err(KeyringBackendError::NoEntry) => return Err(KeyringError::NotFound),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let marker: ConformanceCleanupMarker =
+            serde_json::from_slice(marker_bytes.as_slice()).map_err(|_| KeyringError::Failure)?;
+        validate_installation_id(&marker.instance_id)?;
+        validate_installation_id(&marker.owner_token)?;
+        if marker.version != 2
+            || marker.store_schema_version != 1
+            || marker.run_id != handle
+            || marker.harness_identity != CONFORMANCE_HARNESS_IDENTITY
+            || marker.target_account
+                != format!("{CREDENTIAL_ACCOUNT_PREFIX}:{}", marker.instance_id)
+            || marker.capability_sha256 != conformance_sha256_hex(capability.as_bytes())
+        {
+            return Err(KeyringError::Failure);
+        }
+        if marker.owner_token != owner_token {
+            return Ok(ConformanceCleanupOutcome::Transferred);
+        }
+        let target = Self::credential_entry(&marker.instance_id)?;
+        match target.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => {}
+            Err(error) => return Err(map_keyring_error(error)),
+        }
+        match target.get_secret() {
+            Err(KeyringBackendError::NoEntry) => {}
+            Ok(mut value) => {
+                value.zeroize();
+                return Err(KeyringError::Failure);
+            }
+            Err(error) => return Err(map_keyring_error(error)),
+        }
+        marker_entry
+            .delete_credential()
+            .map_err(map_keyring_error)?;
+        match marker_entry.get_secret() {
+            Err(KeyringBackendError::NoEntry) => {
+                *self
+                    .prepared_instance
+                    .lock()
+                    .map_err(|_| KeyringError::Failure)? = None;
+                let mut prepared_cleanup = self
+                    .prepared_cleanup
+                    .lock()
+                    .map_err(|_| KeyringError::Failure)?;
+                if prepared_cleanup
+                    .as_ref()
+                    .is_some_and(|prepared| prepared.reservation_handle == handle)
+                {
+                    *prepared_cleanup = None;
+                }
+                Ok(ConformanceCleanupOutcome::Deleted)
+            }
+
+            Ok(mut value) => {
+                value.zeroize();
+                Err(KeyringError::Failure)
+            }
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    pub(crate) fn begin_adopt_conformance_cleanup(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<ConformanceCleanupReservation, KeyringError> {
+        self.reject_provider_if_configured()?;
+        validate_installation_id(handle)?;
+        validate_installation_id(capability)?;
+        validate_installation_id(owner_token)?;
+        validate_installation_id(successor_owner_token)?;
+        let _guard = acquire_mutation_lock()?;
+        let marker_entry = Self::conformance_reservation_entry(handle)?;
+        let marker_bytes = match marker_entry.get_secret() {
+            Ok(value) => Zeroizing::new(value),
+            Err(KeyringBackendError::NoEntry) => return Err(KeyringError::NotFound),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let mut marker: ConformanceCleanupMarker =
+            serde_json::from_slice(marker_bytes.as_slice()).map_err(|_| KeyringError::Failure)?;
+        validate_installation_id(&marker.instance_id)?;
+        validate_installation_id(&marker.owner_token)?;
+        if marker.version != 2
+            || marker.store_schema_version != 1
+            || marker.run_id != handle
+            || marker.harness_identity != CONFORMANCE_HARNESS_IDENTITY
+            || marker.target_account
+                != format!("{CREDENTIAL_ACCOUNT_PREFIX}:{}", marker.instance_id)
+            || marker.capability_sha256 != conformance_sha256_hex(capability.as_bytes())
+            || marker.owner_token != owner_token
+        {
+            return Err(KeyringError::Failure);
+        }
+        if let Some(pending) = marker.pending_owner_token.as_deref() {
+            if pending == successor_owner_token {
+                return Ok(ConformanceCleanupReservation {
+                    reservation_handle: handle.to_owned(),
+                    capability: capability.to_owned(),
+                    owner_token: successor_owner_token.to_owned(),
+                });
+            }
+            return Err(KeyringError::Failure);
+        }
+        match Self::credential_entry(&marker.instance_id)?.get_secret() {
+            Ok(mut value) => value.zeroize(),
+            Err(error) => return Err(map_keyring_error(error)),
+        }
+        marker.pending_owner_token = Some(successor_owner_token.to_owned());
+        let bytes = Zeroizing::new(serde_json::to_vec(&marker).map_err(|_| KeyringError::Failure)?);
+        marker_entry
+            .set_secret(bytes.as_slice())
+            .map_err(map_keyring_error)?;
+        Ok(ConformanceCleanupReservation {
+            reservation_handle: handle.to_owned(),
+            capability: capability.to_owned(),
+            owner_token: successor_owner_token.to_owned(),
+        })
+    }
+
+    pub(crate) fn commit_adopt_conformance_cleanup(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError> {
+        self.reject_provider_if_configured()?;
+        for value in [handle, capability, owner_token, successor_owner_token] {
+            validate_installation_id(value)?;
+        }
+        let _guard = acquire_mutation_lock()?;
+        let entry = Self::conformance_reservation_entry(handle)?;
+        let bytes = match entry.get_secret() {
+            Ok(value) => Zeroizing::new(value),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let mut marker: ConformanceCleanupMarker =
+            serde_json::from_slice(bytes.as_slice()).map_err(|_| KeyringError::Failure)?;
+        if marker.capability_sha256 != conformance_sha256_hex(capability.as_bytes()) {
+            return Err(KeyringError::Failure);
+        }
+        let already_committed =
+            marker.owner_token == successor_owner_token && marker.pending_owner_token.is_none();
+        if !already_committed {
+            if marker.owner_token != owner_token
+                || marker.pending_owner_token.as_deref() != Some(successor_owner_token)
+            {
+                return Err(KeyringError::Failure);
+            }
+            marker.owner_token = successor_owner_token.to_owned();
+            marker.pending_owner_token = None;
+            let bytes =
+                Zeroizing::new(serde_json::to_vec(&marker).map_err(|_| KeyringError::Failure)?);
+            entry
+                .set_secret(bytes.as_slice())
+                .map_err(map_keyring_error)?;
+        }
+        let reservation = ConformanceCleanupReservation {
+            reservation_handle: handle.to_owned(),
+            capability: capability.to_owned(),
+            owner_token: successor_owner_token.to_owned(),
+        };
+        *self
+            .prepared_cleanup
+            .lock()
+            .map_err(|_| KeyringError::Failure)? = Some(reservation);
+        *self
+            .prepared_instance
+            .lock()
+            .map_err(|_| KeyringError::Failure)? = Some(marker.instance_id);
+        Ok(())
+    }
+
+    pub(crate) fn abort_adopt_conformance_cleanup(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError> {
+        self.reject_provider_if_configured()?;
+        for value in [handle, capability, owner_token, successor_owner_token] {
+            validate_installation_id(value)?;
+        }
+        let _guard = acquire_mutation_lock()?;
+        let entry = Self::conformance_reservation_entry(handle)?;
+        let bytes = match entry.get_secret() {
+            Ok(value) => Zeroizing::new(value),
+            Err(KeyringBackendError::NoEntry) => return Ok(()),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let mut marker: ConformanceCleanupMarker =
+            serde_json::from_slice(bytes.as_slice()).map_err(|_| KeyringError::Failure)?;
+        if marker.capability_sha256 != conformance_sha256_hex(capability.as_bytes()) {
+            return Err(KeyringError::Failure);
+        }
+        if marker.owner_token == successor_owner_token && marker.pending_owner_token.is_none() {
+            return Ok(());
+        }
+        if marker.owner_token != owner_token {
+            return Err(KeyringError::Failure);
+        }
+        if marker.pending_owner_token.as_deref() == Some(successor_owner_token) {
+            marker.pending_owner_token = None;
+            let bytes =
+                Zeroizing::new(serde_json::to_vec(&marker).map_err(|_| KeyringError::Failure)?);
+            entry
+                .set_secret(bytes.as_slice())
+                .map_err(map_keyring_error)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cancel_prepared_conformance_cleanup(&self) -> Result<(), KeyringError> {
+        self.reject_provider_if_configured()?;
+        let prepared = self
+            .prepared_cleanup
+            .lock()
+            .map_err(|_| KeyringError::Failure)?
+            .clone();
+        match prepared {
+            Some(reservation) => self.cleanup_conformance_credential(
+                &reservation.reservation_handle,
+                &reservation.capability,
+                &reservation.owner_token,
+            ),
+            None => Ok(ConformanceCleanupOutcome::Deleted),
+        }
+        .map(|_| ())
+    }
+
+    fn require_prepared_instance(&self, instance_id: &str) -> Result<(), KeyringError> {
+        if !self.reservation_required {
+            return Ok(());
+        }
+        match self
+            .prepared_instance
+            .lock()
+            .map_err(|_| KeyringError::Failure)?
+            .as_deref()
+        {
+            Some(prepared) if prepared == instance_id => Ok(()),
+            _ => Err(KeyringError::Failure),
         }
     }
 }
@@ -165,15 +562,23 @@ struct CredentialMutationGuard {
 }
 
 #[cfg(unix)]
-fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".coven").join("chat")
+}
+
+#[cfg(unix)]
+fn credential_lock_path_for_root(
+    root: &std::path::Path,
+) -> Result<std::path::PathBuf, KeyringError> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
-    let root = std::path::PathBuf::from(home).join(".coven").join("chat");
-    fs::create_dir_all(&root).map_err(|_| KeyringError::Unavailable)?;
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+    if !root.is_absolute() {
+        return Err(KeyringError::Unavailable);
+    }
+    fs::create_dir_all(root).map_err(|_| KeyringError::Unavailable)?;
+    fs::set_permissions(root, fs::Permissions::from_mode(0o700))
         .map_err(|_| KeyringError::Unavailable)?;
-    let metadata = fs::symlink_metadata(&root).map_err(|_| KeyringError::Unavailable)?;
+    let metadata = fs::symlink_metadata(root).map_err(|_| KeyringError::Unavailable)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
@@ -185,6 +590,16 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
 }
 
 #[cfg(unix)]
+fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+    #[cfg(feature = "phase1-conformance")]
+    if let Some(path) = env::var_os("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT") {
+        return credential_lock_path_for_root(&std::path::PathBuf::from(path));
+    }
+    let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
+    credential_lock_path_for_root(&default_credential_lock_root(std::path::Path::new(&home)))
+}
+
+#[cfg(unix)]
 fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
     acquire_mutation_lock_with_timeout(CREDENTIAL_LOCK_TIMEOUT)
 }
@@ -192,6 +607,14 @@ fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
 #[cfg(unix)]
 fn acquire_mutation_lock_with_timeout(
     timeout: Duration,
+) -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock_with_timeout_at(timeout, None)
+}
+
+#[cfg(unix)]
+fn acquire_mutation_lock_with_timeout_at(
+    timeout: Duration,
+    explicit_root: Option<&std::path::Path>,
 ) -> Result<CredentialMutationGuard, KeyringError> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -206,7 +629,10 @@ fn acquire_mutation_lock_with_timeout(
             Err(std::sync::TryLockError::WouldBlock) => return Err(KeyringError::Unavailable),
         }
     };
-    let path = credential_lock_path()?;
+    let path = match explicit_root {
+        Some(root) => credential_lock_path_for_root(root)?,
+        None => credential_lock_path()?,
+    };
     let file = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -762,7 +1188,10 @@ impl CredentialCustody for NativeKeyring {
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
-        self.reject_provider_if_configured()?;
+        {
+            self.reject_provider_if_configured()?;
+            self.require_prepared_instance(instance_id)?;
+        }
         validate_credential_origin(origin)?;
         if let Some(expected_credential) = expected_credential {
             validate_credential_origin(&expected_credential.origin)?;
@@ -817,7 +1246,10 @@ impl CredentialCustody for NativeKeyring {
         credential_id: &str,
     ) -> Result<bool, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
-        self.reject_provider_if_configured()?;
+        {
+            self.reject_provider_if_configured()?;
+            self.require_prepared_instance(instance_id)?;
+        }
         validate_credential_origin(origin)?;
         validate_credential_origin(&expected_stale_credential.origin)?;
         if bearer.is_empty()
@@ -943,6 +1375,10 @@ pub(crate) fn validate_credential_origin(origin: &str) -> Result<(), KeyringErro
 
 impl NativeKeyring {
     fn entry(account: &str) -> Result<Entry, KeyringError> {
+        Self::entry_for(SERVICE, account)
+    }
+
+    fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
         if STORE_INITIALIZED.get().is_none() {
             if !initialize_store() {
                 return Err(KeyringError::Unavailable);
@@ -952,7 +1388,7 @@ impl NativeKeyring {
         #[cfg(windows)]
         {
             return Entry::new_with_modifiers(
-                SERVICE,
+                service,
                 account,
                 &std::collections::HashMap::from([("persistence", "Local")]),
             )
@@ -960,7 +1396,7 @@ impl NativeKeyring {
         }
         #[cfg(not(windows))]
         {
-            Entry::new(SERVICE, account).map_err(map_keyring_error)
+            Entry::new(service, account).map_err(map_keyring_error)
         }
     }
 
@@ -1017,13 +1453,28 @@ fn map_keyring_error(error: KeyringBackendError) -> KeyringError {
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
-    use super::acquire_mutation_lock_with_timeout;
+    use super::{acquire_mutation_lock_with_timeout_at, default_credential_lock_root};
     use super::{
         acquire_windows_mutex, decode_legacy_windows_password, legacy_windows_mutex_name,
         parse_stored_credential, validate_installation_id, windows_mutex_name,
         windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
         WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
     };
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn conformance_storage_gate_accepts_only_the_native_prepared_uuid() {
+        const PREPARED: &str = "00000000-0000-4000-8000-000000000001";
+        const DIFFERENT: &str = "00000000-0000-4000-8000-000000000002";
+        let keyring = super::NativeKeyring::for_conformance();
+        assert!(keyring.require_prepared_instance(PREPARED).is_err());
+        *keyring.prepared_instance.lock().unwrap() = Some(PREPARED.to_owned());
+        assert!(keyring.require_prepared_instance(PREPARED).is_ok());
+        assert!(keyring.require_prepared_instance(DIFFERENT).is_err());
+        assert!(keyring
+            .require_prepared_instance("installation-id-v1")
+            .is_err());
+    }
 
     #[test]
     fn accepts_canonical_lowercase_v4_installation_ids() {
@@ -1082,20 +1533,42 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn unix_credential_lock_contention_is_bounded() {
-        use std::time::{Duration, Instant};
+        use std::{
+            fs,
+            path::Path,
+            time::{Duration, Instant},
+        };
 
-        let first = acquire_mutation_lock_with_timeout(Duration::from_secs(1))
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("keyring-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        let operator_lock = default_credential_lock_root(&std::path::PathBuf::from(
+            std::env::var_os("HOME").unwrap_or_default(),
+        ))
+        .join("credential-mutation.lock");
+        assert_ne!(Some(root.as_path()), operator_lock.parent());
+        let first = acquire_mutation_lock_with_timeout_at(Duration::from_secs(1), Some(&root))
             .expect("first credential lock");
         let started = Instant::now();
-        let contender = std::thread::spawn(|| {
+        let contender_root = root.clone();
+        let contender = std::thread::spawn(move || {
             matches!(
-                acquire_mutation_lock_with_timeout(Duration::from_millis(50)),
+                acquire_mutation_lock_with_timeout_at(
+                    Duration::from_millis(50),
+                    Some(&contender_root)
+                ),
                 Err(KeyringError::Unavailable)
             )
         });
         assert!(contender.join().expect("contender thread"));
         assert!(started.elapsed() < Duration::from_secs(1));
         drop(first);
+        fs::remove_dir_all(root).expect("explicit lock root cleanup");
+        assert_eq!(
+            default_credential_lock_root(Path::new("/operator/home")),
+            Path::new("/operator/home").join(".coven").join("chat")
+        );
     }
 
     #[test]

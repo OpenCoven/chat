@@ -3,11 +3,11 @@ import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
+import { scanPhase1Artifacts } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
-  APPROVED_PHASE1_DIAGNOSTIC_IDS,
-  REQUIRED_PHASE1_ASSERTION_IDS,
-  scanPhase1Artifacts,
-} from '../scripts/phase1-artifact-secret-scan.mjs';
+  buildPlatformEvidence,
+  windowsSupervisorDiagnosticId,
+} from '../scripts/phase1-evidence-contract.mjs';
 import {
   createProcessOwnedArtifactRoot,
   type ProcessOwnedArtifactRoot,
@@ -29,46 +29,129 @@ function createRoot() {
 }
 
 function validReport() {
-  return {
-    schemaVersion: 1,
-    completed: true,
-    status: 'passed',
-    platform: {
-      os: process.platform,
-      arch: process.arch,
+  const registry = {
+    schemaVersion: 1 as const,
+    cave: {
+      engine: 'scripts/client-v1-conformance.mjs' as const,
+      requireIncludeTtl: true as const,
+      requireAuthorityTakeover: true as const,
     },
-    versions: {
-      node: process.versions.node,
-      harness: '1.0.0',
+    sdk: ['sdk.install.packed-tarballs', 'sdk.provenance.fixture-bytes-match', 'sdk.coven.health'],
+    chat: {
+      common: [
+        'chat.install.consumer-lock-matches',
+        'chat.native.keychain-unavailable-fails-closed',
+        'chat.deadline.total-bounded',
+        'chat.coven.health',
+      ],
+      platforms: {
+        'darwin-arm64': ['chat.coven.unix.connected-peer-identity'],
+        'linux-x64': ['chat.coven.unix.connected-peer-identity'],
+        'win32-x64': ['chat.coven.windows.connected-pipe-identity'],
+      },
     },
-    revisions: {
-      chat: '0021d30d0cddc5d3f00a41c55d025cf3ce4611c5',
-      sdk: '163961f4e59cfdef51d2271fa98e7c514977203f',
-      cave: '061ddca45ab00028ecc0335face6239e5553f24a',
-      coven: '721437b84026c042e431b0882dcd14fdb29ac07d',
-    },
-    artifactDigests: {
-      'chat-bundle': 'a'.repeat(64),
-      'sdk-core': 'b'.repeat(64),
-    },
-    assertions: REQUIRED_PHASE1_ASSERTION_IDS.map((id) => ({
-      id,
-      status: 'passed',
-      diagnosticIds: ['phase1.assertion.passed'],
-    })),
-    summary: {
-      required: REQUIRED_PHASE1_ASSERTION_IDS.length,
-      passed: REQUIRED_PHASE1_ASSERTION_IDS.length,
-      failed: 0,
-      blocked: 0,
-      skipped: 0,
-    },
-    diagnosticIds: ['phase1.conformance.passed'],
   };
+  const passing = (ids: string[]) =>
+    ids.map((id) => ({
+      id,
+      result: 'pass' as const,
+      diagnosticId:
+        id === 'sdk.install.packed-tarballs'
+          ? `phase1.sdk-candidate.${'a'.repeat(40)}`
+          : id === 'sdk.provenance.fixture-bytes-match'
+            ? `phase1.sdk-manifest.${'b'.repeat(64)}`
+            : id === 'chat.install.consumer-lock-matches'
+              ? `phase1.chat-harness.${'c'.repeat(40)}`
+              : id === 'chat.native.keychain-unavailable-fails-closed'
+                ? 'phase1.toolchain.rust.1.95.0'
+                : id === 'chat.deadline.total-bounded'
+                  ? windowsSupervisorDiagnosticId({
+                      windowsSupervisorSha256: 'd'.repeat(64),
+                      mingwPackageVersion: 'mingw-w64 14.0.0_3',
+                      mingwHomebrewCoreRevision: 'cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57',
+                      mingwBottleLayerSha256:
+                        '0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5',
+                      mingwLinkerVersion: '2.47.20260726',
+                    })
+                  : 'phase1.assertion.passed',
+    }));
+  return buildPlatformEvidence({
+    registry,
+    platform: 'darwin-arm64',
+    caveRecord: {
+      ranAt: '2026-08-29T04:00:00.000Z',
+      caveVersion: '0.3.11',
+      commit: '2'.repeat(40),
+      platform: 'darwin-arm64',
+      nodeVersion: 'v24.18.1',
+      includeTtl: true,
+      authorityTakeover: {
+        authorityMode: 'enforce',
+        discoveryVersion: 2,
+        mechanism: 'hpke-bound-v1',
+      },
+      assertions: [],
+    },
+    releases: { cave: '0.3.11', coven: '0.1.0' },
+    commits: {
+      cave: '2'.repeat(40),
+      coven: '3'.repeat(40),
+      sdk: '4'.repeat(40),
+      chat: '5'.repeat(40),
+    },
+    digests: {
+      caveAssertionEngine: 'a'.repeat(64),
+      caveContractFixture: 'b'.repeat(64),
+      hpkeVectors: 'c'.repeat(64),
+      consumerLock: 'd'.repeat(64),
+      assertionRegistry: 'e'.repeat(64),
+      sdkTarballs: [
+        { packageName: '@opencoven/sdk-core', sha256: '1'.repeat(64) },
+        { packageName: '@opencoven/cave-client', sha256: '2'.repeat(64) },
+        { packageName: '@opencoven/coven-client', sha256: '3'.repeat(64) },
+        { packageName: '@opencoven/sdk', sha256: '4'.repeat(64) },
+      ],
+    },
+    sdkAssertions: passing(registry.sdk),
+    chatAssertions: passing([...registry.chat.common, ...registry.chat.platforms['darwin-arm64']]),
+    environment: {
+      nodeVersion: 'v24.18.1',
+      packageManagerVersion: 'pnpm@10.34.0',
+    },
+    metadata: {
+      sdkCandidateRevision: 'a'.repeat(40),
+      sdkManifestSha256: 'b'.repeat(64),
+      chatHarnessRevision: 'c'.repeat(40),
+      windowsSupervisorSha256: 'd'.repeat(64),
+      mingwPackageVersion: 'mingw-w64 14.0.0_3',
+      mingwHomebrewCoreRevision: 'cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57',
+      mingwBottleLayerSha256: '0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5',
+      mingwLinkerVersion: '2.47.20260726',
+      rustVersion: '1.95.0',
+    },
+    isolation: {
+      roots: [
+        { id: 'cave-home', ownershipVerified: true, removedAfterRun: true },
+        { id: 'coven-home', ownershipVerified: true, removedAfterRun: true },
+        { id: 'consumer-home', ownershipVerified: true, removedAfterRun: true },
+        { id: 'native-credential-store', ownershipVerified: true, removedAfterRun: true },
+      ],
+      operatorState: [
+        { id: 'cave-home', beforeSha256: '6'.repeat(64), afterSha256: '6'.repeat(64) },
+        { id: 'coven-home', beforeSha256: '7'.repeat(64), afterSha256: '7'.repeat(64) },
+        {
+          id: 'native-credential-store',
+          beforeSha256: '8'.repeat(64),
+          afterSha256: '8'.repeat(64),
+        },
+        { id: 'projects', beforeSha256: '9'.repeat(64), afterSha256: '9'.repeat(64) },
+      ],
+    },
+  });
 }
 
 function assertionAt(report: ReturnType<typeof validReport>, index: number) {
-  const assertion = report.assertions[index];
+  const assertion = report.chatAssertions[index];
   if (assertion === undefined) {
     throw new Error(`missing test assertion at index ${index}`);
   }
@@ -82,8 +165,7 @@ async function scanReport(report: unknown) {
 }
 
 describe('Phase 1 retained-artifact secret scan', () => {
-  test('accepts only the approved secret-free report schema', async () => {
-    expect(APPROVED_PHASE1_DIAGNOSTIC_IDS).toContain('phase1.conformance.passed');
+  test('accepts the exact secret-free SDK platform record schema', async () => {
     const result = await scanReport(validReport());
 
     expect(result).toEqual({
@@ -91,6 +173,19 @@ describe('Phase 1 retained-artifact secret scan', () => {
       bytesScanned: expect.any(Number),
       reportCount: 1,
     });
+  });
+
+  test('rejects evidence produced by a different Node 24 release', async () => {
+    const valid = validReport();
+    const report = {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        nodeVersion: 'v24.19.0',
+      },
+    };
+
+    await expect(scanReport(report)).rejects.toThrow(/environment is invalid/);
   });
 
   test.each([
@@ -102,6 +197,8 @@ describe('Phase 1 retained-artifact secret scan', () => {
     ['protected response plaintext', { protectedResponsePlaintext: '{"message":"private"}' }],
     ['user prompt', { prompt: 'private user prompt' }],
     ['message body', { messageBody: 'private conversation content' }],
+    ['generic content field', { content: 'private conversation content' }],
+    ['command output', { commandOutput: 'private subprocess output' }],
     ['attachment', { attachment: 'private-document.pdf' }],
     ['private macOS path', { diagnostic: '/Users/private-user/Library/Keychains/login.keychain' }],
     ['private Linux path', { diagnostic: '/home/private-user/.config/opencoven' }],
@@ -118,44 +215,42 @@ describe('Phase 1 retained-artifact secret scan', () => {
     );
   });
 
-  test('rejects unknown assertion and diagnostic identifiers', async () => {
+  test('rejects noncanonical assertion and diagnostic identifiers', async () => {
     const unknownAssertion = validReport();
-    unknownAssertion.assertions[0] = {
+    unknownAssertion.chatAssertions[0] = {
       ...assertionAt(unknownAssertion, 0),
-      id: 'phase1.unknown.assertion',
+      id: 'UPPERCASE',
     };
-    await expect(scanReport(unknownAssertion)).rejects.toThrow(/approved assertion ID/);
+    await expect(scanReport(unknownAssertion)).rejects.toThrow(/canonical assertion ID/);
 
     const unknownDiagnostic = validReport();
-    unknownDiagnostic.diagnosticIds = ['phase1.unknown.diagnostic'];
-    await expect(scanReport(unknownDiagnostic)).rejects.toThrow(/approved diagnostic ID/);
+    unknownDiagnostic.chatAssertions[0] = {
+      ...assertionAt(unknownDiagnostic, 0),
+      diagnosticId: 'contains spaces',
+    };
+    await expect(scanReport(unknownDiagnostic)).rejects.toThrow(/canonical diagnostic ID/);
   });
 
-  test('rejects duplicate or missing assertion identifiers', async () => {
+  test('rejects duplicate assertion identifiers', async () => {
     const duplicate = validReport();
-    duplicate.assertions[1] = {
+    duplicate.chatAssertions[1] = {
       ...assertionAt(duplicate, 1),
       id: assertionAt(duplicate, 0).id,
     };
-    await expect(scanReport(duplicate)).rejects.toThrow(/exact required assertion set/);
-
-    const missing = validReport();
-    missing.assertions.pop();
-    await expect(scanReport(missing)).rejects.toThrow(/exact required assertion set/);
+    await expect(scanReport(duplicate)).rejects.toThrow(/duplicate assertion ID/);
   });
 
-  test('rejects skipped assertions and inconsistent summary counts', async () => {
+  test('rejects skipped assertions and unsupported platform IDs', async () => {
     const skipped = validReport();
-    skipped.assertions[0] = {
+    skipped.chatAssertions[0] = {
       ...assertionAt(skipped, 0),
-      status: 'skipped' as never,
+      result: 'skip' as never,
     };
-    await expect(scanReport(skipped)).rejects.toThrow(/approved pass-fail status/);
+    await expect(scanReport(skipped)).rejects.toThrow(/must not skip/);
 
-    const inconsistent = validReport();
-    inconsistent.summary.passed -= 1;
-    inconsistent.summary.failed += 1;
-    await expect(scanReport(inconsistent)).rejects.toThrow(/summary does not match/);
+    const unsupported = validReport();
+    unsupported.platform = 'darwin-x64';
+    await expect(scanReport(unsupported)).rejects.toThrow(/supported platform/);
   });
 
   test('rejects non-JSON artifacts and artifact symlinks without following them', async () => {

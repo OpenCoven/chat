@@ -207,12 +207,6 @@ impl NativeConnectionState {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn using_test_coven_health(mut self, coven_health: Arc<dyn CovenHealth>) -> Self {
-        self.coven_health = coven_health;
-        self
-    }
-
     pub(crate) fn with_test_launch_collaborators(
         transport: Arc<dyn NativeCaveTransport>,
         keyring: Arc<dyn CredentialCustody>,

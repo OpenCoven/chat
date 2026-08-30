@@ -652,6 +652,48 @@ mod tests {
     }
 
     #[test]
+    fn wrong_owner_discovery_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "wrong owner private cause";
+        let diagnostic = map_client_error(ClientError::Discovery(canary.to_owned()));
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("reconcile_required", false)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
+    fn unix_peer_provider_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "peer provider private cause";
+        let diagnostic = map_client_error(ClientError::Io {
+            operation: "failed to inspect connected peer credentials",
+            source: std::io::Error::other(canary),
+        });
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("service_unavailable", true)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
+    fn windows_ownership_provider_failure_maps_to_fail_closed_diagnostic() {
+        let canary = "ownership provider private cause";
+        let diagnostic = map_client_error(ClientError::Io {
+            operation: "failed to inspect named pipe ownership",
+            source: std::io::Error::other(canary),
+        });
+
+        assert_eq!(
+            diagnostic,
+            super::NativeDiagnostic::new("service_unavailable", true)
+        );
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
     fn explicit_home_wins_and_missing_platform_home_fails_closed() {
         let explicit = PathBuf::from("explicit-coven-home");
         assert_eq!(
@@ -817,7 +859,7 @@ mod tests {
         assert!(launcher.launches.lock().unwrap().is_empty());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn owner_current_connected_socket_health_succeeds() {
         use std::{
@@ -827,11 +869,19 @@ mod tests {
             thread,
         };
 
-        let root = std::env::current_dir()
-            .unwrap()
-            .join(format!(".c{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        #[cfg(target_os = "macos")]
+        let short_parent = std::path::Path::new("/Users/Shared");
+        #[cfg(target_os = "linux")]
+        let short_parent = std::path::Path::new("/dev/shm");
+        struct OwnedDirectory(std::path::PathBuf);
+        impl Drop for OwnedDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = short_parent.join(format!(".oc-coven-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let _owned_root = OwnedDirectory(root.clone());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let socket = root.join("coven.sock");
         let listener = UnixListener::bind(&socket).unwrap();
@@ -855,6 +905,5 @@ mod tests {
         let health = DirectCovenHealth::with_home(Arc::new(move || Ok(resolver_root.clone())));
         assert_eq!(health.health().unwrap(), CovenHealthResult { status: "ok" });
         server.join().unwrap();
-        fs::remove_dir_all(&root).unwrap();
     }
 }

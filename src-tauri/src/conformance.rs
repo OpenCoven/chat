@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     env,
-    io::{self, BufRead, Write},
+    fs::OpenOptions,
+    io::{self, BufRead, Read, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, MutexGuard},
@@ -16,7 +17,8 @@ use crate::{
         NativeCaveTaskRunner, NativeDiagnostic, NativeResult,
     },
     keyring::{
-        validate_credential_origin, Credential, CredentialCustody, CredentialSlot, KeyringError,
+        validate_credential_origin, validate_installation_id, ConformanceCleanupOutcome,
+        ConformanceCleanupReservation, Credential, CredentialCustody, CredentialSlot, KeyringError,
         NativeKeyring, NativeProviderPreset,
     },
     operation::{
@@ -40,6 +42,45 @@ pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE
 pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
+const CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING: &str = "production-keyring";
+const INTERNAL_TEST_RESERVATION_OUTPUT_ARGUMENT: &str =
+    "--opencoven-internal-test-reservation-output-v1";
+const INTERNAL_TEST_RESERVATION_EOF_ARGUMENT: &str = "--opencoven-internal-test-reservation-eof-v1";
+const INTERNAL_TEST_KEYCHAIN_ISOLATED_ENV: &str = "OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED";
+const INTERNAL_TEST_RESERVATION_RESULT_PATH_ENV: &str =
+    "OPENCOVEN_PHASE1_TEST_RESERVATION_RESULT_PATH";
+const TEST_ADOPTION_BARRIER_ENV: &str = "OPENCOVEN_PHASE1_TEST_ADOPTION_BARRIER";
+const TEST_ADOPTION_BARRIER_ROOT_ENV: &str = "OPENCOVEN_PHASE1_TEST_ADOPTION_BARRIER_ROOT";
+
+fn adoption_fault_barrier(phase: &str) -> Result<(), NativeDiagnostic> {
+    if env::var(INTERNAL_TEST_KEYCHAIN_ISOLATED_ENV).as_deref() != Ok("1")
+        || env::var(TEST_ADOPTION_BARRIER_ENV).as_deref() != Ok(phase)
+    {
+        return Ok(());
+    }
+    let root = PathBuf::from(
+        env::var_os(TEST_ADOPTION_BARRIER_ROOT_ENV)
+            .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?,
+    );
+    let allowed = PathBuf::from(
+        env::var_os("CARGO_TARGET_DIR")
+            .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?,
+    )
+    .join("phase1-native-rpc-tests");
+    if !root.is_absolute() || !root.starts_with(&allowed) {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    let ready = root.join(format!("{phase}.ready"));
+    let gate = root.join(format!("{phase}.gate"));
+    OpenOptions::new()
+        .write(true)
+        .open(ready)
+        .and_then(|mut file| file.write_all(b"ready\n"))
+        .map_err(|_| NativeDiagnostic::new("keychain_failure", false))?;
+    std::fs::File::open(gate)
+        .map(|_| ())
+        .map_err(|_| NativeDiagnostic::new("keychain_failure", false))
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -98,6 +139,33 @@ enum RpcCommand {
         handle: String,
         operation: NativeOperationInput,
     },
+    ConformancePrepareNativeCleanup {
+        handle: String,
+    },
+    ConformanceBeginAdoptNativeCleanup {
+        reservation_handle: String,
+        capability: String,
+        owner_token: String,
+        successor_owner_token: String,
+    },
+    ConformanceCommitAdoptNativeCleanup {
+        reservation_handle: String,
+        capability: String,
+        owner_token: String,
+        successor_owner_token: String,
+    },
+    ConformanceAbortAdoptNativeCleanup {
+        reservation_handle: String,
+        capability: String,
+        owner_token: String,
+        successor_owner_token: String,
+    },
+    ConformanceCancelPreparedNativeCleanup,
+    ConformanceDeleteNativeCredential {
+        reservation_handle: String,
+        capability: String,
+        owner_token: String,
+    },
     CaveListFamiliars {
         handle: String,
         page: NativePage,
@@ -153,6 +221,8 @@ impl RpcCommand {
             self,
             Self::CaveLaunch
                 | Self::CaveResetPairing { .. }
+                | Self::ConformancePrepareNativeCleanup { .. }
+                | Self::ConformanceDeleteNativeCredential { .. }
                 | Self::ResetNativeState
                 | Self::Shutdown
         )
@@ -335,6 +405,128 @@ pub struct ConformanceCaveLauncher;
 struct ConformanceCaveChild {
     child: Child,
     reaped: bool,
+    #[cfg(windows)]
+    _job: WindowsCaveJob,
+}
+
+#[cfg(windows)]
+struct WindowsCaveJob(isize);
+
+#[cfg(windows)]
+impl Drop for WindowsCaveJob {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(
+                self.0 as windows_sys::Win32::Foundation::HANDLE,
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+fn bind_windows_cave_job(child: &Child) -> io::Result<WindowsCaveJob> {
+    use std::{mem::size_of, os::windows::io::AsRawHandle, ptr};
+
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        },
+    };
+
+    let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+    if job.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut information = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if unsafe {
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&raw const information).cast(),
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    } == 0
+    {
+        let error = io::Error::last_os_error();
+        unsafe {
+            CloseHandle(job);
+        }
+        return Err(error);
+    }
+    if unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0 {
+        let error = io::Error::last_os_error();
+        unsafe {
+            CloseHandle(job);
+        }
+        return Err(error);
+    }
+    Ok(WindowsCaveJob(job as isize))
+}
+
+#[cfg(windows)]
+fn resume_windows_cave(child: &Child) -> io::Result<()> {
+    use std::mem::size_of;
+
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
+                THREADENTRY32,
+            },
+            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
+        },
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = THREADENTRY32 {
+        dwSize: size_of::<THREADENTRY32>() as u32,
+        ..THREADENTRY32::default()
+    };
+    let mut found = false;
+    let mut status = unsafe { Thread32First(snapshot, &mut entry) };
+    while status != 0 {
+        if entry.th32OwnerProcessID == child.id() {
+            found = true;
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                let error = io::Error::last_os_error();
+                unsafe {
+                    CloseHandle(snapshot);
+                }
+                return Err(error);
+            }
+            if unsafe { ResumeThread(thread) } == u32::MAX {
+                let error = io::Error::last_os_error();
+                unsafe {
+                    CloseHandle(thread);
+                    CloseHandle(snapshot);
+                }
+                return Err(error);
+            }
+            unsafe {
+                CloseHandle(thread);
+            }
+        }
+        status = unsafe { Thread32Next(snapshot, &mut entry) };
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    if !found {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "suspended Cave process had no resumable thread",
+        ));
+    }
+    Ok(())
 }
 
 impl ConformanceCaveChild {
@@ -418,58 +610,188 @@ impl CaveLauncher for ConformanceCaveLauncher {
     fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
         let node = regular_absolute_environment_path(CONFORMANCE_NODE_PATH_ENV)?;
         let server = regular_absolute_environment_path(CONFORMANCE_CAVE_SERVER_PATH_ENV)?;
-        let child = Command::new(node)
+        let mut command = Command::new(node);
+        command
             .arg(server)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+            command.creation_flags(CREATE_SUSPENDED);
+        }
+        let child = command
             .spawn()
             .map_err(|_| NativeDiagnostic::new("cave_launch_failed", true))?;
+        #[cfg(windows)]
+        let mut child = child;
+        #[cfg(windows)]
+        let job = bind_windows_cave_job(&child).map_err(|_| {
+            let _ = child.kill();
+            let _ = child.wait();
+            NativeDiagnostic::new("cave_launch_failed", true)
+        })?;
+        #[cfg(windows)]
+        if resume_windows_cave(&child).is_err() {
+            drop(job);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(NativeDiagnostic::new("cave_launch_failed", true));
+        }
         Ok(Box::new(ConformanceCaveChild {
             child,
             reaped: false,
+            #[cfg(windows)]
+            _job: job,
         }))
     }
 }
 
-#[derive(Clone)]
 pub struct RpcRuntime {
     custody: Arc<dyn CredentialCustody>,
+    emergency_cleanup: Option<Arc<dyn ConformanceCredentialCleanup>>,
+    pending_reservation_response: Option<PreparedResponseRollback>,
+    armed_reservation_cleanup: Option<PreparedResponseRollback>,
     state: NativeConnectionState,
+}
+
+impl Clone for RpcRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            custody: Arc::clone(&self.custody),
+            emergency_cleanup: self.emergency_cleanup.clone(),
+            pending_reservation_response: None,
+            armed_reservation_cleanup: None,
+            state: self.state.clone(),
+        }
+    }
+}
+
+trait ConformanceCredentialCleanup: Send + Sync {
+    fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError>;
+    fn begin_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<ConformanceCleanupReservation, KeyringError>;
+    fn commit_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError>;
+    fn abort_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError>;
+    fn cancel_prepared(&self) -> Result<(), KeyringError>;
+    fn cleanup(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+    ) -> Result<ConformanceCleanupOutcome, KeyringError>;
+}
+
+impl ConformanceCredentialCleanup for NativeKeyring {
+    fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError> {
+        self.prepare_conformance_cleanup(instance_id)
+    }
+
+    fn begin_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<ConformanceCleanupReservation, KeyringError> {
+        self.begin_adopt_conformance_cleanup(handle, capability, owner_token, successor_owner_token)
+    }
+
+    fn commit_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError> {
+        self.commit_adopt_conformance_cleanup(
+            handle,
+            capability,
+            owner_token,
+            successor_owner_token,
+        )
+    }
+
+    fn abort_adopt(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+        successor_owner_token: &str,
+    ) -> Result<(), KeyringError> {
+        self.abort_adopt_conformance_cleanup(handle, capability, owner_token, successor_owner_token)
+    }
+
+    fn cancel_prepared(&self) -> Result<(), KeyringError> {
+        self.cancel_prepared_conformance_cleanup()
+    }
+
+    fn cleanup(
+        &self,
+        handle: &str,
+        capability: &str,
+        owner_token: &str,
+    ) -> Result<ConformanceCleanupOutcome, KeyringError> {
+        self.cleanup_conformance_credential(handle, capability, owner_token)
+    }
 }
 
 impl RpcRuntime {
     pub fn new() -> Self {
-        Self::with_custody(Arc::new(SharedMemoryCredentialCustody::new()))
+        Self::with_custody(Arc::new(SharedMemoryCredentialCustody::new()), None)
     }
 
-    fn with_custody(custody: Arc<dyn CredentialCustody>) -> Self {
+    fn with_custody(
+        custody: Arc<dyn CredentialCustody>,
+        emergency_cleanup: Option<Arc<dyn ConformanceCredentialCleanup>>,
+    ) -> Self {
         let operations = Arc::new(NativeOperationRegistry::default());
         let mutations = Arc::new(NativeMutationQueue::default());
         Self {
             state: state_with_custody(Arc::clone(&custody), operations, mutations),
             custody,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_coven_health(coven_health: Arc<dyn crate::coven::CovenHealth>) -> Self {
-        let custody: Arc<dyn CredentialCustody> = Arc::new(SharedMemoryCredentialCustody::new());
-        let operations = Arc::new(NativeOperationRegistry::default());
-        let mutations = Arc::new(NativeMutationQueue::default());
-        Self {
-            state: state_with_custody(Arc::clone(&custody), operations, mutations)
-                .using_test_coven_health(coven_health),
-            custody,
+            emergency_cleanup,
+            pending_reservation_response: None,
+            armed_reservation_cleanup: None,
         }
     }
 
     fn from_environment() -> Result<Self, NativeDiagnostic> {
         match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
-                Ok(Self::with_custody(Arc::new(
-                    NativeKeyring::with_provider_preset(NativeProviderPreset::MissingKeychainTrust),
-                )))
+                Ok(Self::with_custody(
+                    Arc::new(NativeKeyring::with_provider_preset(
+                        NativeProviderPreset::MissingKeychainTrust,
+                    )),
+                    None,
+                ))
+            }
+            Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING => {
+                let keyring = Arc::new(NativeKeyring::for_conformance());
+                Ok(Self::with_custody(
+                    keyring.clone(),
+                    Some(keyring as Arc<dyn ConformanceCredentialCleanup>),
+                ))
             }
             Ok(_) | Err(env::VarError::NotUnicode(_)) => {
                 Err(NativeDiagnostic::new("invalid_native_input", false))
@@ -495,7 +817,11 @@ impl RpcRuntime {
             Ok(request) => request,
             Err(response) => return (response, false),
         };
-        self.process_request(request)
+        let result = self.process_request(request);
+        if let Some(rollback) = self.pending_reservation_response.take() {
+            self.armed_reservation_cleanup = Some(rollback);
+        }
+        result
     }
 
     fn process_request(&mut self, request: RpcRequest) -> (Value, bool) {
@@ -605,6 +931,146 @@ impl RpcRuntime {
                     },
                 ))?
             }
+            RpcCommand::ConformancePrepareNativeCleanup { handle } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let instance_id = self.state.conformance_authorized_instance_id(&handle)?;
+                let reservation = cleanup
+                    .prepare(&instance_id)
+                    .map_err(|error| error.diagnostic())?;
+                let rollback = PreparedResponseRollback::new(cleanup.clone(), reservation.clone());
+                let result = value_from(reservation.clone())?;
+                self.pending_reservation_response = Some(rollback);
+                result
+            }
+            RpcCommand::ConformanceBeginAdoptNativeCleanup {
+                reservation_handle,
+                capability,
+                owner_token,
+                successor_owner_token,
+            } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let reservation = cleanup
+                    .begin_adopt(
+                        &reservation_handle,
+                        &capability,
+                        &owner_token,
+                        &successor_owner_token,
+                    )
+                    .map_err(|error| error.diagnostic())?;
+                let rollback = PreparedResponseRollback::new_pending(
+                    cleanup.clone(),
+                    reservation.clone(),
+                    owner_token,
+                );
+                let result = value_from(reservation)?;
+                self.pending_reservation_response = Some(rollback);
+                result
+            }
+            RpcCommand::ConformanceCommitAdoptNativeCleanup {
+                reservation_handle,
+                capability,
+                owner_token,
+                successor_owner_token,
+            } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                adoption_fault_barrier("before-commit")?;
+                cleanup
+                    .commit_adopt(
+                        &reservation_handle,
+                        &capability,
+                        &owner_token,
+                        &successor_owner_token,
+                    )
+                    .map_err(|error| error.diagnostic())?;
+                adoption_fault_barrier("after-commit")?;
+                let reservation = ConformanceCleanupReservation {
+                    reservation_handle,
+                    capability,
+                    owner_token: successor_owner_token.clone(),
+                };
+                if let Some(rollback) = self.armed_reservation_cleanup.take() {
+                    rollback.disarm();
+                }
+                self.armed_reservation_cleanup = Some(PreparedResponseRollback::new_active(
+                    cleanup.clone(),
+                    reservation,
+                ));
+                json!({ "status": "committed", "ownerToken": successor_owner_token })
+            }
+            RpcCommand::ConformanceAbortAdoptNativeCleanup {
+                reservation_handle,
+                capability,
+                owner_token,
+                successor_owner_token,
+            } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                cleanup
+                    .abort_adopt(
+                        &reservation_handle,
+                        &capability,
+                        &owner_token,
+                        &successor_owner_token,
+                    )
+                    .map_err(|error| error.diagnostic())?;
+                if let Some(rollback) = self.armed_reservation_cleanup.take() {
+                    rollback.disarm();
+                }
+                json!({ "status": "aborted" })
+            }
+            RpcCommand::ConformanceCancelPreparedNativeCleanup => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                cleanup
+                    .cancel_prepared()
+                    .map_err(|error| error.diagnostic())?;
+                if let Some(rollback) = self.armed_reservation_cleanup.take() {
+                    rollback.disarm();
+                }
+                json!({ "status": "missing" })
+            }
+            RpcCommand::ConformanceDeleteNativeCredential {
+                reservation_handle,
+                capability,
+                owner_token,
+            } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let outcome = cleanup
+                    .cleanup(&reservation_handle, &capability, &owner_token)
+                    .map_err(|error| error.diagnostic())?;
+                if outcome == ConformanceCleanupOutcome::Transferred {
+                    return Err(NativeDiagnostic::new("stale_cleanup_owner", false));
+                }
+                if self
+                    .armed_reservation_cleanup
+                    .as_ref()
+                    .is_some_and(|rollback| {
+                        rollback.matches(&reservation_handle, &capability, &owner_token)
+                    })
+                {
+                    self.armed_reservation_cleanup
+                        .take()
+                        .expect("checked armed reservation")
+                        .disarm();
+                }
+                json!({ "status": "missing" })
+            }
             RpcCommand::CaveListFamiliars {
                 handle,
                 page,
@@ -684,6 +1150,34 @@ impl RpcRuntime {
             RpcCommand::Shutdown => return Ok((json!({ "status": "shutting_down" }), true)),
         };
         Ok((result, false))
+    }
+
+    fn take_pending_reservation_response(&mut self) -> Option<PreparedResponseRollback> {
+        self.pending_reservation_response.take()
+    }
+
+    fn arm_delivered_reservation(&mut self, rollback: Option<PreparedResponseRollback>) {
+        if let Some(rollback) = rollback {
+            self.armed_reservation_cleanup = Some(rollback);
+        }
+    }
+
+    fn cleanup_armed_reservation(&mut self) -> Result<(), KeyringError> {
+        match self.armed_reservation_cleanup.take() {
+            Some(rollback) => rollback.rollback(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for RpcRuntime {
+    fn drop(&mut self) {
+        if let Some(rollback) = self.pending_reservation_response.take() {
+            let _ = rollback.rollback();
+        }
+        if let Some(rollback) = self.armed_reservation_cleanup.take() {
+            let _ = rollback.rollback();
+        }
     }
 }
 
@@ -871,6 +1365,77 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
             Ok(RpcCommand::CaveForgetCredential {
                 handle: required_string(object, "handle")?,
                 operation: required_operation(object)?,
+            })
+        }
+        "conformance_prepare_native_cleanup" => {
+            expect_exact_args(object, &["handle"])?;
+            Ok(RpcCommand::ConformancePrepareNativeCleanup {
+                handle: required_string(object, "handle")?,
+            })
+        }
+        "conformance_begin_adopt_native_cleanup"
+        | "conformance_commit_adopt_native_cleanup"
+        | "conformance_abort_adopt_native_cleanup" => {
+            expect_exact_args(
+                object,
+                &[
+                    "capability",
+                    "ownerToken",
+                    "reservationHandle",
+                    "successorOwnerToken",
+                ],
+            )?;
+            let reservation_handle = required_string(object, "reservationHandle")?;
+            let capability = required_string(object, "capability")?;
+            let owner_token = required_string(object, "ownerToken")?;
+            let successor_owner_token = required_string(object, "successorOwnerToken")?;
+            validate_installation_id(&reservation_handle)
+                .and_then(|_| validate_installation_id(&capability))
+                .and_then(|_| validate_installation_id(&owner_token))
+                .and_then(|_| validate_installation_id(&successor_owner_token))
+                .map_err(|_| ("invalid_native_input", false))?;
+            match command {
+                "conformance_begin_adopt_native_cleanup" => {
+                    Ok(RpcCommand::ConformanceBeginAdoptNativeCleanup {
+                        reservation_handle,
+                        capability,
+                        owner_token,
+                        successor_owner_token,
+                    })
+                }
+                "conformance_commit_adopt_native_cleanup" => {
+                    Ok(RpcCommand::ConformanceCommitAdoptNativeCleanup {
+                        reservation_handle,
+                        capability,
+                        owner_token,
+                        successor_owner_token,
+                    })
+                }
+                _ => Ok(RpcCommand::ConformanceAbortAdoptNativeCleanup {
+                    reservation_handle,
+                    capability,
+                    owner_token,
+                    successor_owner_token,
+                }),
+            }
+        }
+        "conformance_cancel_prepared_native_cleanup" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::ConformanceCancelPreparedNativeCleanup)
+        }
+        "conformance_delete_native_credential" => {
+            expect_exact_args(object, &["capability", "ownerToken", "reservationHandle"])?;
+            let reservation_handle = required_string(object, "reservationHandle")?;
+            let capability = required_string(object, "capability")?;
+            let owner_token = required_string(object, "ownerToken")?;
+            validate_installation_id(&reservation_handle)
+                .and_then(|_| validate_installation_id(&capability))
+                .and_then(|_| validate_installation_id(&owner_token))
+                .map_err(|_| ("invalid_native_input", false))?;
+            Ok(RpcCommand::ConformanceDeleteNativeCredential {
+                reservation_handle,
+                capability,
+                owner_token,
             })
         }
         "cave_list_familiars" => {
@@ -1181,7 +1746,9 @@ pub fn run_stdio() -> io::Result<()> {
             join_rpc_workers(&mut workers)?;
         }
         let (response, shutdown) = runtime.process_request(request);
-        write_rpc_response(&stdout, &response)?;
+        let reservation = runtime.take_pending_reservation_response();
+        let delivered = write_rpc_response_transaction(&stdout, &response, reservation)?;
+        runtime.arm_delivered_reservation(delivered);
         if shutdown {
             break;
         }
@@ -1190,13 +1757,246 @@ pub fn run_stdio() -> io::Result<()> {
         .state
         .cancel_all_operations(NativeCancelReason::Aborted);
     join_rpc_workers(&mut workers)?;
+    runtime
+        .cleanup_armed_reservation()
+        .map_err(|_| io::Error::other("native reservation cleanup failed"))?;
     Ok(())
 }
 
-fn write_rpc_response(
-    stdout: &Arc<Mutex<io::BufWriter<io::Stdout>>>,
+pub fn run_internal_test_reservation_output_if_requested() -> Option<io::Result<()>> {
+    let args = env::args_os().collect::<Vec<_>>();
+    if args.len() != 2 {
+        return None;
+    }
+    let wait_for_eof = if args[1] == INTERNAL_TEST_RESERVATION_OUTPUT_ARGUMENT {
+        false
+    } else if args[1] == INTERNAL_TEST_RESERVATION_EOF_ARGUMENT {
+        true
+    } else {
+        return None;
+    };
+    Some(run_internal_test_reservation_output(wait_for_eof))
+}
+
+fn run_internal_test_reservation_output(wait_for_eof: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    if env::var(INTERNAL_TEST_KEYCHAIN_ISOLATED_ENV).as_deref() != Ok("1") {
+        return Err(io::Error::other("isolated test keychain is not configured"));
+    }
+    let result_path = PathBuf::from(
+        env::var_os(INTERNAL_TEST_RESERVATION_RESULT_PATH_ENV)
+            .ok_or_else(|| io::Error::other("reservation result path is unavailable"))?,
+    );
+    let allowed_root = PathBuf::from(
+        env::var_os("CARGO_TARGET_DIR")
+            .ok_or_else(|| io::Error::other("isolated Cargo target root is unavailable"))?,
+    )
+    .join("phase1-native-rpc-tests");
+    let parent = result_path
+        .parent()
+        .ok_or_else(|| io::Error::other("reservation result parent is unavailable"))?;
+    if !result_path.is_absolute()
+        || result_path.file_name().and_then(|name| name.to_str()) != Some("reservation.json")
+        || !parent.starts_with(&allowed_root)
+        || std::fs::canonicalize(parent)
+            .map(|canonical| !canonical.starts_with(&allowed_root))
+            .unwrap_or(true)
+    {
+        return Err(io::Error::other("reservation result path is invalid"));
+    }
+
+    let keyring = Arc::new(NativeKeyring::for_conformance());
+    let instance_id = uuid::Uuid::new_v4().to_string();
+    let reservation = keyring
+        .prepare_conformance_cleanup(&instance_id)
+        .map_err(|_| io::Error::other("test reservation creation failed"))?;
+    let cleanup: Arc<dyn ConformanceCredentialCleanup> = keyring.clone();
+    let rollback = PreparedResponseRollback::new(cleanup.clone(), reservation.clone());
+    let control = json!({
+        "reservationHandle": reservation.reservation_handle,
+        "capability": reservation.capability,
+        "ownerToken": reservation.owner_token,
+        "instanceId": instance_id,
+    });
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut control_file = options.open(&result_path)?;
+    serde_json::to_writer(&mut control_file, &control)?;
+    control_file.write_all(b"\n")?;
+    control_file.sync_all()?;
+
+    let response = success_response("prepare".to_owned(), control);
+    let stdout = Arc::new(Mutex::new(io::BufWriter::new(io::stdout())));
+    match write_rpc_response_transaction(&stdout, &response, Some(rollback)) {
+        Ok(Some(rollback)) => {
+            if wait_for_eof {
+                keyring
+                    .store_if_current(
+                        &instance_id,
+                        "http://127.0.0.1:4310/",
+                        None,
+                        "test-bearer",
+                        "test-credential",
+                    )
+                    .map_err(|_| io::Error::other("test credential storage failed"))?;
+                let mut input = Vec::new();
+                io::stdin().read_to_end(&mut input)?;
+            }
+            rollback
+                .rollback()
+                .map_err(|_| io::Error::other("test reservation cleanup failed"))
+        }
+        Ok(None) => Err(io::Error::other("test reservation guard was unavailable")),
+        Err(error) => Err(error),
+    }
+}
+
+struct PreparedResponseRollback {
+    cleanup: Arc<dyn ConformanceCredentialCleanup>,
+    reservation: ConformanceCleanupReservation,
+    mode: ReservationGuardMode,
+    armed: bool,
+}
+
+enum ReservationGuardMode {
+    Active,
+    Pending { predecessor_owner_token: String },
+}
+
+impl PreparedResponseRollback {
+    fn new(
+        cleanup: Arc<dyn ConformanceCredentialCleanup>,
+        reservation: ConformanceCleanupReservation,
+    ) -> Self {
+        Self::new_active(cleanup, reservation)
+    }
+
+    fn new_active(
+        cleanup: Arc<dyn ConformanceCredentialCleanup>,
+        reservation: ConformanceCleanupReservation,
+    ) -> Self {
+        Self {
+            cleanup,
+            reservation,
+            mode: ReservationGuardMode::Active,
+            armed: true,
+        }
+    }
+
+    fn new_pending(
+        cleanup: Arc<dyn ConformanceCredentialCleanup>,
+        reservation: ConformanceCleanupReservation,
+        predecessor_owner_token: String,
+    ) -> Self {
+        Self {
+            cleanup,
+            reservation,
+            mode: ReservationGuardMode::Pending {
+                predecessor_owner_token,
+            },
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+
+    fn matches(&self, handle: &str, capability: &str, owner_token: &str) -> bool {
+        self.reservation.reservation_handle == handle
+            && self.reservation.capability == capability
+            && self.reservation.owner_token == owner_token
+    }
+
+    fn rollback(mut self) -> Result<(), KeyringError> {
+        let result = match &self.mode {
+            ReservationGuardMode::Active => self
+                .cleanup
+                .cleanup(
+                    &self.reservation.reservation_handle,
+                    &self.reservation.capability,
+                    &self.reservation.owner_token,
+                )
+                .map(|_| ()),
+            ReservationGuardMode::Pending {
+                predecessor_owner_token,
+            } => self.cleanup.abort_adopt(
+                &self.reservation.reservation_handle,
+                &self.reservation.capability,
+                predecessor_owner_token,
+                &self.reservation.owner_token,
+            ),
+        };
+        if result.is_ok() {
+            self.armed = false;
+        }
+        result
+    }
+}
+
+impl Drop for PreparedResponseRollback {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = match &self.mode {
+                ReservationGuardMode::Active => self
+                    .cleanup
+                    .cleanup(
+                        &self.reservation.reservation_handle,
+                        &self.reservation.capability,
+                        &self.reservation.owner_token,
+                    )
+                    .map(|_| ()),
+                ReservationGuardMode::Pending {
+                    predecessor_owner_token,
+                } => self.cleanup.abort_adopt(
+                    &self.reservation.reservation_handle,
+                    &self.reservation.capability,
+                    predecessor_owner_token,
+                    &self.reservation.owner_token,
+                ),
+            };
+        }
+    }
+}
+
+fn write_rpc_response_transaction<W: Write>(
+    stdout: &Arc<Mutex<W>>,
     response: &Value,
+    rollback: Option<PreparedResponseRollback>,
+) -> io::Result<Option<PreparedResponseRollback>> {
+    match write_rpc_response(stdout, response) {
+        Ok(()) => Ok(rollback),
+        Err(write_error) => {
+            if let Some(rollback) = rollback {
+                rollback.rollback().map_err(|_| {
+                    io::Error::other("native cleanup reservation output rollback failed")
+                })?;
+            }
+            Err(write_error)
+        }
+    }
+}
+
+#[cfg(test)]
+fn write_prepared_response_for_test<W: Write>(
+    stdout: &Arc<Mutex<W>>,
+    response: Value,
+    cleanup: Arc<dyn ConformanceCredentialCleanup>,
+    reservation: ConformanceCleanupReservation,
 ) -> io::Result<()> {
+    write_rpc_response_transaction(
+        stdout,
+        &response,
+        Some(PreparedResponseRollback::new(cleanup, reservation)),
+    )
+    .map(|_| ())
+}
+
+fn write_rpc_response<W: Write>(stdout: &Arc<Mutex<W>>, response: &Value) -> io::Result<()> {
     let mut stdout = stdout
         .lock()
         .map_err(|_| io::Error::other("RPC stdout lock was poisoned"))?;
@@ -1238,13 +2038,16 @@ mod tests {
 
     use super::{
         parse_command, parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher,
-        RpcCommand, RpcRuntime, SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID,
+        ConformanceCredentialCleanup, RpcCommand, RpcRuntime, SharedMemoryCredentialCustody,
+        CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV,
         CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
     };
     use crate::{
-        cave::{CaveLauncher, NativeDiagnostic, NativeResult},
-        coven::{CovenHealth, CovenHealthResult},
-        keyring::{Credential, CredentialCustody, CredentialSlot, KeyringError},
+        cave::CaveLauncher,
+        keyring::{
+            ConformanceCleanupOutcome, ConformanceCleanupReservation, Credential,
+            CredentialCustody, CredentialSlot, KeyringError,
+        },
     };
     use serde_json::json;
 
@@ -1253,7 +2056,100 @@ mod tests {
     const SECOND_ORIGIN: &str = "http://127.0.0.1:4320/";
     const FIRST_OPERATION_ATTEMPT: &str = "op1-1787900000000-1-00000000000000000000000000000000";
     const SECOND_OPERATION_ATTEMPT: &str = "op1-1787900000000-2-11111111111111111111111111111111";
+    const OWNER_TOKEN: &str = "00000000-0000-4000-8000-000000000004";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct RecordingEmergencyCleanup {
+        cleanup_inputs: Mutex<Vec<(String, String)>>,
+        present: Mutex<bool>,
+        expected_handle: String,
+        expected_capability: String,
+        expected_owner_token: String,
+    }
+
+    impl ConformanceCredentialCleanup for RecordingEmergencyCleanup {
+        fn prepare(
+            &self,
+            _instance_id: &str,
+        ) -> Result<ConformanceCleanupReservation, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn begin_adopt(
+            &self,
+            _handle: &str,
+            _capability: &str,
+            _owner_token: &str,
+            _successor_owner_token: &str,
+        ) -> Result<ConformanceCleanupReservation, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn commit_adopt(
+            &self,
+            _handle: &str,
+            _capability: &str,
+            _owner_token: &str,
+            _successor_owner_token: &str,
+        ) -> Result<(), KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn abort_adopt(
+            &self,
+            _handle: &str,
+            _capability: &str,
+            _owner_token: &str,
+            _successor_owner_token: &str,
+        ) -> Result<(), KeyringError> {
+            Ok(())
+        }
+
+        fn cancel_prepared(&self) -> Result<(), KeyringError> {
+            *self.present.lock().unwrap() = false;
+            Ok(())
+        }
+
+        fn cleanup(
+            &self,
+            handle: &str,
+            capability: &str,
+            owner_token: &str,
+        ) -> Result<ConformanceCleanupOutcome, KeyringError> {
+            self.cleanup_inputs
+                .lock()
+                .unwrap()
+                .push((handle.to_owned(), capability.to_owned()));
+            let mut present = self.present.lock().unwrap();
+            if !*present
+                || handle != self.expected_handle
+                || capability != self.expected_capability
+                || owner_token != self.expected_owner_token
+            {
+                return Err(KeyringError::Failure);
+            }
+            *present = false;
+            Ok(ConformanceCleanupOutcome::Deleted)
+        }
+    }
+
+    struct BrokenPipeWriter;
+
+    impl std::io::Write for BrokenPipeWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "closed output",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "closed output",
+            ))
+        }
+    }
 
     #[test]
     fn parses_the_bounded_coven_health_rpc_command() {
@@ -1272,16 +2168,190 @@ mod tests {
     }
 
     #[test]
+    fn emergency_native_credential_cleanup_is_exact_and_production_gated() {
+        const HANDLE: &str = "00000000-0000-4000-8000-000000000001";
+        const CAPABILITY: &str = "00000000-0000-4000-8000-000000000002";
+        let cleanup = Arc::new(RecordingEmergencyCleanup {
+            cleanup_inputs: Mutex::new(Vec::new()),
+            present: Mutex::new(true),
+            expected_handle: HANDLE.to_owned(),
+            expected_capability: CAPABILITY.to_owned(),
+            expected_owner_token: OWNER_TOKEN.to_owned(),
+        });
+        let crashed_runtime = RpcRuntime::with_custody(
+            Arc::new(SharedMemoryCredentialCustody::new()),
+            Some(cleanup.clone()),
+        );
+        drop(crashed_runtime);
+        let mut runtime = RpcRuntime::with_custody(
+            Arc::new(SharedMemoryCredentialCustody::new()),
+            Some(cleanup.clone()),
+        );
+
+        let forged = runtime.process_line(
+            format!(
+                r#"{{"id":"forged","command":"conformance_delete_native_credential","args":{{"reservationHandle":"{HANDLE}","capability":"00000000-0000-4000-8000-000000000003","ownerToken":"{OWNER_TOKEN}"}}}}"#
+            )
+            .as_bytes(),
+        );
+        assert_eq!(forged["error"]["code"], "keychain_failure");
+
+        let response = runtime.process_line(
+            format!(
+                r#"{{"id":"cleanup","command":"conformance_delete_native_credential","args":{{"reservationHandle":"{HANDLE}","capability":"{CAPABILITY}","ownerToken":"{OWNER_TOKEN}"}}}}"#
+            )
+            .as_bytes(),
+        );
+        assert_eq!(
+            response,
+            json!({"id":"cleanup","ok":true,"result":{"status":"missing"}})
+        );
+        assert_eq!(
+            cleanup.cleanup_inputs.lock().unwrap().last(),
+            Some(&(HANDLE.to_owned(), CAPABILITY.to_owned()))
+        );
+        assert!(!*cleanup.present.lock().unwrap());
+        let replay = runtime.process_line(
+            format!(
+                r#"{{"id":"replay","command":"conformance_delete_native_credential","args":{{"reservationHandle":"{HANDLE}","capability":"{CAPABILITY}","ownerToken":"{OWNER_TOKEN}"}}}}"#
+            )
+            .as_bytes(),
+        );
+        assert_eq!(replay["error"]["code"], "keychain_failure");
+
+        let mut unprivileged = RpcRuntime::new();
+        let rejected = unprivileged.process_line(
+            format!(
+                r#"{{"id":"cleanup","command":"conformance_delete_native_credential","args":{{"reservationHandle":"{HANDLE}","capability":"{CAPABILITY}","ownerToken":"{OWNER_TOKEN}"}}}}"#
+            )
+            .as_bytes(),
+        );
+        assert_eq!(
+            rejected,
+            json!({
+                "id":"cleanup",
+                "ok":false,
+                "error":{"code":"invalid_native_input","retryable":false}
+            })
+        );
+        let invalid = runtime.process_line(
+            br#"{"id":"cleanup-invalid","command":"conformance_delete_native_credential","args":{"reservationHandle":"not-a-uuid","capability":"also-invalid","ownerToken":"invalid"}}"#,
+        );
+        assert_eq!(invalid["error"]["code"], "invalid_native_input");
+    }
+
+    #[test]
+    fn prepared_native_cleanup_can_be_canceled_without_response_capability() {
+        let cleanup = Arc::new(RecordingEmergencyCleanup {
+            cleanup_inputs: Mutex::new(Vec::new()),
+            present: Mutex::new(true),
+            expected_handle: "00000000-0000-4000-8000-000000000001".to_owned(),
+            expected_capability: "00000000-0000-4000-8000-000000000002".to_owned(),
+            expected_owner_token: OWNER_TOKEN.to_owned(),
+        });
+        let mut runtime = RpcRuntime::with_custody(
+            Arc::new(SharedMemoryCredentialCustody::new()),
+            Some(cleanup.clone()),
+        );
+
+        let response = runtime.process_line(
+            br#"{"id":"cancel","command":"conformance_cancel_prepared_native_cleanup"}"#,
+        );
+        assert_eq!(
+            response,
+            json!({"id":"cancel","ok":true,"result":{"status":"missing"}})
+        );
+        assert!(!*cleanup.present.lock().unwrap());
+
+        let mut unprivileged = RpcRuntime::new();
+        let rejected = unprivileged.process_line(
+            br#"{"id":"cancel","command":"conformance_cancel_prepared_native_cleanup"}"#,
+        );
+        assert_eq!(rejected["error"]["code"], "invalid_native_input");
+    }
+
+    #[test]
+    fn native_rpc_broken_output_rolls_back_unacknowledged_reservation() {
+        const HANDLE: &str = "00000000-0000-4000-8000-000000000001";
+        const CAPABILITY: &str = "00000000-0000-4000-8000-000000000002";
+        let cleanup = Arc::new(RecordingEmergencyCleanup {
+            cleanup_inputs: Mutex::new(Vec::new()),
+            present: Mutex::new(true),
+            expected_handle: HANDLE.to_owned(),
+            expected_capability: CAPABILITY.to_owned(),
+            expected_owner_token: OWNER_TOKEN.to_owned(),
+        });
+        let output = Arc::new(Mutex::new(BrokenPipeWriter));
+        let error = super::write_prepared_response_for_test(
+            &output,
+            json!({
+                "id":"prepare",
+                "ok":true,
+                "result":{"reservationHandle":HANDLE,"capability":CAPABILITY,"ownerToken":OWNER_TOKEN}
+            }),
+            cleanup.clone(),
+            ConformanceCleanupReservation {
+                reservation_handle: HANDLE.to_owned(),
+                capability: CAPABILITY.to_owned(),
+                owner_token: OWNER_TOKEN.to_owned(),
+            },
+        )
+        .expect_err("closed native RPC output must fail");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(!*cleanup.present.lock().unwrap());
+        assert!(cleanup.cleanup(HANDLE, CAPABILITY, OWNER_TOKEN).is_err());
+        assert_eq!(cleanup.cleanup_inputs.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn native_rpc_runtime_drop_cleans_an_acknowledged_reservation() {
+        const HANDLE: &str = "00000000-0000-4000-8000-000000000001";
+        const CAPABILITY: &str = "00000000-0000-4000-8000-000000000002";
+        let cleanup = Arc::new(RecordingEmergencyCleanup {
+            cleanup_inputs: Mutex::new(Vec::new()),
+            present: Mutex::new(true),
+            expected_handle: HANDLE.to_owned(),
+            expected_capability: CAPABILITY.to_owned(),
+            expected_owner_token: OWNER_TOKEN.to_owned(),
+        });
+        let output = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let delivered = super::write_rpc_response_transaction(
+            &output,
+            &json!({"id":"prepare","ok":true,"result":{}}),
+            Some(super::PreparedResponseRollback::new(
+                cleanup.clone(),
+                ConformanceCleanupReservation {
+                    reservation_handle: HANDLE.to_owned(),
+                    capability: CAPABILITY.to_owned(),
+                    owner_token: OWNER_TOKEN.to_owned(),
+                },
+            )),
+        )
+        .expect("reservation response must be acknowledged");
+        let mut runtime = RpcRuntime::with_custody(
+            Arc::new(SharedMemoryCredentialCustody::new()),
+            Some(cleanup.clone()),
+        );
+        runtime.arm_delivered_reservation(delivered);
+        drop(runtime);
+
+        assert!(!*cleanup.present.lock().unwrap());
+        assert_eq!(cleanup.cleanup_inputs.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn dispatches_coven_health_through_the_bounded_rpc_operation() {
-        struct ReconcileRequiredCovenHealth;
-
-        impl CovenHealth for ReconcileRequiredCovenHealth {
-            fn health(&self) -> NativeResult<CovenHealthResult> {
-                Err(NativeDiagnostic::new("reconcile_required", false))
-            }
-        }
-
-        let mut runtime = RpcRuntime::with_coven_health(Arc::new(ReconcileRequiredCovenHealth));
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::var_os("COVEN_HOME");
+        env::set_var(
+            "COVEN_HOME",
+            env::current_dir().unwrap().join("missing-coven-health"),
+        );
+        let mut runtime = RpcRuntime::new();
 
         let response = runtime.process_line(
             format!(
@@ -1296,11 +2366,32 @@ mod tests {
                 "id": "coven",
                 "ok": false,
                 "error": {
-                    "code": "reconcile_required",
-                    "retryable": false
+                    "code": "service_unavailable",
+                    "retryable": true
                 }
             })
         );
+        match original {
+            Some(value) => env::set_var("COVEN_HOME", value),
+            None => env::remove_var("COVEN_HOME"),
+        }
+    }
+
+    #[test]
+    fn accepts_the_production_keyring_conformance_preset() {
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::var_os(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV);
+        env::set_var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV, "production-keyring");
+
+        assert!(RpcRuntime::from_environment().is_ok());
+
+        match original {
+            Some(value) => env::set_var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV, value),
+            None => env::remove_var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV),
+        }
     }
 
     struct ScopedCaveHome(Option<std::ffi::OsString>);
@@ -1651,6 +2742,106 @@ mod tests {
             Some(value) => env::set_var(CONFORMANCE_NODE_PATH_ENV, value),
             None => env::remove_var(CONFORMANCE_NODE_PATH_ENV),
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_job_close_terminates_cave_descendants_without_touching_unrelated_processes() {
+        use std::{
+            fs,
+            path::PathBuf,
+            process::Command,
+            thread,
+            time::{Duration, Instant},
+        };
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, WAIT_OBJECT_0},
+            System::Threading::{OpenProcess, WaitForSingleObject},
+        };
+
+        fn exited(pid: u32) -> bool {
+            const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
+            let process = unsafe { OpenProcess(SYNCHRONIZE_ACCESS, 0, pid) };
+            if process.is_null() {
+                return true;
+            }
+            let result = unsafe { WaitForSingleObject(process, 0) };
+            unsafe {
+                CloseHandle(process);
+            }
+            result == WAIT_OBJECT_0
+        }
+
+        let _environment = ENVIRONMENT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let node_output = Command::new("where.exe")
+            .arg("node.exe")
+            .output()
+            .expect("node lookup must run");
+        assert!(node_output.status.success(), "node must be available");
+        let node = PathBuf::from(
+            String::from_utf8(node_output.stdout)
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap(),
+        );
+        let root = env::temp_dir().join(format!("chat-job-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let descendant_path = root.join("descendant.pid");
+        let script = root.join("server.cjs");
+        fs::write(
+            &script,
+            format!(
+                "const{{spawn}}=require('node:child_process');const{{writeFileSync}}=require('node:fs');const c=spawn(process.execPath,['-e','setInterval(()=>{{}},1000)'],{{stdio:'ignore'}});writeFileSync({},String(c.pid));setInterval(()=>{{}},1000);",
+                serde_json::to_string(&descendant_path).unwrap()
+            ),
+        )
+        .unwrap();
+        let original_node = env::var_os(CONFORMANCE_NODE_PATH_ENV);
+        let original_server = env::var_os(super::CONFORMANCE_CAVE_SERVER_PATH_ENV);
+        env::set_var(CONFORMANCE_NODE_PATH_ENV, &node);
+        env::set_var(super::CONFORMANCE_CAVE_SERVER_PATH_ENV, &script);
+        let cave = ConformanceCaveLauncher
+            .launch()
+            .expect("Cave child must launch");
+        let mut unrelated = Command::new(&node)
+            .args(["-e", "setInterval(()=>{},1000)"])
+            .spawn()
+            .expect("unrelated process must launch");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !descendant_path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "descendant PID must be published"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let descendant_pid = fs::read_to_string(&descendant_path)
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+
+        drop(cave);
+
+        while !exited(descendant_pid) {
+            assert!(Instant::now() < deadline, "job descendant must terminate");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(unrelated.try_wait().unwrap().is_none());
+        unrelated.kill().unwrap();
+        unrelated.wait().unwrap();
+        match original_node {
+            Some(value) => env::set_var(CONFORMANCE_NODE_PATH_ENV, value),
+            None => env::remove_var(CONFORMANCE_NODE_PATH_ENV),
+        }
+        match original_server {
+            Some(value) => env::set_var(super::CONFORMANCE_CAVE_SERVER_PATH_ENV, value),
+            None => env::remove_var(super::CONFORMANCE_CAVE_SERVER_PATH_ENV),
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1,0 +1,2 @@
+scripts/phase1-conformance-launcher.sh text eol=lf
+scripts/phase1-conformance-launcher.ps1 text eol=lf

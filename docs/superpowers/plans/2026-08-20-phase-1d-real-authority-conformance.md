@@ -29,7 +29,7 @@
 - `docs/phase1-conformance.md` — operator guide for running and reading the conformance harness.
 
 ### Modify
-- `package.json` — add `test:phase1-conformance`.
+- trusted non-Node launcher scripts — invoke the Phase 1 runner without Node preload exposure.
 - `scripts/contract-canary.mjs`, `scripts/owned-temp-directory.mjs`, and `src/contract-canary-artifact-root.test.ts` — share verified helper logic where it makes the Phase 1 harness safer, without replacing the Phase 0 canary.
 - `contract-canary.lock.json` documentation references in `README.md` and `docs/developer-toolchains.md` — explain the relationship between the Phase 0 canary lock and the new Phase 1 lock.
 - `.github/workflows/ci.yml` — add the required Phase 1 conformance job with SHA-pinned actions.
@@ -109,7 +109,7 @@ export function readPhase1ConformanceLock(lockPath = resolve(root, 'phase1-confo
 Implementation requirements:
 - reject non-40-character SHAs;
 - require clean exact checkouts for the locked Chat/SDK/Cave/Coven roots;
-- add `test:phase1-conformance` to `package.json`, but do not remove or repurpose `test:contract-canary`.
+- add trusted non-Node launchers, but do not remove or repurpose `test:contract-canary`.
 
 - [ ] **Step 5: Run the focused lock tests again and confirm they pass**
 
@@ -377,7 +377,7 @@ Expected: the spec guards do not yet mention the new required conformance job or
           security default-keychain -d user -s "$keychain"
           security list-keychains -d user -s "$keychain"
           echo "PHASE1_TEST_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-      - run: pnpm test:phase1-conformance
+      - run: /bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"
       - name: Remove isolated test keychain
         if: always()
         shell: bash
@@ -409,7 +409,7 @@ pnpm cargo:check
 pnpm cargo:test
 pnpm cargo:clippy
 pnpm app:build
-pnpm test:phase1-conformance
+/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"
 ```
 
 Expected: all commands pass. Do not run any publish or release workflow.
@@ -439,7 +439,7 @@ gh -R OpenCoven/chat pr create --base main --head phase1d/real-authority-conform
 - pnpm cargo:test
 - pnpm cargo:clippy
 - pnpm app:build
-- pnpm test:phase1-conformance"
+- /bin/sh scripts/phase1-conformance-launcher.sh \"$(command -v node)\""
 gh -R OpenCoven/chat pr checks --watch
 gh -R OpenCoven/chat pr merge --squash --delete-branch=false
 cd /Users/buns/Documents/GitHub/OpenCoven/coven-cave
@@ -447,8 +447,8 @@ bd ready --json --limit 0
 bd show cave-0prpu
 bd show cave-23nmv
 bd show cave-fz01p
-bd close cave-0prpu --reason "Merged phase1d/real-authority-conformance after the full Chat validation matrix and pnpm test:phase1-conformance."
-bd close cave-23nmv --reason "Merged phase1d/real-authority-conformance after the full Chat validation matrix and pnpm test:phase1-conformance."
+bd close cave-0prpu --reason "Merged phase1d/real-authority-conformance after the full trusted-launcher Chat validation matrix."
+bd close cave-23nmv --reason "Merged phase1d/real-authority-conformance after the full trusted-launcher Chat validation matrix."
 bd close cave-fz01p --reason "All Phase 1 implementation, integration, and conformance PRs merged with green required checks and retained-artifact secret scans."
 ```
 

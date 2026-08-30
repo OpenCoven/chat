@@ -625,6 +625,12 @@ fn start_launch_worker(
 }
 
 impl NativeConnectionState {
+    #[cfg(feature = "phase1-conformance")]
+    pub(crate) fn conformance_authorized_instance_id(&self, handle: &str) -> NativeResult<String> {
+        let (_, _, instance_id) = self.runtime()?.require_authorized(handle)?;
+        Ok(instance_id)
+    }
+
     #[cfg(test)]
     pub(crate) fn cave_read_discovery(&self) -> NativeResult<OwnerDiscoveryRecord> {
         let attempt = self.runtime()?.begin_discovery_attempt()?;

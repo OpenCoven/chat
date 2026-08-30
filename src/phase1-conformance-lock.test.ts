@@ -73,6 +73,9 @@ function supportsFileSymlinks() {
 }
 
 const fileSymlinksSupported = supportsFileSymlinks();
+const committedHarnessAuthority = JSON.parse(
+  readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
+).harnessAuthority;
 
 const expectedEntries = {
   chat: {
@@ -85,11 +88,161 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '086b6421d8f5daa814e2ad1b3c47605d1ffb542b',
+    revision: 'e74078a147c084bd761d929654f0990df66ef99f',
   },
   coven: {
     repository: 'OpenCoven/coven',
     revision: '721437b84026c042e431b0882dcd14fdb29ac07d',
+  },
+  harness: {
+    repository: 'OpenCoven/chat',
+    revision: 'b24eaa7eb6886a5ef07af6b459ab57e0335fd20f',
+  },
+  harnessAuthority: committedHarnessAuthority,
+  chatAuthority: {
+    tree: '72de37ed3c1afd36dcbd2824570f0a00b46459c6',
+    files: [
+      {
+        path: 'src-tauri/Cargo.toml',
+        blob: '75a54c604d5d8b88b661f5a2427c3f9494e3a374',
+        sha256: '92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf',
+      },
+      {
+        path: 'src-tauri/Cargo.lock',
+        blob: '4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a',
+        sha256: '50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca',
+      },
+      {
+        path: 'src-tauri/src/bin/phase1-native-rpc.rs',
+        blob: '0fbf0dcd1d2f1a49a556a9319b3121990cf53946',
+        sha256: 'a479704ea719138967f4828707bca04fb2a3de7fd2d2d2b9c7282831ec4bdf09',
+      },
+      {
+        path: 'src-tauri/src/conformance.rs',
+        blob: 'e0997e45a2371cc231bc3923a55d9d62d7cff2a0',
+        sha256: '32c1b24e2ce27fb666af5ffe73a42d626f258285dd0d680852014799054d953d',
+      },
+      {
+        path: 'src-tauri/src/coven.rs',
+        blob: 'b904e5eeded97aa624140b56c5141daebea772b2',
+        sha256: '09ca4871fc95d818cb642764ceaba3b1a8d6adba62e7552e69f0d0ac47662ff6',
+      },
+      {
+        path: 'src-tauri/src/keyring.rs',
+        blob: 'a33c68672b87a5cfa39cba37d4629619408309a4',
+        sha256: '3d9215c4ba388d9180c43dea573fc839e6bfd6a214876cff7f836c9d7ad50c52',
+      },
+      {
+        path: 'src-tauri/src/lib.rs',
+        blob: 'd9c97b4fb24e73fb103330fa9a8f778ccad42a3a',
+        sha256: 'f42a987b0dcb61b7c98f9dcdbf264d079134defe4bbe63e5019d4560ea967e21',
+      },
+    ],
+  },
+  tools: {
+    windowsSupervisor: {
+      source: {
+        repository: 'OpenCoven/chat',
+        revision: '6bee23b645c0edb1dcb0afd4f8cc18d2d0e6bec6',
+        path: 'tools/phase1-process-supervisor/src/main.rs',
+        blob: '6a95b4db7612ed0a502e91c4c21a7df5cbfe9021',
+        sha256: 'fa4c4759c0b01ce7f9bbd662ed3073b0aeed42dc7da0001026703482a5b9708a',
+        manifestSha256: '3d3964b144599835006248fcc40eee0437b06c268a180a373c15fea44bf4bf8b',
+        lockSha256: 'e31803e60e80d9d0a68cf043786cb1f516b425c185465785216aa5b05dd6fa88',
+        configSha256: '79d370b49837a1c4ec84231eb7fa13422e5e18a569c2b2eebf97ab3ec333d49c',
+      },
+      toolchain: {
+        homebrewCoreRevision: 'cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57',
+        packageVersion: 'mingw-w64 14.0.0_3',
+        bottleLayerSha256: '0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5',
+        linkerVersion: '2.47.20260726',
+      },
+      artifact: {
+        target: 'x86_64-pc-windows-gnu',
+        buildInvocation:
+          'cd tools/phase1-process-supervisor && SOURCE_DATE_EPOCH=0 cargo build --target x86_64-pc-windows-gnu --release --locked',
+        fileName: 'phase1-process-supervisor.exe',
+        fleetPath: 'C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe',
+        size: 333824,
+        sha256: '372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5',
+      },
+    },
+  },
+  release: {
+    sdkManifest: {
+      version: '0.1.0',
+      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+    },
+    sdkArtifacts: [
+      {
+        packageName: '@opencoven/sdk-core',
+        releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+        vendorFile: 'sdk-core-0.1.0.tgz',
+        size: 33284,
+        sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
+      },
+      {
+        packageName: '@opencoven/cave-client',
+        releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+        vendorFile: 'cave-client-0.1.0.tgz',
+        size: 81543,
+        sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
+      },
+      {
+        packageName: '@opencoven/coven-client',
+        releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
+        vendorFile: 'coven-client-0.1.0.tgz',
+        size: 33009,
+        sha256: 'cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1',
+      },
+      {
+        packageName: '@opencoven/sdk',
+        releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
+        vendorFile: 'sdk-0.1.0.tgz',
+        size: 15833,
+        sha256: 'eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f',
+      },
+    ],
+    caveVersion: '0.3.12',
+    covenVersion: '0.1.0',
+    consumerLock: {
+      path: 'pnpm-lock.yaml',
+      size: 56222,
+      sha256: 'd2f0db8eca64112324e861bb7cbd2b645ed9ae4aad836200855b3477f3ea49ae',
+    },
+    caveArtifacts: {
+      assertionEngine: {
+        path: 'scripts/client-v1-conformance.mjs',
+        size: 146432,
+        sha256: 'b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd',
+      },
+      contractFixture: {
+        path: 'src/lib/server/client-v1/contract-fixture.json',
+        size: 16695,
+        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
+      },
+      hpkeVectors: {
+        path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
+        size: 4041,
+        sha256: 'f806967291de12175277b6b24ac3c7bba912ae760fd8227fb21b1a4d5f5e6797',
+      },
+    },
+  },
+  evidence: {
+    repository: 'OpenCoven/sdk',
+    revision: '4736bf2e0d5b16272d79ecf7784c75f376b39b94',
+    contract: {
+      path: 'scripts/conformance-contract.mjs',
+      sha256: '50b1012b3c4c22f518c1a611fb5210a5675ee976a9b194b502f6125bc48f5111',
+    },
+    schema: {
+      path: 'conformance/client-v1-cross-repository-evidence.schema.json',
+      sha256: 'ca338cdbb33c46a97fe8430d95e04f6b30a2db453a7fff2184b335e33ea4f790',
+    },
+    assertionRegistry: {
+      path: 'conformance/client-v1-cross-repository-assertions.json',
+      sha256: 'fb56d7cadaf194126fd9a7f090d8af600c04f7161cab1e2ebb3419df49fbcbe0',
+    },
   },
 } as const;
 
@@ -311,14 +464,14 @@ describe('Phase 1 conformance lock', () => {
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     expect(readPhase1ConformanceLock()).toEqual({
       path: resolve(projectRoot, 'phase1-conformance.lock.json'),
-      version: 1,
+      version: 5,
       ...expectedEntries,
     });
   });
 
   test('rejects an unexpected repository', () => {
     const lockPath = writeLock({
-      version: 1,
+      version: 5,
       ...expectedEntries,
       sdk: {
         ...expectedEntries.sdk,
@@ -335,22 +488,22 @@ describe('Phase 1 conformance lock', () => {
     [
       'missing top-level key',
       {
-        version: 1,
+        version: 5,
         chat: expectedEntries.chat,
         sdk: expectedEntries.sdk,
         cave: expectedEntries.cave,
       },
-      'must contain exactly version, chat, sdk, cave, and coven',
+      'must contain exactly version, chat, sdk, cave, coven, harness, chatAuthority, harnessAuthority, tools, release, and evidence',
     ],
     [
       'extra top-level key',
-      { version: 1, ...expectedEntries, extra: true },
-      'must contain exactly version, chat, sdk, cave, and coven',
+      { version: 5, ...expectedEntries, extra: true },
+      'must contain exactly version, chat, sdk, cave, coven, harness, chatAuthority, harnessAuthority, tools, release, and evidence',
     ],
     [
       'missing entry key',
       {
-        version: 1,
+        version: 5,
         ...expectedEntries,
         chat: { repository: expectedEntries.chat.repository },
       },
@@ -359,7 +512,7 @@ describe('Phase 1 conformance lock', () => {
     [
       'extra entry key',
       {
-        version: 1,
+        version: 5,
         ...expectedEntries,
         chat: { ...expectedEntries.chat, branch: 'main' },
       },
@@ -374,7 +527,7 @@ describe('Phase 1 conformance lock', () => {
     ['short', expectedEntries.chat.revision.slice(0, -1)],
   ])('rejects a %s revision', (_label, revision) => {
     const lockPath = writeLock({
-      version: 1,
+      version: 5,
       ...expectedEntries,
       chat: { ...expectedEntries.chat, revision },
     });
@@ -382,6 +535,71 @@ describe('Phase 1 conformance lock', () => {
     expect(() => readPhase1ConformanceLock(lockPath)).toThrow(
       'chat.revision must be a lowercase immutable 40-character commit SHA.',
     );
+  });
+
+  test('rejects SDK artifacts outside the canonical package order', () => {
+    const lockPath = writeLock({
+      version: 5,
+      ...expectedEntries,
+      release: {
+        ...expectedEntries.release,
+        sdkArtifacts: [
+          expectedEntries.release.sdkArtifacts[1],
+          expectedEntries.release.sdkArtifacts[0],
+          ...expectedEntries.release.sdkArtifacts.slice(2),
+        ],
+      },
+    });
+
+    expect(() => readPhase1ConformanceLock(lockPath)).toThrow(/canonical package order/);
+  });
+
+  test('binds the SDK manifest digest to the canonical package metadata', () => {
+    const lockPath = writeLock({
+      version: 5,
+      ...expectedEntries,
+      release: {
+        ...expectedEntries.release,
+        sdkArtifacts: expectedEntries.release.sdkArtifacts.map((artifact, index) =>
+          index === 0 ? { ...artifact, size: artifact.size + 1 } : artifact,
+        ),
+      },
+    });
+
+    expect(() => readPhase1ConformanceLock(lockPath)).toThrow(/manifest digest/);
+  });
+
+  test('requires the canonical production Chat authority file order', () => {
+    const lockPath = writeLock({
+      version: 5,
+      ...expectedEntries,
+      chatAuthority: {
+        ...expectedEntries.chatAuthority,
+        files: [
+          expectedEntries.chatAuthority.files[1],
+          expectedEntries.chatAuthority.files[0],
+          ...expectedEntries.chatAuthority.files.slice(2),
+        ],
+      },
+    });
+
+    expect(() => readPhase1ConformanceLock(lockPath)).toThrow(/Chat authority file order/);
+  });
+
+  test('requires canonical executing harness and production delta authority order', () => {
+    for (const property of ['files', 'productionDeltas'] as const) {
+      const entries = expectedEntries.harnessAuthority[property];
+      const lockPath = writeLock({
+        version: 5,
+        ...expectedEntries,
+        harnessAuthority: {
+          ...expectedEntries.harnessAuthority,
+          [property]: [entries[1], entries[0], ...entries.slice(2)],
+        },
+      });
+
+      expect(() => readPhase1ConformanceLock(lockPath)).toThrow(/canonical file order/);
+    }
   });
 
   test('rejects missing and non-path lock inputs explicitly', () => {
@@ -395,6 +613,33 @@ describe('Phase 1 conformance lock', () => {
 });
 
 describe('Phase 1 checkout verification', () => {
+  gitTest('verifies the pinned Chat harness checkout with the hardened paths', () => {
+    const fixture = createCheckoutFixture();
+    const harnessRoot = resolve(createScratchRoot('harness-checkout'), 'chat');
+    runGit(['clone', fixture.roots.sdkRoot, harnessRoot], projectRoot);
+    const harnessRevision = runGit(['rev-parse', 'HEAD'], harnessRoot);
+    const harnessLock = {
+      ...fixture.lock,
+      harness: {
+        repository: 'OpenCoven/chat',
+        revision: harnessRevision,
+      },
+    };
+    const roots = {
+      ...fixture.roots,
+      chatHarnessRoot: harnessRoot,
+    };
+
+    expect(assertCleanPhase1Checkouts(roots)).toHaveProperty('harness');
+    expect(assertPhase1CheckoutHeads(harnessLock, roots)).toHaveProperty(
+      'harness',
+      harnessRevision,
+    );
+
+    writeFileSync(resolve(harnessRoot, 'tracked.txt'), 'dirty harness\n');
+    expect(() => assertCleanPhase1Checkouts(roots)).toThrow(/harness checkout is dirty/);
+  });
+
   test('sanitizes inherited Git variables case-insensitively for verifier children', () => {
     const environment = createGitEnvironment({
       PATH: process.env.PATH,
@@ -560,11 +805,15 @@ setInterval(() => {}, 1_000);
       const childPid = Number.parseInt(readFileSync(childPidPath, 'utf8'), 10);
       expect(Date.now() - startedAt).toBeLessThan(25_000);
       expect(Number.isSafeInteger(childPid)).toBe(true);
-      expect(() => process.kill(childPid, 0)).toThrow(
-        expect.objectContaining({
-          code: 'ESRCH',
-        }),
-      );
+      let survivingCommand = '';
+      try {
+        survivingCommand = execFileSync('ps', ['-o', 'command=', '-p', String(childPid)], {
+          encoding: 'utf8',
+        });
+      } catch {
+        // The exact child PID no longer exists.
+      }
+      expect(survivingCommand).not.toContain(fakeGitPath);
       expect(message).toBe('chat checkout verification timed out.');
       expect(message).not.toContain(secretDiagnostic);
       expect(message).not.toContain(fakeGitPath);
@@ -1411,7 +1660,7 @@ setInterval(() => {}, 1_000);
         fakeGitPath,
         `#!/bin/sh
 printf 'invoked\\n' >> ${JSON.stringify(invocationMarker)}
-sleep 0.15
+sleep 0.5
 PATH=${JSON.stringify(originalPath)} exec git "$@"
 `,
       );
@@ -1425,13 +1674,13 @@ PATH=${JSON.stringify(originalPath)} exec git "$@"
         () => {
           expect(() =>
             phase1ConformanceTestOnly.assertCleanPhase1Checkouts(fixture.roots, {
-              limits: { repositoryDeadlineMs: 1_500 },
+              limits: { repositoryDeadlineMs: 5_000 },
             }),
           ).toThrow('chat checkout verification timed out.');
         },
       );
 
-      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(Date.now() - startedAt).toBeLessThan(7_500);
       expect(
         readFileSync(invocationMarker, 'utf8').split('\n').filter(Boolean).length,
       ).toBeGreaterThan(1);

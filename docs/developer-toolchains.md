@@ -77,10 +77,11 @@
   dependency.
 - Run the local canary with
   `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
-- Run the packaged real-authority matrix with
-  `pnpm test:phase1-conformance`. Its independent
-  `phase1-conformance.lock.json` pins Chat, SDK, Cave, and Coven; the harness
-  creates exact clean detached clones rather than trusting the source
+- Run the packaged real-authority matrix through the trusted outer launcher:
+  `/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"`. Its independent
+  `phase1-conformance.lock.json` pins Chat, the SDK package candidate, Cave,
+  Coven, all four frozen SDK artifacts, and the SDK evidence authority; the
+  harness creates exact clean detached clones rather than trusting source
   repositories' current branches.
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
@@ -98,18 +99,22 @@
   permissions for the `main` window.
 - No shell, filesystem, opener, or network plugin permissions are configured.
 - The feature-gated `phase1-native-rpc` binary is a headless conformance-only
-  NDJSON bridge. It is excluded from default Cargo and Tauri builds, uses an
-  in-memory test custody instead of the operator keyring, and accepts Cave
-  launch paths only through its two explicit
+  NDJSON bridge. It is excluded from default Cargo and Tauri builds. Unit
+  scenarios default to in-memory custody, while the real-authority runner
+  explicitly selects the production `NativeKeyring`, restarts the RPC process,
+  and verifies credential reuse and deletion. Cave launch paths are accepted
+  only through its two explicit
   `OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH` and
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
 - Run its subprocess integration gate with `pnpm test:native-e2e`; normal
   `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
-- CI compiles every Rust target on a native Windows runner in addition to the
-  macOS Rust checks, so Tauri's Windows resource build is validated with the
-  platform toolchain it requires.
+- Run the persisted Windows GNU cross-target compile gate with
+  `pnpm cargo:check:windows-gnu`.
 - The Phase 1 harness creates mode-`0700` process-owned roots under the real OS
   temporary directory, reaps only tracked child processes, scans the completed
-  report for secrets and private content, and retains only
+  SDK platform record for secrets and private content, and retains only
   `test-results/phase1-conformance/report.json`. See
   [`phase1-conformance.md`](phase1-conformance.md).
+- Coven conformance starts the real locked daemon and invokes Chat
+  `phase1-native-rpc` command `coven_health`; it never uses `coven daemon
+  status` or reimplements producer-owned peer/pipe identity checks.
