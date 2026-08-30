@@ -1647,6 +1647,17 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('expects the bounded production diagnostic from rejected Coven child probes', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const scenario = source.slice(
+      source.indexOf('async function runCovenIdentityScenario'),
+      source.indexOf('function recordCaveBackedAssertions'),
+    );
+
+    expect(scenario.match(/'service_unavailable'/gu)).toHaveLength(5);
+    expect(scenario).not.toContain("'reconcile_required'");
+  });
+
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {
     const primary = new Error('scenario failed');
     const cleanup = new Error('cleanup failed');

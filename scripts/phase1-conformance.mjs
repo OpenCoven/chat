@@ -3833,7 +3833,7 @@ async function runCovenIdentityScenario({
           nativeRpcPath,
           environment,
           maliciousHome,
-          'reconcile_required',
+          'service_unavailable',
         );
 
         activeCovenIdentityStage = 'wrong-mode-home';
@@ -3845,7 +3845,7 @@ async function runCovenIdentityScenario({
           nativeRpcPath,
           environment,
           wrongModeHome,
-          'reconcile_required',
+          'service_unavailable',
         );
 
         activeCovenIdentityStage = 'symlink-socket-home';
@@ -3857,14 +3857,14 @@ async function runCovenIdentityScenario({
           nativeRpcPath,
           environment,
           symlinkSocketHome,
-          'reconcile_required',
+          'service_unavailable',
         );
 
         activeCovenIdentityStage = 'socket-mode';
         const socketPath = resolve(covenHome, 'coven.sock');
         chmodSync(socketPath, 0o666);
         try {
-          await rpc.error('coven_health', { operation: rpc.operation() }, 'reconcile_required');
+          await rpc.error('coven_health', { operation: rpc.operation() }, 'service_unavailable');
         } finally {
           chmodSync(socketPath, 0o600);
         }
