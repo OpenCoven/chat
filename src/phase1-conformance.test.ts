@@ -37,6 +37,7 @@ import {
   covenIdentityFailureDiagnostic,
   createCleanupAdoptionRecovery,
   diagnoseCovenLifecycleFailure,
+  evidenceValidationFailureDiagnostic,
   extractVerifiedRunnerDiagnostic,
   finalizeOperatorSafety,
   NativeRpcClient,
@@ -1492,6 +1493,22 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.stage.evidence-validation.failed',
     'phase1.stage.evidence-retention.failed',
   ])('publishes the bounded post-runtime diagnostic %s', (diagnosticId) => {
+    expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
+  });
+
+  test.each([
+    ['evidence exceeds the 1-byte evidence limit', 'size'],
+    ['Chat Phase 1 platform evidence is not valid JSON: private parser detail', 'json'],
+    ['duplicate JSON object key at private.path', 'duplicate-key'],
+    ['evidence.private contains a possible secret', 'possible-secret'],
+    ['evidence.private contains a private filesystem path', 'private-path'],
+    ['forbidden evidence field "private"', 'forbidden-field'],
+    ['evidence.private contains a non-JSON value', 'non-json'],
+    ['Chat Phase 1 platform evidence.private has unexpected field "detail"', 'shape'],
+    ['private validator failure', 'unknown'],
+  ])('classifies evidence validation %s without exposing details', (message, category) => {
+    const diagnosticId = `phase1.stage.evidence-validation.${category}`;
+    expect(evidenceValidationFailureDiagnostic(new Error(message))).toBe(diagnosticId);
     expect(publicPhase1FailureDiagnostic(new Error(diagnosticId))).toBe(diagnosticId);
   });
 

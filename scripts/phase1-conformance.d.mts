@@ -220,6 +220,7 @@ export function runtimeScenarioFailureDiagnostic(
   results: ReadonlyMap<string, { status?: unknown; diagnosticIds?: unknown }>,
 ): string | undefined;
 export function covenIdentityFailureDiagnostic(stage: unknown): string;
+export function evidenceValidationFailureDiagnostic(error: unknown): string;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,

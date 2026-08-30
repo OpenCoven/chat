@@ -331,6 +331,15 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.assertion-recording.failed',
   'phase1.stage.evidence-build.failed',
   'phase1.stage.evidence-validation.failed',
+  'phase1.stage.evidence-validation.size',
+  'phase1.stage.evidence-validation.json',
+  'phase1.stage.evidence-validation.duplicate-key',
+  'phase1.stage.evidence-validation.possible-secret',
+  'phase1.stage.evidence-validation.private-path',
+  'phase1.stage.evidence-validation.forbidden-field',
+  'phase1.stage.evidence-validation.non-json',
+  'phase1.stage.evidence-validation.shape',
+  'phase1.stage.evidence-validation.unknown',
   'phase1.stage.evidence-retention.failed',
   'phase1.stage.execution-root-cleanup.failed',
   'phase1.cave-authority.timeout',
@@ -4304,6 +4313,41 @@ export function runtimeScenarioFailureDiagnostic(results) {
   return undefined;
 }
 
+export function evidenceValidationFailureDiagnostic(error) {
+  const message =
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+      ? error.message
+      : '';
+  if (message.includes('evidence limit')) {
+    return 'phase1.stage.evidence-validation.size';
+  }
+  if (message.includes('is not valid JSON')) {
+    return 'phase1.stage.evidence-validation.json';
+  }
+  if (message.includes('duplicate JSON object key')) {
+    return 'phase1.stage.evidence-validation.duplicate-key';
+  }
+  if (message.includes('contains a possible secret')) {
+    return 'phase1.stage.evidence-validation.possible-secret';
+  }
+  if (message.includes('contains a private filesystem path')) {
+    return 'phase1.stage.evidence-validation.private-path';
+  }
+  if (message.includes('forbidden evidence field')) {
+    return 'phase1.stage.evidence-validation.forbidden-field';
+  }
+  if (message.includes('contains a non-JSON value')) {
+    return 'phase1.stage.evidence-validation.non-json';
+  }
+  if (message.startsWith('Chat Phase 1 platform evidence')) {
+    return 'phase1.stage.evidence-validation.shape';
+  }
+  return 'phase1.stage.evidence-validation.unknown';
+}
+
 function assertRuntimeScenariosPassed(results) {
   const diagnosticId = runtimeScenarioFailureDiagnostic(results);
   if (diagnosticId !== undefined) {
@@ -4666,9 +4710,11 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     }),
   );
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
-  runPublicPhase1Stage('phase1.stage.evidence-validation.failed', () =>
-    evidenceAuthorities.parsePlatformEvidence(serialized, 'Chat Phase 1 platform evidence'),
-  );
+  try {
+    evidenceAuthorities.parsePlatformEvidence(serialized, 'Chat Phase 1 platform evidence');
+  } catch (error) {
+    throw new Error(evidenceValidationFailureDiagnostic(error), { cause: error });
+  }
 
   return runPublicPhase1StageAsync('phase1.stage.evidence-retention.failed', () => {
     const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
