@@ -175,6 +175,13 @@ describe('Phase 1 retained-artifact secret scan', () => {
     });
   });
 
+  test('rejects evidence produced by a different Node 24 release', async () => {
+    const report = validReport();
+    report.environment.nodeVersion = 'v24.19.0';
+
+    await expect(scanReport(report)).rejects.toThrow(/environment is invalid/);
+  });
+
   test.each([
     ['pairing secret', { pairingSecret: 'pairing-secret-value' }],
     ['bearer', { bearer: 'Bearer eyJhbGciOiJIUzI1NiJ9.secret-value' }],

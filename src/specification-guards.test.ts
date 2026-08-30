@@ -1035,6 +1035,41 @@ describe('Phase 1 specification guards', () => {
     expect(tokenLines, 'all cross-repository checkouts need the token').toHaveLength(6);
   });
 
+  it('does not persist checkout credentials into CI worktrees', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const lines = workflow.split('\n');
+    const checkoutSteps: string[] = [];
+
+    for (const [index, line] of lines.entries()) {
+      if (!line.includes('- uses: actions/checkout@')) {
+        continue;
+      }
+
+      const stepIndent = line.indexOf('-');
+      let end = index + 1;
+      while (end < lines.length) {
+        const candidate = lines[end] ?? '';
+        const trimmed = candidate.trimStart();
+        const indent = candidate.length - trimmed.length;
+
+        if (
+          trimmed.length > 0 &&
+          (indent < stepIndent || (indent === stepIndent && trimmed.startsWith('- ')))
+        ) {
+          break;
+        }
+        end += 1;
+      }
+
+      checkoutSteps.push(lines.slice(index, end).join('\n'));
+    }
+
+    expect(checkoutSteps.length, 'CI must retain checkout steps').toBeGreaterThan(0);
+    for (const checkout of checkoutSteps) {
+      expect(checkout).toContain('persist-credentials: false');
+    }
+  });
+
   it('proves the packed harness installs with no network access', () => {
     // The offline install is the assertion, and the warm pass exists only so
     // that assertion is about the tarballs rather than about whether a fresh
