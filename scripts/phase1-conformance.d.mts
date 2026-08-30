@@ -1,4 +1,8 @@
 export const cargoBuildTimeoutMs: number;
+export function windowsJobBindingEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+): Record<string, string>;
 export function parseArgs(argv: string[]): {
   lockPath: string;
   scenario: 'all';

@@ -28,33 +28,1153 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Bootstrap supervised Windows conformance
+        if: matrix.platform == 'win32-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          function Assert-NoReparsePath {
+            param(
+              [Parameter(Mandatory)][string]$Path,
+              [Parameter(Mandatory)][string]$Label
+            )
+            if (-not [IO.Path]::IsPathFullyQualified($Path)) {
+              throw "$Label is not absolute."
+            }
+            $item = Get-Item -LiteralPath $Path -Force
+            while ($null -ne $item) {
+              if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Label contains a reparse component."
+              }
+              $item = $item.Parent
+            }
+          }
+
+          if (-not $IsWindows -or $env:RUNNER_OS -ne 'Windows' -or $env:ImageOS -ne 'win25') {
+            throw 'The win32-x64 lane requires the GitHub windows-2025 image.'
+          }
+          if (
+            [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64' -or
+            [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or
+            $env:PROCESSOR_ARCHITECTURE -ne 'AMD64'
+          ) {
+            throw 'The protected Windows lane requires a native AMD64 process and kernel.'
+          }
+          if ([Environment]::OSVersion.Version.Build -ne 26100) {
+            throw 'The protected Windows lane requires the Windows Server 2025 kernel family.'
+          }
+          $powerShellFacility = "$($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)"
+          if (
+            $PSVersionTable.PSEdition -ne 'Core' -or
+            $powerShellFacility -notin @('7.4', '7.5', '7.6') -or
+            [Environment]::Version.Major -notin @(8, 9, 10)
+          ) {
+            throw 'The protected Windows lane requires an allowlisted PowerShell/.NET facility.'
+          }
+
+          $trustedPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          $trustedKernel32 = 'C:\Windows\System32\kernel32.dll'
+          $trustedComspec = 'C:\Windows\System32\cmd.exe'
+          $runningPwsh = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+          if (
+            -not [IO.File]::Exists($trustedPwsh) -or
+            -not [IO.File]::Exists($trustedKernel32) -or
+            -not [IO.File]::Exists($trustedComspec) -or
+            -not [String]::Equals(
+              [IO.Path]::GetFullPath($runningPwsh),
+              $trustedPwsh,
+              [StringComparison]::OrdinalIgnoreCase
+            )
+          ) {
+            throw 'Trusted absolute PowerShell or system DLL paths are unavailable.'
+          }
+          Assert-NoReparsePath -Path $trustedPwsh -Label 'System PowerShell'
+          Assert-NoReparsePath -Path $trustedKernel32 -Label 'System kernel32.dll'
+          Assert-NoReparsePath -Path $trustedComspec -Label 'System command processor'
+          if (
+            -not [Diagnostics.FileVersionInfo]::GetVersionInfo($trustedKernel32).FileVersion.StartsWith(
+              '10.0.26100.',
+              [StringComparison]::Ordinal
+            )
+          ) {
+            throw 'The kernel32.dll facility is outside the reviewed Windows Server 2025 family.'
+          }
+
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          Assert-NoReparsePath -Path $runnerTemp -Label 'Runner temporary root'
+          Assert-NoReparsePath -Path $workspace -Label 'GitHub workspace'
+          if ((Get-ChildItem -LiteralPath $workspace -Force | Measure-Object).Count -ne 0) {
+            throw 'The pre-checkout GitHub workspace is not empty.'
+          }
+          $msvcRoot = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC'
+          $msvcVersion = Get-ChildItem -LiteralPath $msvcRoot -Directory |
+            Where-Object { $_.Name -match '^14\.(?:4[4-9]|5[0-9])\.[0-9]+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if ($null -eq $msvcVersion) {
+            throw 'An allowlisted Visual Studio 2022 MSVC facility is unavailable.'
+          }
+          $msvcBin = Join-Path $msvcVersion.FullName 'bin\Hostx64\x64'
+          $msvcLib = Join-Path $msvcVersion.FullName 'lib\x64'
+          $msvcInclude = Join-Path $msvcVersion.FullName 'include'
+          $windowsSdkVersion = '10.0.26100.0'
+          $windowsSdkRoot = 'C:\Program Files (x86)\Windows Kits\10'
+          $windowsSdkBin = Join-Path $windowsSdkRoot "bin\$windowsSdkVersion\x64"
+          $windowsSdkLibUm = Join-Path $windowsSdkRoot "Lib\$windowsSdkVersion\um\x64"
+          $windowsSdkLibUcrt = Join-Path $windowsSdkRoot "Lib\$windowsSdkVersion\ucrt\x64"
+          $windowsSdkIncludeRoot = Join-Path $windowsSdkRoot "Include\$windowsSdkVersion"
+          foreach ($facility in @(
+            $msvcBin,
+            $msvcLib,
+            $msvcInclude,
+            $windowsSdkBin,
+            $windowsSdkLibUm,
+            $windowsSdkLibUcrt,
+            $windowsSdkIncludeRoot
+          )) {
+            Assert-NoReparsePath -Path $facility -Label 'MSVC/Windows SDK facility'
+          }
+          foreach ($tool in @(
+            (Join-Path $msvcBin 'link.exe'),
+            (Join-Path $msvcBin 'cl.exe'),
+            (Join-Path $windowsSdkBin 'rc.exe')
+          )) {
+            if (-not [IO.File]::Exists($tool)) {
+              throw 'A required trusted MSVC/Windows SDK executable is unavailable.'
+            }
+            Assert-NoReparsePath -Path $tool -Label 'MSVC/Windows SDK executable'
+          }
+
+          $jobSupervisorSource = @'
+          using System;
+          using System.Collections;
+          using System.Collections.Generic;
+          using System.ComponentModel;
+          using System.Diagnostics;
+          using System.IO;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          using System.Threading;
+          using System.Threading.Tasks;
+          using Microsoft.Win32.SafeHandles;
+
+          namespace OpenCoven {
+            public sealed class WindowsPinnedDirectory : IDisposable {
+              private IntPtr handle;
+              internal WindowsPinnedDirectory(IntPtr value) { handle = value; }
+              public void Dispose() {
+                IntPtr value = handle;
+                handle = IntPtr.Zero;
+                if (value != IntPtr.Zero) WindowsJobSupervisor.ClosePinnedDirectory(value);
+                GC.SuppressFinalize(this);
+              }
+            }
+            public sealed class WindowsJobRunResult {
+              public int ExitCode { get; internal set; }
+              public bool TimedOut { get; internal set; }
+              public bool StdoutOverflow { get; internal set; }
+              public bool StderrOverflow { get; internal set; }
+              public string Stdout { get; internal set; }
+              public string Stderr { get; internal set; }
+            }
+            public sealed class WindowsJobSupervisor : IDisposable {
+              private const uint CREATE_SUSPENDED = 0x00000004;
+              private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+              private const uint CREATE_NO_WINDOW = 0x08000000;
+              private const uint STARTF_USESTDHANDLES = 0x00000100;
+              private const uint HANDLE_FLAG_INHERIT = 0x00000001;
+              private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+              private const uint JOB_OBJECT_QUERY = 0x0004;
+              private const uint WAIT_OBJECT_0 = 0;
+              private const uint WAIT_TIMEOUT = 0x00000102;
+              private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+              private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
+              private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+              private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+              private const int JobObjectExtendedLimitInformation = 9;
+              private const int SupervisorFailureExitCode = unchecked((int)0xe0434f4d);
+              private IntPtr jobHandle;
+              private bool disposed;
+
+              private WindowsJobSupervisor(IntPtr handle) { jobHandle = handle; }
+
+              public static WindowsJobSupervisor Create(string name) {
+                if (String.IsNullOrWhiteSpace(name) ||
+                    !name.StartsWith(@"Local\OpenCoven.Chat.", StringComparison.Ordinal) ||
+                    name.Length > 240) {
+                  throw new ArgumentException("Job Object name is outside the reviewed namespace.");
+                }
+                IntPtr handle = CreateJobObjectW(IntPtr.Zero, name);
+                if (handle == IntPtr.Zero) throw Error("CreateJobObjectW");
+                try {
+                  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits =
+                    new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                  int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+                  IntPtr buffer = Marshal.AllocHGlobal(length);
+                  try {
+                    Marshal.StructureToPtr(limits, buffer, false);
+                    if (!SetInformationJobObject(
+                      handle, JobObjectExtendedLimitInformation, buffer, (uint)length
+                    )) throw Error("SetInformationJobObject");
+                  } finally {
+                    Marshal.FreeHGlobal(buffer);
+                  }
+                  return new WindowsJobSupervisor(handle);
+                } catch {
+                  CloseHandle(handle);
+                  throw;
+                }
+              }
+
+              public static void RequireCurrentProcessInJob(string name) {
+                IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, name);
+                if (job == IntPtr.Zero) throw Error("OpenJobObjectW");
+                try {
+                  bool member;
+                  if (!IsProcessInJob(GetCurrentProcess(), job, out member)) {
+                    throw Error("IsProcessInJob");
+                  }
+                  if (!member) throw new InvalidOperationException("Expected Job membership is absent.");
+                } finally {
+                  CloseHandle(job);
+                }
+              }
+
+              public static WindowsPinnedDirectory PinDirectory(string path) {
+                SECURITY_ATTRIBUTES attributes = SecurityAttributes();
+                IntPtr handle = CreateFileW(
+                  path, 0x80, 0x1 | 0x2, ref attributes, 3,
+                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero
+                );
+                if (handle == new IntPtr(-1)) throw Error("CreateFileW");
+                FILE_ATTRIBUTE_TAG_INFO information;
+                if (!GetFileInformationByHandleEx(
+                    handle, 9, out information,
+                    (uint)Marshal.SizeOf(typeof(FILE_ATTRIBUTE_TAG_INFO))) ||
+                    (information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                    (information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                  CloseHandle(handle);
+                  throw new InvalidOperationException("Pinned root is not a stable directory.");
+                }
+                return new WindowsPinnedDirectory(handle);
+              }
+
+              public WindowsJobRunResult Run(
+                string applicationName,
+                string arguments,
+                string workingDirectory,
+                IDictionary environment,
+                TimeSpan TotalTimeout,
+                int MaxStdoutBytes,
+                int MaxStderrBytes
+              ) {
+                ThrowIfDisposed();
+                if (String.IsNullOrWhiteSpace(applicationName) ||
+                    !Path.IsPathRooted(applicationName) ||
+                    applicationName.IndexOf('"') >= 0) {
+                  throw new ArgumentException("Application path is invalid.");
+                }
+                if (String.IsNullOrWhiteSpace(workingDirectory) ||
+                    !Path.IsPathRooted(workingDirectory)) {
+                  throw new ArgumentException("Working directory is invalid.");
+                }
+                if (TotalTimeout <= TimeSpan.Zero || TotalTimeout > TimeSpan.FromHours(1)) {
+                  throw new ArgumentOutOfRangeException("TotalTimeout");
+                }
+                if (MaxStdoutBytes < 1 || MaxStderrBytes < 1) {
+                  throw new ArgumentOutOfRangeException("Output bounds");
+                }
+
+                IntPtr stdoutRead = IntPtr.Zero, stdoutWrite = IntPtr.Zero;
+                IntPtr stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero;
+                IntPtr stdinHandle = IntPtr.Zero, environmentBlock = IntPtr.Zero;
+                PROCESS_INFORMATION process = new PROCESS_INFORMATION();
+                Task<PipeCapture> stdoutTask = null, stderrTask = null;
+                ManualResetEventSlim overflow = new ManualResetEventSlim(false);
+                try {
+                  SECURITY_ATTRIBUTES inheritable = SecurityAttributes();
+                  inheritable.bInheritHandle = true;
+                  CreateBoundedPipe(inheritable, out stdoutRead, out stdoutWrite);
+                  CreateBoundedPipe(inheritable, out stderrRead, out stderrWrite);
+                  stdinHandle = CreateFileW(
+                    "NUL", 0x80000000, 0x1 | 0x2, ref inheritable, 3, 0x80, IntPtr.Zero
+                  );
+                  if (stdinHandle == new IntPtr(-1)) {
+                    stdinHandle = IntPtr.Zero;
+                    throw Error("CreateFileW(NUL)");
+                  }
+                  STARTUPINFO startup = new STARTUPINFO();
+                  startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                  startup.dwFlags = STARTF_USESTDHANDLES;
+                  startup.hStdInput = stdinHandle;
+                  startup.hStdOutput = stdoutWrite;
+                  startup.hStdError = stderrWrite;
+                  environmentBlock = BuildEnvironmentBlock(environment);
+                  StringBuilder commandLine = new StringBuilder("\"");
+                  commandLine.Append(applicationName);
+                  commandLine.Append('"');
+                  if (!String.IsNullOrWhiteSpace(arguments)) {
+                    commandLine.Append(' ');
+                    commandLine.Append(arguments);
+                  }
+                  if (!CreateProcessW(
+                    applicationName, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+                    CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                    environmentBlock, workingDirectory, ref startup, out process
+                  )) throw Error("CreateProcessW");
+
+                  CloseHandle(stdoutWrite); stdoutWrite = IntPtr.Zero;
+                  CloseHandle(stderrWrite); stderrWrite = IntPtr.Zero;
+                  CloseHandle(stdinHandle); stdinHandle = IntPtr.Zero;
+                  if (!AssignProcessToJobObject(jobHandle, process.hProcess)) {
+                    TerminateProcess(process.hProcess, 1);
+                    throw Error("AssignProcessToJobObject");
+                  }
+                  bool assigned;
+                  if (!IsProcessInJob(process.hProcess, jobHandle, out assigned) || !assigned) {
+                    TerminateJobObject(jobHandle, 1);
+                    throw new InvalidOperationException("Suspended child Job membership failed.");
+                  }
+                  stdoutTask = ReadPipeAsync(stdoutRead, MaxStdoutBytes, overflow);
+                  stdoutRead = IntPtr.Zero;
+                  stderrTask = ReadPipeAsync(stderrRead, MaxStderrBytes, overflow);
+                  stderrRead = IntPtr.Zero;
+                  if (ResumeThread(process.hThread) == UInt32.MaxValue) {
+                    TerminateJobObject(jobHandle, 1);
+                    throw Error("ResumeThread");
+                  }
+
+                  Stopwatch timer = Stopwatch.StartNew();
+                  bool timedOut = false, terminated = false;
+                  while (true) {
+                    uint wait = WaitForSingleObject(process.hProcess, 50);
+                    if (wait == WAIT_OBJECT_0) break;
+                    if (wait != WAIT_TIMEOUT) {
+                      TerminateJobObject(jobHandle, 1);
+                      throw Error("WaitForSingleObject");
+                    }
+                    if (overflow.IsSet || timer.Elapsed >= TotalTimeout) {
+                      timedOut = timer.Elapsed >= TotalTimeout;
+                      if (!TerminateJobObject(jobHandle, 1)) throw Error("TerminateJobObject");
+                      terminated = true;
+                      if (WaitForSingleObject(process.hProcess, 30000) != WAIT_OBJECT_0) {
+                        throw new TimeoutException("Supervised root could not be reaped.");
+                      }
+                      break;
+                    }
+                  }
+                  uint nativeExitCode;
+                  if (!GetExitCodeProcess(process.hProcess, out nativeExitCode)) {
+                    throw Error("GetExitCodeProcess");
+                  }
+                  int exitCode = unchecked((int)nativeExitCode);
+                  if (!terminated && exitCode != 0 &&
+                      !TerminateJobObject(jobHandle, nativeExitCode)) {
+                    throw Error("TerminateJobObject(failure)");
+                  }
+                  if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 30000)) {
+                    TerminateJobObject(jobHandle, 1);
+                    throw new TimeoutException("Output readers could not be reaped.");
+                  }
+                  PipeCapture stdout = stdoutTask.Result, stderr = stderrTask.Result;
+                  bool outputOverflow = stdout.Overflow || stderr.Overflow;
+                  return new WindowsJobRunResult {
+                    ExitCode = timedOut || outputOverflow ? SupervisorFailureExitCode : exitCode,
+                    TimedOut = timedOut,
+                    StdoutOverflow = stdout.Overflow,
+                    StderrOverflow = stderr.Overflow,
+                    Stdout = stdout.Text,
+                    Stderr = stderr.Text
+                  };
+                } catch {
+                  if (process.hProcess != IntPtr.Zero) {
+                    TerminateJobObject(jobHandle, 1);
+                    WaitForSingleObject(process.hProcess, 30000);
+                  }
+                  throw;
+                } finally {
+                  overflow.Dispose();
+                  if (environmentBlock != IntPtr.Zero) Marshal.FreeHGlobal(environmentBlock);
+                  CloseIfValid(process.hThread); CloseIfValid(process.hProcess);
+                  CloseIfValid(stdoutRead); CloseIfValid(stdoutWrite);
+                  CloseIfValid(stderrRead); CloseIfValid(stderrWrite); CloseIfValid(stdinHandle);
+                }
+              }
+
+              public void Dispose() {
+                if (!disposed) {
+                  disposed = true;
+                  IntPtr handle = jobHandle;
+                  jobHandle = IntPtr.Zero;
+                  if (handle != IntPtr.Zero) CloseHandle(handle);
+                }
+                GC.SuppressFinalize(this);
+              }
+
+              private static SECURITY_ATTRIBUTES SecurityAttributes() {
+                SECURITY_ATTRIBUTES value = new SECURITY_ATTRIBUTES();
+                value.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+                return value;
+              }
+              private static Win32Exception Error(string operation) {
+                return new Win32Exception(Marshal.GetLastWin32Error(), operation + " failed.");
+              }
+              private void ThrowIfDisposed() {
+                if (disposed || jobHandle == IntPtr.Zero) {
+                  throw new ObjectDisposedException("WindowsJobSupervisor");
+                }
+              }
+              private static void CreateBoundedPipe(
+                SECURITY_ATTRIBUTES attributes, out IntPtr read, out IntPtr write
+              ) {
+                if (!CreatePipe(out read, out write, ref attributes, 0)) throw Error("CreatePipe");
+                if (!SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0)) {
+                  CloseHandle(read); CloseHandle(write);
+                  read = IntPtr.Zero; write = IntPtr.Zero;
+                  throw Error("SetHandleInformation");
+                }
+              }
+              private static Task<PipeCapture> ReadPipeAsync(
+                IntPtr handle, int maximumBytes, ManualResetEventSlim overflow
+              ) {
+                SafeFileHandle safeHandle = new SafeFileHandle(handle, true);
+                return Task.Run(delegate {
+                  using (safeHandle)
+                  using (FileStream stream = new FileStream(
+                    safeHandle, FileAccess.Read, 4096, false))
+                  using (MemoryStream captured = new MemoryStream()) {
+                    byte[] buffer = new byte[8192];
+                    bool exceeded = false;
+                    while (true) {
+                      int count = stream.Read(buffer, 0, buffer.Length);
+                      if (count == 0) break;
+                      int remaining = maximumBytes - checked((int)captured.Length);
+                      if (remaining > 0) captured.Write(buffer, 0, Math.Min(remaining, count));
+                      if (count > remaining) { exceeded = true; overflow.Set(); }
+                    }
+                    return new PipeCapture {
+                      Overflow = exceeded,
+                      Text = new UTF8Encoding(false, true).GetString(captured.ToArray())
+                    };
+                  }
+                });
+              }
+              private static IntPtr BuildEnvironmentBlock(IDictionary environment) {
+                SortedDictionary<string, string> values =
+                  new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (environment != null) {
+                  foreach (DictionaryEntry entry in environment) {
+                    string key = Convert.ToString(entry.Key);
+                    string value = Convert.ToString(entry.Value);
+                    if (String.IsNullOrEmpty(key) || key.IndexOf('=') >= 0 ||
+                        key.IndexOf('\0') >= 0 || value.IndexOf('\0') >= 0) {
+                      throw new ArgumentException("Child environment is malformed.");
+                    }
+                    values.Add(key, value);
+                  }
+                }
+                StringBuilder block = new StringBuilder();
+                foreach (KeyValuePair<string, string> entry in values) {
+                  block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
+                }
+                if (values.Count == 0) block.Append('\0');
+                block.Append('\0');
+                byte[] bytes = Encoding.Unicode.GetBytes(block.ToString());
+                IntPtr pointer = Marshal.AllocHGlobal(bytes.Length);
+                Marshal.Copy(bytes, 0, pointer, bytes.Length);
+                return pointer;
+              }
+              private static void CloseIfValid(IntPtr handle) {
+                if (handle != IntPtr.Zero && handle != new IntPtr(-1)) CloseHandle(handle);
+              }
+              internal static void ClosePinnedDirectory(IntPtr handle) { CloseHandle(handle); }
+              private sealed class PipeCapture { internal bool Overflow; internal string Text; }
+
+              [StructLayout(LayoutKind.Sequential)]
+              private struct SECURITY_ATTRIBUTES {
+                internal int nLength; internal IntPtr lpSecurityDescriptor;
+                [MarshalAs(UnmanagedType.Bool)] internal bool bInheritHandle;
+              }
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              private struct STARTUPINFO {
+                internal int cb; internal string lpReserved; internal string lpDesktop;
+                internal string lpTitle; internal uint dwX; internal uint dwY;
+                internal uint dwXSize; internal uint dwYSize; internal uint dwXCountChars;
+                internal uint dwYCountChars; internal uint dwFillAttribute; internal uint dwFlags;
+                internal ushort wShowWindow; internal ushort cbReserved2;
+                internal IntPtr lpReserved2; internal IntPtr hStdInput;
+                internal IntPtr hStdOutput; internal IntPtr hStdError;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              private struct PROCESS_INFORMATION {
+                internal IntPtr hProcess; internal IntPtr hThread;
+                internal uint dwProcessId; internal uint dwThreadId;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              private struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+                internal long PerProcessUserTimeLimit; internal long PerJobUserTimeLimit;
+                internal uint LimitFlags; internal UIntPtr MinimumWorkingSetSize;
+                internal UIntPtr MaximumWorkingSetSize; internal uint ActiveProcessLimit;
+                internal UIntPtr Affinity; internal uint PriorityClass; internal uint SchedulingClass;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              private struct IO_COUNTERS {
+                internal ulong ReadOperationCount; internal ulong WriteOperationCount;
+                internal ulong OtherOperationCount; internal ulong ReadTransferCount;
+                internal ulong WriteTransferCount; internal ulong OtherTransferCount;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+                internal JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+                internal IO_COUNTERS IoInfo; internal UIntPtr ProcessMemoryLimit;
+                internal UIntPtr JobMemoryLimit; internal UIntPtr PeakProcessMemoryUsed;
+                internal UIntPtr PeakJobMemoryUsed;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              private struct FILE_ATTRIBUTE_TAG_INFO {
+                internal uint FileAttributes; internal uint ReparseTag;
+              }
+
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              private static extern IntPtr CreateJobObjectW(IntPtr attributes, string name);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool SetInformationJobObject(
+                IntPtr job, int informationClass, IntPtr information, uint informationLength);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool IsProcessInJob(
+                IntPtr process, IntPtr job, [MarshalAs(UnmanagedType.Bool)] out bool result);
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              private static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);
+              [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool CreateProcessW(
+                string applicationName, StringBuilder commandLine, IntPtr processAttributes,
+                IntPtr threadAttributes, bool inheritHandles, uint creationFlags,
+                IntPtr environment, string currentDirectory, ref STARTUPINFO startupInfo,
+                out PROCESS_INFORMATION processInformation);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern uint ResumeThread(IntPtr thread);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool CreatePipe(
+                out IntPtr readPipe, out IntPtr writePipe,
+                ref SECURITY_ATTRIBUTES pipeAttributes, uint size);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              private static extern IntPtr CreateFileW(
+                string name, uint desiredAccess, uint shareMode,
+                ref SECURITY_ATTRIBUTES securityAttributes, uint creationDisposition,
+                uint flagsAndAttributes, IntPtr templateFile);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool GetFileInformationByHandleEx(
+                IntPtr file, int informationClass, out FILE_ATTRIBUTE_TAG_INFO information,
+                uint bufferSize);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              private static extern bool CloseHandle(IntPtr handle);
+            }
+          }
+          '@
+          Add-Type -TypeDefinition $jobSupervisorSource -Language CSharp
+
+          $job = $null
+          $bootstrapPin = $null
+          $workspacePin = $null
+          $bootstrapRoot = $null
+          try {
+            $nonce = [Convert]::ToHexString(
+              [Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
+            ).ToLowerInvariant()
+            $jobName = "Local\OpenCoven.Chat.Conformance.$nonce"
+            $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName)
+
+            $bootstrapRoot = Join-Path $runnerTemp "opencoven-win32-$nonce"
+            [IO.Directory]::CreateDirectory($bootstrapRoot) | Out-Null
+            Assert-NoReparsePath -Path $bootstrapRoot -Label 'Bootstrap root'
+            $bootstrapPin = [OpenCoven.WindowsJobSupervisor]::PinDirectory($bootstrapRoot)
+            $workspacePin = [OpenCoven.WindowsJobSupervisor]::PinDirectory($workspace)
+
+            $supervisorSourcePath = Join-Path $bootstrapRoot 'windows-job-supervisor.cs'
+            [IO.File]::WriteAllText(
+              $supervisorSourcePath,
+              $jobSupervisorSource,
+              [Text.UTF8Encoding]::new($false)
+            )
+            $childBootstrapPath = Join-Path $bootstrapRoot 'windows-conformance-child.ps1'
+            $childBootstrap = @'
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $ProgressPreference = 'SilentlyContinue'
+
+          Add-Type -TypeDefinition (
+            [IO.File]::ReadAllText($env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)
+          ) -Language CSharp
+          [OpenCoven.WindowsJobSupervisor]::RequireCurrentProcessInJob(
+            $env:OPENCOVEN_WINDOWS_JOB_NAME
+          )
+          if (
+            $env:OPENCOVEN_WINDOWS_JOB_REQUIRED -ne '1' -or
+            $env:OPENCOVEN_WINDOWS_JOB_NAME -ne
+              "Local\OpenCoven.Chat.Conformance.$($env:OPENCOVEN_WINDOWS_JOB_NONCE)"
+          ) {
+            throw 'The supervised child is not bound to the expected Job Object nonce.'
+          }
+
+          function Invoke-Checked {
+            param(
+              [Parameter(Mandatory)][string]$FilePath,
+              [Parameter(Mandatory)][string[]]$ArgumentList,
+              [Parameter(Mandatory)][string]$Label
+            )
+            & $FilePath @ArgumentList
+            if ($LASTEXITCODE -ne 0) {
+              throw "$Label failed with exit code $LASTEXITCODE."
+            }
+          }
+
+          function Download-PinnedAsset {
+            param(
+              [Parameter(Mandatory)][uri]$Uri,
+              [Parameter(Mandatory)][string]$Destination,
+              [Parameter(Mandatory)][long]$ExpectedBytes,
+              [Parameter(Mandatory)][string]$ExpectedSha256
+            )
+            $allowedHosts = @(
+              'github.com',
+              'release-assets.githubusercontent.com',
+              'objects.githubusercontent.com',
+              'nodejs.org',
+              'registry.npmjs.org',
+              'static.rust-lang.org'
+            )
+            $handler = [Net.Http.HttpClientHandler]::new()
+            $handler.AllowAutoRedirect = $false
+            $handler.UseProxy = $false
+            $client = [Net.Http.HttpClient]::new($handler)
+            $client.Timeout = [TimeSpan]::FromMinutes(5)
+            try {
+              $current = $Uri
+              for ($redirects = 0; $redirects -le 5; $redirects++) {
+                if (
+                  $current.Scheme -ne 'https' -or
+                  $current.Host.ToLowerInvariant() -notin $allowedHosts
+                ) {
+                  throw 'Pinned download left the HTTPS host allowlist.'
+                }
+                $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $current)
+                $response = $client.Send(
+                  $request,
+                  [Net.Http.HttpCompletionOption]::ResponseHeadersRead
+                )
+                $request.Dispose()
+                if ([int]$response.StatusCode -in @(301, 302, 303, 307, 308)) {
+                  $location = $response.Headers.Location
+                  $response.Dispose()
+                  if ($null -eq $location) {
+                    throw 'Pinned download redirect omitted its location.'
+                  }
+                  $current = if ($location.IsAbsoluteUri) {
+                    $location
+                  } else {
+                    [uri]::new($current, $location)
+                  }
+                  continue
+                }
+                if (-not $response.IsSuccessStatusCode) {
+                  throw "Pinned download failed with HTTP $([int]$response.StatusCode)."
+                }
+                if (
+                  $null -ne $response.Content.Headers.ContentLength -and
+                  $response.Content.Headers.ContentLength -ne $ExpectedBytes
+                ) {
+                  throw 'Pinned download Content-Length changed.'
+                }
+                $input = $response.Content.ReadAsStream()
+                $output = [IO.File]::Open(
+                  $Destination,
+                  [IO.FileMode]::CreateNew,
+                  [IO.FileAccess]::Write,
+                  [IO.FileShare]::None
+                )
+                try {
+                  $buffer = [byte[]]::new(65536)
+                  [long]$written = 0
+                  while (($count = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $written += $count
+                    if ($written -gt $ExpectedBytes) {
+                      throw 'Pinned download exceeded its exact byte bound.'
+                    }
+                    $output.Write($buffer, 0, $count)
+                  }
+                  $output.Flush($true)
+                } finally {
+                  $output.Dispose()
+                  $input.Dispose()
+                  $response.Dispose()
+                }
+                if ($written -ne $ExpectedBytes) {
+                  throw 'Pinned download byte length changed.'
+                }
+                $digest = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+                if (-not [String]::Equals(
+                  $digest,
+                  $ExpectedSha256,
+                  [StringComparison]::OrdinalIgnoreCase
+                )) {
+                  throw 'Pinned download SHA256 changed.'
+                }
+                return
+              }
+              throw 'Pinned download exceeded the redirect bound.'
+            } finally {
+              $client.Dispose()
+              $handler.Dispose()
+            }
+          }
+
+          $root = $env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT
+          $workspace = $env:GITHUB_WORKSPACE
+          $downloads = Join-Path $root 'downloads'
+          $tools = Join-Path $root 'tools'
+          [IO.Directory]::CreateDirectory($downloads) | Out-Null
+          [IO.Directory]::CreateDirectory($tools) | Out-Null
+
+          $gitArchive = Join-Path $downloads 'PortableGit-2.55.0.5-64-bit.7z.exe'
+          Download-PinnedAsset `
+            -Uri 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe' `
+            -Destination $gitArchive `
+            -ExpectedBytes 58960208 `
+            -ExpectedSha256 '5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290'
+          $nodeArchive = Join-Path $downloads 'node-v24.18.1-win-x64.zip'
+          Download-PinnedAsset `
+            -Uri 'https://nodejs.org/dist/v24.18.1/node-v24.18.1-win-x64.zip' `
+            -Destination $nodeArchive `
+            -ExpectedBytes 37177316 `
+            -ExpectedSha256 'ec56b84a7551893ab2324ebdfdc4ab974a63b4781162600b68a1293cc3e53765'
+          $pnpmArchive = Join-Path $downloads 'pnpm-10.34.0.tgz'
+          Download-PinnedAsset `
+            -Uri 'https://registry.npmjs.org/pnpm/-/pnpm-10.34.0.tgz' `
+            -Destination $pnpmArchive `
+            -ExpectedBytes 4582819 `
+            -ExpectedSha256 '58e143258871df51589b651c06205dabec48766a5dbba3c25999b69b50be598e'
+          $rustupInit = Join-Path $downloads 'rustup-init.exe'
+          Download-PinnedAsset `
+            -Uri 'https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe' `
+            -Destination $rustupInit `
+            -ExpectedBytes 13551616 `
+            -ExpectedSha256 '88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0'
+
+          $gitRoot = Join-Path $tools 'git'
+          Invoke-Checked `
+            -FilePath $gitArchive `
+            -ArgumentList @('-y', "-o$gitRoot") `
+            -Label 'Pinned PortableGit extraction'
+          $git = Join-Path $gitRoot 'cmd\git.exe'
+          if ((& $git --version).Trim() -ne 'git version 2.55.0.windows.5') {
+            throw 'Pinned PortableGit version changed.'
+          }
+
+          $nodeParent = Join-Path $tools 'node'
+          [IO.Directory]::CreateDirectory($nodeParent) | Out-Null
+          [IO.Compression.ZipFile]::ExtractToDirectory($nodeArchive, $nodeParent)
+          $nodeRoot = Join-Path $nodeParent 'node-v24.18.1-win-x64'
+          $node = Join-Path $nodeRoot 'node.exe'
+          $npm = Join-Path $nodeRoot 'npm.cmd'
+          if ((& $node --version).Trim() -ne 'v24.18.1') {
+            throw 'Pinned Node version changed.'
+          }
+
+          $pnpmRoot = Join-Path $tools 'pnpm'
+          $npmCache = Join-Path $root 'npm-cache'
+          [IO.Directory]::CreateDirectory($npmCache) | Out-Null
+          Invoke-Checked `
+            -FilePath $npm `
+            -ArgumentList @(
+              'install',
+              '--global',
+              '--prefix',
+              $pnpmRoot,
+              '--ignore-scripts',
+              '--no-audit',
+              '--no-fund',
+              '--cache',
+              $npmCache,
+              $pnpmArchive
+            ) `
+            -Label 'Pinned pnpm installation'
+          $pnpm = Join-Path $pnpmRoot 'pnpm.cmd'
+          if ((& $pnpm --version).Trim() -ne '10.34.0') {
+            throw 'Pinned pnpm version changed.'
+          }
+
+          $env:RUSTUP_HOME = Join-Path $root 'rustup'
+          $env:CARGO_HOME = Join-Path $root 'cargo'
+          $env:RUSTUP_DIST_SERVER = 'https://static.rust-lang.org'
+          $env:RUSTUP_UPDATE_ROOT = 'https://static.rust-lang.org/rustup'
+          Invoke-Checked `
+            -FilePath $rustupInit `
+            -ArgumentList @(
+              '-y',
+              '--no-modify-path',
+              '--profile',
+              'minimal',
+              '--default-toolchain',
+              '1.95.0'
+            ) `
+            -Label 'Pinned Rust installation'
+          $cargoBin = Join-Path $env:CARGO_HOME 'bin'
+          $rustup = Join-Path $cargoBin 'rustup.exe'
+          $cargo = Join-Path $cargoBin 'cargo.exe'
+          $rustc = Join-Path $cargoBin 'rustc.exe'
+          if (-not (& $rustup --version).StartsWith('rustup 1.28.2 ')) {
+            throw 'Pinned rustup version changed.'
+          }
+          if (-not (& $rustc --version).StartsWith('rustc 1.95.0 ')) {
+            throw 'Pinned Rust version changed.'
+          }
+
+          $env:PATH = @(
+            $gitRoot + '\cmd',
+            $nodeRoot,
+            $pnpmRoot,
+            $cargoBin,
+            $env:OPENCOVEN_MSVC_BIN,
+            $env:OPENCOVEN_WINDOWS_SDK_BIN,
+            'C:\Windows\System32',
+            'C:\Windows',
+            'C:\Program Files\PowerShell\7'
+          ) -join ';'
+          $env:LIB = @(
+            $env:OPENCOVEN_MSVC_LIB,
+            $env:OPENCOVEN_WINDOWS_SDK_LIB_UM,
+            $env:OPENCOVEN_WINDOWS_SDK_LIB_UCRT
+          ) -join ';'
+          $env:INCLUDE = @(
+            $env:OPENCOVEN_MSVC_INCLUDE,
+            (Join-Path $env:OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT 'ucrt'),
+            (Join-Path $env:OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT 'shared'),
+            (Join-Path $env:OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT 'um'),
+            (Join-Path $env:OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT 'winrt'),
+            (Join-Path $env:OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT 'cppwinrt')
+          ) -join ';'
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = 'NUL'
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $env:GIT_NO_REPLACE_OBJECTS = '1'
+          $env:GIT_NO_LAZY_FETCH = '1'
+          $env:GIT_ALLOW_PROTOCOL = 'https'
+          $env:GCM_INTERACTIVE = 'Never'
+          $env:GIT_ASKPASS = ''
+          $env:SSH_ASKPASS = ''
+          $env:HTTP_PROXY = ''
+          $env:HTTPS_PROXY = ''
+          $env:ALL_PROXY = ''
+          $env:http_proxy = ''
+          $env:https_proxy = ''
+          $env:all_proxy = ''
+          $env:NPM_CONFIG_USERCONFIG = 'NUL'
+          $env:NPM_CONFIG_PROXY = ''
+          $env:NPM_CONFIG_HTTPS_PROXY = ''
+          $env:NPM_CONFIG_REGISTRY = 'https://registry.npmjs.org/'
+          $env:COREPACK_ENABLE_PROJECT_SPEC = '0'
+          $env:CARGO_NET_GIT_FETCH_WITH_CLI = 'true'
+          $env:CARGO_TERM_COLOR = 'never'
+          $env:CI = '1'
+          $env:NO_COLOR = '1'
+
+          if (
+            $env:OPENCOVEN_CHAT_REPOSITORY -ne 'OpenCoven/chat' -or
+            $env:OPENCOVEN_CHAT_SHA -notmatch '^[0-9a-f]{40}$' -or
+            $env:OPENCOVEN_VALIDATOR_REVISION -notmatch '^[0-9a-f]{40}$'
+          ) {
+            throw 'Protected workflow revisions are malformed.'
+          }
+          Push-Location $workspace
+          try {
+            Write-Host 'git fetch exact protected Chat revision'
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @('init', '--initial-branch=detached-bootstrap') `
+              -Label 'Chat repository initialization'
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-c',
+                'credential.helper=',
+                '-c',
+                'core.hooksPath=NUL',
+                'remote',
+                'add',
+                'origin',
+                'https://github.com/OpenCoven/chat.git'
+              ) `
+              -Label 'Chat origin configuration'
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-c',
+                'credential.helper=',
+                '-c',
+                'core.hooksPath=NUL',
+                '-c',
+                'protocol.https.allow=always',
+                'fetch',
+                '--quiet',
+                '--no-tags',
+                '--depth=1',
+                'origin',
+                $env:OPENCOVEN_CHAT_SHA
+              ) `
+              -Label 'Chat exact-SHA fetch'
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-c',
+                'core.hooksPath=NUL',
+                'checkout',
+                '--detach',
+                '--force',
+                'FETCH_HEAD'
+              ) `
+              -Label 'Chat detached checkout'
+          } finally {
+            Pop-Location
+          }
+          if ((& $git -C $workspace rev-parse HEAD).Trim() -ne $env:OPENCOVEN_CHAT_SHA) {
+            throw 'Chat checkout HEAD changed.'
+          }
+          if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0) {
+            throw 'Chat checkout is not clean.'
+          }
+          if (Test-Path -LiteralPath (Join-Path $workspace '.gitmodules')) {
+            throw 'The protected Chat checkout may not contain submodules.'
+          }
+
+          Push-Location $workspace
+          try {
+            Invoke-Checked `
+              -FilePath $env:OPENCOVEN_WINDOWS_SYSTEM_PWSH `
+              -ArgumentList @(
+                '-NoLogo',
+                '-NoProfile',
+                '-NonInteractive',
+                '-File',
+                (Join-Path $workspace 'scripts\windows-job-supervisor.test.ps1')
+              ) `
+              -Label 'Windows Job Object native runtime tests'
+            Invoke-Checked `
+              -FilePath $pnpm `
+              -ArgumentList @('install', '--frozen-lockfile', '--ignore-scripts') `
+              -Label 'pnpm install --frozen-lockfile --ignore-scripts'
+
+            if (
+              (& $node --version).Trim() -ne 'v24.18.1' -or
+              "pnpm@$((& $pnpm --version).Trim())" -ne 'pnpm@10.34.0' -or
+              -not (& $rustc --version).StartsWith('rustc 1.95.0 ')
+            ) {
+              throw 'Frozen Windows toolchain does not match.'
+            }
+            $tauriVersion = (& $pnpm exec tauri --version).Trim()
+            if ($tauriVersion -ne 'tauri-cli 2.11.4') {
+              throw 'Frozen Tauri CLI version changed.'
+            }
+
+            $harnessPath = Join-Path $workspace 'scripts\phase1-conformance.mjs'
+            $harness = Get-Item -LiteralPath $harnessPath -Force
+            if (
+              -not $harness.PSIsContainer -and
+              ($harness.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+              $harness.Length -eq 187069 -and
+              (Get-FileHash -LiteralPath $harnessPath -Algorithm SHA256).Hash.ToLowerInvariant() -eq
+                '1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70'
+            ) {
+              Write-Host 'Frozen harness bytes verified.'
+            } else {
+              throw 'Frozen harness bytes do not match.'
+            }
+
+            $recordPath = Join-Path $workspace '.artifacts\client-v1-conformance-win32-x64.json'
+            Invoke-Checked `
+              -FilePath $node `
+              -ArgumentList @(
+                $harnessPath,
+                '--validator-revision',
+                $env:OPENCOVEN_VALIDATOR_REVISION,
+                '--platform',
+                'win32-x64',
+                '--output',
+                $recordPath
+              ) `
+              -Label 'Windows schema-v2 conformance production'
+
+            Write-Host 'Validate canonical platform record'
+            $canonicalValidation = @"
+          import { lstatSync, readFileSync } from 'node:fs';
+          const sort = (value) => Array.isArray(value)
+            ? value.map(sort)
+            : value !== null && typeof value === 'object'
+              ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])]))
+              : value;
+          const path = process.argv[1];
+          const stats = lstatSync(path);
+          const text = readFileSync(path, 'utf8');
+          const value = JSON.parse(text);
+          if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 ||
+              stats.size > 1048576 || value === null || Array.isArray(value) ||
+              value.schemaVersion !== 2 || value.platform !== 'win32-x64' ||
+              JSON.stringify(sort(value), null, 2) + '\n' !== text) {
+            throw new Error('Platform record is not canonical');
+          }
+          "@
+            Invoke-Checked `
+              -FilePath $node `
+              -ArgumentList @('--input-type=module', '--eval', $canonicalValidation, $recordPath) `
+              -Label 'Validate canonical platform record'
+          } finally {
+            Pop-Location
+          }
+          '@
+            [IO.File]::WriteAllText(
+              $childBootstrapPath,
+              $childBootstrap,
+              [Text.UTF8Encoding]::new($false)
+            )
+
+            $childEnvironment = [ordered]@{
+              SystemRoot = 'C:\Windows'
+              WINDIR = 'C:\Windows'
+              COMSPEC = $trustedComspec
+              PATHEXT = '.COM;.EXE;.BAT;.CMD'
+              PATH = 'C:\Program Files\PowerShell\7;C:\Windows\System32;C:\Windows'
+              TEMP = $bootstrapRoot
+              TMP = $bootstrapRoot
+              USERPROFILE = (Join-Path $bootstrapRoot 'profile')
+              APPDATA = (Join-Path $bootstrapRoot 'profile\AppData\Roaming')
+              LOCALAPPDATA = (Join-Path $bootstrapRoot 'profile\AppData\Local')
+              GITHUB_WORKSPACE = $workspace
+              OPENCOVEN_CHAT_REPOSITORY = '${{ github.repository }}'
+              OPENCOVEN_CHAT_SHA = '${{ github.sha }}'
+              OPENCOVEN_VALIDATOR_REVISION = '${{ inputs.validator_revision }}'
+              OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $bootstrapRoot
+              OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+              OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
+              OPENCOVEN_WINDOWS_JOB_NAME = $jobName
+              OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
+              OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE = $supervisorSourcePath
+              OPENCOVEN_MSVC_BIN = $msvcBin
+              OPENCOVEN_MSVC_LIB = $msvcLib
+              OPENCOVEN_MSVC_INCLUDE = $msvcInclude
+              OPENCOVEN_WINDOWS_SDK_BIN = $windowsSdkBin
+              OPENCOVEN_WINDOWS_SDK_LIB_UM = $windowsSdkLibUm
+              OPENCOVEN_WINDOWS_SDK_LIB_UCRT = $windowsSdkLibUcrt
+              OPENCOVEN_WINDOWS_SDK_INCLUDE_ROOT = $windowsSdkIncludeRoot
+            }
+            foreach ($directory in @(
+              $childEnvironment.USERPROFILE,
+              $childEnvironment.APPDATA,
+              $childEnvironment.LOCALAPPDATA
+            )) {
+              [IO.Directory]::CreateDirectory($directory) | Out-Null
+            }
+
+            $result = $job.Run(
+              $trustedPwsh,
+              "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$childBootstrapPath`"",
+              $bootstrapRoot,
+              $childEnvironment,
+              [TimeSpan]::FromMinutes(55),
+              16MB,
+              16MB
+            )
+            if ($result.Stdout.Length -gt 0) {
+              [Console]::Out.Write($result.Stdout)
+            }
+            if ($result.Stderr.Length -gt 0) {
+              [Console]::Error.Write($result.Stderr)
+            }
+            if (
+              $result.TimedOut -or
+              $result.StdoutOverflow -or
+              $result.StderrOverflow -or
+              $result.ExitCode -ne 0
+            ) {
+              throw "Supervised Windows production failed with exit code $($result.ExitCode)."
+            }
+          } finally {
+            if ($null -ne $job) {
+              $job.Dispose()
+            }
+            if ($null -ne $workspacePin) {
+              $workspacePin.Dispose()
+            }
+            if ($null -ne $bootstrapPin) {
+              $bootstrapPin.Dispose()
+            }
+            if ($null -ne $bootstrapRoot -and [IO.Directory]::Exists($bootstrapRoot)) {
+              Assert-NoReparsePath -Path $bootstrapRoot -Label 'Bootstrap cleanup root'
+              [IO.Directory]::Delete($bootstrapRoot, $true)
+            }
+          }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: matrix.platform != 'win32-x64'
         with:
           node-version: 24.18.1
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        if: matrix.platform != 'win32-x64'
         with:
           version: 10.34.0
       - name: Install frozen dependencies
+        if: matrix.platform != 'win32-x64'
         run: corepack pnpm@10.34.0 install --frozen-lockfile --ignore-scripts
       - name: Set up frozen Rust
+        if: matrix.platform != 'win32-x64'
         run: rustup toolchain install 1.95.0 --profile minimal && rustup default 1.95.0
       - name: Install frozen Linux Secret Service
-        if: matrix.platform == 'linux-x64'
+        if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'
         run: node scripts/phase1-linux-secret-service.mjs --install
       - name: Require frozen toolchain
+        if: matrix.platform != 'win32-x64'
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; const run = (command, args) => execFileSync(command, args, { encoding: ''utf8'' }).trim(); if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
       - name: Verify frozen harness bytes
-        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 186989 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''a94b76d45f23c4ad1fabf9e08c188c5da3d044e1aa8c1cc2cf1db269df0c3607'') throw new Error(''Frozen harness bytes do not match'');"'
+        if: matrix.platform != 'win32-x64'
+        run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 187069 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70'') throw new Error(''Frozen harness bytes do not match'');"'
       - name: Produce platform evidence
+        if: matrix.platform != 'win32-x64'
         shell: bash
         env:
           OPENCOVEN_VALIDATOR_REVISION: ${{ inputs.validator_revision }}
         run: if [[ "${{ matrix.platform }}" == "linux-x64" ]]; then bash scripts/phase1-linux-secret-service.sh --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; else node scripts/phase1-conformance.mjs --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" --platform "${{ matrix.platform }}" --output ".artifacts/client-v1-conformance-${{ matrix.platform }}.json"; fi
       - name: Validate canonical platform record
+        if: matrix.platform != 'win32-x64'
         run: 'node --input-type=module --eval "import { lstatSync, readFileSync } from ''node:fs''; const sort = (value) => Array.isArray(value) ? value.map(sort) : value !== null && typeof value === ''object'' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])])) : value; const path = process.argv[1]; const stats = lstatSync(path); const text = readFileSync(path, ''utf8''); const value = JSON.parse(text); if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 || stats.size > 1048576 || value === null || Array.isArray(value) || value.schemaVersion !== 2 || value.platform !== process.argv[2] || JSON.stringify(sort(value), null, 2) + ''\n'' !== text) throw new Error(''Platform record is not canonical'');" ".artifacts/client-v1-conformance-${{ matrix.platform }}.json" "${{ matrix.platform }}"'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

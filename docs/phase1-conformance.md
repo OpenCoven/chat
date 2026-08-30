@@ -220,6 +220,70 @@ tool command. The local frozen artifact is retained outside Git at
 `files/phase1-process-supervisor-ff415b6/win32-x64/phase1-process-supervisor.exe`
 in this implementation session's artifact area.
 
+### Windows pre-bootstrap trust boundary
+
+The `win32-x64` matrix expansion does not begin with checkout or a setup
+action. Its first step is inline `pwsh` reviewed as part of the workflow
+itself. Before network access or repository mutation, that step requires the
+GitHub `windows-2025` x64 image, Windows build 26100, allowlisted PowerShell
+Core/.NET runtime families, the absolute system PowerShell, `kernel32.dll`,
+`cmd.exe`, MSVC, and Windows SDK paths, and non-reparse runner temporary and
+workspace roots.
+
+The inline C# P/Invoke supervisor creates a named, nonce-bound Job Object with
+only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. It calls `CreateProcessW` with
+`CREATE_SUSPENDED`, assigns the child with `AssignProcessToJobObject`, confirms
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
+flags are not enabled. The parent retains non-delete-sharing handles for the
+bootstrap and workspace directories, captures stdout and stderr independently
+with 16 MiB bounds, applies a 55-minute total timeout, terminates the complete
+Job on timeout, overflow, launch error, or non-zero child status, reaps the
+root, and closes every native handle. Closing the final Job handle also kills
+any descendant that outlived the supervised root.
+
+The assigned child performs every Windows production operation: exact Chat
+checkout, tool acquisition, dependency installation, tool and harness
+verification, the Windows Job runtime test, all candidate/validator/Cave/Coven
+checkouts and builds, native RPC execution, schema-v2 production, and final
+canonical-record validation. The Node harness verifies that its own PID is in
+the nonce-named Job through trusted system PowerShell. The phase-1 native RPC
+opens the same named Job and fails before runtime initialization if its nonce
+binding or membership is absent. Those four binding variables are explicitly
+carried through the harness's curated environment; they cannot degrade to an
+unnamed or ambient Job.
+
+The child receives a constructed environment rather than the runner
+environment. It contains no GitHub token, OIDC request value, Git credential,
+Cargo credential, or proxy setting. Git disables system/global configuration,
+credential helpers, prompts, replacement objects, and non-HTTPS fetch
+protocols. Downloads use a proxy-free .NET `HttpClient`, allow only HTTPS and
+an explicit host list, cap redirects and time, require an exact byte count,
+and verify SHA-256 before execution or extraction.
+
+The directly downloaded Windows assets are:
+
+| Facility | Exact asset | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Git for Windows | `PortableGit-2.55.0.5-64-bit.7z.exe` | 58,960,208 | `5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290` |
+| Node.js | `node-v24.18.1-win-x64.zip` | 37,177,316 | `ec56b84a7551893ab2324ebdfdc4ab974a63b4781162600b68a1293cc3e53765` |
+| pnpm | `pnpm-10.34.0.tgz` | 4,582,819 | `58e143258871df51589b651c06205dabec48766a5dbba3c25999b69b50be598e` |
+| rustup-init | `1.28.2/x86_64-pc-windows-msvc/rustup-init.exe` | 13,551,616 | `88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0` |
+
+The pinned rustup executable installs only Rust `1.95.0` with the minimal
+profile from `https://static.rust-lang.org`; rustup verifies the exact
+toolchain component hashes from that release manifest. The workflow then
+requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
+conformance.
+
+`scripts/windows-job-supervisor.test.ps1` is also run by the ordinary Windows
+Rust CI job. On Windows it compiles the reviewed C# source, creates a
+child/grandchild tree, proves timeout termination reaches both processes,
+proves kill-on-close reaches a surviving grandchild, and proves a mismatched
+named-Job membership check fails. The protected lane runs the same test
+against the exact inline supervisor source after checkout and while already
+inside the production Job. macOS development can parse and compile the source
+but cannot claim those native runtime results.
+
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
 search paths, and handles explicit extensions without fallback. Batch shims run
@@ -246,6 +310,19 @@ by the target; no status path or capability enters the target environment.
 Timeout and output-limit cancellation signal the live supervisor, which remains
 the process-group leader through bounded TERM-to-KILL descendant cleanup and is
 then reaped.
+
+### Protected workflow graph
+
+Self-review is prevented and administrators cannot bypass the protection. The
+exact SDK workflow contract requires no application credential secret because
+all counterpart repositories are public. The manual dispatch requires one
+input, `validator_revision`, containing the full lowercase 40-character SDK
+validator commit. The workflow has only
+the three protected matrix jobs and one permissionless aggregation-confirmation
+job. macOS and Linux use the pinned official checkout, Node, and pnpm setup
+actions. Windows routes around those actions through the pre-bootstrap Job
+root. All platforms use the pinned official artifact upload and
+build-provenance attestation actions after candidate execution is complete.
 
 `HOME`, XDG directories, temporary directories, pnpm store, Cargo home, Cave
 home, and Coven home are isolated for the ordinary harness, checkout,
@@ -330,3 +407,25 @@ node ./scripts/phase1-artifact-secret-scan.mjs \
 
 A producer failure, timeout, incomplete assertion set, or isolation/redaction
 mismatch fails without publishing partial evidence.
+
+## Non-cyclic SDK handoff
+
+The Chat producer commit is created first. SDK #74 then freezes that exact
+producer commit/tree, package manifest, harness, workflow, environment ID, and
+source/signer digests in a later validator commit. Operators dispatch the
+already-committed Chat workflow with that full SDK commit as
+`validator_revision`.
+
+The pre-repin SDK validator is expected to reject this new workflow
+graph until that one-time metadata update is reviewed and merged. Chat-local
+tests therefore require the old validator's rejection while independently
+guarding the new graph and supervisor APIs. The later SDK change must replace
+the producer workflow size/SHA-256 and producer commit/tree metadata. Chat's
+runtime `validator_revision` model remains unchanged, and no SDK validator SHA
+is added to Chat.
+
+The selected validator commit and tree, plus its contract and schema digests,
+are recomputed from the exact clean checkout and embedded in the platform
+record. The SDK aggregator still requires those values to equal the validator
+checkout performing aggregation. No SDK validator revision is committed back
+into Chat, so the two repositories do not form a commit-hash cycle.

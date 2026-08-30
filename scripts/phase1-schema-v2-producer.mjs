@@ -110,6 +110,151 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
   return environment;
 }
 
+export function windowsJobBindingEnvironment(
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform !== 'win32') {
+    return {};
+  }
+  const required = environment.OPENCOVEN_WINDOWS_JOB_REQUIRED;
+  const nonce = environment.OPENCOVEN_WINDOWS_JOB_NONCE;
+  const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
+  const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
+  const compilerLibraryPath = environment.LIB;
+  const compilerIncludePath = environment.INCLUDE;
+  if (required !== '1') {
+    throw new Error('Windows schema-v2 evidence Job Object supervision is required.');
+  }
+  if (
+    typeof nonce !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(nonce) ||
+    name !== `Local\\OpenCoven.Chat.Conformance.${nonce}`
+  ) {
+    throw new Error('Windows Job Object supervision is not nonce-bound.');
+  }
+  if (
+    typeof systemPwsh !== 'string' ||
+    systemPwsh.toLowerCase() !== 'c:\\program files\\powershell\\7\\pwsh.exe'
+  ) {
+    throw new Error('Windows Job Object membership requires trusted system PowerShell.');
+  }
+  for (const [label, value] of [
+    ['library', compilerLibraryPath],
+    ['include', compilerIncludePath],
+  ]) {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.includes('\n') ||
+      value.includes('\r') ||
+      value.split(';').some((path) => {
+        const lower = path.toLowerCase();
+        return (
+          !/^[a-z]:\\/u.test(lower) ||
+          lower.includes('\\..\\') ||
+          (!lower.startsWith(
+            'c:\\program files\\microsoft visual studio\\2022\\enterprise\\vc\\tools\\msvc\\14.',
+          ) &&
+            !lower.startsWith('c:\\program files (x86)\\windows kits\\10\\'))
+        );
+      })
+    ) {
+      throw new Error(`Windows Job Object ${label} path is outside trusted toolchain roots.`);
+    }
+  }
+  return {
+    OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
+    OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
+    OPENCOVEN_WINDOWS_JOB_NAME: name,
+    OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
+    LIB: compilerLibraryPath,
+    INCLUDE: compilerIncludePath,
+  };
+}
+
+function assertWindowsJobMembership(binding) {
+  if (Object.keys(binding).length === 0) {
+    return;
+  }
+  const script = `
+$ErrorActionPreference = 'Stop'
+$source = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class OpenCovenExpectedJobMembership {
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsProcessInJob(
+        IntPtr process,
+        IntPtr job,
+        [MarshalAs(UnmanagedType.Bool)] out bool result);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+    public static void Require(string name, uint processId) {
+        IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, name);
+        if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+        if (process == IntPtr.Zero) {
+            CloseHandle(job);
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try {
+            bool member;
+            if (!IsProcessInJob(process, job, out member) || !member) {
+                throw new InvalidOperationException("Harness process is outside the expected Job Object.");
+            }
+        } finally {
+            CloseHandle(process);
+            CloseHandle(job);
+        }
+    }
+}
+'@
+Add-Type -TypeDefinition $source -Language CSharp
+[OpenCovenExpectedJobMembership]::Require($args[0], [uint32]$args[1])
+`;
+  const output = execFileSync(
+    binding.OPENCOVEN_WINDOWS_SYSTEM_PWSH,
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+      binding.OPENCOVEN_WINDOWS_JOB_NAME,
+      String(process.pid),
+    ],
+    {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      env: {
+        SYSTEMROOT: process.env.SYSTEMROOT,
+        WINDIR: process.env.WINDIR,
+        COMSPEC: process.env.COMSPEC,
+        PATH: process.env.PATH,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+      },
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      windowsHide: true,
+    },
+  );
+  if (output.trim() !== '') {
+    throw new Error('Windows Job Object membership probe returned unexpected output.');
+  }
+}
+
 function killUntrackedOwnedChild(child) {
   if (ownedProcessGroupsSupported && child.exitCode === null && child.signalCode === null) {
     try {
@@ -3430,6 +3575,9 @@ export async function runSchemaV2Conformance(options) {
       `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
     );
   }
+  const windowsJobBinding =
+    schemaV2 && process.platform === 'win32' ? windowsJobBindingEnvironment(process.env) : {};
+  assertWindowsJobMembership(windowsJobBinding);
   const startedAt = new Date().toISOString();
   const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
   const operatorBefore =
@@ -3443,7 +3591,10 @@ export async function runSchemaV2Conformance(options) {
       : {};
   const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
   const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
-  const environment = safeEnvironment(executionRoot.rootPath, linuxSessionEnvironment);
+  const environment = safeEnvironment(executionRoot.rootPath, {
+    ...linuxSessionEnvironment,
+    ...windowsJobBinding,
+  });
   const results = new Map();
   let artifactDigests = {};
   let infrastructureFailure;

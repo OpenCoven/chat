@@ -67,6 +67,7 @@ import {
   snapshotOperatorState,
   throwNativeScenarioFailures,
   validateSupervisorArtifactFile,
+  windowsJobBindingEnvironment,
   withFixtureDaemon,
   withOwnedArtifactRoot,
   wrapInfrastructureFailure,
@@ -241,6 +242,46 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(scrubEvidenceAuthorizationEnvironment(environment)).toEqual({
       PATH: '/trusted/bin',
     });
+  });
+
+  test('requires an exact nonce-bound Windows Job Object environment for Windows evidence', () => {
+    const nonce = '0123456789abcdef0123456789abcdef';
+    const binding = {
+      OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
+      OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
+      OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
+      OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      LIB: [
+        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.50.35717\\lib\\x64',
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64',
+      ].join(';'),
+      INCLUDE: [
+        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.50.35717\\include',
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
+      ].join(';'),
+    };
+
+    expect(windowsJobBindingEnvironment(binding, 'win32')).toEqual(binding);
+    expect(windowsJobBindingEnvironment(binding, 'linux')).toEqual({});
+    expect(() =>
+      windowsJobBindingEnvironment({ ...binding, OPENCOVEN_WINDOWS_JOB_REQUIRED: '0' }, 'win32'),
+    ).toThrow(/required/u);
+    expect(() =>
+      windowsJobBindingEnvironment(
+        { ...binding, OPENCOVEN_WINDOWS_JOB_NAME: 'Local\\OpenCoven.Chat.Conformance.other' },
+        'win32',
+      ),
+    ).toThrow(/nonce-bound/u);
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\untrusted\\pwsh.exe',
+        },
+        'win32',
+      ),
+    ).toThrow(/system PowerShell/u);
   });
 
   test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {

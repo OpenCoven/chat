@@ -42,6 +42,9 @@ pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_P
 pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
 pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+const WINDOWS_JOB_REQUIRED_ENV: &str = "OPENCOVEN_WINDOWS_JOB_REQUIRED";
+const WINDOWS_JOB_NONCE_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NONCE";
+const WINDOWS_JOB_NAME_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NAME";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
 const CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING: &str = "production-keyring";
 const CONFORMANCE_NATIVE_PROVIDER_SYSTEM: &str = "system-native";
@@ -82,6 +85,75 @@ fn adoption_fault_barrier(phase: &str) -> Result<(), NativeDiagnostic> {
     std::fs::File::open(gate)
         .map(|_| ())
         .map_err(|_| NativeDiagnostic::new("keychain_failure", false))
+}
+
+fn validate_windows_job_binding_values(
+    required: &str,
+    nonce: &str,
+    name: &str,
+) -> NativeResult<()> {
+    let valid_nonce = nonce.len() == 32
+        && nonce
+            .bytes()
+            .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value));
+    if required != "1"
+        || !valid_nonce
+        || name != format!(r"Local\OpenCoven.Chat.Conformance.{nonce}")
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+fn require_windows_job_supervision_from_environment() -> NativeResult<()> {
+    let required = match env::var(WINDOWS_JOB_REQUIRED_ENV) {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => return Ok(()),
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+    };
+    let nonce = env::var(WINDOWS_JOB_NONCE_ENV)
+        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?;
+    let name = env::var(WINDOWS_JOB_NAME_ENV)
+        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?;
+    validate_windows_job_binding_values(&required, &nonce, &name)?;
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::{
+                JobObjects::{IsProcessInJob, OpenJobObjectW},
+                Threading::GetCurrentProcess,
+            },
+        };
+
+        const JOB_OBJECT_QUERY: u32 = 0x0004;
+        let wide_name = std::ffi::OsStr::new(&name)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide_name.as_ptr()) };
+        if job.is_null() {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        let mut member = 0;
+        let inspected = unsafe { IsProcessInJob(GetCurrentProcess(), job, &mut member) };
+        unsafe {
+            CloseHandle(job);
+        }
+        if inspected == 0 || member == 0 {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err(NativeDiagnostic::new("invalid_native_input", false))
+    }
 }
 
 #[derive(Deserialize)]
@@ -806,6 +878,7 @@ impl RpcRuntime {
     }
 
     fn from_environment() -> Result<Self, NativeDiagnostic> {
+        require_windows_job_supervision_from_environment()?;
         match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
                 Ok(Self::with_custody(
@@ -2176,10 +2249,11 @@ mod tests {
     };
 
     use super::{
-        parse_command, parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher,
-        ConformanceCredentialCleanup, RpcCommand, RpcRuntime, SharedMemoryCredentialCustody,
-        CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV,
-        CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
+        parse_command, parse_request_line, read_bounded_line, validate_windows_job_binding_values,
+        BoundedLine, ConformanceCaveLauncher, ConformanceCredentialCleanup, RpcCommand, RpcRuntime,
+        SharedMemoryCredentialCustody, CONFORMANCE_INSTALLATION_ID,
+        CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV, CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID,
+        MAX_LINE_BYTES,
     };
     use crate::{
         cave::CaveLauncher,
@@ -2197,6 +2271,22 @@ mod tests {
     const SECOND_OPERATION_ATTEMPT: &str = "op1-1787900000000-2-11111111111111111111111111111111";
     const OWNER_TOKEN: &str = "00000000-0000-4000-8000-000000000004";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn windows_job_binding_requires_the_exact_nonce_bound_job_name() {
+        let nonce = "0123456789abcdef0123456789abcdef";
+        let name = format!(r"Local\OpenCoven.Chat.Conformance.{nonce}");
+
+        assert!(validate_windows_job_binding_values("1", nonce, &name).is_ok());
+        assert!(validate_windows_job_binding_values("0", nonce, &name).is_err());
+        assert!(validate_windows_job_binding_values("1", "short", &name).is_err());
+        assert!(validate_windows_job_binding_values(
+            "1",
+            nonce,
+            r"Local\OpenCoven.Chat.Conformance.other"
+        )
+        .is_err());
+    }
 
     struct RecordingEmergencyCleanup {
         cleanup_inputs: Mutex<Vec<(String, String)>>,

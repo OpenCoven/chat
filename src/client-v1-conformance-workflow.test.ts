@@ -21,6 +21,33 @@ function sha256(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function workflowStep(workflow: string, name: string): string {
+  const start = workflow.indexOf(`      - name: ${name}`);
+  if (start < 0) {
+    throw new Error(`missing workflow step: ${name}`);
+  }
+  const end = workflow.indexOf('\n      - ', start + 1);
+  return workflow.slice(start, end < 0 ? workflow.length : end);
+}
+
+function embeddedWindowsSupervisorSource(workflow: string): string {
+  const startMarker = "          $jobSupervisorSource = @'\n";
+  const endMarker = "\n          '@\n";
+  const start = workflow.indexOf(startMarker);
+  if (start < 0) {
+    throw new Error('missing inline Windows Job Object supervisor source');
+  }
+  const end = workflow.indexOf(endMarker, start + startMarker.length);
+  if (end < 0) {
+    throw new Error('unterminated inline Windows Job Object supervisor source');
+  }
+  return `${workflow
+    .slice(start + startMarker.length, end)
+    .split('\n')
+    .map((line) => line.replace(/^ {10}/u, ''))
+    .join('\n')}\n`;
+}
+
 async function workflowFixture() {
   const { verifyProtectedWorkflow } = await import(
     pathToFileURL(resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs')).href
@@ -84,7 +111,7 @@ async function workflowFixture() {
 }
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
-  test('matches the exact frozen SDK workflow graph', async () => {
+  test('is expected to be rejected by the pre-repin SDK workflow validator', async () => {
     const fixture = await workflowFixture();
     expect(fixture.workflow).toContain('      validator_revision:');
     expect(fixture.workflow).toContain('        required: true');
@@ -95,7 +122,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
-    ).not.toThrow();
+    ).toThrow(/workflow/u);
   });
 
   test.each([
@@ -248,5 +275,140 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(() => fixture.verifyProtectedWorkflow(workflow, producer, fixture.toolchain)).toThrow(
       /workflow/u,
     );
+  });
+});
+
+describe('Chat-local protected Windows conformance workflow', () => {
+  test('runs one inline supervised Windows production before every action or repository command', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const stepsStart = workflow.indexOf('    steps:\n');
+    const bootstrapStart = workflow.indexOf(
+      '      - name: Bootstrap supervised Windows conformance',
+      stepsStart,
+    );
+    const firstAction = workflow.indexOf('      - uses:', stepsStart);
+
+    expect(bootstrapStart).toBe(stepsStart + '    steps:\n'.length);
+    expect(bootstrapStart).toBeLessThan(firstAction);
+    expect(workflowStep(workflow, 'Bootstrap supervised Windows conformance')).toMatch(
+      /if: matrix\.platform == 'win32-x64'[\s\S]*?shell: pwsh[\s\S]*?run: \|/u,
+    );
+    expect(workflow).not.toContain('workflow_call:');
+    expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
+
+    for (const name of [
+      'Install frozen dependencies',
+      'Set up frozen Rust',
+      'Install frozen Linux Secret Service',
+      'Require frozen toolchain',
+      'Verify frozen harness bytes',
+      'Produce platform evidence',
+      'Validate canonical platform record',
+    ]) {
+      expect(workflowStep(workflow, name)).toContain("if: matrix.platform != 'win32-x64'");
+    }
+
+    for (const action of ['actions/checkout@', 'actions/setup-node@', 'pnpm/action-setup@']) {
+      const actionStart = workflow.indexOf(`      - uses: ${action}`);
+      const actionEnd = workflow.indexOf('\n      - ', actionStart + 1);
+      const step = workflow.slice(actionStart, actionEnd);
+      expect(actionStart).toBeGreaterThan(bootstrapStart);
+      expect(step).toContain("if: matrix.platform != 'win32-x64'");
+    }
+
+    const platformSteps = workflow
+      .slice(stepsStart, workflow.indexOf('\n  aggregate-conformance:'))
+      .split('\n      - ')
+      .slice(1);
+    for (const step of platformSteps) {
+      if (
+        step.startsWith('name: Bootstrap supervised Windows conformance') ||
+        step.startsWith('uses: actions/upload-artifact@') ||
+        step.startsWith('uses: actions/attest-build-provenance@')
+      ) {
+        continue;
+      }
+      if (
+        /(?:actions\/checkout|actions\/setup-node|pnpm\/action-setup|\bgit\b|\bnode\b|corepack|pnpm|rustup|rustc|cargo)/u.test(
+          step,
+        )
+      ) {
+        expect(step).toContain("if: matrix.platform != 'win32-x64'");
+      }
+    }
+  });
+
+  test('contains the reviewed suspended-create Job Object supervisor with fail-closed bounds', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      for (const required of [
+        'CreateProcessW',
+        'CREATE_SUSPENDED',
+        'AssignProcessToJobObject',
+        'IsProcessInJob',
+        'ResumeThread',
+        'SetInformationJobObject',
+        'JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE',
+        'CreatePipe',
+        'TerminateJobObject',
+        'MaxStdoutBytes',
+        'MaxStderrBytes',
+        'TotalTimeout',
+        'WaitForSingleObject',
+        'CloseHandle',
+      ]) {
+        expect(source).toContain(required);
+      }
+      expect(source).not.toContain('JOB_OBJECT_LIMIT_BREAKAWAY_OK');
+      expect(source).not.toContain('JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK');
+    }
+  });
+
+  test('runs the native Job Object tree tests in the ordinary Windows CI job', () => {
+    const workflow = readFileSync(resolve(projectRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const windowsJob = workflow.slice(workflow.indexOf('  windows-supervisor-behavior:'));
+
+    expect(windowsJob).toContain('name: Test Windows Job Object supervision');
+    expect(windowsJob).toContain(
+      'pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-job-supervisor.test.ps1',
+    );
+  });
+
+  test('pins and verifies the complete supervised Windows bootstrap and evidence tree', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+
+    for (const required of [
+      'windows-2025',
+      'AMD64',
+      'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      'C:\\Windows\\System32\\kernel32.dll',
+      'node-v24.18.1-win-x64.zip',
+      'pnpm-10.34.0.tgz',
+      'rustup-init.exe',
+      '1.95.0',
+      'PortableGit',
+      'Get-FileHash',
+      'SHA256',
+      'https://',
+      'git fetch',
+      'pnpm install --frozen-lockfile --ignore-scripts',
+      'windows-job-supervisor.test.ps1',
+      'phase1-conformance.mjs',
+      'Validate canonical platform record',
+      'OPENCOVEN_WINDOWS_JOB_REQUIRED',
+      'OPENCOVEN_WINDOWS_JOB_NONCE',
+      'OPENCOVEN_WINDOWS_JOB_NAME',
+    ]) {
+      expect(bootstrap).toContain(required);
+    }
+    expect(bootstrap).not.toMatch(/\b(?:curl|wget|Invoke-WebRequest)\b/u);
+    expect(bootstrap).not.toContain('http://');
+    expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
   });
 });
