@@ -202,6 +202,18 @@ export function nativeAdapterTestEnvironment(
   platform?: NodeJS.Platform,
   operatorEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export function nativeMissingKeychainFailureDiagnostic(options: {
+  supervised: boolean;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  supervisorStatusValid: boolean;
+  terminationReason: string | undefined;
+  killFailed: boolean;
+  processFailed: boolean;
+  canaryExposed: boolean;
+  homeChanged: boolean;
+  responseValid: boolean;
+}): string | undefined;
 export function withFixtureDaemon<T>(
   fixtureDaemon: { close(): Promise<void> },
   action: () => Promise<T>,

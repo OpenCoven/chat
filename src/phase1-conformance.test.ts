@@ -39,6 +39,7 @@ import {
   finalizeOperatorSafety,
   NativeRpcClient,
   nativeAdapterTestEnvironment,
+  nativeMissingKeychainFailureDiagnostic,
   observeReleaseToolVersions,
   parseArgs,
   parseCaveConformanceOutput,
@@ -1455,6 +1456,46 @@ describe('Phase 1 real-authority conformance harness', () => {
       publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart-discovery')),
     ).toBe('phase1.native-scenarios.restart-discovery');
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
+  });
+
+  test.each([
+    ['timeout', { terminationReason: 'timeout' }, 'phase1.native-scenarios.missing-keychain-timeout'],
+    [
+      'output limit',
+      { terminationReason: 'stdout-limit' },
+      'phase1.native-scenarios.missing-keychain-output-limit',
+    ],
+    ['process', { processFailed: true }, 'phase1.native-scenarios.missing-keychain-process'],
+    [
+      'termination',
+      { supervised: true, signal: null },
+      'phase1.native-scenarios.missing-keychain-termination',
+    ],
+    [
+      'supervisor',
+      { supervisorStatusValid: false },
+      'phase1.native-scenarios.missing-keychain-supervisor',
+    ],
+    ['canary', { canaryExposed: true }, 'phase1.native-scenarios.missing-keychain-canary'],
+    ['home', { homeChanged: true }, 'phase1.native-scenarios.missing-keychain-home'],
+    ['response', { responseValid: false }, 'phase1.native-scenarios.missing-keychain-response'],
+  ] as const)('classifies missing-keychain %s failures without private output', (_name, change, id) => {
+    const diagnostic = nativeMissingKeychainFailureDiagnostic({
+      supervised: true,
+      code: null,
+      signal: 'SIGKILL',
+      supervisorStatusValid: true,
+      terminationReason: undefined,
+      killFailed: false,
+      processFailed: false,
+      canaryExposed: false,
+      homeChanged: false,
+      responseValid: true,
+      ...change,
+    });
+
+    expect(diagnostic).toBe(id);
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic ?? 'missing'))).toBe(id);
   });
 
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {

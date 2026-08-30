@@ -267,6 +267,15 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.stale-discovery',
   'phase1.native-scenarios.cleanup',
   'phase1.native-scenarios.missing-keychain',
+  'phase1.native-scenarios.missing-keychain-timeout',
+  'phase1.native-scenarios.missing-keychain-output-limit',
+  'phase1.native-scenarios.missing-keychain-process',
+  'phase1.native-scenarios.missing-keychain-reap',
+  'phase1.native-scenarios.missing-keychain-termination',
+  'phase1.native-scenarios.missing-keychain-supervisor',
+  'phase1.native-scenarios.missing-keychain-canary',
+  'phase1.native-scenarios.missing-keychain-home',
+  'phase1.native-scenarios.missing-keychain-response',
   'phase1.native-scenarios.isolation-proof',
   'phase1.stage.coven-identity.failed',
   'phase1.stage.runtime-assertions.failed',
@@ -2436,6 +2445,48 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   return new NativeRpcClient(child, { supervised });
 }
 
+export function nativeMissingKeychainFailureDiagnostic({
+  supervised,
+  code,
+  signal,
+  supervisorStatusValid,
+  terminationReason,
+  killFailed,
+  processFailed,
+  canaryExposed,
+  homeChanged,
+  responseValid,
+}) {
+  if (terminationReason === 'timeout') {
+    return 'phase1.native-scenarios.missing-keychain-timeout';
+  }
+  if (terminationReason?.endsWith('-limit')) {
+    return 'phase1.native-scenarios.missing-keychain-output-limit';
+  }
+  if (terminationReason !== undefined || killFailed || processFailed) {
+    return 'phase1.native-scenarios.missing-keychain-process';
+  }
+  if (
+    (!supervised && (code !== 0 || signal !== null)) ||
+    (supervised && (code !== null || signal !== 'SIGKILL'))
+  ) {
+    return 'phase1.native-scenarios.missing-keychain-termination';
+  }
+  if (!supervisorStatusValid) {
+    return 'phase1.native-scenarios.missing-keychain-supervisor';
+  }
+  if (canaryExposed) {
+    return 'phase1.native-scenarios.missing-keychain-canary';
+  }
+  if (homeChanged) {
+    return 'phase1.native-scenarios.missing-keychain-home';
+  }
+  if (!responseValid) {
+    return 'phase1.native-scenarios.missing-keychain-response';
+  }
+  return undefined;
+}
+
 async function runNativeMissingKeychainTrustScenario(
   artifactRoot,
   nativeRpcPath,
@@ -2532,7 +2583,7 @@ async function runNativeMissingKeychainTrustScenario(
   }
   clearTimeout(timeoutHandle);
   if (closeResult === null) {
-    throw new Error('native missing-keychain-trust child could not be reaped');
+    throw new Error('phase1.native-scenarios.missing-keychain-reap');
   }
   const [code, signal] = closeResult;
   const stdoutText = Buffer.concat(stdout).toString('utf8');
@@ -2547,42 +2598,45 @@ async function runNativeMissingKeychainTrustScenario(
       supervisedStatusValid = false;
     }
   }
-  const responses = stdoutText
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  let responses;
+  try {
+    responses = stdoutText
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch {
+    responses = undefined;
+  }
   const unchanged = JSON.stringify(readdirSync(trustHome)) === JSON.stringify(beforeEntries);
-  if (
-    terminationReason !== undefined ||
-    killError !== undefined ||
-    processError !== undefined ||
-    (!supervised && code !== 0) ||
-    (!supervised && signal !== null) ||
-    (supervised && signal !== 'SIGKILL') ||
-    !supervisedStatusValid ||
-    stderrText.includes(canary) ||
-    stdoutText.includes(canary) ||
-    !unchanged ||
-    JSON.stringify(responses) !==
-      JSON.stringify([
-        {
-          id: 'installation',
-          ok: false,
-          error: { code: 'secure_store_unavailable', retryable: true },
-        },
-        {
-          id: 'shutdown',
-          ok: true,
-          result: { status: 'shutting_down' },
-        },
-      ])
-  ) {
-    throw new Error(
-      `native missing-keychain-trust preset returned an unsafe result${
-        terminationReason === undefined ? '' : ` (${terminationReason})`
-      }`,
-    );
+  const responseValid =
+    JSON.stringify(responses) ===
+    JSON.stringify([
+      {
+        id: 'installation',
+        ok: false,
+        error: { code: 'secure_store_unavailable', retryable: true },
+      },
+      {
+        id: 'shutdown',
+        ok: true,
+        result: { status: 'shutting_down' },
+      },
+    ]);
+  const diagnostic = nativeMissingKeychainFailureDiagnostic({
+    supervised,
+    code,
+    signal,
+    supervisorStatusValid,
+    terminationReason,
+    killFailed: killError !== undefined,
+    processFailed: processError !== undefined,
+    canaryExposed: stderrText.includes(canary) || stdoutText.includes(canary),
+    homeChanged: !unchanged,
+    responseValid,
+  });
+  if (diagnostic !== undefined) {
+    throw new Error(diagnostic);
   }
   addAssertion(
     results,
@@ -3539,7 +3593,10 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
   try {
     await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
   } catch (error) {
-    throw new Error('phase1.native-scenarios.missing-keychain', { cause: error });
+    throw new Error(
+      publicPhase1FailureDiagnostic(error) ?? 'phase1.native-scenarios.missing-keychain',
+      { cause: error },
+    );
   }
   if (
     nativeCredentialStoreBefore === undefined ||
