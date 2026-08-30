@@ -77,6 +77,11 @@
   dependency.
 - Run the local canary with
   `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
+- Run the packaged real-authority matrix with
+  `pnpm test:phase1-conformance`. Its independent
+  `phase1-conformance.lock.json` pins Chat, SDK, Cave, and Coven; the harness
+  creates exact clean detached clones rather than trusting the source
+  repositories' current branches.
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
   checked-out HEADs before the canary runs. The SDK lock targets canonical
@@ -100,5 +105,11 @@
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
 - Run its subprocess integration gate with `pnpm test:native-e2e`; normal
   `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
-- Run the persisted Windows GNU cross-target compile gate with
-  `pnpm cargo:check:windows-gnu`.
+- CI compiles every Rust target on a native Windows runner in addition to the
+  macOS Rust checks, so Tauri's Windows resource build is validated with the
+  platform toolchain it requires.
+- The Phase 1 harness creates mode-`0700` process-owned roots under the real OS
+  temporary directory, reaps only tracked child processes, scans the completed
+  report for secrets and private content, and retains only
+  `test-results/phase1-conformance/report.json`. See
+  [`phase1-conformance.md`](phase1-conformance.md).

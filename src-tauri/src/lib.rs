@@ -61,7 +61,7 @@ impl Default for NativeConnectionState {
         Self {
             runtime: Arc::new(Mutex::new(ConnectionRuntime::default())),
             transport: Arc::new(ConstrainedTransport),
-            keyring: Arc::new(NativeKeyring),
+            keyring: Arc::new(NativeKeyring::default()),
             discovery: Arc::new(NativeCaveDiscoveryReader),
             launcher: Arc::new(NativeCaveLauncher),
             clock: Arc::new(NativeCaveClock::default()),
@@ -205,6 +205,12 @@ impl NativeConnectionState {
             coven_health,
             ..Self::default()
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn using_test_coven_health(mut self, coven_health: Arc<dyn CovenHealth>) -> Self {
+        self.coven_health = coven_health;
+        self
     }
 
     pub(crate) fn with_test_launch_collaborators(

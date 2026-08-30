@@ -23,12 +23,12 @@
     "test:native-e2e": "cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --test phase1_native_rpc",
     "test:contract-canary": "node ./scripts/contract-canary.mjs",
     "cargo:check": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
-    "cargo:check:windows-gnu": "cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets",
     "cargo:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "cargo:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "cargo:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "app:dev": "tauri dev",
-    "app:build": "tauri build"
+    "app:build": "tauri build",
+    "test:phase1-conformance": "node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all"
   },
   "dependencies": {
     "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",

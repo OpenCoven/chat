@@ -28,7 +28,7 @@ represented through experimental cross-database dependencies.
 | Shared-surface beads | 47 |
 | Desktop-surface beads | 10 |
 | Dependency cycles | 0 |
-| Tracker worktree | `/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking` |
+| Tracker checkout | `/Users/buns/Documents/GitHub/OpenCoven/coven-cave` or another clean checkout containing the canonical `.beads` database |
 
 All program beads carry `program:chat-v1`, one `repo:*`, one `phase:*`, one
 `area:*`, one `surface:shared|desktop`, and `verification-required`. Gates also
@@ -180,7 +180,8 @@ canary. Phase 0 closes through `cave-bt9wx`.
 
 ## Verification Commands
 
-Run from the isolated Cave tracker worktree:
+Run from `/Users/buns/Documents/GitHub/OpenCoven/coven-cave` or another clean
+checkout containing the canonical `.beads` database:
 
 ```bash
 bd list --label program:chat-v1 --json --limit 0 --flat
@@ -202,6 +203,12 @@ The repository-wide `pnpm beads:surfaces` audit currently reports older,
 unrelated beads without surface labels. Program-specific counts above isolate
 this graph from those pre-existing warnings.
 
+Phase 1 gate evidence is the completed, secret-scanned
+`test-results/phase1-conformance/report.json` produced by
+`pnpm test:phase1-conformance` at the revisions in
+`phase1-conformance.lock.json`. A `blocked` or `failed` report is evidence of an
+open gate, not permission to close it.
+
 ## Bead Evidence Template
 
 Append this information before requesting closure:
@@ -218,4 +225,3 @@ Security/secret review:
 Known follow-up or blocker:
 Commit/push state:
 ```
-
