@@ -232,6 +232,18 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.pairing-exchange',
   'phase1.native-scenarios.pairing-denial',
   'phase1.native-scenarios.restart',
+  'phase1.native-scenarios.restart-rpc-start',
+  'phase1.native-scenarios.restart-discovery',
+  'phase1.native-scenarios.restart-health',
+  'phase1.native-scenarios.restart-cleanup-adoption',
+  'phase1.native-scenarios.restart-status',
+  'phase1.native-scenarios.restart-handoff-close',
+  'phase1.native-scenarios.restart-post-handoff-status',
+  'phase1.native-scenarios.restart-launch',
+  'phase1.native-scenarios.restart-rediscovery',
+  'phase1.native-scenarios.restart-restarted-health',
+  'phase1.native-scenarios.restart-restarted-status',
+  'phase1.native-scenarios.restart-result',
   'phase1.native-scenarios.reads',
   'phase1.native-scenarios.reconciliation',
   'phase1.native-scenarios.revocation',
@@ -3077,14 +3089,17 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
         } else {
           let replacementRpc;
           try {
+            activeNativeStage = 'restart-rpc-start';
             replacementRpc = await startNativeRpc(
               artifactRoot,
               nativeRpcPath,
               rpcEnvironment,
               roots.caveRoot,
             );
+            activeNativeStage = 'restart-discovery';
             const replacementDiscovery = await waitForDiscovery(replacementRpc);
             const replacementHandle = replacementDiscovery.handle;
+            activeNativeStage = 'restart-health';
             const replacementHealth = await replacementRpc.ok('cave_health', {
               handle: replacementHandle,
               operation: replacementRpc.operation(),
@@ -3093,11 +3108,13 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
               throw new Error('Cave identity changed before native credential restart');
             }
             cleanupAdoptionRecovery = createCleanupAdoptionRecovery(cleanupReservation);
+            activeNativeStage = 'restart-cleanup-adoption';
             cleanupReservation = await adoptNativeCleanupReservation(
               replacementRpc,
               cleanupAdoptionRecovery,
               () => startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot),
             );
+            activeNativeStage = 'restart-status';
             const replacementStatus = await replacementRpc.ok('cave_credential_status', {
               handle: replacementHandle,
               operation: replacementRpc.operation(),
@@ -3108,7 +3125,9 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             const previousRpc = rpc;
             rpc = replacementRpc;
             handle = replacementHandle;
+            activeNativeStage = 'restart-handoff-close';
             await previousRpc.close();
+            activeNativeStage = 'restart-post-handoff-status';
             const postHandoffStatus = await rpc.ok('cave_credential_status', {
               handle,
               operation: rpc.operation(),
@@ -3116,9 +3135,12 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             if (postHandoffStatus.status !== 'valid') {
               throw new Error('credential did not survive cleanup ownership handoff');
             }
+            activeNativeStage = 'restart-launch';
             await rpc.ok('cave_launch');
+            activeNativeStage = 'restart-rediscovery';
             const discovery = await waitForDiscovery(rpc);
             handle = discovery.handle;
+            activeNativeStage = 'restart-restarted-health';
             const restartedHealth = await rpc.ok('cave_health', {
               handle,
               operation: rpc.operation(),
@@ -3126,6 +3148,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             if (restartedHealth.data?.instanceId !== nativeCredentialInstanceId) {
               throw new Error('Cave identity changed across native credential restart');
             }
+            activeNativeStage = 'restart-restarted-status';
             const status = await rpc.ok('cave_credential_status', {
               handle,
               operation: rpc.operation(),
@@ -3133,6 +3156,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
             if (status.status !== 'valid') {
               throw new Error('credential was not reused after native state restart');
             }
+            activeNativeStage = 'restart-result';
             addAssertion(
               results,
               'phase1.credential.restart-reuse',

@@ -459,6 +459,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(emergencyCleanupBoundary).toContain('...nativeAdapterTestEnvironment(environment)');
     const nativeStages = [
       "activeNativeStage = 'restart'",
+      "activeNativeStage = 'restart-rpc-start'",
+      "activeNativeStage = 'restart-discovery'",
+      "activeNativeStage = 'restart-health'",
+      "activeNativeStage = 'restart-cleanup-adoption'",
+      "activeNativeStage = 'restart-status'",
+      "activeNativeStage = 'restart-handoff-close'",
+      "activeNativeStage = 'restart-post-handoff-status'",
+      "activeNativeStage = 'restart-launch'",
+      "activeNativeStage = 'restart-rediscovery'",
+      "activeNativeStage = 'restart-restarted-health'",
+      "activeNativeStage = 'restart-restarted-status'",
+      "activeNativeStage = 'restart-result'",
       "activeNativeStage = 'reads'",
       "activeNativeStage = 'reconciliation'",
       "activeNativeStage = 'revocation'",
@@ -1430,6 +1442,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart'))).toBe(
       'phase1.native-scenarios.restart',
     );
+    expect(
+      publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart-discovery')),
+    ).toBe('phase1.native-scenarios.restart-discovery');
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
   });
 
