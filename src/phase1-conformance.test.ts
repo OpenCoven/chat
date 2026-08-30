@@ -54,6 +54,7 @@ import {
   runOwnedProcessStatusForTest,
   runReservedNativePairing,
   runSupervisedCommandForTest,
+  runtimeScenarioFailureDiagnostic,
   safeEnvironment,
   snapshotOperatorState,
   throwNativeScenarioFailures,
@@ -1527,6 +1528,54 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(
       nativeMissingKeychainResponsesValid([{ ...responses[0], extra: true }, responses[1]]),
     ).toBe(false);
+  });
+
+  test('classifies the first failed runtime scenario without exposing private output', () => {
+    const classifications = [
+      [
+        'phase1.missing-cave.validated-launch',
+        'phase1.runtime-assertions.missing-cave-validated-launch',
+      ],
+      [
+        'phase1.pairing.create-pending-approve-exchange',
+        'phase1.runtime-assertions.pairing-create-pending-approve-exchange',
+      ],
+      ['phase1.pairing.denial', 'phase1.runtime-assertions.pairing-denial'],
+      ['phase1.pairing.expiry', 'phase1.runtime-assertions.pairing-expiry'],
+      [
+        'phase1.pairing.wrong-secret-replay',
+        'phase1.runtime-assertions.pairing-wrong-secret-replay',
+      ],
+      [
+        'phase1.pairing.failure-budget-retry-after',
+        'phase1.runtime-assertions.pairing-failure-budget-retry-after',
+      ],
+      ['phase1.credential.restart-reuse', 'phase1.runtime-assertions.credential-restart-reuse'],
+      [
+        'phase1.credential.revocation-repair',
+        'phase1.runtime-assertions.credential-revocation-repair',
+      ],
+      ['phase1.hpke.endpoint-takeover', 'phase1.runtime-assertions.hpke-endpoint-takeover'],
+      ['phase1.reads.bounded-canonical', 'phase1.runtime-assertions.reads-bounded-canonical'],
+      [
+        'phase1.reads.stale-generation-cursor-reconciliation',
+        'phase1.runtime-assertions.reads-stale-generation-cursor-reconciliation',
+      ],
+      ['phase1.coven.same-user-identity', 'phase1.runtime-assertions.coven-same-user-identity'],
+      [
+        'phase1.native.missing-keychain-trust',
+        'phase1.runtime-assertions.native-missing-keychain-trust',
+      ],
+    ] as const;
+    const results = new Map<string, { status: string }>();
+
+    for (const [id, diagnosticId] of classifications) {
+      const diagnostic = runtimeScenarioFailureDiagnostic(results);
+      expect(diagnostic).toBe(diagnosticId);
+      expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnosticId);
+      results.set(id, { status: 'passed' });
+    }
+    expect(runtimeScenarioFailureDiagnostic(results)).toBeUndefined();
   });
 
   test('always performs the operator after-check and aggregates scenario cleanup and mutation failures', () => {

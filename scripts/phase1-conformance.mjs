@@ -173,6 +173,37 @@ export class CommandExecutionError extends Error {
   }
 }
 
+const runtimeScenarioDiagnosticIds = new Map([
+  [
+    'phase1.missing-cave.validated-launch',
+    'phase1.runtime-assertions.missing-cave-validated-launch',
+  ],
+  [
+    'phase1.pairing.create-pending-approve-exchange',
+    'phase1.runtime-assertions.pairing-create-pending-approve-exchange',
+  ],
+  ['phase1.pairing.denial', 'phase1.runtime-assertions.pairing-denial'],
+  ['phase1.pairing.expiry', 'phase1.runtime-assertions.pairing-expiry'],
+  ['phase1.pairing.wrong-secret-replay', 'phase1.runtime-assertions.pairing-wrong-secret-replay'],
+  [
+    'phase1.pairing.failure-budget-retry-after',
+    'phase1.runtime-assertions.pairing-failure-budget-retry-after',
+  ],
+  ['phase1.credential.restart-reuse', 'phase1.runtime-assertions.credential-restart-reuse'],
+  ['phase1.credential.revocation-repair', 'phase1.runtime-assertions.credential-revocation-repair'],
+  ['phase1.hpke.endpoint-takeover', 'phase1.runtime-assertions.hpke-endpoint-takeover'],
+  ['phase1.reads.bounded-canonical', 'phase1.runtime-assertions.reads-bounded-canonical'],
+  [
+    'phase1.reads.stale-generation-cursor-reconciliation',
+    'phase1.runtime-assertions.reads-stale-generation-cursor-reconciliation',
+  ],
+  ['phase1.coven.same-user-identity', 'phase1.runtime-assertions.coven-same-user-identity'],
+  [
+    'phase1.native.missing-keychain-trust',
+    'phase1.runtime-assertions.native-missing-keychain-trust',
+  ],
+]);
+
 const publicPhase1DiagnosticIds = new Set([
   'phase1.operator-fingerprint.failed',
   'phase1.operator-fingerprint.unsafe-root',
@@ -279,6 +310,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.isolation-proof',
   'phase1.stage.coven-identity.failed',
   'phase1.stage.runtime-assertions.failed',
+  ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
   'phase1.stage.execution-root-cleanup.failed',
   'phase1.cave-authority.timeout',
@@ -4209,25 +4241,19 @@ function platformCovenTestProofs(platform, passedTests) {
   return ids;
 }
 
-function assertRuntimeScenariosPassed(results) {
-  for (const id of [
-    'phase1.missing-cave.validated-launch',
-    'phase1.pairing.create-pending-approve-exchange',
-    'phase1.pairing.denial',
-    'phase1.pairing.expiry',
-    'phase1.pairing.wrong-secret-replay',
-    'phase1.pairing.failure-budget-retry-after',
-    'phase1.credential.restart-reuse',
-    'phase1.credential.revocation-repair',
-    'phase1.hpke.endpoint-takeover',
-    'phase1.reads.bounded-canonical',
-    'phase1.reads.stale-generation-cursor-reconciliation',
-    'phase1.coven.same-user-identity',
-    'phase1.native.missing-keychain-trust',
-  ]) {
+export function runtimeScenarioFailureDiagnostic(results) {
+  for (const [id, diagnosticId] of runtimeScenarioDiagnosticIds) {
     if (results.get(id)?.status !== 'passed') {
-      throw new Error(`Required runtime scenario ${id} did not pass.`);
+      return diagnosticId;
     }
+  }
+  return undefined;
+}
+
+function assertRuntimeScenariosPassed(results) {
+  const diagnosticId = runtimeScenarioFailureDiagnostic(results);
+  if (diagnosticId !== undefined) {
+    throw new Error(diagnosticId);
   }
 }
 
