@@ -1,40 +1,27 @@
-export const REQUIRED_PHASE1_ASSERTION_IDS: readonly string[];
-export const APPROVED_PHASE1_DIAGNOSTIC_IDS: readonly string[];
-
-export type Phase1AssertionResult = {
-  id: string;
-  status: 'passed' | 'failed' | 'blocked';
-  diagnosticIds: string[];
-};
-
-export type Phase1SanitizedReport = {
+export type Phase1PlatformEvidence = {
   schemaVersion: 1;
-  completed: true;
-  status: 'passed' | 'failed' | 'blocked';
-  platform: {
+  issue: 'OpenCoven/sdk#38';
+  platform: 'darwin-arm64' | 'linux-x64' | 'win32-x64';
+  environment: {
     os: 'darwin' | 'linux' | 'win32';
     arch: 'arm64' | 'x64';
+    nodeVersion: string;
+    packageManagerVersion: 'pnpm@10.34.0';
   };
-  versions: Record<string, string>;
-  revisions: {
-    chat: string;
-    sdk: string;
-    cave: string;
-    coven: string;
-  };
-  artifactDigests: Record<string, string>;
-  assertions: Phase1AssertionResult[];
-  summary: {
-    required: number;
-    passed: number;
-    failed: number;
-    blocked: number;
-    skipped: 0;
-  };
-  diagnosticIds: string[];
+  sdkAssertions: Array<{
+    id: string;
+    result: 'pass' | 'fail';
+    diagnosticId: string;
+  }>;
+  chatAssertions: Array<{
+    id: string;
+    result: 'pass' | 'fail';
+    diagnosticId: string;
+  }>;
+  [key: string]: unknown;
 };
 
-export function validatePhase1SanitizedReport(value: unknown): Phase1SanitizedReport;
+export function validatePhase1SanitizedReport(value: unknown): Phase1PlatformEvidence;
 export function scanPhase1Artifacts(options: { artifactRoot: string }): Promise<{
   filesScanned: number;
   bytesScanned: number;

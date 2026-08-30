@@ -9,14 +9,17 @@ const maxFiles = 32;
 const maxDepth = 8;
 const shaPattern = /^[0-9a-f]{40}$/;
 const digestPattern = /^[0-9a-f]{64}$/;
-const identifierPattern = /^[a-z0-9][a-z0-9.-]{0,127}$/;
-const versionPattern = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/;
-const passFailStatuses = new Set(['passed', 'failed', 'blocked']);
-const platformValues = Object.freeze({
-  os: new Set(['darwin', 'linux', 'win32']),
-  arch: new Set(['arm64', 'x64']),
-});
-const approvedVersionKeys = new Set(['harness', 'node', 'rust', 'tauri']);
+const identifierPattern = /^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/u;
+const supportedPlatforms = new Set(['darwin-arm64', 'linux-x64', 'win32-x64']);
+const sdkTarballNames = [
+  '@opencoven/sdk-core',
+  '@opencoven/cave-client',
+  '@opencoven/coven-client',
+  '@opencoven/sdk',
+];
+const notCoveredScopeIds = ['cross-process-pairing', 'oauth-ui', 'remote-peer', 'write-apis'];
+const isolationRootIds = ['cave-home', 'coven-home', 'consumer-home', 'native-credential-store'];
+const operatorStateIds = ['cave-home', 'coven-home', 'native-credential-store', 'projects'];
 const prohibitedContentPatterns = [
   /"(?:pairingSecret|pairing_secret|pairing-secret)"\s*:/iu,
   /\bpairing[ _-]secret\s*[:=]/iu,
@@ -26,56 +29,13 @@ const prohibitedContentPatterns = [
   /"(?:rawKeychainValue|keychainValue|credentialValue)"\s*:/iu,
   /"(?:protectedRequestPlaintext|protectedResponsePlaintext)"\s*:/iu,
   /"(?:prompt|userPrompt|messageBody|attachment|attachmentBody)"\s*:/iu,
+  /"(?:body|commandOutput|content|message|stderr|stdout)"\s*:/iu,
   /"(?:privatePath|socketPath|socketHandle)"\s*:/iu,
   /\/Users\/[^/"\\\s]+\/(?:Library|\.config|\.ssh|Documents)\//u,
   /\/home\/[^/"\\\s]+\/(?:\.config|\.ssh|Documents)\//u,
   /\/private\/var\/folders\/[^"\\\s]+/u,
   /\\\\Users\\\\[^"\\\s]+\\\\(?:AppData|Documents)\\\\/u,
 ];
-
-export const REQUIRED_PHASE1_ASSERTION_IDS = Object.freeze([
-  'phase1.missing-cave.validated-launch',
-  'phase1.pairing.create-pending-approve-exchange',
-  'phase1.pairing.denial',
-  'phase1.pairing.expiry',
-  'phase1.pairing.wrong-secret-replay',
-  'phase1.pairing.failure-budget-retry-after',
-  'phase1.credential.restart-reuse',
-  'phase1.credential.revocation-repair',
-  'phase1.compat.api-major-min-client',
-  'phase1.hpke.endpoint-takeover',
-  'phase1.reads.bounded-canonical',
-  'phase1.reads.stale-generation-cursor-reconciliation',
-  'phase1.coven.same-user-identity',
-  'phase1.native.missing-keychain-trust',
-  'phase1.operator.homes-credentials-untouched',
-]);
-
-export const APPROVED_PHASE1_DIAGNOSTIC_IDS = Object.freeze([
-  'phase1.conformance.passed',
-  'phase1.conformance.failed',
-  'phase1.conformance.blocked',
-  'phase1.assertion.passed',
-  'phase1.assertion.failed',
-  'phase1.assertion.blocked',
-  'phase1.integration.native-pairing-exchange-failed',
-  'phase1.integration.native-credential-unavailable',
-  'phase1.integration.coven-identity-failed',
-  'phase1.producer.cave-launch-fixture-unavailable',
-  'phase1.producer.pairing-control-unavailable',
-  'phase1.producer.pairing-expiry-control-unavailable',
-  'phase1.producer.failure-budget-control-unavailable',
-  'phase1.producer.revocation-control-unavailable',
-  'phase1.producer.compatibility-control-unavailable',
-  'phase1.producer.hpke-takeover-control-unavailable',
-  'phase1.producer.canonical-read-fixture-unavailable',
-  'phase1.producer.stale-reconciliation-fixture-unavailable',
-  'phase1.producer.coven-identity-fixture-unavailable',
-  'phase1.producer.native-trust-fixture-unavailable',
-]);
-
-const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
-const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -91,133 +51,138 @@ function requireExactKeys(record, keys, label) {
   }
 }
 
-function requireApprovedDiagnosticIds(value, label) {
-  if (
-    !Array.isArray(value) ||
-    value.some((id) => typeof id !== 'string' || !approvedDiagnosticSet.has(id))
-  ) {
-    throw new Error(`${label} contains an unapproved diagnostic ID.`);
+function validateAssertions(value, label) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array.`);
   }
-}
-
-function validatePlatform(value) {
-  const platform = requireRecord(value, 'Phase 1 report platform');
-  requireExactKeys(platform, ['os', 'arch'], 'Phase 1 report platform');
-
-  if (!platformValues.os.has(platform.os) || !platformValues.arch.has(platform.arch)) {
-    throw new Error('Phase 1 report platform must use approved platform metadata.');
-  }
-}
-
-function validateVersions(value) {
-  const versions = requireRecord(value, 'Phase 1 report versions');
-  const keys = Object.keys(versions);
-
-  if (
-    keys.length === 0 ||
-    keys.some(
-      (key) =>
-        !approvedVersionKeys.has(key) ||
-        typeof versions[key] !== 'string' ||
-        !versionPattern.test(versions[key]),
-    )
-  ) {
-    throw new Error('Phase 1 report versions must use approved version metadata.');
-  }
-}
-
-function validateRevisions(value) {
-  const revisions = requireRecord(value, 'Phase 1 report revisions');
-  requireExactKeys(revisions, ['chat', 'sdk', 'cave', 'coven'], 'Phase 1 report revisions');
-
-  if (Object.values(revisions).some((revision) => !shaPattern.test(revision))) {
-    throw new Error('Phase 1 report revisions must contain immutable commit SHAs.');
-  }
-}
-
-function validateArtifactDigests(value) {
-  const digests = requireRecord(value, 'Phase 1 report artifact digests');
-
-  for (const [name, digest] of Object.entries(digests)) {
-    if (!identifierPattern.test(name) || !digestPattern.test(digest)) {
-      throw new Error(
-        'Phase 1 report artifact digests must use approved names and SHA-256 values.',
-      );
-    }
-  }
-}
-
-function validateAssertions(value) {
-  if (!Array.isArray(value) || value.length !== REQUIRED_PHASE1_ASSERTION_IDS.length) {
-    throw new Error('Phase 1 report must contain the exact required assertion set.');
-  }
-
-  const observedIds = new Set();
-  const statusCounts = {
-    passed: 0,
-    failed: 0,
-    blocked: 0,
-  };
-
+  const seen = new Set();
   for (const rawAssertion of value) {
-    const assertion = requireRecord(rawAssertion, 'Phase 1 report assertion');
-    requireExactKeys(assertion, ['id', 'status', 'diagnosticIds'], 'Phase 1 report assertion');
-
-    if (typeof assertion.id !== 'string' || !requiredAssertionSet.has(assertion.id)) {
-      throw new Error('Phase 1 report contains an unapproved assertion ID.');
+    const assertion = requireRecord(rawAssertion, `${label} assertion`);
+    requireExactKeys(assertion, ['id', 'result', 'diagnosticId'], `${label} assertion`);
+    if (typeof assertion.id !== 'string' || !identifierPattern.test(assertion.id)) {
+      throw new Error(`${label} contains a noncanonical assertion ID.`);
     }
-    if (observedIds.has(assertion.id)) {
-      throw new Error('Phase 1 report must contain the exact required assertion set.');
+    if (seen.has(assertion.id)) {
+      throw new Error(`${label} contains a duplicate assertion ID.`);
     }
-    observedIds.add(assertion.id);
-
-    if (!passFailStatuses.has(assertion.status)) {
-      throw new Error('Phase 1 report assertion must use an approved pass-fail status.');
+    seen.add(assertion.id);
+    if (assertion.result === 'skip') {
+      throw new Error(`${label} must not skip assertions.`);
     }
-    statusCounts[assertion.status] += 1;
-    requireApprovedDiagnosticIds(assertion.diagnosticIds, 'Phase 1 report assertion');
+    if (!['pass', 'fail'].includes(assertion.result)) {
+      throw new Error(`${label} contains an invalid assertion result.`);
+    }
+    if (
+      typeof assertion.diagnosticId !== 'string' ||
+      !identifierPattern.test(assertion.diagnosticId)
+    ) {
+      throw new Error(`${label} contains a noncanonical diagnostic ID.`);
+    }
   }
-
-  if (
-    observedIds.size !== requiredAssertionSet.size ||
-    REQUIRED_PHASE1_ASSERTION_IDS.some((id) => !observedIds.has(id))
-  ) {
-    throw new Error('Phase 1 report must contain the exact required assertion set.');
-  }
-
-  return statusCounts;
 }
 
-function validateSummary(value, statusCounts) {
-  const summary = requireRecord(value, 'Phase 1 report summary');
+function validateDigests(value) {
+  const digests = requireRecord(value, 'Phase 1 report digests');
   requireExactKeys(
-    summary,
-    ['required', 'passed', 'failed', 'blocked', 'skipped'],
-    'Phase 1 report summary',
+    digests,
+    [
+      'caveAssertionEngine',
+      'caveContractFixture',
+      'hpkeVectors',
+      'consumerLock',
+      'assertionRegistry',
+      'sdkTarballs',
+    ],
+    'Phase 1 report digests',
   );
-
-  if (
-    Object.values(summary).some((count) => !Number.isSafeInteger(count) || count < 0) ||
-    summary.required !== REQUIRED_PHASE1_ASSERTION_IDS.length ||
-    summary.passed !== statusCounts.passed ||
-    summary.failed !== statusCounts.failed ||
-    summary.blocked !== statusCounts.blocked ||
-    summary.skipped !== 0
-  ) {
-    throw new Error('Phase 1 report summary does not match its assertion results.');
+  for (const key of [
+    'caveAssertionEngine',
+    'caveContractFixture',
+    'hpkeVectors',
+    'consumerLock',
+    'assertionRegistry',
+  ]) {
+    if (typeof digests[key] !== 'string' || !digestPattern.test(digests[key])) {
+      throw new Error('Phase 1 report digests must contain SHA-256 values.');
+    }
   }
+  if (!Array.isArray(digests.sdkTarballs) || digests.sdkTarballs.length !== 4) {
+    throw new Error('Phase 1 report must contain four SDK tarball digests.');
+  }
+  digests.sdkTarballs.forEach((rawArtifact, index) => {
+    const artifact = requireRecord(rawArtifact, 'SDK tarball digest');
+    requireExactKeys(artifact, ['packageName', 'sha256'], 'SDK tarball digest');
+    if (
+      artifact.packageName !== sdkTarballNames[index] ||
+      typeof artifact.sha256 !== 'string' ||
+      !digestPattern.test(artifact.sha256)
+    ) {
+      throw new Error('Phase 1 report SDK tarballs must use canonical order and digests.');
+    }
+  });
 }
 
-function validateReportStatus(report, statusCounts) {
-  if (!passFailStatuses.has(report.status)) {
-    throw new Error('Phase 1 report must use an approved pass-fail status.');
+function validateIsolation(value) {
+  const isolation = requireRecord(value, 'Phase 1 report isolation');
+  requireExactKeys(
+    isolation,
+    [
+      'strategy',
+      'network',
+      'sourceCheckoutDependency',
+      'workspaceLinkDependency',
+      'retainedPrivatePaths',
+      'retainedSocketHandles',
+      'roots',
+      'operatorState',
+    ],
+    'Phase 1 report isolation',
+  );
+  if (
+    isolation.strategy !== 'process-owned-temporary-roots' ||
+    isolation.network !== 'loopback-only' ||
+    isolation.sourceCheckoutDependency !== false ||
+    isolation.workspaceLinkDependency !== false ||
+    isolation.retainedPrivatePaths !== false ||
+    isolation.retainedSocketHandles !== false
+  ) {
+    throw new Error('Phase 1 report isolation metadata is invalid.');
   }
-
-  const expectedStatus =
-    statusCounts.failed > 0 ? 'failed' : statusCounts.blocked > 0 ? 'blocked' : 'passed';
-  if (report.status !== expectedStatus) {
-    throw new Error('Phase 1 report status does not match its assertion results.');
+  if (!Array.isArray(isolation.roots) || isolation.roots.length !== isolationRootIds.length) {
+    throw new Error('Phase 1 report isolation roots are invalid.');
   }
+  isolation.roots.forEach((rawRoot, index) => {
+    const root = requireRecord(rawRoot, 'Phase 1 report isolation root');
+    requireExactKeys(
+      root,
+      ['id', 'ownershipVerified', 'removedAfterRun'],
+      'Phase 1 report isolation root',
+    );
+    if (
+      root.id !== isolationRootIds[index] ||
+      root.ownershipVerified !== true ||
+      root.removedAfterRun !== true
+    ) {
+      throw new Error('Phase 1 report isolation roots are invalid.');
+    }
+  });
+  if (
+    !Array.isArray(isolation.operatorState) ||
+    isolation.operatorState.length !== operatorStateIds.length
+  ) {
+    throw new Error('Phase 1 report operator state is invalid.');
+  }
+  isolation.operatorState.forEach((rawState, index) => {
+    const state = requireRecord(rawState, 'Phase 1 report operator state');
+    requireExactKeys(state, ['id', 'beforeSha256', 'afterSha256'], 'Phase 1 report operator state');
+    if (
+      state.id !== operatorStateIds[index] ||
+      !digestPattern.test(state.beforeSha256) ||
+      state.beforeSha256 !== state.afterSha256
+    ) {
+      throw new Error('Phase 1 report operator state is invalid.');
+    }
+  });
 }
 
 export function validatePhase1SanitizedReport(value) {
@@ -226,31 +191,73 @@ export function validatePhase1SanitizedReport(value) {
     report,
     [
       'schemaVersion',
-      'completed',
-      'status',
+      'issue',
       'platform',
-      'versions',
-      'revisions',
-      'artifactDigests',
-      'assertions',
-      'summary',
-      'diagnosticIds',
+      'ranAt',
+      'environment',
+      'releases',
+      'commits',
+      'digests',
+      'caveRecord',
+      'sdkAssertions',
+      'chatAssertions',
+      'coverage',
+      'notCovered',
+      'isolation',
     ],
     'Phase 1 report',
   );
 
-  if (report.schemaVersion !== 1 || report.completed !== true) {
-    throw new Error('Phase 1 report must be a completed version-1 report.');
+  if (report.schemaVersion !== 1 || report.issue !== 'OpenCoven/sdk#38') {
+    throw new Error('Phase 1 report must be an SDK #38 version-1 record.');
   }
-
-  validatePlatform(report.platform);
-  validateVersions(report.versions);
-  validateRevisions(report.revisions);
-  validateArtifactDigests(report.artifactDigests);
-  const statusCounts = validateAssertions(report.assertions);
-  validateSummary(report.summary, statusCounts);
-  validateReportStatus(report, statusCounts);
-  requireApprovedDiagnosticIds(report.diagnosticIds, 'Phase 1 report');
+  if (typeof report.platform !== 'string' || !supportedPlatforms.has(report.platform)) {
+    throw new Error('Phase 1 report must use a supported platform ID.');
+  }
+  const environment = requireRecord(report.environment, 'Phase 1 report environment');
+  requireExactKeys(
+    environment,
+    ['os', 'arch', 'nodeVersion', 'packageManagerVersion'],
+    'Phase 1 report environment',
+  );
+  if (
+    `${environment.os}-${environment.arch}` !== report.platform ||
+    !/^v24\.\d+\.\d+$/u.test(environment.nodeVersion) ||
+    environment.packageManagerVersion !== 'pnpm@10.34.0'
+  ) {
+    throw new Error('Phase 1 report environment is invalid.');
+  }
+  const releases = requireRecord(report.releases, 'Phase 1 report releases');
+  requireExactKeys(releases, ['cave', 'coven'], 'Phase 1 report releases');
+  const commits = requireRecord(report.commits, 'Phase 1 report commits');
+  requireExactKeys(commits, ['cave', 'coven', 'sdk', 'chat'], 'Phase 1 report commits');
+  if (Object.values(commits).some((revision) => !shaPattern.test(revision))) {
+    throw new Error('Phase 1 report commits must contain immutable revisions.');
+  }
+  validateDigests(report.digests);
+  requireRecord(report.caveRecord, 'Phase 1 report Cave record');
+  validateAssertions(report.sdkAssertions, 'Phase 1 report SDK assertions');
+  validateAssertions(report.chatAssertions, 'Phase 1 report Chat assertions');
+  const coverage = requireRecord(report.coverage, 'Phase 1 report coverage');
+  requireExactKeys(coverage, ['cave', 'coven', 'sdk', 'chat'], 'Phase 1 report coverage');
+  if (Object.values(coverage).some((covered) => covered !== true)) {
+    throw new Error('Phase 1 report coverage must be complete.');
+  }
+  if (!Array.isArray(report.notCovered) || report.notCovered.length !== 4) {
+    throw new Error('Phase 1 report notCovered scopes are invalid.');
+  }
+  report.notCovered.forEach((rawScope, index) => {
+    const scope = requireRecord(rawScope, 'Phase 1 report notCovered scope');
+    requireExactKeys(scope, ['scopeId', 'diagnosticId'], 'Phase 1 report notCovered scope');
+    if (
+      scope.scopeId !== notCoveredScopeIds[index] ||
+      typeof scope.diagnosticId !== 'string' ||
+      !identifierPattern.test(scope.diagnosticId)
+    ) {
+      throw new Error('Phase 1 report notCovered scopes are invalid.');
+    }
+  });
+  validateIsolation(report.isolation);
   return report;
 }
 

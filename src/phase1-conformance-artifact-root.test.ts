@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -72,6 +72,54 @@ function createScratchRoot(prefix: string) {
   return scratchRoot;
 }
 
+function processIsLive(pid: number) {
+  try {
+    const state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+      encoding: 'utf8',
+    }).trim();
+    return state.length > 0 && !state.startsWith('Z');
+  } catch {
+    return false;
+  }
+}
+
+function writeSupervisorWorker(root: ProcessOwnedArtifactRoot, name: string, source: string) {
+  const workerPath = resolve(root.rootPath, name);
+  writeFileSync(workerPath, `#!/usr/bin/env node\n${source}\n`);
+  chmodSync(workerPath, 0o700);
+  return workerPath;
+}
+
+async function spawnSupervisor(workerPath: string, stderr: 'ignore' | 'pipe' = 'ignore') {
+  const supervisorPath = resolve(
+    import.meta.dirname,
+    '..',
+    'scripts',
+    'phase1-process-supervisor.mjs',
+  );
+  const supervisor = spawn(process.execPath, [supervisorPath, workerPath], {
+    detached: true,
+    stdio: ['ignore', 'ignore', stderr, 'pipe'],
+  });
+  const status = supervisor.stdio[3];
+  if (status !== undefined && status !== null && 'resume' in status) status.resume();
+  activeChildren.add(supervisor);
+  await new Promise<void>((resolveSpawn, rejectSpawn) => {
+    supervisor.once('spawn', resolveSpawn);
+    supervisor.once('error', rejectSpawn);
+  });
+  return supervisor;
+}
+
+function minimalEvidence(overrides: Record<string, unknown> = {}) {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    issue: 'OpenCoven/sdk#38',
+    platform: 'darwin-arm64',
+    ...overrides,
+  })}\n`;
+}
+
 async function spawnChild(source: string) {
   const child = spawn(process.execPath, ['-e', source], {
     stdio: 'ignore',
@@ -140,6 +188,185 @@ describe('process-owned artifact root', () => {
     expect(existsSync(root.rootPath)).toBe(false);
   });
 
+  test('continues reverse-order child cleanup after failure and retains root until retry succeeds', async () => {
+    const root = createRoot({ terminationGraceMs: 50 });
+    const first = await spawnChild('setInterval(() => {}, 1_000)');
+    const later = await spawnChild('setInterval(() => {}, 1_000)');
+    const failing = await spawnChild('setInterval(() => {}, 1_000)');
+    const originalKill = failing.kill.bind(failing);
+    failing.kill = (() => false) as typeof failing.kill;
+    root.trackChild(first);
+    root.trackChild(later);
+    root.trackChild(failing);
+
+    await expect(root.cleanup()).rejects.toMatchObject({
+      errors: [expect.any(Error)],
+    });
+    expect(root.reapedChildren).toEqual([later.pid, first.pid]);
+    expect(existsSync(root.rootPath)).toBe(true);
+    expect(later.exitCode ?? later.signalCode).not.toBeNull();
+    expect(first.exitCode ?? first.signalCode).not.toBeNull();
+    expect(failing.exitCode).toBeNull();
+
+    failing.kill = originalKill;
+    await root.cleanup();
+    activeRoots.delete(root);
+    expect(root.reapedChildren).toEqual([later.pid, first.pid, failing.pid]);
+    expect(existsSync(root.rootPath)).toBe(false);
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'supervisor terminates its owned descendant tree without touching an unrelated process',
+    async () => {
+      const root = createRoot({ terminationGraceMs: 100 });
+      const descendantPath = resolve(root.rootPath, 'descendant.pid');
+      const workerPath = writeSupervisorWorker(
+        root,
+        'supervised-worker.cjs',
+        [
+          "const { spawn } = require('node:child_process');",
+          "const { writeFileSync } = require('node:fs');",
+          "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', process.stderr] });",
+          `writeFileSync(${JSON.stringify(descendantPath)}, String(child.pid));`,
+          'setInterval(() => {}, 1000);',
+        ].join(''),
+      );
+      const supervisor = await spawnSupervisor(workerPath, 'pipe');
+      const unrelated = await spawnChild('setInterval(() => {}, 1_000)');
+      await new Promise<void>((resolveReady, rejectReady) => {
+        const deadline = Date.now() + 5_000;
+        const poll = () => {
+          if (existsSync(descendantPath)) {
+            resolveReady();
+          } else if (Date.now() >= deadline) {
+            rejectReady(new Error('descendant PID was not published'));
+          } else {
+            setTimeout(poll, 10);
+          }
+        };
+        poll();
+      });
+      const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+
+      root.trackChild(supervisor);
+      await root.cleanup();
+      activeRoots.delete(root);
+
+      expect(() => process.kill(descendantPid, 0)).toThrow();
+      expect(unrelated.exitCode).toBeNull();
+      expect(unrelated.signalCode).toBeNull();
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'supervisor cleans descendants when its RPC exits while a pipe remains inherited',
+    async () => {
+      const root = createRoot({ terminationGraceMs: 100 });
+      const descendantPath = resolve(root.rootPath, 'exited-root-descendant.pid');
+      const workerPath = writeSupervisorWorker(
+        root,
+        'crashing-supervised-worker.cjs',
+        [
+          "const { spawn } = require('node:child_process');",
+          "const { writeFileSync } = require('node:fs');",
+          "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', process.stderr] });",
+          `writeFileSync(${JSON.stringify(descendantPath)}, String(child.pid));`,
+          'child.unref();',
+          'process.exitCode = 7;',
+        ].join(''),
+      );
+      const supervisor = await spawnSupervisor(workerPath, 'pipe');
+      root.trackChild(supervisor);
+      if (supervisor.exitCode === null && supervisor.signalCode === null) {
+        await new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
+      }
+      const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+      const unrelated = await spawnChild('setInterval(() => {}, 1_000)');
+      const deadline = Date.now() + 5_000;
+      while (processIsLive(descendantPid)) {
+        if (Date.now() >= deadline) {
+          throw new Error('descendant survived its exited process-group root');
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      }
+
+      await root.cleanup();
+      activeRoots.delete(root);
+      expect(unrelated.exitCode).toBeNull();
+      expect(unrelated.signalCode).toBeNull();
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'supervisor kills a detached-stdio descendant that ignores graceful termination',
+    async () => {
+      const root = createRoot({ terminationGraceMs: 100 });
+      const descendantPath = resolve(root.rootPath, 'ignoring-descendant.pid');
+      const workerPath = writeSupervisorWorker(
+        root,
+        'ignoring-supervised-worker.cjs',
+        [
+          "const { spawn } = require('node:child_process');",
+          "const { writeFileSync } = require('node:fs');",
+          "const child = spawn(process.execPath, ['-e', \"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"], { stdio: 'ignore' });",
+          `writeFileSync(${JSON.stringify(descendantPath)}, String(child.pid));`,
+          'child.unref();',
+          'process.exitCode = 7;',
+        ].join(''),
+      );
+      const supervisor = await spawnSupervisor(workerPath);
+      root.trackChild(supervisor);
+      if (supervisor.exitCode === null && supervisor.signalCode === null) {
+        await new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
+      }
+      const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+      const deadline = Date.now() + 5_000;
+      while (processIsLive(descendantPid)) {
+        if (Date.now() >= deadline) {
+          throw new Error('SIGTERM-ignoring descendant survived supervisor escalation');
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      }
+      await root.cleanup();
+      activeRoots.delete(root);
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'supervisor kills detached descendants after a successful RPC exit',
+    async () => {
+      const root = createRoot({ terminationGraceMs: 100 });
+      const descendantPath = resolve(root.rootPath, 'successful-descendant.pid');
+      const workerPath = writeSupervisorWorker(
+        root,
+        'successful-supervised-worker.cjs',
+        [
+          "const { spawn } = require('node:child_process');",
+          "const { writeFileSync } = require('node:fs');",
+          "const child = spawn(process.execPath, ['-e', \"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"], { stdio: 'ignore' });",
+          `writeFileSync(${JSON.stringify(descendantPath)}, String(child.pid));`,
+          'child.unref();',
+        ].join(''),
+      );
+      const supervisor = await spawnSupervisor(workerPath);
+      root.trackChild(supervisor);
+      if (supervisor.exitCode === null && supervisor.signalCode === null) {
+        await new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
+      }
+      expect(supervisor.signalCode).toBe('SIGKILL');
+      const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+      const deadline = Date.now() + 5_000;
+      while (processIsLive(descendantPid)) {
+        if (Date.now() >= deadline) {
+          throw new Error('descendant survived successful supervised RPC exit');
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      }
+      await root.cleanup();
+      activeRoots.delete(root);
+    },
+  );
+
   test.skipIf(process.platform === 'win32')(
     'escalates an uncooperative tracked child to SIGKILL and reaps it',
     async () => {
@@ -171,110 +398,6 @@ describe('process-owned artifact root', () => {
     },
   );
 
-  test.skipIf(process.platform === 'win32')(
-    'terminates descendants in an owned process group',
-    async () => {
-      const root = createRoot();
-      const parent = spawn(
-        process.execPath,
-        [
-          '-e',
-          [
-            "const { spawn } = require('node:child_process');",
-            "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
-            'child.unref();',
-            'process.stdout.write(String(child.pid));',
-            'setInterval(() => {}, 1_000);',
-          ].join(' '),
-        ],
-        {
-          detached: true,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        },
-      );
-      activeChildren.add(parent);
-      const grandchildPid = await new Promise<number>((resolvePid, rejectPid) => {
-        if (parent.stdout === null) {
-          rejectPid(new Error('tracked parent stdout was not piped'));
-          return;
-        }
-        parent.stdout.once('data', (chunk) => resolvePid(Number(String(chunk))));
-        parent.once('error', rejectPid);
-      });
-
-      root.trackChild(parent, { processGroup: true });
-      await root.cleanup();
-      activeRoots.delete(root);
-
-      expect(parent.signalCode).toBe('SIGKILL');
-      let grandchildAlive = true;
-      try {
-        process.kill(grandchildPid, 0);
-      } catch {
-        grandchildAlive = false;
-      }
-      try {
-        expect(grandchildAlive).toBe(false);
-      } finally {
-        if (grandchildAlive) {
-          process.kill(grandchildPid, 'SIGKILL');
-        }
-      }
-    },
-  );
-
-  test.skipIf(process.platform === 'win32')(
-    'refuses to signal a process group after its tracked leader exited',
-    async () => {
-      const root = createRoot();
-      const parent = spawn(
-        process.execPath,
-        [
-          '-e',
-          [
-            "const { spawn } = require('node:child_process');",
-            "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
-            'child.unref();',
-            'process.stdout.write(String(child.pid));',
-          ].join(' '),
-        ],
-        {
-          detached: true,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        },
-      );
-      activeChildren.add(parent);
-      root.trackChild(parent, { processGroup: true });
-      const grandchildPid = await new Promise<number>((resolvePid, rejectPid) => {
-        if (parent.stdout === null) {
-          rejectPid(new Error('tracked parent stdout was not piped'));
-          return;
-        }
-        parent.stdout.once('data', (chunk) => resolvePid(Number(String(chunk))));
-        parent.once('error', rejectPid);
-      });
-      await new Promise<void>((resolveClose) => {
-        if (parent.exitCode !== null || parent.signalCode !== null) {
-          resolveClose();
-          return;
-        }
-        parent.once('close', () => resolveClose());
-      });
-
-      try {
-        await expect(root.cleanup()).rejects.toThrow(
-          /exited while its process group still had descendants/,
-        );
-        expect(() => process.kill(grandchildPid, 0)).not.toThrow();
-      } finally {
-        process.kill(grandchildPid, 'SIGKILL');
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-      await root.cleanup();
-      activeRoots.delete(root);
-    },
-  );
-
   test('requires a direct ChildProcess object instead of accepting an arbitrary PID', () => {
     const root = createRoot();
     expect(() => root.trackChild(999_999_999 as never)).toThrow(/spawned ChildProcess/);
@@ -293,12 +416,16 @@ describe('process-owned artifact root', () => {
     expect(readFileSync(sentinelPath, 'utf8')).toBe('untouched\n');
   });
 
-  test('retains one completed JSON report only after the owned root scans clean', async () => {
+  test('retains one SDK platform evidence record only after the owned root scans clean', async () => {
     const root = createRoot();
     const scratchRoot = createScratchRoot('retain');
     const reportPath = resolve(root.rootPath, 'report.json');
     const destinationPath = resolve(scratchRoot, 'nested', 'sanitized.json');
-    const report = { schemaVersion: 1, status: 'passed', completed: true };
+    const report = {
+      schemaVersion: 1,
+      issue: 'OpenCoven/sdk#38',
+      platform: 'darwin-arm64',
+    };
     writeFileSync(reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
     const scans: string[] = [];
 
@@ -318,7 +445,7 @@ describe('process-owned artifact root', () => {
 
   test.each([
     ['incomplete JSON', '{"completed":'],
-    ['non-completed report', '{"schemaVersion":1,"completed":false}'],
+    ['wrong evidence issue', '{"schemaVersion":1,"issue":"other","platform":"darwin-arm64"}'],
   ])('refuses to retain %s', async (_label, contents) => {
     const root = createRoot();
     const scratchRoot = createScratchRoot('incomplete');
@@ -332,7 +459,7 @@ describe('process-owned artifact root', () => {
         destinationPath,
         secretScan: async () => undefined,
       }),
-    ).rejects.toThrow(/completed JSON report/);
+    ).rejects.toThrow(/SDK platform evidence record/);
     expect(existsSync(destinationPath)).toBe(false);
   });
 
@@ -356,7 +483,7 @@ describe('process-owned artifact root', () => {
     }
 
     rmSync(reportLink);
-    writeFileSync(reportLink, '{"completed":true}\n');
+    writeFileSync(reportLink, minimalEvidence());
     await expect(
       root.retainSanitizedJsonReport({
         reportPath: reportLink,
@@ -377,7 +504,7 @@ describe('process-owned artifact root', () => {
     const reportPath = resolve(root.rootPath, 'report.json');
     writeFileSync(destinationPath, 'existing\n');
     writeFileSync(sentinelPath, 'untouched\n');
-    writeFileSync(reportPath, '{"completed":true}\n');
+    writeFileSync(reportPath, minimalEvidence());
 
     await expect(
       root.retainSanitizedJsonReport({
@@ -400,7 +527,7 @@ describe('process-owned artifact root', () => {
     const reportPath = resolve(root.rootPath, 'report.json');
     const destinationLink = resolve(scratchRoot, 'report.json');
     const parentLink = resolve(scratchRoot, 'linked-parent');
-    writeFileSync(reportPath, '{"completed":true}\n');
+    writeFileSync(reportPath, minimalEvidence());
     writeFileSync(resolve(outsideRoot, 'existing.json'), 'outside\n');
     symlinkSync(resolve(outsideRoot, 'existing.json'), destinationLink);
     symlinkSync(outsideRoot, parentLink);
@@ -421,7 +548,7 @@ describe('process-owned artifact root', () => {
     const scratchRoot = createScratchRoot('scan-race');
     const reportPath = resolve(root.rootPath, 'report.json');
     const destinationPath = resolve(scratchRoot, 'retained.json');
-    writeFileSync(reportPath, '{"completed":true}\n');
+    writeFileSync(reportPath, minimalEvidence());
 
     await expect(
       root.retainSanitizedJsonReport({
@@ -429,7 +556,7 @@ describe('process-owned artifact root', () => {
         destinationPath,
         secretScan: async () => {
           chmodSync(reportPath, 0o600);
-          writeFileSync(reportPath, '{"completed":true,"changed":true}\n');
+          writeFileSync(reportPath, minimalEvidence({ changed: true }));
         },
       }),
     ).rejects.toThrow(/changed after the secret scan/);

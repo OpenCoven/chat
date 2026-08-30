@@ -115,22 +115,24 @@ function readReportSnapshot(reportPath, rootRealPath) {
   }
 }
 
-function requireCompletedJsonReport(snapshot) {
+function requireSdkPlatformEvidenceRecord(snapshot) {
   let report;
 
   try {
     report = JSON.parse(snapshot.bytes.toString('utf8'));
   } catch {
-    throw new Error('Sanitized report must be a completed JSON report.');
+    throw new Error('Sanitized report must be an SDK platform evidence record.');
   }
 
   if (
     report === null ||
     typeof report !== 'object' ||
     Array.isArray(report) ||
-    report.completed !== true
+    report.schemaVersion !== 1 ||
+    report.issue !== 'OpenCoven/sdk#38' ||
+    typeof report.platform !== 'string'
   ) {
-    throw new Error('Sanitized report must be a completed JSON report.');
+    throw new Error('Sanitized report must be an SDK platform evidence record.');
   }
 }
 
@@ -231,109 +233,30 @@ function waitForChildClose(child, timeoutMs) {
   });
 }
 
-function processGroupExists(pid) {
-  if (process.platform === 'win32') {
-    return false;
-  }
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
-      return false;
-    }
-    if (error instanceof Error && 'code' in error && error.code === 'EPERM') {
-      return true;
-    }
-    throw error;
-  }
-}
-
-function signalOwnedChild(child, signal, processGroup) {
-  if (processGroup && process.platform !== 'win32') {
-    try {
-      process.kill(-child.pid, signal);
-      return true;
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
-        return false;
-      }
-      throw error;
-    }
-  }
-  return child.kill(signal);
-}
-
-function waitForOwnedExecutionClose(child, processGroup, timeoutMs) {
-  if (!processGroup || process.platform === 'win32') {
-    return waitForChildClose(child, timeoutMs);
-  }
+async function terminateAndReapChild(child, terminationGraceMs) {
   const pid = child.pid;
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolveWait) => {
-    const check = () => {
-      const childClosed = child.exitCode !== null || child.signalCode !== null;
-      if (childClosed && !processGroupExists(pid)) {
-        resolveWait(true);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        resolveWait(false);
-        return;
-      }
-      setTimeout(check, 10);
-    };
-    check();
-  });
-}
 
-async function terminateAndReapChild(child, terminationGraceMs, processGroup) {
-  const pid = child.pid;
-  const childActive = child.exitCode === null && child.signalCode === null;
-
-  if (!childActive) {
-    if (processGroup && processGroupExists(pid)) {
-      throw new Error(`Tracked child ${pid} exited while its process group still had descendants.`);
+  if (child.exitCode === null && child.signalCode === null) {
+    const signaled = child.kill('SIGTERM');
+    if (!signaled && child.exitCode === null && child.signalCode === null) {
+      throw new Error(`Tracked child ${pid} could not be terminated.`);
     }
+  }
+
+  if (await waitForChildClose(child, terminationGraceMs)) {
     return;
   }
 
-  if (processGroup) {
-    const killed = signalOwnedChild(child, 'SIGKILL', true);
-    if (!killed && child.exitCode === null && child.signalCode === null) {
-      throw new Error(`Tracked child ${pid} process group could not be killed.`);
-    }
-    if (!(await waitForOwnedExecutionClose(child, true, terminationGraceMs))) {
-      throw new Error(`Tracked child ${pid} process group could not be reaped.`);
-    }
-    return;
+  if (child.__phase1SupervisorOwnsTree === true) {
+    throw new Error(`Tracked supervisor ${pid} did not complete owned-tree cleanup.`);
   }
 
-  const signaled = signalOwnedChild(child, 'SIGTERM', processGroup);
-  if (
-    !signaled &&
-    child.exitCode === null &&
-    child.signalCode === null &&
-    (!processGroup || !processGroupExists(pid))
-  ) {
-    throw new Error(`Tracked child ${pid} could not be terminated.`);
-  }
-
-  if (await waitForOwnedExecutionClose(child, processGroup, terminationGraceMs)) {
-    return;
-  }
-
-  const killed = signalOwnedChild(child, 'SIGKILL', false);
-  if (
-    !killed &&
-    child.exitCode === null &&
-    child.signalCode === null &&
-    (!processGroup || !processGroupExists(pid))
-  ) {
+  const killed = child.kill('SIGKILL');
+  if (!killed && child.exitCode === null && child.signalCode === null) {
     throw new Error(`Tracked child ${pid} could not be killed.`);
   }
 
-  if (!(await waitForOwnedExecutionClose(child, processGroup, terminationGraceMs))) {
+  if (!(await waitForChildClose(child, terminationGraceMs))) {
     throw new Error(`Tracked child ${pid} could not be reaped.`);
   }
 }
@@ -355,40 +278,17 @@ export function createProcessOwnedArtifactRoot(options) {
     ownerPid: process.pid,
     cleanedChildren,
     reapedChildren,
-    trackChild(child, options = {}) {
+    trackChild(child) {
       if (!(child instanceof ChildProcess) || !Number.isInteger(child.pid) || child.pid <= 0) {
         throw new Error('trackChild requires a spawned ChildProcess with a positive PID.');
       }
-      if (
-        options === null ||
-        typeof options !== 'object' ||
-        Array.isArray(options) ||
-        Object.keys(options).some((key) => key !== 'processGroup') ||
-        (options.processGroup !== undefined && typeof options.processGroup !== 'boolean')
-      ) {
-        throw new Error('trackChild options may contain only a boolean processGroup.');
-      }
-      const processGroup = options.processGroup ?? false;
-      if (processGroup && process.platform === 'win32') {
-        throw new Error('Owned process groups are unavailable on Windows.');
-      }
 
       const existing = trackedChildren.get(child.pid);
-      if (existing !== undefined && existing.child !== child) {
+      if (existing !== undefined && existing !== child) {
         throw new Error(`A different child is already tracked for PID ${child.pid}.`);
       }
-      trackedChildren.set(child.pid, { child, processGroup });
+      trackedChildren.set(child.pid, child);
       return child;
-    },
-    async terminateChild(child) {
-      const tracked = trackedChildren.get(child?.pid);
-      if (tracked === undefined || tracked.child !== child) {
-        throw new Error('terminateChild requires a currently tracked ChildProcess.');
-      }
-      await terminateAndReapChild(tracked.child, terminationGraceMs, tracked.processGroup);
-      trackedChildren.delete(child.pid);
-      cleanedChildren.push(child.pid);
-      reapedChildren.push(child.pid);
     },
     async retainSanitizedJsonReport({ reportPath, destinationPath, secretScan }) {
       if (cleaned) {
@@ -399,7 +299,7 @@ export function createProcessOwnedArtifactRoot(options) {
       }
 
       const firstSnapshot = readReportSnapshot(reportPath, owned.rootRealPath);
-      requireCompletedJsonReport(firstSnapshot);
+      requireSdkPlatformEvidenceRecord(firstSnapshot);
 
       await secretScan({
         artifactRoot: owned.rootPath,
@@ -427,15 +327,29 @@ export function createProcessOwnedArtifactRoot(options) {
         return;
       }
 
-      for (const [pid, tracked] of trackedChildren) {
-        await terminateAndReapChild(tracked.child, terminationGraceMs, tracked.processGroup);
-        cleanedChildren.push(pid);
-        reapedChildren.push(pid);
+      const failures = [];
+      for (const [pid, child] of [...trackedChildren.entries()].reverse()) {
+        try {
+          await terminateAndReapChild(child, terminationGraceMs);
+          cleanedChildren.push(pid);
+          reapedChildren.push(pid);
+          trackedChildren.delete(pid);
+        } catch (error) {
+          failures.push(error);
+        }
       }
 
-      trackedChildren.clear();
-      cleanupOwnedTempRoot(owned);
-      cleaned = true;
+      if (trackedChildren.size === 0) {
+        try {
+          cleanupOwnedTempRoot(owned);
+          cleaned = true;
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Process-owned artifact root cleanup failed.');
+      }
     },
   };
 }

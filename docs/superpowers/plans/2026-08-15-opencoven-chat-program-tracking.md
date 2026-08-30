@@ -204,10 +204,10 @@ unrelated beads without surface labels. Program-specific counts above isolate
 this graph from those pre-existing warnings.
 
 Phase 1 gate evidence is the completed, secret-scanned
-`test-results/phase1-conformance/report.json` produced by
-`pnpm test:phase1-conformance` at the revisions in
-`phase1-conformance.lock.json`. A `blocked` or `failed` report is evidence of an
-open gate, not permission to close it.
+`test-results/phase1-conformance/report.json` produced through
+`/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"` at the revisions in
+`phase1-conformance.lock.json`. It is a complete SDK #38 platform record; a
+failed or incomplete run publishes no evidence and leaves the gate open.
 
 ## Bead Evidence Template
 
