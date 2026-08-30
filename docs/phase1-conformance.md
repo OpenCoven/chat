@@ -592,6 +592,45 @@ supervisor. Windows routes around those actions through the pre-bootstrap Job
 root. Production preserves the existing native behavior and uses the pinned
 official artifact upload exactly once per matrix expansion.
 
+Windows artifact handoff is a broker-only terminal transition. After the
+supervised root exits, the broker first terminates the Job Object and verifies
+zero active Job processes. It then disables the ephemeral local account with
+`NetUserSetInfo` and independently re-reads the account with `NetUserGetInfo`;
+an absent or ambiguous `UF_ACCOUNTDISABLE` bit is fatal. The trusted broker
+recursively enumerates Task Scheduler folders and hidden registrations through
+`Schedule.Service`, matches exact SID and local-account principals plus
+run-root identities, stops all matching instances, deletes registrations, and
+verifies absence. It also enumerates all-user BITS jobs, cancels every job
+whose owner SID is the isolated SID, and verifies absence.
+
+System-wide process proof uses `WTSEnumerateProcessesExW` level 1, whose
+`WTS_PROCESS_INFO_EXW.pUserSid` is the primary-token user SID. It does not
+infer absence from Job membership or from failed `OpenProcess` calls. Every
+exact-SID process must be opened, rechecked by primary token, terminated,
+waited, and reaped; enumeration, SID query, access, termination, or wait
+failures are fatal. Scheduler cleanup, BITS cleanup, and SID-wide drain repeat
+until three bounded consecutive rounds observe no attributable registration,
+running task, BITS job, or process.
+
+Only then does the broker retain no-delete-sharing handles, replace the
+workspace, artifact-directory, and record owner/DACL with protected
+broker/SYSTEM/Administrators-only ACLs, verify those ACLs through the handles,
+and read the record. It checks scheduler, BITS, account-disable, and SID-wide
+process state before and after the read and before and after publication. Any
+reappearance aborts handoff. A fresh broker process validates the captured
+bytes before the no-overwrite broker-private publication.
+
+The restricted standard-user token cannot create a Windows service because
+creating an SCM service requires service-control-manager create-service access,
+which the token does not have. It likewise cannot create permanent WMI
+subscriptions because writing `__EventFilter`/consumer/binding instances in
+`root/subscription` requires namespace write/provider rights absent from the
+token. The `windows-2025` runtime test executes both denied operations and
+fails if either succeeds or fails ambiguously. Account disablement plus exact
+task/BITS/process drain also closes per-user Run keys and Startup-folder
+persistence: those mechanisms require a future logon, and no new logon is
+possible before the account, profile, and isolated root are deleted.
+
 The producer and fresh-validation jobs have only `contents: read`; they have no
 `id-token` or `attestations` permission. The harness and all candidate
 subprocesses receive a curated environment under a UID distinct from the
@@ -699,13 +738,71 @@ node ./scripts/phase1-artifact-secret-scan.mjs \
 A producer failure, timeout, incomplete assertion set, or isolation/redaction
 mismatch fails without publishing partial evidence.
 
+## Isolation and redaction
+
+Execution and report staging use process-created mode-`0700` roots under the
+real OS temporary directory. Cleanup verifies device, inode, real path, and an
+unpredictable ownership stamp, terminates only tracked child processes, and
+does not follow symlinks.
+
+Before execution and after cleanup, the harness hashes the operator's real
+Cave home, Coven home, and Cave project index with bounded traversal. Any
+change fails the run. Retained evidence contains only the resulting SHA-256
+values, never the paths or contents.
+
+Before writing or retaining schema-v2 bytes:
+
+1. Chat's `phase1-artifact-secret-scan` rejects secret/private content; and
+2. the exact validator checkout runs the SDK schema, executable parser,
+   canonicalizer, and retained-evidence scanner.
+
+After upload, a fresh unprivileged runner repeats the complete exact SDK
+schema/parser/canonicalizer/scanner validation over one in-memory snapshot of
+the downloaded bytes. Attestation is authorized only when a second fresh
+download has the same SHA-256 as that validated snapshot.
+
+The record cannot contain a pairing secret, bearer, authorization header,
+prompt, message or attachment body, command output, private cause, raw path,
+URL, socket or pipe handle, operator identifier, or credential metadata.
+Diagnostics are stable IDs only.
+
+## Failure behavior
+
+- Missing, duplicate, unexpected, skipped, failed, or blocked primary
+  assertions produce no schema-v2 record.
+- A platform mismatch, unavailable native keyring, failed peer/pipe proof,
+  changed operator state, dirty checkout, artifact drift, scanner rejection,
+  timeout, or cleanup failure produces no schema-v2 record.
+- The output path is no-overwrite. Windows publishes only handle-captured
+  bytes after verified account disablement, recursive scheduler/BITS cleanup,
+  three stable SID-wide zero-process rounds, and handle-verified ACL sealing;
+  macOS/Linux publish only after native zero-process proof and a no-follow
+  descriptor read whose identity and timestamps remain stable.
+- Windows account-disable ambiguity, scheduler or BITS enumeration/access
+  failure, WTS enumeration or SID-query failure, matching-process access or
+  termination failure, unstable drain, ACL-seal failure, or post-seal
+  reappearance produces no artifact.
+- Uploaded bytes that fail fresh SDK validation, differ from the validation
+  digest when downloaded for attestation, or use a validator input unequal to
+  the protected environment variable are never attested.
+- Partial subprocess output and skipped controls are never accepted as passes.
+
+No platform evidence is claimed until an SDK validator commit contains a
+compatible producer entry naming the reviewed Chat producer commit, harness
+bytes, workflow bytes, protected environment, and artifact conventions. A
+missing, malformed, stale, or otherwise incompatible `validator_revision`
+fails before evidence publication. The SDK metadata update must also record
+the `validate-conformance-artifacts` and `attest-conformance-artifacts` job
+names, the three static download names and record paths, the pinned download
+and attestation action SHAs, and the environment variable prerequisite.
+
 ### SDK verification metadata for this producer
 
 The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 266,877 | `c33d96f08389c3bf9933d06bd5a113a8558606f58e580242f79f7db6941d640d` |
+| `.github/workflows/client-v1-conformance.yml` | 349,422 | `f4f892a8952cf734e2f1dee46237493526f021ccc5b9ba0275a3eb0f790e8abb` |
 | `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
 | `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -714,8 +811,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
-| `scripts/windows-job-supervisor.cs` | 164,613 | `94340862f991355263f931b7963f5ad288b53b40bf797464a421d40ccb53f9ca` |
-| `scripts/windows-job-supervisor.test.ps1` | 57,864 | `73bfdb047c64e6a0ffe062cb8a626518b835cd7fd87c8d116844adf551feda90` |
+| `scripts/windows-job-supervisor.cs` | 228,299 | `3fdb8a2046968442ca1c7538d55dfd79dc3d2fde7b2f0fd9082ee74dfd1594ab` |
+| `scripts/windows-job-supervisor.test.ps1` | 85,429 | `2aad7073de28d245fce432a0a29a2db485276788ae07cedcb289ea51a4b70cb3` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
 production Unix source files by the sizes and digests above before compiling or

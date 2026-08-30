@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -46,6 +47,7 @@ namespace OpenCoven
         private const uint NERR_USER_EXISTS = 2224;
         private const uint USER_PRIV_USER = 1;
         private const uint UF_SCRIPT = 0x0001;
+        private const uint UF_ACCOUNTDISABLE = 0x0002;
         private const uint UF_NORMAL_ACCOUNT = 0x0200;
         private const uint UF_DONT_EXPIRE_PASSWD = 0x10000;
         private const int LOGON32_LOGON_INTERACTIVE = 2;
@@ -54,6 +56,7 @@ namespace OpenCoven
         private const int MaximumAccountCreationAttempts = 8;
 
         private string password;
+        private bool accountDisabled;
         private bool disposed;
 
         private WindowsIsolatedUser(
@@ -89,7 +92,17 @@ namespace OpenCoven
             get
             {
                 ThrowIfDisposed();
+                RequireEnabledForLogon();
                 return password;
+            }
+        }
+
+        public bool IsDisabled
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return accountDisabled;
             }
         }
 
@@ -266,6 +279,117 @@ namespace OpenCoven
             }
         }
 
+        internal void RequireEnabledForLogon()
+        {
+            if (accountDisabled || password == null)
+            {
+                throw new InvalidOperationException(
+                    "Ephemeral Windows account is disabled for final artifact handoff.");
+            }
+        }
+
+        public void DisableAndVerify()
+        {
+            ThrowIfDisposed();
+            IntPtr information = IntPtr.Zero;
+            uint status = NetUserGetInfo(null, UserName, 1, out information);
+            if (status != NERR_SUCCESS || information == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user disablement preflight could not be queried.");
+            }
+
+            uint flags;
+            try
+            {
+                USER_INFO_1 current = (USER_INFO_1)Marshal.PtrToStructure(
+                    information,
+                    typeof(USER_INFO_1));
+                flags = current.usri1_flags | UF_ACCOUNTDISABLE;
+            }
+            finally
+            {
+                NetApiBufferFree(information);
+            }
+
+            USER_INFO_1008 update = new USER_INFO_1008();
+            update.usri1008_flags = flags;
+            uint parameterError;
+            status = NetUserSetInfo(
+                null,
+                UserName,
+                1008,
+                ref update,
+                out parameterError);
+            if (status != NERR_SUCCESS)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user could not be disabled.");
+            }
+
+            information = IntPtr.Zero;
+            status = NetUserGetInfo(null, UserName, 1, out information);
+            if (status != NERR_SUCCESS || information == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user disablement could not be verified.");
+            }
+            try
+            {
+                USER_INFO_1 verified = (USER_INFO_1)Marshal.PtrToStructure(
+                    information,
+                    typeof(USER_INFO_1));
+                if ((verified.usri1_flags & UF_ACCOUNTDISABLE) == 0 ||
+                    (verified.usri1_flags & UF_NORMAL_ACCOUNT) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral local user disablement verification was ambiguous.");
+                }
+            }
+            finally
+            {
+                NetApiBufferFree(information);
+            }
+            accountDisabled = true;
+            password = null;
+        }
+
+        internal void RequireDisabledAndVerify()
+        {
+            ThrowIfDisposed();
+            if (!accountDisabled || password != null)
+            {
+                throw new InvalidOperationException(
+                    "Ephemeral local user is not disabled for artifact handoff.");
+            }
+            IntPtr information = IntPtr.Zero;
+            uint status = NetUserGetInfo(null, UserName, 1, out information);
+            if (status != NERR_SUCCESS || information == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user disabled state could not be rechecked.");
+            }
+            try
+            {
+                USER_INFO_1 verified = (USER_INFO_1)Marshal.PtrToStructure(
+                    information,
+                    typeof(USER_INFO_1));
+                if ((verified.usri1_flags & UF_ACCOUNTDISABLE) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral local user was re-enabled before artifact handoff.");
+                }
+            }
+            finally
+            {
+                NetApiBufferFree(information);
+            }
+        }
+
         private static void ValidateStandardUser(
             string userName,
             string passwordValue,
@@ -285,7 +409,8 @@ namespace OpenCoven
                     information,
                     typeof(USER_INFO_1));
                 if (value.usri1_priv != USER_PRIV_USER ||
-                    (value.usri1_flags & UF_NORMAL_ACCOUNT) == 0)
+                    (value.usri1_flags & UF_NORMAL_ACCOUNT) == 0 ||
+                    (value.usri1_flags & UF_ACCOUNTDISABLE) != 0)
                 {
                     throw new InvalidOperationException(
                         "Ephemeral account is not a standard local user.");
@@ -489,6 +614,12 @@ namespace OpenCoven
             internal string usri1_script_path;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct USER_INFO_1008
+        {
+            internal uint usri1008_flags;
+        }
+
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
         private static extern uint NetUserAdd(
             string serverName,
@@ -502,6 +633,14 @@ namespace OpenCoven
             string userName,
             uint level,
             out IntPtr buffer);
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetUserSetInfo(
+            string serverName,
+            string userName,
+            uint level,
+            ref USER_INFO_1008 buffer,
+            out uint parameterError);
 
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
         private static extern uint NetUserDel(string serverName, string userName);
@@ -531,6 +670,12 @@ namespace OpenCoven
         private static extern bool ConvertStringSidToSidW(
             string stringSid,
             out IntPtr sid);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertSidToStringSidW(
+            IntPtr sid,
+            out IntPtr stringSid);
 
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -723,15 +868,41 @@ namespace OpenCoven
         private const int JobObjectExtendedLimitInformation = 9;
         private const int SupervisorFailureExitCode = unchecked((int)0xe0434f4d);
         private const int MaximumQuotaEntries = 500000;
+        private const int MinimumStableIsolationRounds = 3;
+        private const int MaximumIsolationRounds = 120;
+        private const int IsolationRoundDelayMilliseconds = 100;
+        private const int MaximumSchedulerCleanupPasses = 8;
+        private const int MaximumBitsCleanupPasses = 8;
+        private const int TASK_ENUM_HIDDEN = 1;
+        private const uint BG_JOB_ENUM_ALL_USERS = 1;
+        private const uint WTS_ANY_SESSION = 0xffffffff;
+        private const int WTSTypeProcessInfoLevel1 = 1;
+        private const uint TOKEN_QUERY = 0x0008;
+        private const int TokenUser = 1;
+        private const uint STILL_ACTIVE = 259;
 
         private IntPtr jobHandle;
         private readonly string supervisedSid;
+        private readonly string supervisedUserName;
+        private readonly string supervisedQualifiedUserName;
+        private readonly string supervisedRootPath;
+        private readonly string runIdentity;
+        private WindowsIsolatedUser sealedIsolatedUser;
+        private bool artifactBoundarySealed;
         private bool disposed;
 
-        private WindowsJobSupervisor(IntPtr handle, string isolatedSid)
+        private WindowsJobSupervisor(
+            IntPtr handle,
+            WindowsIsolatedUser isolatedUser,
+            string identity)
         {
             jobHandle = handle;
-            supervisedSid = isolatedSid;
+            supervisedSid = isolatedUser.Sid;
+            supervisedUserName = isolatedUser.UserName;
+            supervisedQualifiedUserName =
+                Environment.MachineName + "\\" + isolatedUser.UserName;
+            supervisedRootPath = isolatedUser.RootPath;
+            runIdentity = identity;
         }
 
         public long AuthoritativeHandleValue
@@ -824,7 +995,7 @@ namespace OpenCoven
                     {
                         Marshal.FreeHGlobal(buffer);
                     }
-                    return new WindowsJobSupervisor(handle, isolatedUser.Sid);
+                    return new WindowsJobSupervisor(handle, isolatedUser, name);
                 }
                 catch
                 {
@@ -1867,6 +2038,1080 @@ namespace OpenCoven
             return new WindowsPinnedDirectory(handle);
         }
 
+        private static void ExecuteArtifactSecuritySequence(
+            Action requireJobZero,
+            Action disableAccount,
+            Func<int> cleanupScheduledTasks,
+            Func<int> cleanupBitsJobs,
+            Func<int> drainProcessesByPrimaryTokenSid,
+            Action sealArtifactSource,
+            Action requirePostSealIsolation,
+            Action captureArtifact,
+            int maximumRounds,
+            int delayMilliseconds)
+        {
+            if (requireJobZero == null ||
+                disableAccount == null ||
+                cleanupScheduledTasks == null ||
+                cleanupBitsJobs == null ||
+                drainProcessesByPrimaryTokenSid == null ||
+                sealArtifactSource == null ||
+                requirePostSealIsolation == null ||
+                captureArtifact == null)
+            {
+                throw new ArgumentNullException(
+                    "Artifact security sequence delegates may not be null.");
+            }
+            if (maximumRounds < MinimumStableIsolationRounds ||
+                maximumRounds > MaximumIsolationRounds ||
+                delayMilliseconds < 0 ||
+                delayMilliseconds > 1000)
+            {
+                throw new ArgumentOutOfRangeException(
+                    "Artifact security sequence bounds are invalid.");
+            }
+
+            requireJobZero();
+            disableAccount();
+            int stableRounds = 0;
+            for (int round = 0; round < maximumRounds; round++)
+            {
+                int scheduledTaskCount = cleanupScheduledTasks();
+                int bitsJobCount = cleanupBitsJobs();
+                int processCount = drainProcessesByPrimaryTokenSid();
+                if (scheduledTaskCount < 0 ||
+                    bitsJobCount < 0 ||
+                    processCount < 0)
+                {
+                    throw new InvalidOperationException(
+                        "Isolation cleanup returned an invalid observation count.");
+                }
+                if (scheduledTaskCount == 0 &&
+                    bitsJobCount == 0 &&
+                    processCount == 0)
+                {
+                    stableRounds++;
+                }
+                else
+                {
+                    stableRounds = 0;
+                }
+                if (stableRounds >= MinimumStableIsolationRounds)
+                {
+                    break;
+                }
+                if (delayMilliseconds != 0)
+                {
+                    Thread.Sleep(delayMilliseconds);
+                }
+            }
+            if (stableRounds < MinimumStableIsolationRounds)
+            {
+                throw new TimeoutException(
+                    "Isolated account persistence did not reach three stable zero rounds.");
+            }
+
+            sealArtifactSource();
+            requirePostSealIsolation();
+            captureArtifact();
+            requirePostSealIsolation();
+        }
+
+        private int CleanupScheduledTasks()
+        {
+            int observed = 0;
+            for (int pass = 0; pass < MaximumSchedulerCleanupPasses; pass++)
+            {
+                List<ScheduledTaskReference> matches =
+                    EnumerateMatchingScheduledTasks(true);
+                HashSet<string> matchingPaths = new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (ScheduledTaskReference match in matches)
+                {
+                    matchingPaths.Add(match.Path);
+                }
+                observed = checked(
+                    observed +
+                    matches.Count +
+                    StopMatchingRunningTasks(matchingPaths, true));
+                foreach (ScheduledTaskReference match in matches)
+                {
+                    DeleteScheduledTask(match);
+                }
+
+                List<ScheduledTaskReference> remaining =
+                    EnumerateMatchingScheduledTasks(false);
+                HashSet<string> remainingPaths = new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (ScheduledTaskReference match in remaining)
+                {
+                    remainingPaths.Add(match.Path);
+                }
+                int running = StopMatchingRunningTasks(remainingPaths, false);
+                if (remaining.Count == 0 && running == 0)
+                {
+                    return observed;
+                }
+            }
+            throw new InvalidOperationException(
+                "Attributable Task Scheduler registrations or running instances remained.");
+        }
+
+        private int InspectScheduledTasks()
+        {
+            List<ScheduledTaskReference> registrations =
+                EnumerateMatchingScheduledTasks(false);
+            HashSet<string> paths = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (ScheduledTaskReference registration in registrations)
+            {
+                paths.Add(registration.Path);
+            }
+            return checked(
+                registrations.Count +
+                StopMatchingRunningTasks(paths, false));
+        }
+
+        private List<ScheduledTaskReference> EnumerateMatchingScheduledTasks(
+            bool stopMatches)
+        {
+            object service = null;
+            try
+            {
+                service = CreateTaskService();
+                List<string> folders = new List<string>();
+                CollectTaskFolderPaths(service, "\\", folders);
+                List<ScheduledTaskReference> matches =
+                    new List<ScheduledTaskReference>();
+                foreach (string folderPath in folders)
+                {
+                    object folder = null;
+                    object tasks = null;
+                    try
+                    {
+                        folder = InvokeComMethod(
+                            service,
+                            "GetFolder",
+                            folderPath);
+                        tasks = InvokeComMethod(
+                            folder,
+                            "GetTasks",
+                            TASK_ENUM_HIDDEN);
+                        int count = Convert.ToInt32(
+                            GetComProperty(tasks, "Count"),
+                            CultureInfo.InvariantCulture);
+                        for (int index = 1; index <= count; index++)
+                        {
+                            object task = null;
+                            try
+                            {
+                                task = GetComProperty(tasks, "Item", index);
+                                if (!ScheduledTaskMatches(task))
+                                {
+                                    continue;
+                                }
+                                string name = Convert.ToString(
+                                    GetComProperty(task, "Name"),
+                                    CultureInfo.InvariantCulture);
+                                string path = Convert.ToString(
+                                    GetComProperty(task, "Path"),
+                                    CultureInfo.InvariantCulture);
+                                if (String.IsNullOrWhiteSpace(name) ||
+                                    String.IsNullOrWhiteSpace(path))
+                                {
+                                    throw new InvalidOperationException(
+                                        "Matching scheduled task identity is ambiguous.");
+                                }
+                                if (stopMatches)
+                                {
+                                    InvokeComMethod(task, "Stop", 0);
+                                    RequireRegisteredTaskInstancesStopped(task);
+                                }
+                                matches.Add(new ScheduledTaskReference
+                                {
+                                    FolderPath = folderPath,
+                                    Name = name,
+                                    Path = path,
+                                });
+                            }
+                            finally
+                            {
+                                ReleaseComObject(task);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseComObject(tasks);
+                        ReleaseComObject(folder);
+                    }
+                }
+                return matches;
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Task Scheduler registration enumeration failed.",
+                    error);
+            }
+            finally
+            {
+                ReleaseComObject(service);
+            }
+        }
+
+        private static object CreateTaskService()
+        {
+            Type serviceType = Type.GetTypeFromProgID(
+                "Schedule.Service",
+                true);
+            object service = Activator.CreateInstance(serviceType);
+            if (service == null)
+            {
+                throw new InvalidOperationException(
+                    "Task Scheduler COM service could not be created.");
+            }
+            InvokeComMethod(
+                service,
+                "Connect",
+                Type.Missing,
+                Type.Missing,
+                Type.Missing,
+                Type.Missing);
+            bool connected = Convert.ToBoolean(
+                GetComProperty(service, "Connected"),
+                CultureInfo.InvariantCulture);
+            if (!connected)
+            {
+                ReleaseComObject(service);
+                throw new InvalidOperationException(
+                    "Task Scheduler COM service did not connect.");
+            }
+            return service;
+        }
+
+        private static void CollectTaskFolderPaths(
+            object service,
+            string folderPath,
+            List<string> paths)
+        {
+            paths.Add(folderPath);
+            object folder = null;
+            object folders = null;
+            try
+            {
+                folder = InvokeComMethod(service, "GetFolder", folderPath);
+                folders = InvokeComMethod(folder, "GetFolders", 0);
+                int count = Convert.ToInt32(
+                    GetComProperty(folders, "Count"),
+                    CultureInfo.InvariantCulture);
+                for (int index = 1; index <= count; index++)
+                {
+                    object child = null;
+                    try
+                    {
+                        child = GetComProperty(folders, "Item", index);
+                        string childPath = Convert.ToString(
+                            GetComProperty(child, "Path"),
+                            CultureInfo.InvariantCulture);
+                        if (String.IsNullOrWhiteSpace(childPath) ||
+                            paths.Contains(childPath))
+                        {
+                            throw new InvalidOperationException(
+                                "Task Scheduler folder enumeration was ambiguous.");
+                        }
+                        CollectTaskFolderPaths(service, childPath, paths);
+                    }
+                    finally
+                    {
+                        ReleaseComObject(child);
+                    }
+                }
+            }
+            finally
+            {
+                ReleaseComObject(folders);
+                ReleaseComObject(folder);
+            }
+        }
+
+        private static void RequireRegisteredTaskInstancesStopped(
+            object task)
+        {
+            Stopwatch timer = Stopwatch.StartNew();
+            while (true)
+            {
+                object instances = null;
+                try
+                {
+                    instances = InvokeComMethod(
+                        task,
+                        "GetInstances",
+                        0);
+                    int count = Convert.ToInt32(
+                        GetComProperty(instances, "Count"),
+                        CultureInfo.InvariantCulture);
+                    if (count == 0)
+                    {
+                        return;
+                    }
+                    for (int index = 1; index <= count; index++)
+                    {
+                        object instance = null;
+                        try
+                        {
+                            instance = GetComProperty(
+                                instances,
+                                "Item",
+                                index);
+                            InvokeComMethod(instance, "Stop");
+                        }
+                        finally
+                        {
+                            ReleaseComObject(instance);
+                        }
+                    }
+                }
+                finally
+                {
+                    ReleaseComObject(instances);
+                }
+                if (timer.Elapsed >= TimeSpan.FromSeconds(10))
+                {
+                    throw new TimeoutException(
+                        "Attributable Task Scheduler instances could not be stopped.");
+                }
+                Thread.Sleep(50);
+            }
+        }
+
+        private bool ScheduledTaskMatches(object task)
+        {
+            string name = Convert.ToString(
+                GetComProperty(task, "Name"),
+                CultureInfo.InvariantCulture);
+            string path = Convert.ToString(
+                GetComProperty(task, "Path"),
+                CultureInfo.InvariantCulture);
+            if (ContainsRunIdentity(name) || ContainsRunIdentity(path))
+            {
+                return true;
+            }
+
+            object definition = null;
+            object principal = null;
+            object registration = null;
+            object actions = null;
+            try
+            {
+                definition = GetComProperty(task, "Definition");
+                principal = GetComProperty(definition, "Principal");
+                string userId = Convert.ToString(
+                    GetComProperty(principal, "UserId"),
+                    CultureInfo.InvariantCulture);
+                string groupId = Convert.ToString(
+                    GetComProperty(principal, "GroupId"),
+                    CultureInfo.InvariantCulture);
+                if (TaskPrincipalMatches(userId) ||
+                    TaskPrincipalMatches(groupId))
+                {
+                    return true;
+                }
+
+                registration = GetComProperty(
+                    definition,
+                    "RegistrationInfo");
+                foreach (string value in new string[]
+                {
+                    Convert.ToString(
+                        GetComProperty(registration, "URI"),
+                        CultureInfo.InvariantCulture),
+                    Convert.ToString(
+                        GetComProperty(registration, "Source"),
+                        CultureInfo.InvariantCulture),
+                })
+                {
+                    if (ContainsRunIdentity(value))
+                    {
+                        return true;
+                    }
+                }
+
+                actions = GetComProperty(definition, "Actions");
+                int actionCount = Convert.ToInt32(
+                    GetComProperty(actions, "Count"),
+                    CultureInfo.InvariantCulture);
+                for (int index = 1; index <= actionCount; index++)
+                {
+                    object action = null;
+                    try
+                    {
+                        action = GetComProperty(actions, "Item", index);
+                        int type = Convert.ToInt32(
+                            GetComProperty(action, "Type"),
+                            CultureInfo.InvariantCulture);
+                        if (type != 0)
+                        {
+                            continue;
+                        }
+                        foreach (string value in new string[]
+                        {
+                            Convert.ToString(
+                                GetComProperty(action, "Path"),
+                                CultureInfo.InvariantCulture),
+                            Convert.ToString(
+                                GetComProperty(action, "Arguments"),
+                                CultureInfo.InvariantCulture),
+                            Convert.ToString(
+                                GetComProperty(action, "WorkingDirectory"),
+                                CultureInfo.InvariantCulture),
+                        })
+                        {
+                            if (ContainsRunIdentity(value))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseComObject(action);
+                    }
+                }
+                return false;
+            }
+            finally
+            {
+                ReleaseComObject(actions);
+                ReleaseComObject(registration);
+                ReleaseComObject(principal);
+                ReleaseComObject(definition);
+            }
+        }
+
+        private bool TaskPrincipalMatches(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            string candidate = value.Trim();
+            return String.Equals(
+                    candidate,
+                    supervisedSid,
+                    StringComparison.Ordinal) ||
+                String.Equals(
+                    candidate,
+                    supervisedUserName,
+                    StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(
+                    candidate,
+                    supervisedQualifiedUserName,
+                    StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(
+                    candidate,
+                    ".\\" + supervisedUserName,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool ContainsRunIdentity(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            return value.IndexOf(
+                    runIdentity,
+                    StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf(
+                    supervisedRootPath,
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void DeleteScheduledTask(
+            ScheduledTaskReference task)
+        {
+            object service = null;
+            object folder = null;
+            try
+            {
+                service = CreateTaskService();
+                folder = InvokeComMethod(
+                    service,
+                    "GetFolder",
+                    task.FolderPath);
+                InvokeComMethod(folder, "DeleteTask", task.Name, 0);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Attributable Task Scheduler registration could not be deleted.",
+                    error);
+            }
+            finally
+            {
+                ReleaseComObject(folder);
+                ReleaseComObject(service);
+            }
+        }
+
+        private int StopMatchingRunningTasks(
+            HashSet<string> matchingPaths,
+            bool stopMatches)
+        {
+            object service = null;
+            object runningTasks = null;
+            Dictionary<uint, string> processSids =
+                EnumerateProcessPrimaryTokenSids();
+            int matches = 0;
+            try
+            {
+                service = CreateTaskService();
+                runningTasks = InvokeComMethod(
+                    service,
+                    "GetRunningTasks",
+                    TASK_ENUM_HIDDEN);
+                int count = Convert.ToInt32(
+                    GetComProperty(runningTasks, "Count"),
+                    CultureInfo.InvariantCulture);
+                for (int index = 1; index <= count; index++)
+                {
+                    object runningTask = null;
+                    try
+                    {
+                        runningTask = GetComProperty(
+                            runningTasks,
+                            "Item",
+                            index);
+                        string path = Convert.ToString(
+                            GetComProperty(runningTask, "Path"),
+                            CultureInfo.InvariantCulture);
+                        string name = Convert.ToString(
+                            GetComProperty(runningTask, "Name"),
+                            CultureInfo.InvariantCulture);
+                        string currentAction = Convert.ToString(
+                            GetComProperty(runningTask, "CurrentAction"),
+                            CultureInfo.InvariantCulture);
+                        uint processId = Convert.ToUInt32(
+                            GetComProperty(runningTask, "EnginePID"),
+                            CultureInfo.InvariantCulture);
+                        string processSid;
+                        bool match =
+                            matchingPaths.Contains(path) ||
+                            ContainsRunIdentity(path) ||
+                            ContainsRunIdentity(name) ||
+                            ContainsRunIdentity(currentAction) ||
+                            (processId != 0 &&
+                                processSids.TryGetValue(
+                                    processId,
+                                    out processSid) &&
+                                String.Equals(
+                                    processSid,
+                                    supervisedSid,
+                                    StringComparison.Ordinal));
+                        if (!match)
+                        {
+                            continue;
+                        }
+                        matches++;
+                        if (stopMatches)
+                        {
+                            InvokeComMethod(runningTask, "Stop");
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseComObject(runningTask);
+                    }
+                }
+                return matches;
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Task Scheduler running-instance enumeration failed.",
+                    error);
+            }
+            finally
+            {
+                ReleaseComObject(runningTasks);
+                ReleaseComObject(service);
+            }
+        }
+
+        private static object InvokeComMethod(
+            object target,
+            string name,
+            params object[] arguments)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException("target");
+            }
+            try
+            {
+                return target.GetType().InvokeMember(
+                    name,
+                    BindingFlags.InvokeMethod,
+                    null,
+                    target,
+                    arguments,
+                    CultureInfo.InvariantCulture);
+            }
+            catch (TargetInvocationException error)
+            {
+                throw new InvalidOperationException(
+                    "Windows COM method invocation failed: " + name + ".",
+                    error.InnerException ?? error);
+            }
+        }
+
+        private static object GetComProperty(
+            object target,
+            string name,
+            params object[] arguments)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException("target");
+            }
+            try
+            {
+                return target.GetType().InvokeMember(
+                    name,
+                    BindingFlags.GetProperty,
+                    null,
+                    target,
+                    arguments,
+                    CultureInfo.InvariantCulture);
+            }
+            catch (TargetInvocationException error)
+            {
+                throw new InvalidOperationException(
+                    "Windows COM property query failed: " + name + ".",
+                    error.InnerException ?? error);
+            }
+        }
+
+        private static void ReleaseComObject(object value)
+        {
+            if (value != null && Marshal.IsComObject(value))
+            {
+                Marshal.FinalReleaseComObject(value);
+            }
+        }
+
+        private int CleanupBitsJobs()
+        {
+            int observed = 0;
+            for (int pass = 0; pass < MaximumBitsCleanupPasses; pass++)
+            {
+                int matches = EnumerateMatchingBitsJobs(true);
+                observed = checked(observed + matches);
+                if (EnumerateMatchingBitsJobs(false) == 0)
+                {
+                    return observed;
+                }
+            }
+            throw new InvalidOperationException(
+                "Attributable BITS jobs remained after cancellation.");
+        }
+
+        private int InspectBitsJobs()
+        {
+            return EnumerateMatchingBitsJobs(false);
+        }
+
+        private int EnumerateMatchingBitsJobs(bool cancelMatches)
+        {
+            IBackgroundCopyManager manager = null;
+            IEnumBackgroundCopyJobs jobs = null;
+            try
+            {
+                manager = (IBackgroundCopyManager)new BackgroundCopyManager();
+                RequireComSuccess(
+                    manager.EnumJobs(BG_JOB_ENUM_ALL_USERS, out jobs),
+                    "All-user BITS job enumeration failed.");
+                if (jobs == null)
+                {
+                    throw new InvalidOperationException(
+                        "All-user BITS job enumeration returned no enumerator.");
+                }
+                int matches = 0;
+                while (true)
+                {
+                    IBackgroundCopyJob job = null;
+                    uint fetched;
+                    int result = jobs.Next(1, out job, out fetched);
+                    if (result < 0)
+                    {
+                        RequireComSuccess(
+                            result,
+                            "BITS job enumeration failed.");
+                    }
+                    if (fetched == 0)
+                    {
+                        ReleaseComObject(job);
+                        break;
+                    }
+                    if (job == null || fetched != 1)
+                    {
+                        ReleaseComObject(job);
+                        throw new InvalidOperationException(
+                            "BITS job enumeration returned an ambiguous entry.");
+                    }
+                    try
+                    {
+                        IntPtr owner = IntPtr.Zero;
+                        RequireComSuccess(
+                            job.GetOwner(out owner),
+                            "BITS job owner SID query failed.");
+                        if (owner == IntPtr.Zero)
+                        {
+                            throw new InvalidOperationException(
+                                "BITS job owner SID query was ambiguous.");
+                        }
+                        string ownerSid;
+                        try
+                        {
+                            ownerSid = Marshal.PtrToStringUni(owner);
+                        }
+                        finally
+                        {
+                            Marshal.FreeCoTaskMem(owner);
+                        }
+                        if (!String.Equals(
+                                ownerSid,
+                                supervisedSid,
+                                StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        matches++;
+                        if (cancelMatches)
+                        {
+                            RequireComSuccess(
+                                job.Cancel(),
+                                "Attributable BITS job cancellation failed.");
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseComObject(job);
+                    }
+                }
+                return matches;
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "BITS all-user cleanup failed.",
+                    error);
+            }
+            finally
+            {
+                ReleaseComObject(jobs);
+                ReleaseComObject(manager);
+            }
+        }
+
+        private static void RequireComSuccess(
+            int result,
+            string failure)
+        {
+            if (result < 0)
+            {
+                throw new COMException(failure, result);
+            }
+        }
+
+        private int DrainProcessesByPrimaryTokenSid()
+        {
+            Dictionary<uint, string> processes =
+                EnumerateProcessPrimaryTokenSids();
+            List<uint> matches = new List<uint>();
+            foreach (KeyValuePair<uint, string> process in processes)
+            {
+                if (String.Equals(
+                        process.Value,
+                        supervisedSid,
+                        StringComparison.Ordinal))
+                {
+                    matches.Add(process.Key);
+                }
+            }
+
+            foreach (uint processId in matches)
+            {
+                IntPtr process = OpenProcess(
+                    PROCESS_TERMINATE |
+                        SYNCHRONIZE |
+                        PROCESS_QUERY_LIMITED_INFORMATION,
+                    false,
+                    processId);
+                if (process == IntPtr.Zero)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Matching isolated-SID process could not be opened.");
+                }
+                try
+                {
+                    string verifiedSid = QueryProcessPrimaryTokenSid(process);
+                    if (!String.Equals(
+                            verifiedSid,
+                            supervisedSid,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Matching isolated-SID process identity changed.");
+                    }
+                    if (!TerminateProcess(process, 1))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Matching isolated-SID process termination failed.");
+                    }
+                    uint wait = WaitForSingleObject(process, 30000);
+                    if (wait != WAIT_OBJECT_0)
+                    {
+                        if (wait == WAIT_TIMEOUT)
+                        {
+                            throw new TimeoutException(
+                                "Matching isolated-SID process did not terminate.");
+                        }
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Matching isolated-SID process wait failed.");
+                    }
+                    uint exitCode;
+                    if (!GetExitCodeProcess(process, out exitCode) ||
+                        exitCode == STILL_ACTIVE)
+                    {
+                        throw new InvalidOperationException(
+                            "Matching isolated-SID process could not be reaped.");
+                    }
+                }
+                finally
+                {
+                    CloseHandle(process);
+                }
+            }
+            return matches.Count;
+        }
+
+        private int CountProcessesByPrimaryTokenSid()
+        {
+            int matches = 0;
+            foreach (string sid in EnumerateProcessPrimaryTokenSids().Values)
+            {
+                if (String.Equals(
+                        sid,
+                        supervisedSid,
+                        StringComparison.Ordinal))
+                {
+                    matches++;
+                }
+            }
+            return matches;
+        }
+
+        private static Dictionary<uint, string>
+            EnumerateProcessPrimaryTokenSids()
+        {
+            uint level = 1;
+            IntPtr buffer = IntPtr.Zero;
+            uint count;
+            if (!WTSEnumerateProcessesExW(
+                    IntPtr.Zero,
+                    ref level,
+                    WTS_ANY_SESSION,
+                    out buffer,
+                    out count))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "System-wide WTS process SID enumeration failed.");
+            }
+            if (level != 1 || (count != 0 && buffer == IntPtr.Zero))
+            {
+                if (buffer != IntPtr.Zero)
+                {
+                    WTSFreeMemoryExW(
+                        WTSTypeProcessInfoLevel1,
+                        buffer,
+                        count);
+                }
+                throw new InvalidOperationException(
+                    "System-wide WTS process SID enumeration was ambiguous.");
+            }
+
+            Exception failure = null;
+            Dictionary<uint, string> processes =
+                new Dictionary<uint, string>();
+            try
+            {
+                int size = Marshal.SizeOf(typeof(WTS_PROCESS_INFO_EXW));
+                for (uint index = 0; index < count; index++)
+                {
+                    IntPtr entry = new IntPtr(
+                        buffer.ToInt64() + checked((long)index * size));
+                    WTS_PROCESS_INFO_EXW information =
+                        (WTS_PROCESS_INFO_EXW)Marshal.PtrToStructure(
+                            entry,
+                            typeof(WTS_PROCESS_INFO_EXW));
+                    if (information.pUserSid == IntPtr.Zero)
+                    {
+                        if (information.ProcessId == 0)
+                        {
+                            continue;
+                        }
+                        throw new InvalidOperationException(
+                            "WTS process primary token SID query was ambiguous.");
+                    }
+                    string sid = ConvertNativeSidToString(
+                        information.pUserSid,
+                        "WTS process primary token SID conversion failed.");
+                    if (processes.ContainsKey(information.ProcessId))
+                    {
+                        throw new InvalidOperationException(
+                            "WTS process enumeration returned a duplicate PID.");
+                    }
+                    processes.Add(information.ProcessId, sid);
+                }
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero &&
+                    !WTSFreeMemoryExW(
+                        WTSTypeProcessInfoLevel1,
+                        buffer,
+                        count) &&
+                    failure == null)
+                {
+                    failure = new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "WTS process enumeration buffer could not be released.");
+                }
+            }
+            if (failure != null)
+            {
+                throw failure;
+            }
+            return processes;
+        }
+
+        private static string QueryProcessPrimaryTokenSid(
+            IntPtr process)
+        {
+            IntPtr token;
+            if (!OpenProcessToken(process, TOKEN_QUERY, out token))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Matching process primary token could not be opened.");
+            }
+            try
+            {
+                uint length = 0;
+                GetTokenInformation(
+                    token,
+                    TokenUser,
+                    IntPtr.Zero,
+                    0,
+                    out length);
+                if (length == 0 ||
+                    Marshal.GetLastWin32Error() != 122)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Matching process token SID length could not be queried.");
+                }
+                IntPtr buffer = Marshal.AllocHGlobal(
+                    checked((int)length));
+                try
+                {
+                    if (!GetTokenInformation(
+                            token,
+                            TokenUser,
+                            buffer,
+                            length,
+                            out length))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Matching process token SID could not be queried.");
+                    }
+                    TOKEN_USER user = (TOKEN_USER)Marshal.PtrToStructure(
+                        buffer,
+                        typeof(TOKEN_USER));
+                    if (user.User.Sid == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException(
+                            "Matching process token SID was ambiguous.");
+                    }
+                    return ConvertNativeSidToString(
+                        user.User.Sid,
+                        "Matching process token SID conversion failed.");
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+        }
+
+        private static string ConvertNativeSidToString(
+            IntPtr sid,
+            string failure)
+        {
+            IntPtr value;
+            if (!ConvertSidToStringSidW(sid, out value) ||
+                value == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    failure);
+            }
+            try
+            {
+                string result = Marshal.PtrToStringUni(value);
+                if (String.IsNullOrWhiteSpace(result))
+                {
+                    throw new InvalidOperationException(failure);
+                }
+                return result;
+            }
+            finally
+            {
+                LocalFree(value);
+            }
+        }
+
+        private void RequirePostSealIsolation(
+            WindowsIsolatedUser isolatedUser)
+        {
+            isolatedUser.RequireDisabledAndVerify();
+            int scheduledTasks = InspectScheduledTasks();
+            int bitsJobs = InspectBitsJobs();
+            int processes = CountProcessesByPrimaryTokenSid();
+            if (scheduledTasks != 0 ||
+                bitsJobs != 0 ||
+                processes != 0)
+            {
+                throw new InvalidOperationException(
+                    "Isolated persistence reappeared during or after artifact sealing.");
+            }
+        }
+
         public WindowsValidatedArtifact CaptureIsolatedArtifact(
             WindowsIsolatedUser isolatedUser,
             string sourceRoot,
@@ -1874,12 +3119,12 @@ namespace OpenCoven
             int maximumBytes)
         {
             ThrowIfDisposed();
-            RequireJobHasZeroActiveProcesses();
             if (isolatedUser == null)
             {
                 throw new ArgumentNullException("isolatedUser");
             }
             isolatedUser.ThrowIfDisposed();
+            isolatedUser.RequireEnabledForLogon();
             if (!String.Equals(
                     isolatedUser.Sid,
                     supervisedSid,
@@ -1892,7 +3137,6 @@ namespace OpenCoven
             {
                 throw new ArgumentOutOfRangeException("maximumBytes");
             }
-
             string fullRoot = Path.GetFullPath(sourceRoot);
             if (!String.Equals(
                     TrimDirectorySeparator(fullRoot),
@@ -1902,6 +3146,11 @@ namespace OpenCoven
             {
                 throw new InvalidOperationException(
                     "Artifact source root is not the isolated workspace.");
+            }
+            if (artifactBoundarySealed)
+            {
+                throw new InvalidOperationException(
+                    "The final artifact boundary has already been consumed.");
             }
             string fullSource;
             string[] segments = GetStrictDescendantSegments(
@@ -1915,6 +3164,72 @@ namespace OpenCoven
                     "Supervisor Windows user SID is unavailable.");
             }
 
+            WindowsSealedArtifactSource sealedSource = null;
+            WindowsValidatedArtifact captured = null;
+            try
+            {
+                ExecuteArtifactSecuritySequence(
+                delegate
+                {
+                    RequireJobHasZeroActiveProcesses();
+                },
+                delegate
+                {
+                    isolatedUser.DisableAndVerify();
+                },
+                delegate
+                {
+                    return CleanupScheduledTasks();
+                },
+                delegate
+                {
+                    return CleanupBitsJobs();
+                },
+                delegate
+                {
+                    return DrainProcessesByPrimaryTokenSid();
+                },
+                delegate
+                    {
+                        sealedSource = SealArtifactSource(
+                            isolatedUser,
+                            fullRoot,
+                            fullSource,
+                            segments,
+                            current.Value,
+                            maximumBytes);
+                    },
+                delegate
+                {
+                    RequirePostSealIsolation(isolatedUser);
+                },
+                delegate
+                {
+                    captured = CaptureSealedArtifact(sealedSource);
+                },
+                MaximumIsolationRounds,
+                IsolationRoundDelayMilliseconds);
+                sealedIsolatedUser = isolatedUser;
+                artifactBoundarySealed = true;
+                return captured;
+            }
+            finally
+            {
+                if (sealedSource != null)
+                {
+                    sealedSource.Dispose();
+                }
+            }
+        }
+
+        private static WindowsSealedArtifactSource SealArtifactSource(
+            WindowsIsolatedUser isolatedUser,
+            string fullRoot,
+            string fullSource,
+            string[] segments,
+            string supervisorSid,
+            int maximumBytes)
+        {
             List<IntPtr> parentHandles = new List<IntPtr>();
             IntPtr sourceHandle = IntPtr.Zero;
             try
@@ -1929,12 +3244,13 @@ namespace OpenCoven
                             currentPath,
                             segments[index - 1]);
                     }
-                    IntPtr directoryHandle = OpenArtifactDirectory(currentPath);
+                    IntPtr directoryHandle =
+                        OpenArtifactDirectoryForSeal(currentPath);
                     parentHandles.Add(directoryHandle);
                     ValidateDirectoryHandle(
                         directoryHandle,
                         isolatedUser.Sid,
-                        current.Value,
+                        supervisorSid,
                         index == 0);
                     BY_HANDLE_FILE_INFORMATION directoryInformation =
                         QueryFileInformation(
@@ -1951,21 +3267,25 @@ namespace OpenCoven
                     }
                 }
 
-                SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
+                SECURITY_ATTRIBUTES attributes =
+                NonInheritableSecurityAttributes();
                 sourceHandle = CreateFileW(
-                    fullSource,
-                    GENERIC_READ | READ_CONTROL,
-                    FILE_SHARE_READ,
-                    ref attributes,
-                    OPEN_EXISTING,
-                    FILE_FLAG_OPEN_REPARSE_POINT,
-                    IntPtr.Zero);
+                fullSource,
+                GENERIC_READ |
+                    READ_CONTROL |
+                    WRITE_DAC |
+                    WRITE_OWNER,
+                FILE_SHARE_READ,
+                ref attributes,
+                OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT,
+                IntPtr.Zero);
                 if (sourceHandle == new IntPtr(-1))
                 {
                     sourceHandle = IntPtr.Zero;
                     throw new Win32Exception(
                         Marshal.GetLastWin32Error(),
-                        "Artifact record could not be opened without following links.");
+                        "Artifact record could not be pinned for sealing.");
                 }
                 if (GetFileType(sourceHandle) != FILE_TYPE_DISK)
                 {
@@ -1973,114 +3293,292 @@ namespace OpenCoven
                         "Artifact record is not a disk file.");
                 }
                 FILE_ATTRIBUTE_TAG_INFO attributesBefore =
-                    QueryAttributeTag(
-                        sourceHandle,
-                        "Artifact record attributes could not be queried.");
-                if ((attributesBefore.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
-                    (attributesBefore.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                QueryAttributeTag(
+                    sourceHandle,
+                    "Artifact record attributes could not be queried.");
+                if ((attributesBefore.FileAttributes &
+                    (FILE_ATTRIBUTE_DIRECTORY |
+                        FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
                 {
                     throw new InvalidOperationException(
                         "Artifact record is not a non-reparse regular file.");
                 }
                 ValidateIsolatedArtifactHandleSecurity(
-                    sourceHandle,
-                    isolatedUser.Sid,
-                    current.Value,
-                    false,
-                    false);
+                sourceHandle,
+                isolatedUser.Sid,
+                supervisorSid,
+                false,
+                false);
                 BY_HANDLE_FILE_INFORMATION informationBefore =
-                    QueryFileInformation(
-                        sourceHandle,
-                        "Artifact record identity could not be queried.");
-                if (informationBefore.NumberOfLinks != 1)
-                {
-                    throw new InvalidOperationException(
-                        "Artifact record must have exactly one link.");
-                }
+                QueryFileInformation(
+                    sourceHandle,
+                    "Artifact record identity could not be queried.");
                 long length = GetFileLength(informationBefore);
-                if (length < 1 || length > maximumBytes || length > Int32.MaxValue)
+                if (informationBefore.NumberOfLinks != 1 ||
+                length < 1 ||
+                length > maximumBytes ||
+                length > Int32.MaxValue)
                 {
                     throw new InvalidOperationException(
-                        "Artifact record size is outside the trusted bound.");
+                        "Artifact record link count or size is outside the trusted bound.");
                 }
                 if (parentHandles.Count == 0 ||
-                    informationBefore.VolumeSerialNumber !=
-                        QueryFileInformation(
-                            parentHandles[0],
-                            "Artifact root identity could not be rechecked.")
-                        .VolumeSerialNumber)
+                informationBefore.VolumeSerialNumber !=
+                    QueryFileInformation(
+                        parentHandles[0],
+                        "Artifact root identity could not be rechecked.")
+                    .VolumeSerialNumber)
                 {
                     throw new InvalidOperationException(
                         "Artifact record is outside the isolated workspace volume.");
                 }
 
-                byte[] bytes = new byte[checked((int)length)];
-                SafeFileHandle safeHandle = new SafeFileHandle(sourceHandle, true);
-                sourceHandle = IntPtr.Zero;
-                using (safeHandle)
-                using (FileStream stream = new FileStream(
-                    safeHandle,
-                    FileAccess.Read,
-                    4096,
-                    false))
+                SealArtifactHandle(sourceHandle, supervisorSid, false);
+                for (int index = parentHandles.Count - 1; index >= 0; index--)
                 {
-                    int offset = 0;
-                    while (offset < bytes.Length)
-                    {
-                        int read = stream.Read(
-                            bytes,
-                            offset,
-                            bytes.Length - offset);
-                        if (read == 0)
-                        {
-                            throw new EndOfStreamException(
-                                "Artifact record ended before its validated size.");
-                        }
-                        offset += read;
-                    }
-                    if (stream.ReadByte() != -1)
-                    {
-                        throw new InvalidOperationException(
-                            "Artifact record exceeded its validated size.");
-                    }
-
-                    IntPtr stableHandle = safeHandle.DangerousGetHandle();
-                    FILE_ATTRIBUTE_TAG_INFO attributesAfter =
-                        QueryAttributeTag(
-                            stableHandle,
-                            "Artifact record attributes changed during capture.");
-                    BY_HANDLE_FILE_INFORMATION informationAfter =
-                        QueryFileInformation(
-                            stableHandle,
-                            "Artifact record identity changed during capture.");
-                    if (!SameFileIdentity(
-                            informationBefore,
-                            informationAfter) ||
-                        informationAfter.NumberOfLinks != 1 ||
-                        GetFileLength(informationAfter) != length ||
-                        attributesAfter.FileAttributes !=
-                            attributesBefore.FileAttributes ||
-                        (attributesAfter.FileAttributes &
-                            (FILE_ATTRIBUTE_DIRECTORY |
-                                FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
-                    {
-                        throw new InvalidOperationException(
-                            "Artifact record changed during handle capture.");
-                    }
+                    SealArtifactHandle(
+                        parentHandles[index],
+                        supervisorSid,
+                        true);
+                }
+                ValidateSupervisorArtifactHandleSecurity(
+                sourceHandle,
+                supervisorSid,
+                false);
+                foreach (IntPtr parentHandle in parentHandles)
+                {
+                    ValidateSupervisorArtifactHandleSecurity(
+                        parentHandle,
+                        supervisorSid,
+                        true);
                 }
 
-                return new WindowsValidatedArtifact(
-                    bytes,
-                    ComputeSha256(bytes));
+                FILE_ATTRIBUTE_TAG_INFO attributesAfter =
+                QueryAttributeTag(
+                    sourceHandle,
+                    "Sealed artifact attributes could not be rechecked.");
+                BY_HANDLE_FILE_INFORMATION informationAfter =
+                QueryFileInformation(
+                    sourceHandle,
+                    "Sealed artifact identity could not be rechecked.");
+                if (!SameFileCaptureMetadata(
+                    informationBefore,
+                    informationAfter) ||
+                attributesAfter.FileAttributes !=
+                    attributesBefore.FileAttributes)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record changed while its ACL was sealed.");
+                }
+
+                WindowsSealedArtifactSource result =
+                new WindowsSealedArtifactSource(
+                    sourceHandle,
+                    parentHandles,
+                    informationBefore,
+                    attributesBefore,
+                    checked((int)length),
+                    supervisorSid);
+                sourceHandle = IntPtr.Zero;
+                parentHandles = null;
+                return result;
             }
             finally
             {
                 CloseIfValid(sourceHandle);
-                for (int index = parentHandles.Count - 1; index >= 0; index--)
+                if (parentHandles != null)
                 {
-                    CloseIfValid(parentHandles[index]);
+                    for (int index = parentHandles.Count - 1;
+                        index >= 0;
+                        index--)
+                    {
+                        CloseIfValid(parentHandles[index]);
+                    }
                 }
             }
+        }
+
+        private static IntPtr OpenArtifactDirectoryForSeal(
+            string path)
+        {
+            SECURITY_ATTRIBUTES attributes =
+                NonInheritableSecurityAttributes();
+            IntPtr handle = CreateFileW(
+                path,
+                FILE_READ_ATTRIBUTES |
+                READ_CONTROL |
+                WRITE_DAC |
+                WRITE_OWNER,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                ref attributes,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS |
+                FILE_FLAG_OPEN_REPARSE_POINT,
+                IntPtr.Zero);
+            if (handle == new IntPtr(-1))
+            {
+                throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Artifact parent could not be pinned for sealing.");
+            }
+            return handle;
+        }
+
+        private static void SealArtifactHandle(
+            IntPtr handle,
+            string supervisorSid,
+            bool directory)
+        {
+            EnablePrivilege("SeRestorePrivilege");
+            string flags = directory ? "OICI" : String.Empty;
+            string sddl = "O:" + supervisorSid + "D:P" +
+                "(A;" + flags + ";0x001f01ff;;;SY)" +
+                "(A;" + flags + ";0x001f01ff;;;BA)" +
+                "(A;" + flags + ";0x001f01ff;;;" + supervisorSid + ")";
+            IntPtr descriptor;
+            uint descriptorLength;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl,
+                SDDL_REVISION_1,
+                out descriptor,
+                out descriptorLength))
+            {
+                throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Sealed artifact security descriptor creation failed.");
+            }
+            try
+            {
+                IntPtr owner;
+                bool ownerDefaulted;
+                bool daclPresent;
+                IntPtr dacl;
+                bool daclDefaulted;
+                if (!GetSecurityDescriptorOwner(
+                    descriptor,
+                    out owner,
+                    out ownerDefaulted) ||
+                owner == IntPtr.Zero ||
+                !GetSecurityDescriptorDacl(
+                    descriptor,
+                    out daclPresent,
+                    out dacl,
+                    out daclDefaulted) ||
+                !daclPresent ||
+                dacl == IntPtr.Zero)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Sealed artifact owner or DACL could not be read.");
+                }
+                uint status = SetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION |
+                    DACL_SECURITY_INFORMATION |
+                    PROTECTED_DACL_SECURITY_INFORMATION,
+                owner,
+                IntPtr.Zero,
+                dacl,
+                IntPtr.Zero);
+                if (status != 0)
+                {
+                    throw new Win32Exception(
+                        unchecked((int)status),
+                        "Artifact owner or DACL could not be sealed.");
+                }
+            }
+            finally
+            {
+                LocalFree(descriptor);
+            }
+        }
+
+        private static WindowsValidatedArtifact CaptureSealedArtifact(
+            WindowsSealedArtifactSource source)
+        {
+            if (source == null)
+            {
+                throw new InvalidOperationException(
+                "Sealed artifact source is unavailable.");
+            }
+            byte[] bytes = new byte[source.Length];
+            IntPtr handle = source.TakeSourceHandle();
+            using (SafeFileHandle safeHandle =
+                new SafeFileHandle(handle, true))
+            using (FileStream stream = new FileStream(
+                safeHandle,
+                FileAccess.Read,
+                4096,
+                false))
+            {
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int read = stream.Read(
+                        bytes,
+                        offset,
+                        bytes.Length - offset);
+                    if (read == 0)
+                    {
+                        throw new EndOfStreamException(
+                            "Artifact record ended before its sealed size.");
+                    }
+                    offset += read;
+                }
+                if (stream.ReadByte() != -1)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record exceeded its sealed size.");
+                }
+
+                IntPtr stableHandle = safeHandle.DangerousGetHandle();
+                ValidateSupervisorArtifactHandleSecurity(
+                stableHandle,
+                source.SupervisorSid,
+                false);
+                FILE_ATTRIBUTE_TAG_INFO attributesAfter =
+                QueryAttributeTag(
+                    stableHandle,
+                    "Artifact record attributes changed during capture.");
+                BY_HANDLE_FILE_INFORMATION informationAfter =
+                QueryFileInformation(
+                    stableHandle,
+                    "Artifact record identity changed during capture.");
+                if (!SameFileCaptureMetadata(
+                    source.Information,
+                    informationAfter) ||
+                attributesAfter.FileAttributes !=
+                    source.Attributes.FileAttributes ||
+                (attributesAfter.FileAttributes &
+                    (FILE_ATTRIBUTE_DIRECTORY |
+                        FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Artifact record changed during sealed handle capture.");
+                }
+            }
+            return new WindowsValidatedArtifact(
+                bytes,
+                ComputeSha256(bytes));
+        }
+
+        private static bool SameFileCaptureMetadata(
+            BY_HANDLE_FILE_INFORMATION left,
+            BY_HANDLE_FILE_INFORMATION right)
+        {
+            return SameFileIdentity(left, right) &&
+                left.NumberOfLinks == right.NumberOfLinks &&
+                left.FileSizeHigh == right.FileSizeHigh &&
+                left.FileSizeLow == right.FileSizeLow &&
+                left.CreationTime.LowDateTime ==
+                right.CreationTime.LowDateTime &&
+                left.CreationTime.HighDateTime ==
+                right.CreationTime.HighDateTime &&
+                left.LastWriteTime.LowDateTime ==
+                right.LastWriteTime.LowDateTime &&
+                left.LastWriteTime.HighDateTime ==
+                right.LastWriteTime.HighDateTime;
         }
 
         public static void RequireCanonicalSchemaV2Artifact(
@@ -2153,6 +3651,13 @@ namespace OpenCoven
         {
             ThrowIfDisposed();
             RequireJobHasZeroActiveProcesses();
+            if (!artifactBoundarySealed ||
+                sealedIsolatedUser == null)
+            {
+                throw new InvalidOperationException(
+                    "Artifact publication requires a sealed isolated boundary.");
+            }
+            RequirePostSealIsolation(sealedIsolatedUser);
             if (artifact == null)
             {
                 throw new ArgumentNullException("artifact");
@@ -2330,6 +3835,7 @@ namespace OpenCoven
                             "Protected artifact changed during publication.");
                     }
                 }
+                RequirePostSealIsolation(sealedIsolatedUser);
             }
             finally
             {
@@ -3071,6 +4577,7 @@ namespace OpenCoven
                 throw new ArgumentNullException("isolatedUser");
             }
             isolatedUser.ThrowIfDisposed();
+            isolatedUser.RequireEnabledForLogon();
             if (!String.Equals(
                     isolatedUser.Sid,
                     supervisedSid,
@@ -3781,6 +5288,177 @@ namespace OpenCoven
             internal string Text;
         }
 
+        private sealed class ScheduledTaskReference
+        {
+            internal string FolderPath;
+            internal string Name;
+            internal string Path;
+        }
+
+        private sealed class WindowsSealedArtifactSource : IDisposable
+        {
+            private IntPtr sourceHandle;
+            private List<IntPtr> parentHandles;
+
+            internal WindowsSealedArtifactSource(
+                IntPtr source,
+                List<IntPtr> parents,
+                BY_HANDLE_FILE_INFORMATION information,
+                FILE_ATTRIBUTE_TAG_INFO attributes,
+                int length,
+                string supervisorSid)
+            {
+                sourceHandle = source;
+                parentHandles = parents;
+                Information = information;
+                Attributes = attributes;
+                Length = length;
+                SupervisorSid = supervisorSid;
+            }
+
+            internal BY_HANDLE_FILE_INFORMATION Information;
+            internal FILE_ATTRIBUTE_TAG_INFO Attributes;
+            internal int Length;
+            internal string SupervisorSid;
+
+            internal IntPtr TakeSourceHandle()
+            {
+                IntPtr handle = sourceHandle;
+                sourceHandle = IntPtr.Zero;
+                if (handle == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        "Sealed artifact source handle was already consumed.");
+                }
+                return handle;
+            }
+
+            public void Dispose()
+            {
+                CloseIfValid(sourceHandle);
+                sourceHandle = IntPtr.Zero;
+                if (parentHandles != null)
+                {
+                    for (int index = parentHandles.Count - 1;
+                        index >= 0;
+                        index--)
+                    {
+                        CloseIfValid(parentHandles[index]);
+                    }
+                    parentHandles = null;
+                }
+            }
+        }
+
+        [ComImport]
+        [Guid("4991D34B-80A1-4291-83B6-3328366B9097")]
+        private class BackgroundCopyManager
+        {
+        }
+
+        [ComImport]
+        [Guid("5CE34C0D-0DC9-4C1F-897C-DAA1B78CEE7C")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IBackgroundCopyManager
+        {
+            [PreserveSig]
+            int CreateJob(
+                [MarshalAs(UnmanagedType.LPWStr)] string displayName,
+                uint type,
+                out Guid jobId,
+                out IBackgroundCopyJob job);
+
+            [PreserveSig]
+            int GetJob(
+                ref Guid jobId,
+                out IBackgroundCopyJob job);
+
+            [PreserveSig]
+            int EnumJobs(
+                uint flags,
+                out IEnumBackgroundCopyJobs jobs);
+
+            [PreserveSig]
+            int GetErrorDescription(
+                int result,
+                uint languageId,
+                out IntPtr description);
+        }
+
+        [ComImport]
+        [Guid("1AF4F612-3B71-466F-8F58-7B6F73AC57AD")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IEnumBackgroundCopyJobs
+        {
+            [PreserveSig]
+            int Next(
+                uint count,
+                out IBackgroundCopyJob job,
+                out uint fetched);
+
+            [PreserveSig]
+            int Skip(uint count);
+
+            [PreserveSig]
+            int Reset();
+
+            [PreserveSig]
+            int Clone(out IEnumBackgroundCopyJobs jobs);
+
+            [PreserveSig]
+            int GetCount(out uint count);
+        }
+
+        [ComImport]
+        [Guid("37668D37-507E-4160-9316-26306D150B12")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IBackgroundCopyJob
+        {
+            [PreserveSig]
+            int AddFileSet(uint count, IntPtr fileSet);
+
+            [PreserveSig]
+            int AddFile(
+                [MarshalAs(UnmanagedType.LPWStr)] string remoteUrl,
+                [MarshalAs(UnmanagedType.LPWStr)] string localName);
+
+            [PreserveSig]
+            int EnumFiles(out IntPtr files);
+
+            [PreserveSig]
+            int Suspend();
+
+            [PreserveSig]
+            int Resume();
+
+            [PreserveSig]
+            int Cancel();
+
+            [PreserveSig]
+            int Complete();
+
+            [PreserveSig]
+            int GetId(out Guid jobId);
+
+            [PreserveSig]
+            int GetType(out uint type);
+
+            [PreserveSig]
+            int GetProgress(out BG_JOB_PROGRESS progress);
+
+            [PreserveSig]
+            int GetTimes(out BG_JOB_TIMES times);
+
+            [PreserveSig]
+            int GetState(out uint state);
+
+            [PreserveSig]
+            int GetError(out IntPtr error);
+
+            [PreserveSig]
+            int GetOwner(out IntPtr owner);
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         private struct SECURITY_ATTRIBUTES
         {
@@ -3925,6 +5603,53 @@ namespace OpenCoven
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct BG_JOB_PROGRESS
+        {
+            internal ulong BytesTotal;
+            internal ulong BytesTransferred;
+            internal uint FilesTotal;
+            internal uint FilesTransferred;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BG_JOB_TIMES
+        {
+            internal NATIVE_FILETIME CreationTime;
+            internal NATIVE_FILETIME ModificationTime;
+            internal NATIVE_FILETIME TransferCompletionTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SID_AND_ATTRIBUTES
+        {
+            internal IntPtr Sid;
+            internal uint Attributes;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_USER
+        {
+            internal SID_AND_ATTRIBUTES User;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WTS_PROCESS_INFO_EXW
+        {
+            internal uint SessionId;
+            internal uint ProcessId;
+            internal IntPtr pProcessName;
+            internal IntPtr pUserSid;
+            internal uint NumberOfThreads;
+            internal uint HandleCount;
+            internal uint PagefileUsage;
+            internal uint PeakPagefileUsage;
+            internal uint WorkingSetSize;
+            internal uint PeakWorkingSetSize;
+            internal long UserTime;
+            internal long KernelTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct BY_HANDLE_FILE_INFORMATION
         {
             internal uint FileAttributes;
@@ -3957,6 +5682,12 @@ namespace OpenCoven
         private static extern bool ConvertStringSidToSidW(
             string stringSid,
             out IntPtr sid);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertSidToStringSidW(
+            IntPtr sid,
+            out IntPtr stringSid);
 
         [DllImport("advapi32.dll")]
         private static extern uint GetSecurityInfo(
@@ -4013,6 +5744,21 @@ namespace OpenCoven
 
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorOwner(
+            IntPtr securityDescriptor,
+            out IntPtr owner,
+            [MarshalAs(UnmanagedType.Bool)] out bool ownerDefaulted);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorDacl(
+            IntPtr securityDescriptor,
+            [MarshalAs(UnmanagedType.Bool)] out bool daclPresent,
+            out IntPtr dacl,
+            [MarshalAs(UnmanagedType.Bool)] out bool daclDefaulted);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetAclInformation(
             IntPtr acl,
             out ACL_SIZE_INFORMATION information,
@@ -4040,6 +5786,15 @@ namespace OpenCoven
             IntPtr process,
             uint desiredAccess,
             out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetTokenInformation(
+            IntPtr token,
+            int tokenInformationClass,
+            IntPtr tokenInformation,
+            uint tokenInformationLength,
+            out uint returnLength);
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -4205,6 +5960,22 @@ namespace OpenCoven
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool RemoveDirectoryW(string pathName);
+
+        [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool WTSEnumerateProcessesExW(
+            IntPtr server,
+            ref uint level,
+            uint sessionId,
+            out IntPtr processInfo,
+            out uint count);
+
+        [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool WTSFreeMemoryExW(
+            int typeClass,
+            IntPtr memory,
+            uint count);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

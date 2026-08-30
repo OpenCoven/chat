@@ -71,6 +71,154 @@ if (
   throw 'CreateProcessWithLogonW parameter names or types changed.'
 }
 
+$artifactSequence = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ExecuteArtifactSecuritySequence',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $artifactSequence) {
+  throw 'The fail-closed artifact security sequence is missing.'
+}
+
+function Invoke-ArtifactSequenceProbe {
+  param(
+    [Parameter(Mandatory)][Collections.Generic.List[string]]$Steps,
+    [Parameter(Mandatory)][Action]$DisableAccount,
+    [Parameter(Mandatory)][Func[int]]$CleanupScheduledTasks,
+    [Parameter(Mandatory)][Func[int]]$CleanupBitsJobs,
+    [Parameter(Mandatory)][Func[int]]$DrainProcesses,
+    [Parameter(Mandatory)][Action]$SealArtifact,
+    [int]$MaximumRounds = 4
+  )
+
+  $artifactSequence.Invoke(
+    $null,
+    [object[]]@(
+      [Action]{ $Steps.Add('job-zero') },
+      $DisableAccount,
+      $CleanupScheduledTasks,
+      $CleanupBitsJobs,
+      $DrainProcesses,
+      $SealArtifact,
+      [Action]{ $Steps.Add('post-seal') },
+      [Action]{ $Steps.Add('capture') },
+      $MaximumRounds,
+      0
+    )
+  )
+}
+
+$orderedSteps = [Collections.Generic.List[string]]::new()
+Invoke-ArtifactSequenceProbe `
+  -Steps $orderedSteps `
+  -DisableAccount ([Action]{ $orderedSteps.Add('disable') }) `
+  -CleanupScheduledTasks ([Func[int]]{
+    $orderedSteps.Add('scheduler')
+    return 0
+  }) `
+  -CleanupBitsJobs ([Func[int]]{
+    $orderedSteps.Add('bits')
+    return 0
+  }) `
+  -DrainProcesses ([Func[int]]{
+    $orderedSteps.Add('processes')
+    return 0
+  }) `
+  -SealArtifact ([Action]{ $orderedSteps.Add('seal') })
+$expectedOrder = @(
+  'job-zero',
+  'disable',
+  'scheduler', 'bits', 'processes',
+  'scheduler', 'bits', 'processes',
+  'scheduler', 'bits', 'processes',
+  'seal',
+  'post-seal',
+  'capture',
+  'post-seal'
+)
+if ([string]::Join(',', $orderedSteps) -cne [string]::Join(',', $expectedOrder)) {
+  throw 'Artifact security ordering guard changed.'
+}
+
+function Assert-ArtifactSequenceFailure {
+  param(
+    [Parameter(Mandatory)][string]$Failure,
+    [Parameter(Mandatory)][Action]$DisableAccount,
+    [Parameter(Mandatory)][Func[int]]$CleanupScheduledTasks,
+    [Parameter(Mandatory)][Func[int]]$CleanupBitsJobs,
+    [Parameter(Mandatory)][Func[int]]$DrainProcesses,
+    [Parameter(Mandatory)][Action]$SealArtifact,
+    [int]$MaximumRounds = 4
+  )
+
+  $steps = [Collections.Generic.List[string]]::new()
+  $failed = $false
+  try {
+    Invoke-ArtifactSequenceProbe `
+      -Steps $steps `
+      -DisableAccount $DisableAccount `
+      -CleanupScheduledTasks $CleanupScheduledTasks `
+      -CleanupBitsJobs $CleanupBitsJobs `
+      -DrainProcesses $DrainProcesses `
+      -SealArtifact $SealArtifact `
+      -MaximumRounds $MaximumRounds
+  } catch {
+    $failed = $true
+  }
+  if (-not $failed -or $steps.Contains('capture')) {
+    throw $Failure
+  }
+}
+
+Assert-ArtifactSequenceFailure `
+  -Failure 'Account-disable verification failure did not fail closed.' `
+  -DisableAccount ([Action]{ throw 'account disable verification failed' }) `
+  -CleanupScheduledTasks ([Func[int]]{ 0 }) `
+  -CleanupBitsJobs ([Func[int]]{ 0 }) `
+  -DrainProcesses ([Func[int]]{ 0 }) `
+  -SealArtifact ([Action]{})
+Assert-ArtifactSequenceFailure `
+  -Failure 'Task Scheduler enumeration failure did not fail closed.' `
+  -DisableAccount ([Action]{}) `
+  -CleanupScheduledTasks ([Func[int]]{ throw 'scheduler enumeration failed' }) `
+  -CleanupBitsJobs ([Func[int]]{ 0 }) `
+  -DrainProcesses ([Func[int]]{ 0 }) `
+  -SealArtifact ([Action]{})
+Assert-ArtifactSequenceFailure `
+  -Failure 'BITS enumeration failure did not fail closed.' `
+  -DisableAccount ([Action]{}) `
+  -CleanupScheduledTasks ([Func[int]]{ 0 }) `
+  -CleanupBitsJobs ([Func[int]]{ throw 'BITS enumeration failed' }) `
+  -DrainProcesses ([Func[int]]{ 0 }) `
+  -SealArtifact ([Action]{})
+foreach ($processFailure in @(
+  'WTS process enumeration failure did not fail closed.',
+  'Matching process access failure did not fail closed.',
+  'Matching process termination failure did not fail closed.'
+)) {
+  Assert-ArtifactSequenceFailure `
+    -Failure $processFailure `
+    -DisableAccount ([Action]{}) `
+    -CleanupScheduledTasks ([Func[int]]{ 0 }) `
+    -CleanupBitsJobs ([Func[int]]{ 0 }) `
+    -DrainProcesses ([Func[int]]{ throw $processFailure }) `
+    -SealArtifact ([Action]{})
+}
+Assert-ArtifactSequenceFailure `
+  -Failure 'Unstable SID-wide process drain did not fail closed.' `
+  -DisableAccount ([Action]{}) `
+  -CleanupScheduledTasks ([Func[int]]{ 0 }) `
+  -CleanupBitsJobs ([Func[int]]{ 0 }) `
+  -DrainProcesses ([Func[int]]{ 1 }) `
+  -SealArtifact ([Action]{}) `
+  -MaximumRounds 3
+Assert-ArtifactSequenceFailure `
+  -Failure 'Artifact ACL sealing failure did not fail closed.' `
+  -DisableAccount ([Action]{}) `
+  -CleanupScheduledTasks ([Func[int]]{ 0 }) `
+  -CleanupBitsJobs ([Func[int]]{ 0 }) `
+  -DrainProcesses ([Func[int]]{ 0 }) `
+  -SealArtifact ([Action]{ throw 'ACL sealing failed' })
+
 function Assert-ProcessExited {
   param([Parameter(Mandatory)][int]$ProcessId)
 
@@ -110,6 +258,37 @@ $childEnvironment = @{
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
   OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE = $sourcePath
 }
+
+function New-IsolatedTestContext {
+  param([Parameter(Mandatory)][string]$Label)
+
+  $contextRoot = Join-Path (
+    [IO.Path]::GetTempPath()
+  ) "opencoven-$Label-$PID-$([Guid]::NewGuid().ToString('N'))"
+  $contextUser = [OpenCoven.WindowsIsolatedUser]::Create($contextRoot)
+  $contextEnvironment = $childEnvironment.Clone()
+  $contextEnvironment.HOME = $contextUser.ProfilePath
+  $contextEnvironment.USERPROFILE = $contextUser.ProfilePath
+  $contextEnvironment.APPDATA = Join-Path $contextUser.ProfilePath 'AppData\Roaming'
+  $contextEnvironment.LOCALAPPDATA = Join-Path $contextUser.ProfilePath 'AppData\Local'
+  $contextEnvironment.TEMP = $contextUser.TempPath
+  $contextEnvironment.TMP = $contextUser.TempPath
+  $contextEnvironment.GITHUB_WORKSPACE = $contextUser.WorkspacePath
+  $contextEnvironment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $contextUser.RootPath
+  return [pscustomobject]@{
+    User = $contextUser
+    Environment = $contextEnvironment
+  }
+}
+
+function Remove-IsolatedTestContext {
+  param([Parameter(Mandatory)]$Context)
+
+  if ($null -ne $Context.User) {
+    $Context.User.Dispose()
+  }
+}
+
 try {
   [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
   [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
@@ -320,6 +499,52 @@ try {
 if (-not `$operatorDenied) {
   throw 'Restricted identity accessed supervisor-private credential root.'
 }
+`$serviceName = `$env:OPENCOVEN_DENIAL_SERVICE_NAME
+`$sc = Join-Path `$env:SystemRoot 'System32\sc.exe'
+& `$sc create `$serviceName "binPath= `$env:COMSPEC /d /c exit 0" start= demand *>&1 |
+  Out-Null
+`$serviceCreateExit = `$LASTEXITCODE
+if (`$serviceCreateExit -eq 0) {
+  & `$sc delete `$serviceName *>&1 | Out-Null
+  throw 'Service creation unexpectedly succeeded for the restricted identity.'
+}
+& `$sc query `$serviceName *>&1 | Out-Null
+if (`$LASTEXITCODE -eq 0) {
+  throw 'Denied service creation left a registered service.'
+}
+
+`$filterName = `$env:OPENCOVEN_DENIAL_WMI_FILTER_NAME
+`$wmiDenied = `$false
+`$createdFilter = `$null
+try {
+  `$createdFilter = New-CimInstance `
+    -Namespace 'root/subscription' `
+    -ClassName '__EventFilter' `
+    -Property @{
+      Name = `$filterName
+      EventNamespace = 'root/cimv2'
+      QueryLanguage = 'WQL'
+      Query = 'SELECT * FROM Win32_ProcessStartTrace'
+    }
+} catch {
+  if (
+    `$_.CategoryInfo.Category -eq
+      [Management.Automation.ErrorCategory]::PermissionDenied -or
+    `$_.Exception -is [UnauthorizedAccessException] -or
+    `$_.Exception.InnerException -is [UnauthorizedAccessException]
+  ) {
+    `$wmiDenied = `$true
+  } else {
+    throw
+  }
+}
+if (`$null -ne `$createdFilter) {
+  `$createdFilter | Remove-CimInstance
+  throw 'Permanent WMI subscription creation unexpectedly succeeded.'
+}
+if (-not `$wmiDenied) {
+  throw 'Permanent WMI subscription denial was ambiguous.'
+}
 "@,
     [Text.UTF8Encoding]::new($false)
   )
@@ -327,6 +552,10 @@ if (-not `$operatorDenied) {
     "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment = $childEnvironment.Clone()
   $accessEnvironment.OPENCOVEN_ACCESS_PROBE_JOB = $accessJobName
+  $accessEnvironment.OPENCOVEN_DENIAL_SERVICE_NAME =
+    "OpenCovenSupervisorTest$([Guid]::NewGuid().ToString('N'))"
+  $accessEnvironment.OPENCOVEN_DENIAL_WMI_FILTER_NAME =
+    "OpenCovenSupervisorTest$([Guid]::NewGuid().ToString('N'))"
   $accessJob = [OpenCoven.WindowsJobSupervisor]::Create($accessJobName, $isolatedUser)
   try {
     $accessResult = $accessJob.RunAsUser(
@@ -666,14 +895,21 @@ try {
       [Parameter(Mandatory)][string]$Failure
     )
 
+    $context = New-IsolatedTestContext -Label "live-root-$Label"
     $caseRoot = Join-Path (
-      $isolatedUser.WorkspacePath
+      $context.User.WorkspacePath
     ) "live-root-$Label-$([Guid]::NewGuid().ToString('N'))"
     $recordPath = Join-Path $caseRoot '.artifacts\record.json'
     $completePath = Join-Path $caseRoot 'attack-complete.txt'
-    $environment = $childEnvironment.Clone()
-    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE = $rootProcessAttackSource
-    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SCRIPT = $rootProcessAttackScript
+    $contextAttackSource = Join-Path $context.User.RootPath 'root-process-attack.cs'
+    $contextAttackScript = Join-Path $context.User.RootPath 'root-process-attack.ps1'
+    $contextLiveRootScript = Join-Path $context.User.RootPath 'live-root.ps1'
+    [IO.File]::Copy($rootProcessAttackSource, $contextAttackSource)
+    [IO.File]::Copy($rootProcessAttackScript, $contextAttackScript)
+    [IO.File]::Copy($liveRootScript, $contextLiveRootScript)
+    $environment = $context.Environment.Clone()
+    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SOURCE = $contextAttackSource
+    $environment.OPENCOVEN_ROOT_PROCESS_ATTACK_SCRIPT = $contextAttackScript
     $environment.OPENCOVEN_ROOT_ARTIFACT_PATH = $recordPath
     $environment.OPENCOVEN_ROOT_ARTIFACT_ATTACK = $Attack
     $environment.OPENCOVEN_ROOT_TRUSTED_TEXT = $liveRootTrustedText
@@ -683,14 +919,14 @@ try {
     $environment.OPENCOVEN_ROOT_ATTACK_STDERR = Join-Path $caseRoot 'attack.stderr'
     $job = [OpenCoven.WindowsJobSupervisor]::Create(
       "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
-      $isolatedUser
+      $context.User
     )
     try {
       $result = $job.RunAsUser(
-        $isolatedUser,
+        $context.User,
         $trustedPwsh,
-        "-NoLogo -NoProfile -NonInteractive -File `"$liveRootScript`"",
-        $isolatedUser.RootPath,
+        "-NoLogo -NoProfile -NonInteractive -File `"$contextLiveRootScript`"",
+        $context.User.RootPath,
         $environment,
         [TimeSpan]::FromSeconds(30),
         1MB,
@@ -700,8 +936,8 @@ try {
         throw "Protected root process did not execute normally: $($result.Stderr)"
       }
       $artifact = $job.CaptureIsolatedArtifact(
-        $isolatedUser,
-        $isolatedUser.WorkspacePath,
+        $context.User,
+        $context.User.WorkspacePath,
         $recordPath,
         1MB
       )
@@ -718,6 +954,7 @@ try {
       )
     } finally {
       $job.Dispose()
+      Remove-IsolatedTestContext -Context $context
     }
   }
 
@@ -895,38 +1132,74 @@ try {
     [Security.Cryptography.SHA256]::HashData($expectedHandoffBytes)
   ).ToLowerInvariant()
 
+  $freshValidationEnvironment = $childEnvironment.Clone()
+  $freshValidationEnvironment.OPENCOVEN_EXPECTED_RECORD_SHA256 =
+    $expectedHandoffDigest
+  $freshValidationJob = [OpenCoven.WindowsJobSupervisor]::Create(
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
+  )
+  try {
+    $freshValidationResult = $freshValidationJob.RunAsUserWithStandardInput(
+      $isolatedUser,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$handoffValidatorScript`"",
+      $isolatedUser.RootPath,
+      $freshValidationEnvironment,
+      [TimeSpan]::FromSeconds(30),
+      1MB,
+      1MB,
+      $expectedHandoffBytes
+    )
+    if (
+      $freshValidationResult.ExitCode -ne 0 -or
+      $freshValidationResult.Stdout.Length -ne 0 -or
+      $freshValidationResult.Stderr.Length -ne 0
+    ) {
+      throw 'Fresh unprivileged handle-captured record validation failed.'
+    }
+  } finally {
+    $freshValidationJob.Dispose()
+  }
+
   function Invoke-HandoffProducer {
     param(
       [Parameter(Mandatory)][string]$Label,
       [Parameter(Mandatory)][string]$Attack
     )
 
+    $context = New-IsolatedTestContext -Label "handoff-$Label"
     $caseRoot = Join-Path (
-      $isolatedUser.WorkspacePath
+      $context.User.WorkspacePath
     ) "handoff-$Label-$([Guid]::NewGuid().ToString('N'))"
     $recordPath = Join-Path $caseRoot '.artifacts\record.json'
-    $scriptPath = Join-Path $root "handoff-$Label.ps1"
+    $contextAttackSource = Join-Path $context.User.RootPath 'artifact-handoff-attack.cs'
+    $contextReplacementScript =
+      Join-Path $context.User.RootPath 'artifact-handoff-replacement.ps1'
+    $scriptPath = Join-Path $context.User.RootPath "handoff-$Label.ps1"
+    [IO.File]::Copy($handoffAttackSource, $contextAttackSource)
+    [IO.File]::Copy($handoffReplacementScript, $contextReplacementScript)
     [IO.File]::WriteAllText(
       $scriptPath,
       $handoffProducerTemplate,
       [Text.UTF8Encoding]::new($false)
     )
-    $environment = $childEnvironment.Clone()
+    $environment = $context.Environment.Clone()
     $environment.OPENCOVEN_HANDOFF_ATTACK = $Attack
-    $environment.OPENCOVEN_HANDOFF_ATTACK_SOURCE = $handoffAttackSource
+    $environment.OPENCOVEN_HANDOFF_ATTACK_SOURCE = $contextAttackSource
     $environment.OPENCOVEN_HANDOFF_CANARY = $handoffCanary
     $environment.OPENCOVEN_HANDOFF_RECORD = $recordPath
-    $environment.OPENCOVEN_HANDOFF_REPLACEMENT_SCRIPT = $handoffReplacementScript
+    $environment.OPENCOVEN_HANDOFF_REPLACEMENT_SCRIPT = $contextReplacementScript
     $job = [OpenCoven.WindowsJobSupervisor]::Create(
       "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
-      $isolatedUser
+      $context.User
     )
     try {
       $result = $job.RunAsUser(
-        $isolatedUser,
+        $context.User,
         $trustedPwsh,
         "-NoLogo -NoProfile -NonInteractive -File `"$scriptPath`"",
-        $isolatedUser.RootPath,
+        $context.User.RootPath,
         $environment,
         [TimeSpan]::FromSeconds(30),
         1MB,
@@ -936,11 +1209,14 @@ try {
         throw "Artifact handoff producer '$Label' failed."
       }
       return [pscustomobject]@{
+        Context = $context
         Job = $job
         RecordPath = $recordPath
+        AttackSource = $contextAttackSource
       }
     } catch {
       $job.Dispose()
+      Remove-IsolatedTestContext -Context $context
       throw
     }
   }
@@ -954,8 +1230,8 @@ try {
     $rejected = $false
     try {
       $Case.Job.CaptureIsolatedArtifact(
-        $isolatedUser,
-        $isolatedUser.WorkspacePath,
+        $Case.Context.User,
+        $Case.Context.User.WorkspacePath,
         $Case.RecordPath,
         1MB
       ) | Out-Null
@@ -966,6 +1242,7 @@ try {
       }
     } finally {
       $Case.Job.Dispose()
+      Remove-IsolatedTestContext -Context $Case.Context
     }
     if (-not $rejected) {
       throw $Failure
@@ -975,8 +1252,8 @@ try {
   $successCase = Invoke-HandoffProducer -Label 'success' -Attack 'none'
   try {
     $validatedArtifact = $successCase.Job.CaptureIsolatedArtifact(
-      $isolatedUser,
-      $isolatedUser.WorkspacePath,
+      $successCase.Context.User,
+      $successCase.Context.User.WorkspacePath,
       $successCase.RecordPath,
       1MB
     )
@@ -986,23 +1263,11 @@ try {
     ) {
       throw 'Valid artifact handoff changed captured bytes.'
     }
-    $validationEnvironment = $childEnvironment.Clone()
-    $validationEnvironment.OPENCOVEN_EXPECTED_RECORD_SHA256 =
-      $validatedArtifact.Sha256
-    $validationResult = $successCase.Job.RunAsUserWithStandardInput(
-      $isolatedUser,
-      $trustedPwsh,
-      "-NoLogo -NoProfile -NonInteractive -File `"$handoffValidatorScript`"",
-      $isolatedUser.RootPath,
-      $validationEnvironment,
-      [TimeSpan]::FromSeconds(30),
-      1MB,
-      1MB,
-      $validatedArtifact.Bytes
+    [OpenCoven.WindowsJobSupervisor]::RequireCanonicalSchemaV2Artifact(
+      $validatedArtifact.Bytes,
+      $validatedArtifact.Sha256,
+      'win32-x64'
     )
-    if ($validationResult.ExitCode -ne 0) {
-      throw 'Fresh unprivileged handle-captured record validation failed.'
-    }
     $handoffOutputRoot = Join-Path $operatorPrivateRoot 'handoff-output'
     [IO.Directory]::CreateDirectory($handoffOutputRoot) | Out-Null
     [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory(
@@ -1025,6 +1290,7 @@ try {
     }
   } finally {
     $successCase.Job.Dispose()
+    Remove-IsolatedTestContext -Context $successCase.Context
   }
 
   Assert-HandoffRejected `
@@ -1120,8 +1386,8 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     }
     try {
       $raceArtifact = $raceCase.Job.CaptureIsolatedArtifact(
-        $isolatedUser,
-        $isolatedUser.WorkspacePath,
+        $raceCase.Context.User,
+        $raceCase.Context.User.WorkspacePath,
         $raceCase.RecordPath,
         1MB
       )
@@ -1148,6 +1414,553 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     }
     $raceProcess.Dispose()
     $raceCase.Job.Dispose()
+    Remove-IsolatedTestContext -Context $raceCase.Context
+  }
+
+  $serviceEscapeContext = New-IsolatedTestContext -Label 'service-escape'
+  $serviceEscapeJob = $null
+  $lateRegistrarPid = 0
+  try {
+    $serviceEscapeName =
+      "OpenCoven-ServiceEscape-$([Guid]::NewGuid().ToString('N'))"
+    $lateTaskName =
+      "OpenCoven-LateEscape-$([Guid]::NewGuid().ToString('N'))"
+    $bitsName =
+      "OpenCoven-BitsEscape-$([Guid]::NewGuid().ToString('N'))"
+    $serviceEscapeCaseRoot = Join-Path `
+      $serviceEscapeContext.User.WorkspacePath `
+      'service-escape'
+    $serviceEscapeRecord = Join-Path `
+      $serviceEscapeCaseRoot `
+      '.artifacts\record.json'
+    $serviceEscapeActionMarker = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'task-action-ran.txt'
+    $lateRegistrarReady = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'late-registrar-ready.txt'
+    $lateRegistrationMarker = Join-Path `
+      $serviceEscapeContext.User.TempPath `
+      'late-task-registered.txt'
+    $serviceEscapeTrustedText =
+      '{' + "`n" +
+        '  "platform": "win32-x64",' + "`n" +
+        '  "schemaVersion": 2,' + "`n" +
+        '  "serviceEscape": "blocked"' + "`n" +
+      '}' + "`n"
+    $serviceEscapeForgedText =
+      '{' + "`n" +
+        '  "platform": "win32-x64",' + "`n" +
+        '  "schemaVersion": 2,' + "`n" +
+        '  "serviceEscape": "rewritten"' + "`n" +
+      '}' + "`n"
+    $serviceEscapeTrustedBytes =
+      [Text.UTF8Encoding]::new($false).GetBytes($serviceEscapeTrustedText)
+    $serviceEscapeTrustedBase64 =
+      [Convert]::ToBase64String($serviceEscapeTrustedBytes)
+    $serviceEscapeForgedBase64 = [Convert]::ToBase64String(
+      [Text.UTF8Encoding]::new($false).GetBytes($serviceEscapeForgedText)
+    )
+    $serviceEscapeTrustedDigest = [Convert]::ToHexString(
+      [Security.Cryptography.SHA256]::HashData($serviceEscapeTrustedBytes)
+    ).ToLowerInvariant()
+
+    $taskActionScript = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'task-action.ps1'
+    [IO.File]::WriteAllText(
+      $taskActionScript,
+      @'
+param(
+  [Parameter(Mandatory)][string]$Record,
+  [Parameter(Mandatory)][string]$Marker,
+  [Parameter(Mandatory)][string]$ForgedBase64
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Start-Sleep -Seconds 20
+[IO.File]::WriteAllBytes($Record, [Convert]::FromBase64String($ForgedBase64))
+[IO.File]::WriteAllText($Marker, 'ran', [Text.UTF8Encoding]::new($false))
+'@,
+      [Text.UTF8Encoding]::new($false)
+    )
+
+    $taskHelperScript = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'register-task.ps1'
+    [IO.File]::WriteAllText(
+      $taskHelperScript,
+      @'
+function Register-IsolatedInteractiveTask {
+  param(
+    [Parameter(Mandatory)][string]$TaskName,
+    [Parameter(Mandatory)][string]$PowerShellPath,
+    [Parameter(Mandatory)][string]$ActionScript,
+    [Parameter(Mandatory)][string]$Record,
+    [Parameter(Mandatory)][string]$Marker,
+    [Parameter(Mandatory)][string]$ForgedBase64,
+    [Parameter(Mandatory)][string]$UserId,
+    [Parameter(Mandatory)][int]$DelaySeconds
+  )
+
+  $service = New-Object -ComObject 'Schedule.Service'
+  $service.Connect()
+  $folder = $service.GetFolder('\')
+  $definition = $service.NewTask(0)
+  $definition.RegistrationInfo.URI = "\$TaskName"
+  $definition.RegistrationInfo.Source = 'OpenCoven Windows supervisor runtime test'
+  $definition.Principal.UserId = $UserId
+  $definition.Principal.LogonType = 3
+  $definition.Principal.RunLevel = 0
+  $definition.Settings.Enabled = $true
+  $definition.Settings.Hidden = $true
+  $definition.Settings.StartWhenAvailable = $true
+  $definition.Settings.ExecutionTimeLimit = 'PT2M'
+  $trigger = $definition.Triggers.Create(1)
+  $trigger.StartBoundary = (Get-Date).AddSeconds($DelaySeconds).ToString(
+    'yyyy-MM-ddTHH:mm:ss'
+  )
+  $trigger.Enabled = $true
+  $action = $definition.Actions.Create(0)
+  $action.Path = $PowerShellPath
+  $action.Arguments = @(
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-File',
+    "`"$ActionScript`"",
+    '-Record',
+    "`"$Record`"",
+    '-Marker',
+    "`"$Marker`"",
+    '-ForgedBase64',
+    $ForgedBase64
+  ) -join ' '
+  $action.WorkingDirectory = [IO.Directory]::GetParent($ActionScript).FullName
+  $folder.RegisterTaskDefinition(
+    $TaskName,
+    $definition,
+    6,
+    $null,
+    $null,
+    3,
+    $null
+  ) | Out-Null
+}
+'@,
+      [Text.UTF8Encoding]::new($false)
+    )
+
+    $lateRegistrarScript = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'late-task-registrar.ps1'
+    [IO.File]::WriteAllText(
+      $lateRegistrarScript,
+      @"
+param([Parameter(Mandatory)][string]`$UserName)
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. '$($taskHelperScript.Replace("'", "''"))'
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class DisabledAccountProbe
+{
+    private const uint NERR_SUCCESS = 0;
+    private const uint UF_ACCOUNTDISABLE = 0x0002;
+
+    public static bool IsDisabled(string name)
+    {
+        IntPtr information;
+        uint status = NetUserGetInfo(null, name, 1, out information);
+        if (status != NERR_SUCCESS || information == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                unchecked((int)status),
+                "Account disable state could not be queried.");
+        }
+        try
+        {
+            USER_INFO_1 value = (USER_INFO_1)Marshal.PtrToStructure(
+                information,
+                typeof(USER_INFO_1));
+            return (value.usri1_flags & UF_ACCOUNTDISABLE) != 0;
+        }
+        finally
+        {
+            NetApiBufferFree(information);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct USER_INFO_1
+    {
+        internal string usri1_name;
+        internal string usri1_password;
+        internal uint usri1_password_age;
+        internal uint usri1_priv;
+        internal string usri1_home_dir;
+        internal string usri1_comment;
+        internal uint usri1_flags;
+        internal string usri1_script_path;
+    }
+
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint NetUserGetInfo(
+        string serverName,
+        string userName,
+        uint level,
+        out IntPtr buffer);
+
+    [DllImport("netapi32.dll")]
+    private static extern uint NetApiBufferFree(IntPtr buffer);
+}
+'@
+[IO.File]::WriteAllText(
+  '$($lateRegistrarReady.Replace("'", "''"))',
+  'ready',
+  [Text.UTF8Encoding]::new(`$false)
+)
+while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
+  Start-Sleep -Milliseconds 1
+}
+`$taskParameters = @{
+  TaskName = '$lateTaskName'
+  PowerShellPath = '$($trustedPwsh.Replace("'", "''"))'
+  ActionScript = '$($taskActionScript.Replace("'", "''"))'
+  Record = '$($serviceEscapeRecord.Replace("'", "''"))'
+  Marker = '$($serviceEscapeActionMarker.Replace("'", "''"))'
+  ForgedBase64 = '$serviceEscapeForgedBase64'
+  UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
+  DelaySeconds = 10
+}
+Register-IsolatedInteractiveTask @taskParameters
+[IO.File]::WriteAllText(
+  '$($lateRegistrationMarker.Replace("'", "''"))',
+  'registered-after-disable',
+  [Text.UTF8Encoding]::new(`$false)
+)
+Start-Sleep -Seconds 300
+"@,
+      [Text.UTF8Encoding]::new($false)
+    )
+
+    $unsupervisedLauncherSource = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'unsupervised-logon-process.cs'
+    [IO.File]::WriteAllText(
+      $unsupervisedLauncherSource,
+      @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class UnsupervisedLogonProcess
+{
+    private const uint LOGON_WITH_PROFILE = 0x00000001;
+    private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+    private const uint CREATE_NO_WINDOW = 0x08000000;
+
+    public static uint Start(
+        string userName,
+        string domain,
+        string password,
+        string application,
+        string arguments,
+        string workingDirectory)
+    {
+        STARTUPINFO startup = new STARTUPINFO();
+        startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+        PROCESS_INFORMATION process;
+        StringBuilder command = new StringBuilder();
+        command.Append('"').Append(application).Append('"');
+        if (!String.IsNullOrWhiteSpace(arguments))
+        {
+            command.Append(' ').Append(arguments);
+        }
+        if (!CreateProcessWithLogonW(
+                userName,
+                domain,
+                password,
+                LOGON_WITH_PROFILE,
+                application,
+                command,
+                CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                IntPtr.Zero,
+                workingDirectory,
+                ref startup,
+                out process))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Unsupervised test process could not be launched.");
+        }
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return process.dwProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct STARTUPINFO
+    {
+        internal int cb;
+        internal string lpReserved;
+        internal string lpDesktop;
+        internal string lpTitle;
+        internal uint dwX;
+        internal uint dwY;
+        internal uint dwXSize;
+        internal uint dwYSize;
+        internal uint dwXCountChars;
+        internal uint dwYCountChars;
+        internal uint dwFillAttribute;
+        internal uint dwFlags;
+        internal ushort wShowWindow;
+        internal ushort cbReserved2;
+        internal IntPtr lpReserved2;
+        internal IntPtr hStdInput;
+        internal IntPtr hStdOutput;
+        internal IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_INFORMATION
+    {
+        internal IntPtr hProcess;
+        internal IntPtr hThread;
+        internal uint dwProcessId;
+        internal uint dwThreadId;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateProcessWithLogonW(
+        string userName,
+        string domain,
+        string password,
+        uint logonFlags,
+        string applicationName,
+        StringBuilder commandLine,
+        uint creationFlags,
+        IntPtr environment,
+        string currentDirectory,
+        ref STARTUPINFO startupInfo,
+        out PROCESS_INFORMATION processInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@,
+      [Text.UTF8Encoding]::new($false)
+    )
+    Add-Type -TypeDefinition (
+      [IO.File]::ReadAllText($unsupervisedLauncherSource)
+    ) -Language CSharp
+    $passwordProperty = [OpenCoven.WindowsIsolatedUser].GetProperty(
+      'Password',
+      [Reflection.BindingFlags]'NonPublic,Instance'
+    )
+    $serviceEscapePassword =
+      [string]$passwordProperty.GetValue($serviceEscapeContext.User)
+    $lateRegistrarPid = [int][UnsupervisedLogonProcess]::Start(
+      $serviceEscapeContext.User.UserName,
+      [Environment]::MachineName,
+      $serviceEscapePassword,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$lateRegistrarScript`" -UserName `"$($serviceEscapeContext.User.UserName)`"",
+      $serviceEscapeContext.User.RootPath
+    )
+    $lateReadyDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while (-not [IO.File]::Exists($lateRegistrarReady)) {
+      try {
+        $lateRegistrar = [Diagnostics.Process]::GetProcessById($lateRegistrarPid)
+        $lateRegistrar.Dispose()
+      } catch [ArgumentException] {
+        throw 'Late task registrar exited before observing account disablement.'
+      }
+      if ([DateTime]::UtcNow -ge $lateReadyDeadline) {
+        throw 'Late task registrar did not become ready.'
+      }
+      Start-Sleep -Milliseconds 20
+    }
+
+    $serviceEscapeProducer = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'service-escape-producer.ps1'
+    [IO.File]::WriteAllText(
+      $serviceEscapeProducer,
+      @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. '$($taskHelperScript.Replace("'", "''"))'
+[IO.Directory]::CreateDirectory(
+  '$([IO.Directory]::GetParent($serviceEscapeRecord).FullName.Replace("'", "''"))'
+) | Out-Null
+[IO.File]::WriteAllBytes(
+  '$($serviceEscapeRecord.Replace("'", "''"))',
+  [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
+)
+`$taskParameters = @{
+  TaskName = '$serviceEscapeName'
+  PowerShellPath = '$($trustedPwsh.Replace("'", "''"))'
+  ActionScript = '$($taskActionScript.Replace("'", "''"))'
+  Record = '$($serviceEscapeRecord.Replace("'", "''"))'
+  Marker = '$($serviceEscapeActionMarker.Replace("'", "''"))'
+  ForgedBase64 = '$serviceEscapeForgedBase64'
+  UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
+  DelaySeconds = 5
+}
+Register-IsolatedInteractiveTask @taskParameters
+& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
+  Out-Null
+if (`$LASTEXITCODE -ne 0) {
+  throw 'BITS service-mediated test job could not be created.'
+}
+"@,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $serviceEscapeJobName =
+      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+    $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
+      $serviceEscapeJobName,
+      $serviceEscapeContext.User
+    )
+    $serviceEscapeResult = $serviceEscapeJob.RunAsUser(
+      $serviceEscapeContext.User,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$serviceEscapeProducer`"",
+      $serviceEscapeContext.User.RootPath,
+      $serviceEscapeContext.Environment,
+      [TimeSpan]::FromSeconds(30),
+      1MB,
+      1MB
+    )
+    if ($serviceEscapeResult.ExitCode -ne 0) {
+      throw "Service escape setup failed: $($serviceEscapeResult.Stderr)"
+    }
+
+    $serviceEscapeArtifact = $serviceEscapeJob.CaptureIsolatedArtifact(
+      $serviceEscapeContext.User,
+      $serviceEscapeContext.User.WorkspacePath,
+      $serviceEscapeRecord,
+      1MB
+    )
+    if (
+      -not $serviceEscapeContext.User.IsDisabled -or
+      (Get-LocalUser -Name $serviceEscapeContext.User.UserName).Enabled
+    ) {
+      throw 'Ephemeral account was not disabled before artifact capture.'
+    }
+    if (-not [IO.File]::Exists($lateRegistrationMarker)) {
+      throw 'A task registered after account disablement was not exercised.'
+    }
+    Assert-ProcessExited -ProcessId $lateRegistrarPid
+    $lateRegistrarPid = 0
+    foreach ($taskName in @($serviceEscapeName, $lateTaskName)) {
+      & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
+        /Query `
+        /TN "\$taskName" *>&1 | Out-Null
+      if ($LASTEXITCODE -eq 0) {
+        if ($taskName -eq $lateTaskName) {
+          throw 'A task registered after account disablement survived repeated cleanup.'
+        }
+        throw 'Task Scheduler escape registration survived broker cleanup.'
+      }
+    }
+    $bitsListing = & (Join-Path $env:SystemRoot 'System32\bitsadmin.exe') `
+      /list `
+      /allusers `
+      /verbose 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $bitsListing.Contains($bitsName)) {
+      throw 'BITS service-mediated job survived broker cleanup.'
+    }
+    if (
+      [IO.File]::Exists($serviceEscapeActionMarker) -or
+      $serviceEscapeArtifact.Sha256 -cne $serviceEscapeTrustedDigest -or
+      [Text.UTF8Encoding]::new($false).GetString(
+        $serviceEscapeArtifact.Bytes
+      ) -cne $serviceEscapeTrustedText
+    ) {
+      throw 'Task Scheduler escape action rewrote the sealed artifact.'
+    }
+  } finally {
+    if ($lateRegistrarPid -ne 0) {
+      try {
+        $lateRegistrar = [Diagnostics.Process]::GetProcessById($lateRegistrarPid)
+        try {
+          $lateRegistrar.Kill($true)
+          $lateRegistrar.WaitForExit()
+        } finally {
+          $lateRegistrar.Dispose()
+        }
+      } catch [ArgumentException] {
+      }
+    }
+    foreach ($taskName in @($serviceEscapeName, $lateTaskName)) {
+      & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
+        /End `
+        /TN "\$taskName" *>&1 | Out-Null
+      & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
+        /Delete `
+        /F `
+        /TN "\$taskName" *>&1 | Out-Null
+    }
+    try {
+      Import-Module BitsTransfer -ErrorAction Stop
+      Get-BitsTransfer -AllUsers |
+        Where-Object DisplayName -CEQ $bitsName |
+        Remove-BitsTransfer
+    } catch {
+    }
+    if ($null -ne $serviceEscapeJob) {
+      $serviceEscapeJob.Dispose()
+    }
+    Remove-IsolatedTestContext -Context $serviceEscapeContext
+  }
+
+  $disableFailureContext = New-IsolatedTestContext -Label 'disable-failure'
+  $disableFailureJob = $null
+  try {
+    $disableFailureRecord = Join-Path `
+      $disableFailureContext.User.WorkspacePath `
+      '.artifacts\record.json'
+    [IO.Directory]::CreateDirectory(
+      [IO.Directory]::GetParent($disableFailureRecord).FullName
+    ) | Out-Null
+    [IO.File]::WriteAllBytes(
+      $disableFailureRecord,
+      $expectedHandoffBytes
+    )
+    $disableFailureJob = [OpenCoven.WindowsJobSupervisor]::Create(
+      "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+      $disableFailureContext.User
+    )
+    Remove-LocalUser -Name $disableFailureContext.User.UserName
+    $disableFailureClosed = $false
+    try {
+      $disableFailureJob.CaptureIsolatedArtifact(
+        $disableFailureContext.User,
+        $disableFailureContext.User.WorkspacePath,
+        $disableFailureRecord,
+        1MB
+      ) | Out-Null
+    } catch {
+      $disableFailureClosed = $_.Exception.ToString().Contains(
+        'disablement preflight could not be queried'
+      )
+    }
+    if (-not $disableFailureClosed) {
+      throw 'Account-disable verification failure did not fail closed.'
+    }
+  } finally {
+    if ($null -ne $disableFailureJob) {
+      $disableFailureJob.Dispose()
+    }
+    Remove-IsolatedTestContext -Context $disableFailureContext
   }
 
   $timeoutPids = Join-Path $root 'timeout-pids.txt'

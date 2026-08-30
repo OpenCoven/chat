@@ -733,7 +733,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'WindowsIsolatedUser',
         'WindowsValidatedArtifact',
         'NetUserAdd',
+        'NetUserSetInfo',
+        'NetUserGetInfo',
         'NetUserDel',
+        'UF_ACCOUNTDISABLE',
         'LogonUserW',
         'CheckTokenMembership',
         'CreateProcessWithLogonW',
@@ -774,6 +777,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
         'ActiveProcesses',
+        'Schedule.Service',
+        'TASK_ENUM_HIDDEN',
+        'GetFolders',
+        'GetTasks',
+        'GetRunningTasks',
+        'BG_JOB_ENUM_ALL_USERS',
+        'BackgroundCopyManager',
+        'GetOwner',
+        'Cancel',
+        'WTSEnumerateProcessesExW',
+        'WTS_PROCESS_INFO_EXW',
+        'WTSFreeMemoryExW',
+        'MinimumStableIsolationRounds',
+        'ExecuteArtifactSecuritySequence',
+        'CleanupScheduledTasks',
+        'CleanupBitsJobs',
+        'DrainProcessesByPrimaryTokenSid',
+        'SealArtifactSource',
+        'RequirePostSealIsolation',
         'CaptureIsolatedArtifact',
         'RequireCanonicalSchemaV2Artifact',
         'RunAsUserWithStandardInput',
@@ -805,7 +827,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source).not.toContain('JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK');
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
       expect(source).not.toContain('private static extern bool CreateProcessW(');
+      expect(source).not.toContain('Process.GetProcesses(');
       expect(source).not.toContain('NetLocalGroupAddMembers');
+      expect(source).toMatch(/"GetRunningTasks",\s+TASK_ENUM_HIDDEN/u);
       expect(source).toContain('Ephemeral local user cleanup failed during creation.');
       for (const failure of [
         'Restricted identity unexpectedly belongs to Administrators.',
@@ -819,6 +843,77 @@ describe('Chat-local protected Windows conformance workflow', () => {
         expect(source).toContain(failure);
       }
     }
+  });
+
+  test('orders the fail-closed Windows artifact boundary before capture and publication', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      const sequenceStart = source.indexOf('private static void ExecuteArtifactSecuritySequence(');
+      const sequenceEnd = source.indexOf('private int CleanupScheduledTasks(', sequenceStart);
+      const sequence = source.slice(sequenceStart, sequenceEnd);
+      expect(sequenceStart).toBeGreaterThan(-1);
+      expect(sequenceEnd).toBeGreaterThan(sequenceStart);
+
+      const jobZero = sequence.indexOf('requireJobZero();');
+      const disable = sequence.indexOf('disableAccount();');
+      const scheduler = sequence.indexOf('cleanupScheduledTasks();');
+      const bits = sequence.indexOf('cleanupBitsJobs();');
+      const processes = sequence.indexOf('drainProcessesByPrimaryTokenSid();');
+      const seal = sequence.indexOf('sealArtifactSource();');
+      const firstPostSeal = sequence.indexOf('requirePostSealIsolation();');
+      const capture = sequence.indexOf('captureArtifact();');
+      const secondPostSeal = sequence.indexOf('requirePostSealIsolation();', firstPostSeal + 1);
+
+      expect(jobZero).toBeGreaterThan(-1);
+      expect(disable).toBeGreaterThan(jobZero);
+      expect(scheduler).toBeGreaterThan(disable);
+      expect(bits).toBeGreaterThan(scheduler);
+      expect(processes).toBeGreaterThan(bits);
+      expect(seal).toBeGreaterThan(processes);
+      expect(firstPostSeal).toBeGreaterThan(seal);
+      expect(capture).toBeGreaterThan(firstPostSeal);
+      expect(secondPostSeal).toBeGreaterThan(capture);
+      expect(sequence).toContain('stableRounds < MinimumStableIsolationRounds');
+      expect(sequence).toContain('stableRounds = 0;');
+      expect(sequence).toContain('throw new TimeoutException(');
+
+      const captureStart = source.indexOf(
+        'public WindowsValidatedArtifact CaptureIsolatedArtifact(',
+      );
+      const canonicalStart = source.indexOf(
+        'public static void RequireCanonicalSchemaV2Artifact(',
+        captureStart,
+      );
+      const captureMethod = source.slice(captureStart, canonicalStart);
+      expect(captureMethod).toContain('ExecuteArtifactSecuritySequence(');
+      expect(captureMethod).toContain('isolatedUser.DisableAndVerify()');
+      expect(captureMethod).toContain('CleanupScheduledTasks(');
+      expect(captureMethod).toContain('CleanupBitsJobs(');
+      expect(captureMethod).toContain('DrainProcessesByPrimaryTokenSid(');
+      expect(captureMethod).toContain('SealArtifactSource(');
+      expect(captureMethod).toContain('RequirePostSealIsolation(');
+    }
+
+    const runBody = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const resultCheck = runBody.indexOf('Supervised Windows production failed with exit code');
+    const postProduction = runBody.slice(resultCheck);
+    const capture = postProduction.indexOf('$job.CaptureIsolatedArtifact(');
+    const validation = postProduction.indexOf(
+      '[OpenCoven.WindowsJobSupervisor]::RequireCanonicalSchemaV2Artifact(',
+      capture,
+    );
+    const publish = postProduction.indexOf('$job.PublishValidatedArtifact(', validation);
+    expect(capture).toBeGreaterThan(-1);
+    expect(validation).toBeGreaterThan(capture);
+    expect(publish).toBeGreaterThan(validation);
+    expect(postProduction).not.toContain('$job.RunAsUserWithStandardInput(');
   });
 
   test('uses the official eleven-parameter CreateProcessWithLogonW signature and call order', () => {
@@ -1028,6 +1123,21 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Wrong-owner artifact handoff unexpectedly succeeded.',
       'Permissive-DACL artifact handoff unexpectedly succeeded.',
       'Artifact replacement race exposed supervisor-only canary bytes.',
+      'Task Scheduler escape registration survived broker cleanup.',
+      'Task Scheduler escape action rewrote the sealed artifact.',
+      'A task registered after account disablement survived repeated cleanup.',
+      'BITS service-mediated job survived broker cleanup.',
+      'Ephemeral account was not disabled before artifact capture.',
+      'Account-disable verification failure did not fail closed.',
+      'Task Scheduler enumeration failure did not fail closed.',
+      'BITS enumeration failure did not fail closed.',
+      'WTS process enumeration failure did not fail closed.',
+      'Matching process access failure did not fail closed.',
+      'Matching process termination failure did not fail closed.',
+      'Unstable SID-wide process drain did not fail closed.',
+      'Artifact ACL sealing failure did not fail closed.',
+      'Service creation unexpectedly succeeded for the restricted identity.',
+      'Permanent WMI subscription creation unexpectedly succeeded.',
       'Ephemeral local user survived cleanup.',
       'Ephemeral Windows profile survived cleanup.',
       'Ephemeral bootstrap root survived cleanup.',
@@ -1065,10 +1175,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runBody).toContain('$artifactWorkspace');
     expect(runBody).toContain('$job.CaptureIsolatedArtifact(');
     expect(runBody).toContain('RequireCanonicalSchemaV2Artifact');
-    expect(runBody).toContain('$job.RunAsUserWithStandardInput(');
     expect(runBody).toContain('$job.PublishValidatedArtifact(');
     expect(runBody).toContain('OPENCOVEN_EXPECTED_RECORD_SHA256');
     expect(runBody).toContain('[Console]::OpenStandardInput()');
+    expect(runBody).toContain('Fresh trusted handle-captured record validation failed.');
     expect(runBody).not.toContain('[IO.File]::Copy(');
     expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_PID');
     expect(runBody).toContain('OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE');
@@ -1078,12 +1188,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
     const resultCheck = runBody.indexOf('Supervised Windows production failed with exit code');
     const capture = runBody.indexOf('$job.CaptureIsolatedArtifact(', resultCheck);
-    const freshValidation = runBody.indexOf('$job.RunAsUserWithStandardInput(', capture);
+    const freshValidation = runBody.indexOf(
+      '[OpenCoven.WindowsJobSupervisor]::RequireCanonicalSchemaV2Artifact(',
+      capture,
+    );
     const publish = runBody.indexOf('$job.PublishValidatedArtifact(', freshValidation);
     expect(resultCheck).toBeGreaterThan(-1);
     expect(capture).toBeGreaterThan(resultCheck);
     expect(freshValidation).toBeGreaterThan(capture);
     expect(publish).toBeGreaterThan(freshValidation);
+    expect(runBody.slice(capture, publish)).not.toContain('$job.RunAsUserWithStandardInput(');
     expect(runBody.slice(capture, publish)).not.toMatch(
       /\[IO\.File\]::ReadAll(?:Bytes|Text)\(\s*\$isolatedRecord/u,
     );
