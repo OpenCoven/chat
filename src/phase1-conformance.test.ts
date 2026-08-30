@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -20,6 +21,7 @@ import { PassThrough } from 'node:stream';
 
 import { describe, expect, test } from 'vitest';
 
+import { verifyFrozenPackedConsumer } from '../scripts/contract-canary.mjs';
 import {
   normalizeWindowsRealPathForProcess,
   quoteWindowsBatchCommand,
@@ -34,6 +36,7 @@ import {
   cargoBuildTimeoutMs,
   caveBuildEnvironment,
   classifyPackagingCommandFailure,
+  cloneExactCheckout,
   covenIdentityFailureDiagnostic,
   createCleanupAdoptionRecovery,
   diagnoseCovenLifecycleFailure,
@@ -44,6 +47,7 @@ import {
   nativeAdapterTestEnvironment,
   nativeMissingKeychainFailureDiagnostic,
   nativeMissingKeychainResponsesValid,
+  normalizeSchemaV2ObservationTests,
   observeReleaseToolVersions,
   parseArgs,
   parseCaveConformanceOutput,
@@ -59,6 +63,7 @@ import {
   runSupervisedCommandForTest,
   runtimeScenarioFailureDiagnostic,
   safeEnvironment,
+  scrubEvidenceAuthorizationEnvironment,
   snapshotOperatorState,
   throwNativeScenarioFailures,
   validateSupervisorArtifactFile,
@@ -148,6 +153,114 @@ class NeverCloseChild extends SynchronousCloseChild {
 }
 
 describe('Phase 1 real-authority conformance harness', () => {
+  test('normalizes the exact observation result map consumed by schema-v2 adaptation', () => {
+    const sdk = new Set(['sdk observation']);
+    const chat = new Set(['chat observation']);
+    const chatRust = new Set(['chat rust observation']);
+    const covenRust = new Set(['coven rust observation']);
+
+    expect(normalizeSchemaV2ObservationTests({ sdk, chat, chatRust, covenRust })).toEqual({
+      sdk,
+      chat,
+      chatRust,
+      covenRust,
+    });
+    expect(() =>
+      normalizeSchemaV2ObservationTests({
+        sdkTests: sdk,
+        chatTests: chat,
+        chatRustTests: chatRust,
+        covenRustTests: covenRust,
+      } as never),
+    ).toThrow(/incomplete or malformed/u);
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'clones local sources without invoking their upload-pack hook',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-local-source-'));
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-local-clone-test' });
+      const marker = join(source, 'upload-pack-hook-ran');
+      const hook = join(source, 'upload-pack-hook.sh');
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'fixture'], { cwd: source });
+        writeFileSync(
+          hook,
+          `#!/bin/sh\nprintf ran > ${JSON.stringify(marker)}\nexec git pack-objects "$@"\n`,
+        );
+        chmodSync(hook, 0o755);
+        execFileSync('git', ['config', 'uploadpack.packObjectsHook', hook], {
+          cwd: source,
+        });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        const destination = join(owned.rootPath, 'checkout');
+
+        await cloneExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: source,
+          destinationRoot: destination,
+          repository: 'OpenCoven/chat',
+          revision,
+          environment: process.env,
+          label: 'local source fixture',
+        });
+
+        expect(existsSync(marker)).toBe(false);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: destination,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(revision);
+      } finally {
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('scrubs OIDC and GitHub bearer variables before evidence work begins', () => {
+    const environment = {
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-token',
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://token.actions.invalid',
+      GH_TOKEN: 'gh-token',
+      GITHUB_TOKEN: 'github-token',
+      PATH: '/trusted/bin',
+    };
+
+    expect(scrubEvidenceAuthorizationEnvironment(environment)).toEqual({
+      PATH: '/trusted/bin',
+    });
+  });
+
+  test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
+    expect(verifyFrozenPackedConsumer).toBeTypeOf('function');
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain('chatRoot: roots.producerRoot');
+  });
+
+  test('preserves a private infrastructure cause only on the in-memory error object', () => {
+    const cause = new Error('/private/operator/path should not be retained');
+    const wrapped = wrapInfrastructureFailure(cause, { status: 'failed' });
+
+    expect(wrapped.message).toBe('Phase 1 conformance infrastructure failed.');
+    expect(wrapped.cause).toBe(cause);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
+  });
+
   test('uses Chat native coven_health and never the Coven status CLI for identity proof', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
@@ -800,6 +913,69 @@ describe('Phase 1 real-authority conformance harness', () => {
       /only --scenario all is supported/,
     );
     expect(() => parseArgs(['--unknown'])).toThrow(/unknown option/);
+  });
+
+  test('parses the protected schema-v2 platform invocation without legacy output flags', () => {
+    expect(
+      parseArgs([
+        '--validator-revision',
+        'd'.repeat(40),
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+      ]),
+    ).toMatchObject({
+      platform: 'darwin-arm64',
+      validatorRevision: 'd'.repeat(40),
+      outputPath: expect.stringContaining('.artifacts/client-v1-conformance-darwin-arm64.json'),
+    });
+    expect(() =>
+      parseArgs(['--validator-revision', 'd'.repeat(40), '--platform', 'linux-x64']),
+    ).toThrow(/requires --output/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'linux-x64',
+        '--output',
+        './.artifacts/client-v1-conformance-linux-x64.json',
+      ]),
+    ).toThrow(/requires --validator-revision/u);
+    expect(() =>
+      parseArgs([
+        '--validator-revision',
+        'D'.repeat(40),
+        '--platform',
+        'darwin-arm64',
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+      ]),
+    ).toThrow(/lowercase immutable 40-character commit SHA/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'darwin-arm64',
+        '--validator-revision',
+        'd'.repeat(40),
+        '--output',
+        './.artifacts/client-v1-conformance-linux-x64.json',
+      ]),
+    ).toThrow(/must match the platform/u);
+    expect(() =>
+      parseArgs([
+        '--platform',
+        'darwin-arm64',
+        '--validator-revision',
+        'd'.repeat(40),
+        '--output',
+        './.artifacts/client-v1-conformance-darwin-arm64.json',
+        '--retain-sanitized-report',
+        './legacy.json',
+      ]),
+    ).toThrow(/cannot combine/u);
+    expect(() => parseArgs(['--validator-revision', 'd'.repeat(40), '--scenario', 'all'])).toThrow(
+      /only valid with schema-v2/u,
+    );
   });
 
   test('rejects Node preload and loader runtime injection indicators', () => {

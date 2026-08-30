@@ -3,9 +3,13 @@ export function parseArgs(argv: string[]): {
   lockPath: string;
   scenario: 'all';
   retainSanitizedReport: string;
+  platform?: 'darwin-arm64' | 'linux-x64' | 'win32-x64';
+  outputPath?: string;
+  validatorRevision?: string;
   chatSourceRoot: string;
   sdkSourceRoot: string;
   sdkEvidenceSourceRoot: string;
+  sdkValidatorSourceRoot: string;
   caveSourceRoot: string;
   covenSourceRoot: string;
   windowsSupervisorPath?: string;
@@ -17,6 +21,48 @@ export function observeReleaseToolVersions(): {
 };
 export function parseCaveConformanceOutput(output: string): Map<string, string>;
 export function parsePassedRustTests(output: string): Set<string>;
+export function scrubEvidenceAuthorizationEnvironment<T extends NodeJS.ProcessEnv>(
+  environment?: T,
+): T;
+export function normalizeSchemaV2ObservationTests(value: {
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
+}): Readonly<{
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
+}>;
+export function runSchemaV2ObservationSuites(
+  artifactRoot: unknown,
+  roots: Record<string, string>,
+  environment: NodeJS.ProcessEnv,
+  platform: 'darwin-arm64' | 'linux-x64' | 'win32-x64',
+): Promise<{
+  sdk: Set<string>;
+  chat: Set<string>;
+  chatRust: Set<string>;
+  covenRust: Set<string>;
+}>;
+export function buildObservedSchemaV2Assertions(options: Record<string, unknown>): {
+  sdk: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
+  chat: Array<{ id: string; result: 'pass'; diagnosticId: string }>;
+};
+export function cloneExactCheckout(options: {
+  artifactRoot: {
+    rootPath: string;
+    trackChild(child: unknown, options?: { processGroup?: boolean }): unknown;
+    terminateChild(child: unknown): Promise<void>;
+  };
+  sourceRoot: string;
+  destinationRoot: string;
+  repository?: string;
+  revision: string;
+  environment: NodeJS.ProcessEnv;
+  label: string;
+}): Promise<void>;
 export function resolveLockedCovenDaemonCommand(
   artifactRoot: { rootPath: string },
   lockedCovenCheckoutRoot: string,

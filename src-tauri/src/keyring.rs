@@ -203,6 +203,10 @@ impl NativeKeyring {
         }
     }
 
+    pub(crate) fn for_schema_v2() -> Self {
+        Self::default()
+    }
+
     fn reject_provider_if_configured(&self) -> Result<(), KeyringError> {
         match self.provider_preset {
             Some(NativeProviderPreset::MissingKeychainTrust) => Err(KeyringError::Unavailable),
@@ -531,6 +535,49 @@ impl NativeKeyring {
             None => Ok(ConformanceCleanupOutcome::Deleted),
         }
         .map(|_| ())
+    }
+
+    pub(crate) fn conformance_state(
+        &self,
+        instance_ids: &[String],
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let mut occupied = Self::conformance_entry_present(&Self::installation_id_entry()?)?;
+        for instance_id in instance_ids {
+            validate_installation_id(instance_id)?;
+            occupied |= Self::conformance_entry_present(&Self::credential_entry(instance_id)?)?;
+        }
+        let digest = Sha256::digest(if occupied {
+            b"phase1-native-custody-occupied-v1".as_slice()
+        } else {
+            b"phase1-native-custody-empty-v1".as_slice()
+        });
+        Ok((native_keyring_backend(), !occupied, format!("{digest:x}")))
+    }
+
+    pub(crate) fn cleanup_conformance_entries(
+        &self,
+        instance_ids: &[String],
+    ) -> Result<(&'static str, bool, String), KeyringError> {
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        for entry in std::iter::once(Self::installation_id_entry()?).chain(
+            instance_ids
+                .iter()
+                .map(|instance_id| {
+                    validate_installation_id(instance_id)?;
+                    Self::credential_entry(instance_id)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ) {
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => {}
+                Err(error) => return Err(map_keyring_error(error)),
+            }
+        }
+        drop(_guard);
+        self.conformance_state(instance_ids)
     }
 
     fn require_prepared_instance(&self, instance_id: &str) -> Result<(), KeyringError> {
@@ -1410,6 +1457,38 @@ impl NativeKeyring {
         }
         Self::entry(&format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"))
     }
+
+    #[cfg(feature = "phase1-conformance")]
+    fn conformance_entry_present(entry: &Entry) -> Result<bool, KeyringError> {
+        match entry.get_secret() {
+            Ok(mut value) => {
+                value.zeroize();
+                Ok(true)
+            }
+            Err(KeyringBackendError::NoEntry) => Ok(false),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+const fn native_keyring_backend() -> &'static str {
+    "macos-keychain"
+}
+
+#[cfg(target_os = "linux")]
+const fn native_keyring_backend() -> &'static str {
+    "linux-keyring"
+}
+
+#[cfg(target_os = "windows")]
+const fn native_keyring_backend() -> &'static str {
+    "windows-credential-manager"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+const fn native_keyring_backend() -> &'static str {
+    "unsupported"
 }
 
 fn initialize_store() -> bool {

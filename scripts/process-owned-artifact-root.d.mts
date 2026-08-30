@@ -9,10 +9,12 @@ export type ProcessOwnedArtifactRoot = {
   cleanedChildren: number[];
   reapedChildren: number[];
   trackChild(child: ChildProcess): ChildProcess;
+  terminateChild(child: ChildProcess): Promise<void>;
   retainSanitizedJsonReport(options: {
     reportPath: string;
     destinationPath: string;
     secretScan(options: { artifactRoot: string; reportPath: string }): Promise<void>;
+    validateReport?(value: unknown, bytes: Buffer): void;
   }): Promise<string>;
   cleanup(): Promise<void>;
 };

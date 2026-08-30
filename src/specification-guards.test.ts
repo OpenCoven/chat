@@ -134,7 +134,7 @@ describe('Phase 1 specification guards', () => {
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
-    expect(lock.cave.revision).toBe('2a0ff9237e94e652e477b22f60fd6d721b9e6451');
+    expect(lock.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
@@ -178,7 +178,7 @@ describe('Phase 1 specification guards', () => {
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: '1b78125dab5b77414efd2d34e13315f542b197715ed26c6521f588e299abe61d',
+        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -1166,7 +1166,9 @@ describe('Phase 1 specification guards', () => {
       /\n {2}phase1-conformance:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
     )?.groups?.job;
 
-    expect(packageManifest.scripts?.['test:phase1-conformance']).toBeUndefined();
+    expect(packageManifest.scripts?.['test:phase1-conformance']).toBe(
+      'node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all',
+    );
     expect(workflow).toMatch(/^ {2}phase1-conformance:$/m);
     expect(workflow).toMatch(/name:\s*Phase 1 real-authority conformance/);
     expect(workflow).toContain('runs-on: macos-15');

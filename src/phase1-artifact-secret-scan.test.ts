@@ -3,7 +3,10 @@ import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { scanPhase1Artifacts } from '../scripts/phase1-artifact-secret-scan.mjs';
+import {
+  scanPhase1Artifacts,
+  scanPhase1ArtifactText,
+} from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   buildPlatformEvidence,
   windowsSupervisorDiagnosticId,
@@ -165,6 +168,28 @@ async function scanReport(report: unknown) {
 }
 
 describe('Phase 1 retained-artifact secret scan', () => {
+  test('applies the primary redaction scan to a caller-validated schema-v2 record', () => {
+    const record = {
+      schemaVersion: 2,
+      issue: 'OpenCoven/sdk#38',
+      platform: 'darwin-arm64',
+    };
+    expect(
+      scanPhase1ArtifactText(`${JSON.stringify(record)}\n`, {
+        validateReport(value) {
+          expect(value).toEqual(record);
+        },
+      }),
+    ).toEqual(record);
+    expect(() =>
+      scanPhase1ArtifactText(`${JSON.stringify({ ...record, prompt: 'private user content' })}\n`, {
+        validateReport() {
+          throw new Error('the redaction scan must run first');
+        },
+      }),
+    ).toThrow(/prohibited secret or private content/u);
+  });
+
   test('accepts the exact secret-free SDK platform record schema', async () => {
     const result = await scanReport(validReport());
 
