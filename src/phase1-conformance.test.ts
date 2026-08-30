@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -166,6 +167,11 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
     expect(verifyFrozenPackedConsumer).toBeTypeOf('function');
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-conformance.mjs'),
+      'utf8',
+    );
+    expect(source).toContain('chatRoot: roots.producerRoot');
   });
 
   test('requires every assertion ID exactly once with no skipped result', () => {

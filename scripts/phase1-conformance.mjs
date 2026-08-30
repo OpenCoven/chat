@@ -1186,7 +1186,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
           pathToFileURL(resolve(projectRoot, 'scripts', 'contract-canary.mjs')).href,
         )};`,
         `const result = verifyFrozenPackedConsumer(${JSON.stringify({
-          chatRoot: roots.chatRoot,
+          chatRoot: roots.producerRoot,
           sdkRoot: roots.sdkRoot,
           caveRoot: roots.caveRoot,
         })});`,
