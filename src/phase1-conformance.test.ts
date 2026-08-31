@@ -72,6 +72,7 @@ import {
   wrapInfrastructureFailure,
 } from '../scripts/phase1-conformance.mjs';
 import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
+import { readSchemaV2ProducerIdentity } from '../scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -250,6 +251,26 @@ describe('Phase 1 real-authority conformance harness', () => {
       'utf8',
     );
     expect(source).toContain('chatRoot: roots.producerRoot');
+  });
+
+  test('binds schema-v2 producer identity to the supplied workflow checkout', () => {
+    const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+
+    expect(readSchemaV2ProducerIdentity(projectRoot)).toEqual({ revision, tree });
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain(
+      'cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment)',
+    );
   });
 
   test('preserves a private infrastructure cause only on the in-memory error object', () => {
