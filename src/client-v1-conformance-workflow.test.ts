@@ -1533,6 +1533,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Artifact ACL sealing failure did not fail closed.',
       "Live root '$Label' terminal quarantine failed:",
       "Terminal failure '$Label' producer attempt failed:",
+      "Terminal failure '$Label' cleanup failed:",
       'Service creation unexpectedly succeeded for the restricted identity.',
       'SC_MANAGER_CREATE_SERVICE was not denied with ERROR_ACCESS_DENIED.',
       'CreateServiceW was not denied with ERROR_ACCESS_DENIED.',

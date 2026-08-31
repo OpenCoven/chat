@@ -4295,10 +4295,11 @@ Start-Sleep -Seconds 300
         }
       }
       if ($cleanupErrors.Count -ne 0) {
-        throw [AggregateException]::new(
-          "Terminal failure '$Label' cleanup failed.",
-          $cleanupErrors
-        )
+        $cleanupDetails = (
+          $cleanupErrors |
+            ForEach-Object { $_.ToString() }
+        ) -join "`n---`n"
+        throw "Terminal failure '$Label' cleanup failed:`n$cleanupDetails"
       }
     }
     if (
