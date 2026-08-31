@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: 'ebe662f8696489fe5e7480e03db552b6854c8992',
+    revision: '6adffbd88169964e1e2a70eba56b1a816bf31f39',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -143,7 +143,7 @@ const expectedEntries = {
     windowsSupervisor: {
       source: {
         repository: 'OpenCoven/chat',
-        revision: 'e5bcc1922e7433b33d6d4418cfc8bb076496e2dc',
+        revision: '9612dc81e330952bbd9d357e862944e43dffa58c',
         path: 'tools/phase1-process-supervisor/src/main.rs',
         blob: '6a95b4db7612ed0a502e91c4c21a7df5cbfe9021',
         sha256: 'fa4c4759c0b01ce7f9bbd662ed3073b0aeed42dc7da0001026703482a5b9708a',
