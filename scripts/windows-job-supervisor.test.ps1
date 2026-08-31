@@ -4285,7 +4285,12 @@ Start-Sleep -Seconds 300
       try {
         Remove-IsolatedTestContext -Context $Context
       } catch {
-        $cleanupErrors.Add($_.Exception)
+        $cleanupErrors.Add(
+          [InvalidOperationException]::new(
+            "Terminal failure '$Label' context cleanup failed: $($_.Exception.ToString())",
+            $_.Exception
+          )
+        )
       }
       if ($null -ne $Job) {
         try {

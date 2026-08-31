@@ -1835,6 +1835,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Terminal failure ephemeral local user survived cleanup.',
       'Terminal failure ephemeral Windows profile survived cleanup.',
       'Terminal failure ephemeral bootstrap root survived cleanup.',
+      "Terminal failure '$Label' context cleanup failed:",
       '$Result.StdoutOverflow',
       '$Result.StderrOverflow',
       '$Result.ResourceQuotaExceeded',
