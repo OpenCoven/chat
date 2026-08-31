@@ -955,6 +955,59 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(bytes.endsWith('\n')).toBe(true);
   });
 
+  test('normalizes the verified Cave run into the frozen SDK registry order', async () => {
+    const { input, registry } = await fixture();
+    const caveRecord = structuredClone(input.caveRecord);
+    const ttl = caveRecord.assertions.filter(({ id }) => id.startsWith('pairing.ttl-'));
+    caveRecord.assertions = caveRecord.assertions.filter(
+      ({ id }) => !id.startsWith('pairing.ttl-'),
+    );
+    caveRecord.assertions.splice(43, 0, ...ttl);
+
+    const evidence = buildSchemaV2PlatformEvidence({
+      ...input,
+      caveRecord,
+    });
+
+    expect(evidence.caveRecord.assertions.map(({ id }: { id: string }) => id)).toEqual(
+      (registry.assertions as { cave: string[] }).cave,
+    );
+  });
+
+  test('removes private Cave pass details from the retained record', async () => {
+    const { contract, input } = await fixture();
+    const caveRecord = structuredClone(input.caveRecord);
+    const assertion = caveRecord.assertions.find(({ id }) => id === 'ingress.forwarded.public');
+    const coverage = caveRecord.assertions.find(({ id }) => id === 'harness.assertion-coverage');
+    if (assertion === undefined || coverage === undefined) {
+      throw new Error('Cave assertion fixture is incomplete');
+    }
+    assertion.detail = 'observed https://operator.example.invalid/private';
+    coverage.detail = 'all frozen assertions were observed';
+
+    const evidence = buildSchemaV2PlatformEvidence({
+      ...input,
+      caveRecord,
+    });
+
+    expect(
+      evidence.caveRecord.assertions.find(
+        ({ id }: { id: string }) => id === 'ingress.forwarded.public',
+      )?.detail,
+    ).toBe('');
+    expect(
+      evidence.caveRecord.assertions.find(
+        ({ id }: { id: string }) => id === 'harness.assertion-coverage',
+      )?.detail,
+    ).toBe('complete');
+    expect(() =>
+      serializeValidatedSchemaV2PlatformEvidence(evidence, {
+        contract,
+        schema: input.sdkContract.schema,
+      }),
+    ).not.toThrow();
+  });
+
   test.each(['missing', 'duplicate', 'unexpected', 'skip', 'fail'])(
     'rejects %s primary assertion outcomes',
     async (kind) => {

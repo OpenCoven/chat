@@ -866,13 +866,35 @@ function validateCaveRecord(caveRecordValue, registry, expected) {
   ) {
     throw new Error('Cave evidence record does not match the verified run.');
   }
-  for (let index = 0; index < expectedIds.length; index += 1) {
+  const expectedSet = new Set(expectedIds);
+  const observed = new Map();
+  for (let index = 0; index < caveRecord.assertions.length; index += 1) {
     const assertion = requireRecord(caveRecord.assertions[index], `Cave assertion ${index}`);
-    if (assertion.id !== expectedIds[index] || assertion.result !== 'pass') {
-      throw new Error('Cave evidence record does not contain the complete passing registry.');
+    if (typeof assertion.id !== 'string' || !expectedSet.has(assertion.id)) {
+      throw new Error('Cave evidence record contains an unexpected assertion.');
     }
+    if (observed.has(assertion.id)) {
+      throw new Error(`Cave evidence record contains duplicate assertion ${assertion.id}.`);
+    }
+    if (assertion.result !== 'pass') {
+      throw new Error(`Cave evidence record assertion ${assertion.id} is not passing.`);
+    }
+    if (typeof assertion.detail !== 'string') {
+      throw new Error(`Cave evidence record assertion ${assertion.id} has invalid detail.`);
+    }
+    observed.set(assertion.id, {
+      ...structuredClone(assertion),
+      detail: assertion.id === 'harness.assertion-coverage' ? 'complete' : '',
+    });
   }
-  return structuredClone(caveRecord);
+  const missing = expectedIds.filter((id) => !observed.has(id));
+  if (missing.length > 0) {
+    throw new Error(`Cave evidence record is missing assertions: ${missing.join(',')}.`);
+  }
+  return {
+    ...structuredClone(caveRecord),
+    assertions: expectedIds.map((id) => observed.get(id)),
+  };
 }
 
 function validateObservedAssertions(value, expectedIds, label) {

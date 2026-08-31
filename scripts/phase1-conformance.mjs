@@ -1691,10 +1691,13 @@ export function assertProductionAdapterAtRevision(harnessRoot, lock) {
     'src-tauri/Cargo.toml',
     'src-tauri/Cargo.lock',
     'src-tauri/src/bin/phase1-native-rpc.rs',
+    'src-tauri/src/cave.rs',
+    'src-tauri/src/cleanup_grant.rs',
     'src-tauri/src/conformance.rs',
     'src-tauri/src/connection.rs',
     'src-tauri/src/coven.rs',
     'src-tauri/src/keyring.rs',
+    'src-tauri/src/lib.rs',
   ];
   const expectedDeltas = lock.harnessAuthority.productionDeltas;
   const changed = runSupervisedSync(

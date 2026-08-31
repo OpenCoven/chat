@@ -22,8 +22,9 @@ the final bytes.
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
 - Cave authority `e74078a147c084bd761d929654f0990df66ef99f`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
-- Chat conformance driver support
-  `b236604c3f7b51fdccec1ca6c7e2cebf45a600ca`;
+- Chat conformance driver support at the exact `harness.revision` and
+  `harnessAuthority.tree` generated from the preceding code/integration
+  commit;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -877,9 +878,21 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 384,132 | `79eb73d899870e7b83e99ddff53da8e25279497ef37b3286eb702ad04d390c02` |
-| `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
+| `.github/workflows/client-v1-conformance.yml` | 387,348 | `e20bb1bcf0b24310e51df07a4fd9078b4d322cc102bc77543b64a5254fe994cf` |
+| `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
+| `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
+| `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
+| `scripts/phase1-conformance-lock.mjs` | 41,080 | `2ace05f78ea23c5b59db7aa7e08ab1aeca9b26da9cf86a38001af535e65f5542` |
+| `scripts/phase1-conformance.mjs` | 187,201 | `61a2c03b144779ae4d208a71c908551deabc79dfd167062793f4e5285553b3ac` |
+| `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
+| `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
+| `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
+| `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
+| `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
 | `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
+| `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
+| `scripts/supervised-exec.mjs` | 2,802 | `149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b` |
+| `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 2,663 | `a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1` |
@@ -889,10 +902,12 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.cs` | 255,395 | `057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc` |
 | `scripts/windows-job-supervisor.test.ps1` | 150,114 | `61dd2c7af1a0540a0d3e02be239e393d225ad6a3876cd577f7b2a68188f00c3c` |
 
-The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
-production Unix source files by the sizes and digests above before compiling or
-executing them. Its production job remains `platform-conformance`; the fresh
-validation, OIDC attestation, and terminal confirmation jobs remain
+The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
+harness module executes, Windows verifies the complete 14-module static `.mjs`
+graph with trusted inline PowerShell, while Unix verifies the same graph plus
+the four production shell/C helper sources before compiling or executing them.
+Its production job remains `platform-conformance`; the fresh validation, OIDC
+attestation, and terminal confirmation jobs remain
 `validate-conformance-artifacts`, `attest-conformance-artifacts`, and
 `aggregate-conformance`. The Chat producer commit and tree are recorded only
 after this commit is created; no SDK validator SHA is committed into Chat.

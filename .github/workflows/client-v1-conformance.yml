@@ -7275,32 +7275,11 @@ jobs:
           $nodeRoot = Join-Path $nodeParent 'node-v24.18.1-win-x64'
           $node = Join-Path $nodeRoot 'node.exe'
           $npm = Join-Path $nodeRoot 'npm.cmd'
-          if ((& $node --version).Trim() -ne 'v24.18.1') {
-            throw 'Pinned Node version changed.'
-          }
 
           $pnpmRoot = Join-Path $tools 'pnpm'
           $npmCache = Join-Path $root 'npm-cache'
-          [IO.Directory]::CreateDirectory($npmCache) | Out-Null
-          Invoke-Checked `
-            -FilePath $npm `
-            -ArgumentList @(
-              'install',
-              '--global',
-              '--prefix',
-              $pnpmRoot,
-              '--ignore-scripts',
-              '--no-audit',
-              '--no-fund',
-              '--cache',
-              $npmCache,
-              $pnpmArchive
-            ) `
-            -Label 'Pinned pnpm installation'
           $pnpm = Join-Path $pnpmRoot 'pnpm.cmd'
-          if ((& $pnpm --version).Trim() -ne '10.34.0') {
-            throw 'Pinned pnpm version changed.'
-          }
+          [IO.Directory]::CreateDirectory($npmCache) | Out-Null
 
           $env:RUSTUP_HOME = Join-Path $root 'rustup'
           $env:CARGO_HOME = Join-Path $root 'cargo'
@@ -7451,6 +7430,59 @@ jobs:
             throw 'The protected Chat checkout may not contain submodules.'
           }
 
+          $trustedHarnessModules = @(
+            @('scripts\executable-resolution.mjs', 7326, '65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d'),
+            @('scripts\owned-temp-directory.mjs', 6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095'),
+            @('scripts\phase1-artifact-secret-scan.mjs', 21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a'),
+            @('scripts\phase1-conformance-lock.mjs', 41080, '2ace05f78ea23c5b59db7aa7e08ab1aeca9b26da9cf86a38001af535e65f5542'),
+            @('scripts\phase1-conformance.mjs', 187201, '61a2c03b144779ae4d208a71c908551deabc79dfd167062793f4e5285553b3ac'),
+            @('scripts\phase1-evidence-contract.mjs', 15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f'),
+            @('scripts\phase1-evidence-runtime.mjs', 6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159'),
+            @('scripts\phase1-linux-secret-service.mjs', 4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92'),
+            @('scripts\phase1-macos-keychain.mjs', 5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4'),
+            @('scripts\phase1-schema-v2-evidence.mjs', 40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8'),
+            @('scripts\phase1-schema-v2-producer.mjs', 130161, '20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc'),
+            @('scripts\process-owned-artifact-root.mjs', 11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a'),
+            @('scripts\supervised-exec.mjs', 2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b'),
+            @('scripts\supervisor-status.mjs', 854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e')
+          )
+          foreach ($modulePin in $trustedHarnessModules) {
+            $modulePath = Join-Path $workspace $modulePin[0]
+            $moduleFile = Get-Item -LiteralPath $modulePath -Force
+            Assert-NoReparsePath -Path $modulePath -Label 'Harness module'
+            if (
+              $moduleFile.PSIsContainer -or
+              $moduleFile.Length -ne [int64]$modulePin[1] -or
+              (Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+                $modulePin[2]
+            ) {
+              throw "Frozen harness module bytes do not match: $($modulePin[0])"
+            }
+          }
+          Write-Host 'Frozen harness module graph verified.'
+
+          if ((& $node --version).Trim() -ne 'v24.18.1') {
+            throw 'Pinned Node version changed.'
+          }
+          Invoke-Checked `
+            -FilePath $npm `
+            -ArgumentList @(
+              'install',
+              '--global',
+              '--prefix',
+              $pnpmRoot,
+              '--ignore-scripts',
+              '--no-audit',
+              '--no-fund',
+              '--cache',
+              $npmCache,
+              $pnpmArchive
+            ) `
+            -Label 'Pinned pnpm installation'
+          if ((& $pnpm --version).Trim() -ne '10.34.0') {
+            throw 'Pinned pnpm version changed.'
+          }
+
           Push-Location $workspace
           try {
             Invoke-Checked `
@@ -7476,19 +7508,6 @@ jobs:
             }
 
             $harnessPath = Join-Path $workspace 'scripts\phase1-conformance.mjs'
-            $harness = Get-Item -LiteralPath $harnessPath -Force
-            if (
-              -not $harness.PSIsContainer -and
-              ($harness.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
-              $harness.Length -eq 187069 -and
-              (Get-FileHash -LiteralPath $harnessPath -Algorithm SHA256).Hash.ToLowerInvariant() -eq
-                '1a4dc35dc051f18694951092504c05be3048d73ffa81a01c04b46648e718de70'
-            ) {
-              Write-Host 'Frozen harness bytes verified.'
-            } else {
-              throw 'Frozen harness bytes do not match.'
-            }
-
             $recordPath = Join-Path $workspace '.artifacts\client-v1-conformance-win32-x64.json'
             Invoke-Checked `
               -FilePath $node `
@@ -7916,30 +7935,24 @@ jobs:
           import { createHash } from 'node:crypto';
           import { lstatSync, readFileSync } from 'node:fs';
           const expected = new Map([
-            [
-              'scripts/phase1-conformance.mjs',
-              [187106, '652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981'],
-            ],
-            [
-              'scripts/phase1-schema-v2-producer.mjs',
-              [130161, '20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc'],
-            ],
-            [
-              'scripts/phase1-linux-secret-service.sh',
-              [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476'],
-            ],
-            [
-              'scripts/unix-artifact-handoff.c',
-              [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc'],
-            ],
-            [
-              'scripts/unix-producer-command.sh',
-              [2663, 'a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1'],
-            ],
-            [
-              'scripts/unix-producer-supervisor.sh',
-              [25087, '9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d'],
-            ],
+            ['scripts/executable-resolution.mjs', [7326, '65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d']],
+            ['scripts/owned-temp-directory.mjs', [6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095']],
+            ['scripts/phase1-artifact-secret-scan.mjs', [21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a']],
+            ['scripts/phase1-conformance-lock.mjs', [41080, '2ace05f78ea23c5b59db7aa7e08ab1aeca9b26da9cf86a38001af535e65f5542']],
+            ['scripts/phase1-conformance.mjs', [187201, '61a2c03b144779ae4d208a71c908551deabc79dfd167062793f4e5285553b3ac']],
+            ['scripts/phase1-evidence-contract.mjs', [15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f']],
+            ['scripts/phase1-evidence-runtime.mjs', [6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159']],
+            ['scripts/phase1-linux-secret-service.mjs', [4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92']],
+            ['scripts/phase1-macos-keychain.mjs', [5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4']],
+            ['scripts/phase1-schema-v2-evidence.mjs', [40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8']],
+            ['scripts/phase1-schema-v2-producer.mjs', [130161, '20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc']],
+            ['scripts/process-owned-artifact-root.mjs', [11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a']],
+            ['scripts/supervised-exec.mjs', [2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b']],
+            ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
+            ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
+            ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
+            ['scripts/unix-producer-command.sh', [2663, 'a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1']],
+            ['scripts/unix-producer-supervisor.sh', [25087, '9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);

@@ -72,6 +72,10 @@ const harnessAuthorityPaths = Object.freeze([
   'scripts/phase1-linux-secret-service.mjs',
   'scripts/phase1-linux-secret-service.sh',
   'scripts/phase1-macos-keychain.mjs',
+  'scripts/unix-artifact-handoff.c',
+  'scripts/unix-producer-command.sh',
+  'scripts/unix-producer-supervisor.sh',
+  'scripts/windows-job-supervisor.cs',
   'scripts/contract-canary.mjs',
   'scripts/supervised-exec.mjs',
   'scripts/supervisor-status.mjs',
@@ -81,11 +85,15 @@ const harnessAuthorityPaths = Object.freeze([
 ]);
 const productionDeltaPaths = Object.freeze([
   'src-tauri/Cargo.toml',
+  'src-tauri/Cargo.lock',
   'src-tauri/src/bin/phase1-native-rpc.rs',
+  'src-tauri/src/cave.rs',
+  'src-tauri/src/cleanup_grant.rs',
   'src-tauri/src/conformance.rs',
   'src-tauri/src/connection.rs',
   'src-tauri/src/coven.rs',
   'src-tauri/src/keyring.rs',
+  'src-tauri/src/lib.rs',
 ]);
 const expectedRepositories = Object.freeze({
   chat: 'OpenCoven/chat',

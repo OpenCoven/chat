@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import * as ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,6 +108,51 @@ function workflowJob(workflow: string, name: string): string {
 
 function countOccurrences(value: string, expected: string): number {
   return value.split(expected).length - 1;
+}
+
+function staticLocalMjsModuleGraph(entryPath: string): string[] {
+  const modules = new Set<string>();
+  const pending = [entryPath];
+
+  while (pending.length > 0) {
+    const modulePath = pending.pop();
+    if (modulePath === undefined || modules.has(modulePath)) {
+      continue;
+    }
+    modules.add(modulePath);
+
+    const absolutePath = resolve(projectRoot, modulePath);
+    const sourceFile = ts.createSourceFile(
+      modulePath,
+      readFileSync(absolutePath, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.JS,
+    );
+    for (const statement of sourceFile.statements) {
+      if (
+        (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) ||
+        statement.moduleSpecifier === undefined ||
+        !ts.isStringLiteral(statement.moduleSpecifier)
+      ) {
+        continue;
+      }
+      const specifier = statement.moduleSpecifier.text;
+      if (!specifier.startsWith('.') || !specifier.endsWith('.mjs')) {
+        continue;
+      }
+      const importedPath = relative(
+        projectRoot,
+        resolve(dirname(absolutePath), specifier),
+      ).replaceAll('\\', '/');
+      if (!importedPath.startsWith('scripts/')) {
+        throw new Error(`static harness import escapes scripts/: ${modulePath} -> ${specifier}`);
+      }
+      pending.push(importedPath);
+    }
+  }
+
+  return [...modules].sort();
 }
 
 function verifyExactMainRefConstraint(label: string, job: string): void {
@@ -852,6 +898,46 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('pins the complete static harness module graph before Windows or Unix executes it', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const windowsStep = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const windowsRunBody = workflowRunBody(windowsStep);
+    const unixStep = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const lock = JSON.parse(
+      readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
+    ) as {
+      harnessAuthority: {
+        files: Array<{ path: string; sha256: string }>;
+      };
+    };
+    const moduleGraph = staticLocalMjsModuleGraph('scripts/phase1-conformance.mjs');
+
+    expect(moduleGraph).toContain('scripts/phase1-schema-v2-producer.mjs');
+    for (const path of moduleGraph) {
+      const bytes = readFileSync(resolve(projectRoot, path));
+      const authority = lock.harnessAuthority.files.find((entry) => entry.path === path);
+      expect(authority).toBeDefined();
+      expect(windowsStep).toContain(
+        `@('${path.replaceAll('/', '\\')}', ${bytes.byteLength}, '${sha256(bytes)}')`,
+      );
+      expect(unixStep).toContain(`['${path}', [${bytes.byteLength}, '${sha256(bytes)}']]`);
+    }
+
+    const pinStart = windowsRunBody.indexOf('$trustedHarnessModules = @(');
+    const pinComplete = windowsRunBody.indexOf(
+      "Write-Host 'Frozen harness module graph verified.'",
+    );
+    const nodeStarts = [
+      windowsRunBody.indexOf('& $node'),
+      windowsRunBody.indexOf('-FilePath $npm'),
+      windowsRunBody.indexOf('-FilePath $pnpm'),
+    ].filter((index) => index >= 0);
+    expect(pinStart).toBeGreaterThan(-1);
+    expect(pinComplete).toBeGreaterThan(pinStart);
+    expect(nodeStarts.length).toBeGreaterThan(0);
+    expect(pinComplete).toBeLessThan(Math.min(...nodeStarts));
+  });
+
   test('orders the fail-closed Windows artifact boundary before capture and publication', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const sources = [
@@ -1551,10 +1637,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('documents the exact committed workflow and native supervisor metadata', () => {
     const guide = readFileSync(resolve(projectRoot, 'docs', 'phase1-conformance.md'), 'utf8');
-    for (const relativePath of [
+    const metadataPaths = [
       '.github/workflows/client-v1-conformance.yml',
-      'scripts/phase1-conformance.mjs',
-      'scripts/phase1-schema-v2-producer.mjs',
+      ...staticLocalMjsModuleGraph('scripts/phase1-conformance.mjs'),
       'scripts/phase1-linux-secret-service.sh',
       'scripts/unix-artifact-handoff.c',
       'scripts/unix-producer-command.sh',
@@ -1563,7 +1648,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'scripts/unix-producer-supervisor.test.sh',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
-    ]) {
+    ];
+    for (const relativePath of [...new Set(metadataPaths)]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
       expect(guide).toContain(
         `| \`${relativePath}\` | ${bytes.byteLength.toLocaleString('en-US')} | \`${sha256(bytes)}\` |`,
