@@ -148,6 +148,12 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(buildScript).toContain('source.manifestSha256');
     expect(buildScript).toContain('source.lockSha256');
     expect(buildScript).toContain('source.configSha256');
+    expect(buildScript).toContain(
+      '`https://github.com/${source.repository}.git`',
+    );
+    expect(buildScript).toContain("'--depth=1'");
+    expect(buildScript).toContain('source.revision');
+    expect(buildScript).toContain("GIT_TERMINAL_PROMPT: '0'");
     expect(buildScript).toContain('stats.isSymbolicLink()');
     expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
     expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');

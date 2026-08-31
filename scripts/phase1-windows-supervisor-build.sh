@@ -56,6 +56,25 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { readPhase1ConformanceLock } from './scripts/phase1-conformance-lock.mjs';
 
 const source = readPhase1ConformanceLock().tools.windowsSupervisor.source;
+execFileSync(
+  'git',
+  [
+    '-c',
+    'credential.helper=',
+    'fetch',
+    '--no-tags',
+    '--depth=1',
+    `https://github.com/${source.repository}.git`,
+    source.revision,
+  ],
+  {
+    env: {
+      PATH: process.env.PATH,
+      GIT_TERMINAL_PROMPT: '0',
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  },
+);
 const inputs = [
   [source.path, source.sha256],
   ['tools/phase1-process-supervisor/Cargo.toml', source.manifestSha256],
