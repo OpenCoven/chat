@@ -1565,15 +1565,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain('OpenCoven-PrincipalOnly-');
     for (const nativeTaskProbeToken of [
       'ScheduledActionIsolationProbe',
+      'AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid',
       'OpenJobObjectW',
       'OpenProcess',
       'IsProcessInJob',
       'OpenProcessToken',
       'GetTokenInformation',
       'GetExitCodeProcess',
-      'AssertAliveOutsideJobHandleWithPrimaryTokenSid',
-      'AssertAliveWithPrimaryTokenSid',
-      'AuthoritativeHandleValue',
       'Deterministic service-equivalent exact-SID process',
       'Nonzero persistence process PID',
       'Terminal failure deterministic exact-SID process',
@@ -1595,7 +1593,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Nonzero producer task never reached a running exact-SID action.',
     );
     expect(runtimeTest).not.toContain('Nonzero producer scheduled action did not actually run.');
-    expect(runtimeTest).not.toContain('could not open the supervised Job Object.');
     expect(runtimeTest).toContain(
       '    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
     );
@@ -1693,7 +1690,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '$hasSidMarker = [IO.File]::Exists($SidMarker)',
       '$hasStartedMarker -or $hasPidMarker -or $hasSidMarker -or',
       "'Task Scheduler action process readiness was incomplete.'",
-      '[ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(',
+      '[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(',
     ]) {
       expect(runtimeTest).toContain(schedulerStartEvidence);
     }
@@ -1701,6 +1698,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Terminal failure principal-only scheduled action EnginePID',
     );
     expect(runtimeTest).toContain('Terminal failure deterministic exact-SID process');
+    for (const authoritativeHandleProof of [
+      '$serviceEscapeJob.AuthoritativeHandleValue',
+      '$failureEscapeJob.AuthoritativeHandleValue',
+      '$SupervisorJob.AuthoritativeHandleValue',
+      '-SupervisorJob $Job',
+      'new IntPtr(authoritativeJobHandle)',
+    ]) {
+      expect(runtimeTest).toContain(authoritativeHandleProof);
+    }
     expect(runtimeTest).toContain('SetupPid = $setupPid');
     expect(runtimeTest).toContain('Assert-ProcessExited -ProcessId $persistence.SetupPid');
     expect(runtimeTest).not.toContain(

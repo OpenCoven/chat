@@ -596,18 +596,18 @@ Independently of scheduler session availability, the trusted test broker uses
 long-lived process with the isolated user's primary token outside the
 supervised Job. That process writes a readiness marker, is proven alive,
 outside the Job through `IsProcessInJob` against the supervisor's still-live
-authoritative handle, and bound to the exact isolated SID. Reopening the
-protected Job by name remains intentionally denied. The process waits for
-verified account disablement, then registers and attempts to start a second
-task. The SID-wide quarantine must terminate this deterministic
-service-equivalent escape and remove both task registrations, any action
-process that actually started, all owned nested folders, and the BITS job
-before capture without deleting shared Task Scheduler folders. A separate
-nonzero scenario stages another live outside-Job exact-SID process, registers
-and attempts a scheduler action, and creates a BITS job. Scheduler action
-execution remains conditional, while the process drain, terminal quarantine,
-complete account/profile/root cleanup, and artifact-capture rejection are
-mandatory.
+authoritative handle, and bound to the exact isolated SID. The protected named
+Job DACL intentionally grants reopen access only to the isolated SID, so the
+broker does not reopen it by name. The process waits for verified account
+disablement, then registers and attempts to start a second task. The SID-wide
+quarantine must terminate this deterministic service-equivalent escape and
+remove both task registrations, any action process that actually started, all
+owned nested folders, and the BITS job before capture without deleting shared
+Task Scheduler folders. A separate nonzero scenario stages another live
+outside-Job exact-SID process, registers and attempts a scheduler action, and
+creates a BITS job. Scheduler action execution remains conditional, while the
+process drain, terminal quarantine, complete account/profile/root cleanup, and
+artifact-capture rejection are mandatory.
 
 Four additional native cases stage an exact-SID principal-only task
 registration and run attempt, a deterministic out-of-Job exact-SID process,
@@ -985,7 +985,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 161,495 | `3c493a34c264a947beb0be1dc2117264032fbe95ff13f56e624f7a8422ed6c2e` |
+| `scripts/windows-job-supervisor.test.ps1` | 162,132 | `d74a47cc0c39c00d0075776672938e9a00189b37986f54cce6f1f2c1c8be9d6e` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
