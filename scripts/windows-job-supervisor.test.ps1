@@ -4169,16 +4169,16 @@ Start-Sleep -Seconds 300
           throw 'Terminal producer launch exception was not observed.'
         }
       } else {
-        $directoryQuotas = if ($Mode -eq 'directory-quota') {
-          @(
+        [OpenCoven.WindowsDirectoryQuota[]]$directoryQuotas =
+          [OpenCoven.WindowsDirectoryQuota[]]::new(0)
+        if ($Mode -eq 'directory-quota') {
+          $directoryQuotas = [OpenCoven.WindowsDirectoryQuota[]]@(
             [OpenCoven.WindowsDirectoryQuota]::new(
               'terminal failure workspace',
               $Context.User.WorkspacePath,
               1KB
             )
           )
-        } else {
-          @()
         }
         try {
           $Result = $Job.RunProducerAsUserAndQuarantine(

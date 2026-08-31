@@ -1757,6 +1757,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain(
       'Assert-NoExactSidPersistence -Sid $failureEscapeContext.User.Sid',
     );
+    expect(runtimeTest).toContain('[OpenCoven.WindowsDirectoryQuota[]]::new(0)');
+    expect(runtimeTest).not.toContain('        } else {\n          @()\n        }');
     for (const principalIdentityGuard of [
       'function Resolve-RegisteredPrincipalSid {',
       '[Security.Principal.SecurityIdentifier]::new(`$UserId).Value',
