@@ -1412,7 +1412,9 @@ try {
       [Management.Automation.ErrorCategory]::PermissionDenied -or
     `$_.Exception -is [UnauthorizedAccessException] -or
     `$_.Exception.InnerException -is [UnauthorizedAccessException] -or
-    `$cimDenied
+    `$cimDenied -or
+    `$_.FullyQualifiedErrorId -ceq
+      'HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.NewCimInstanceCommand'
   ) {
     `$wmiDenied = `$true
   } else {
