@@ -2183,8 +2183,23 @@ try {
   Assert-HandoffRejected `
     -Case (Invoke-HandoffProducer -Label 'hardlink' -Attack 'hardlink') `
     -Failure 'Hardlink artifact handoff unexpectedly succeeded.'
+  $junctionCase = Invoke-HandoffProducer -Label 'junction' -Attack 'none'
+  try {
+    $junctionParent =
+      [IO.Directory]::GetParent($junctionCase.RecordPath).FullName
+    $junctionTarget = "$junctionParent-real"
+    [IO.Directory]::Move($junctionParent, $junctionTarget)
+    & $env:COMSPEC /d /c "mklink /J `"$junctionParent`" `"$junctionTarget`""
+    if ($LASTEXITCODE -ne 0) {
+      throw 'Trusted parent junction fixture creation failed.'
+    }
+  } catch {
+    $junctionCase.Job.Dispose()
+    Remove-IsolatedTestContext -Context $junctionCase.Context
+    throw
+  }
   Assert-HandoffRejected `
-    -Case (Invoke-HandoffProducer -Label 'junction' -Attack 'junction') `
+    -Case $junctionCase `
     -Failure 'Parent junction artifact handoff unexpectedly succeeded.'
 
   $ownerCase = Invoke-HandoffProducer -Label 'owner' -Attack 'none'
