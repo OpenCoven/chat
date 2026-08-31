@@ -1336,6 +1336,7 @@ public static class ScmDenialProbe
   [IO.File]::WriteAllText(
     $accessProbeScript,
     @"
+`$ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition ([IO.File]::ReadAllText(`$env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)) -Language CSharp
 Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("'", "''"))')) -Language CSharp
 [OpenCoven.WindowsJobSupervisor]::RequireRestrictedSupervisorBoundary(
