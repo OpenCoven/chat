@@ -1429,6 +1429,69 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('keeps the native Windows proof probes executable and fully instrumented', () => {
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+    const quarantineProbeStart = runtimeTest.indexOf('function Invoke-QuarantineSequenceProbe {');
+    const quarantineProbeEnd = runtimeTest.indexOf('\n$orderedSteps =', quarantineProbeStart);
+    const quarantineProbe = runtimeTest.slice(quarantineProbeStart, quarantineProbeEnd);
+    const failureProbeStart = runtimeTest.indexOf('function Assert-QuarantineSequenceFailure {');
+    const failureProbeEnd = runtimeTest.indexOf(
+      '\nAssert-QuarantineSequenceFailure `',
+      failureProbeStart,
+    );
+    const failureProbe = runtimeTest.slice(failureProbeStart, failureProbeEnd);
+    const artifactFailureStart = runtimeTest.indexOf('$artifactFailureSteps =');
+    const artifactFailureEnd = runtimeTest.indexOf('\n$aggregateSteps =', artifactFailureStart);
+    const artifactFailure = runtimeTest.slice(artifactFailureStart, artifactFailureEnd);
+
+    expect(quarantineProbeStart).toBeGreaterThan(-1);
+    expect(quarantineProbeEnd).toBeGreaterThan(quarantineProbeStart);
+    expect(quarantineProbe).toContain(
+      '[Parameter(Mandatory)][AllowEmptyCollection()]' + '[Collections.Generic.List[string]]$Steps',
+    );
+    expect(runtimeTest).not.toContain(
+      '[Parameter(Mandatory)][Collections.Generic.List[string]]$Steps',
+    );
+
+    expect(runtimeTest).toContain('function Assert-ExpectedReflectionFailure {');
+    expect(runtimeTest).toContain('catch [Management.Automation.MethodInvocationException]');
+    expect(runtimeTest).toContain('$underlying = $_.Exception.InnerException');
+    expect(runtimeTest).toContain('$underlying -is [Reflection.TargetInvocationException]');
+    expect(runtimeTest).toContain('$underlying = $underlying.InnerException');
+    expect(runtimeTest).toContain('$underlying.GetType() -ne $ExpectedType');
+    expect(runtimeTest).toContain('$underlying.Message -cne $ExpectedMessage');
+    expect(runtimeTest).not.toContain('catch [Reflection.TargetInvocationException]');
+
+    expect(failureProbeStart).toBeGreaterThan(-1);
+    expect(failureProbeEnd).toBeGreaterThan(failureProbeStart);
+    expect(failureProbe).toContain('$cleanupScheduledTasksProbe = $CleanupScheduledTasks');
+    expect(failureProbe).toContain('$cleanupBitsJobsProbe = $CleanupBitsJobs');
+    expect(failureProbe).toContain('$drainProcessesProbe = $DrainProcesses');
+    for (const marker of ['scheduler', 'bits', 'processes']) {
+      expect(failureProbe).toContain(`$steps.Add('${marker}')`);
+    }
+    expect(failureProbe.indexOf("$steps.Add('scheduler')")).toBeLessThan(
+      failureProbe.indexOf('$cleanupScheduledTasksProbe.Invoke()'),
+    );
+    expect(failureProbe.indexOf("$steps.Add('bits')")).toBeLessThan(
+      failureProbe.indexOf('$cleanupBitsJobsProbe.Invoke()'),
+    );
+    expect(failureProbe.indexOf("$steps.Add('processes')")).toBeLessThan(
+      failureProbe.indexOf('$drainProcessesProbe.Invoke()'),
+    );
+
+    expect(artifactFailureStart).toBeGreaterThan(-1);
+    expect(artifactFailureEnd).toBeGreaterThan(artifactFailureStart);
+    expect(artifactFailure).toContain("$artifactFailureSteps.Add('seal')");
+    expect(artifactFailure).toContain("$artifactFailureSteps.Add('capture')");
+    expect(artifactFailure).toContain(
+      "[string]::Join(',', $artifactFailureSteps) -cne 'quarantine-proof,seal'",
+    );
+  });
+
   test('creates a distinct non-admin Windows identity before supervised mutation', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');

@@ -86,6 +86,35 @@ $revalidateFailedProcessOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
 if ($null -eq $revalidateFailedProcessOpen) {
   throw 'The stale process-open revalidation hook is missing.'
 }
+function Assert-ExpectedReflectionFailure {
+  param(
+    [Parameter(Mandatory)][scriptblock]$Operation,
+    [Parameter(Mandatory)][type]$ExpectedType,
+    [Parameter(Mandatory)][string]$ExpectedMessage,
+    [Parameter(Mandatory)][string]$Failure
+  )
+
+  try {
+    & $Operation
+  } catch [Management.Automation.MethodInvocationException] {
+    $underlying = $_.Exception.InnerException
+    if ($underlying -is [Reflection.TargetInvocationException]) {
+      $underlying = $underlying.InnerException
+    }
+    if (
+      $null -eq $underlying -or
+      $underlying.GetType() -ne $ExpectedType -or
+      $underlying.Message -cne $ExpectedMessage
+    ) {
+      throw $Failure
+    }
+    return
+  } catch {
+    throw $Failure
+  }
+  throw $Failure
+}
+
 $revalidationSteps = [Collections.Generic.List[string]]::new()
 $missingProcessSnapshot =
   [Collections.Generic.Dictionary[uint32, string]]::new()
@@ -135,55 +164,54 @@ $revalidationSteps.Clear()
 $matchingProcessSnapshot =
   [Collections.Generic.Dictionary[uint32, string]]::new()
 $matchingProcessSnapshot.Add([uint32]424242, 'S-1-5-21-1-2-3-1001')
-$matchingProcessAccepted = $false
-try {
-  $revalidateFailedProcessOpen.Invoke(
-    $null,
-    [object[]]@(
-      [uint32]424242,
-      'S-1-5-21-1-2-3-1001',
-      87,
-      [Func[Collections.Generic.Dictionary[uint32, string]]]{
-        $revalidationSteps.Add('matching')
-        return $matchingProcessSnapshot
-      }
+Assert-ExpectedReflectionFailure `
+  -Operation {
+    $revalidateFailedProcessOpen.Invoke(
+      $null,
+      [object[]]@(
+        [uint32]424242,
+        'S-1-5-21-1-2-3-1001',
+        87,
+        [Func[Collections.Generic.Dictionary[uint32, string]]]{
+          $revalidationSteps.Add('matching')
+          return $matchingProcessSnapshot
+        }
+      )
     )
-  )
-  $matchingProcessAccepted = $true
-} catch [Reflection.TargetInvocationException] {
-}
-if (
-  $matchingProcessAccepted -or
-  [string]::Join(',', $revalidationSteps) -cne 'matching'
-) {
+  } `
+  -ExpectedType ([ComponentModel.Win32Exception]) `
+  -ExpectedMessage 'Matching isolated-SID process still matched after failed open revalidation.' `
+  -Failure 'Still-matching PID returned an unexpected reflection failure.'
+if ([string]::Join(',', $revalidationSteps) -cne 'matching') {
   throw 'Still-matching PID was accepted after failed OpenProcess revalidation.'
 }
 
 $revalidationSteps.Clear()
-$accessDeniedAccepted = $false
-try {
-  $revalidateFailedProcessOpen.Invoke(
-    $null,
-    [object[]]@(
-      [uint32]424242,
-      'S-1-5-21-1-2-3-1001',
-      5,
-      [Func[Collections.Generic.Dictionary[uint32, string]]]{
-        $revalidationSteps.Add('access-denied')
-        return $missingProcessSnapshot
-      }
+Assert-ExpectedReflectionFailure `
+  -Operation {
+    $revalidateFailedProcessOpen.Invoke(
+      $null,
+      [object[]]@(
+        [uint32]424242,
+        'S-1-5-21-1-2-3-1001',
+        5,
+        [Func[Collections.Generic.Dictionary[uint32, string]]]{
+          $revalidationSteps.Add('access-denied')
+          return $missingProcessSnapshot
+        }
+      )
     )
-  )
-  $accessDeniedAccepted = $true
-} catch [Reflection.TargetInvocationException] {
-}
-if ($accessDeniedAccepted -or $revalidationSteps.Count -ne 0) {
+  } `
+  -ExpectedType ([ComponentModel.Win32Exception]) `
+  -ExpectedMessage 'Matching isolated-SID process could not be opened.' `
+  -Failure 'Access denial returned an unexpected reflection failure.'
+if ($revalidationSteps.Count -ne 0) {
   throw 'Matching process access denial did not remain fail closed.'
 }
 
 function Invoke-QuarantineSequenceProbe {
   param(
-    [Parameter(Mandatory)][Collections.Generic.List[string]]$Steps,
+    [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.List[string]]$Steps,
     [Parameter(Mandatory)][Action]$DisableAccount,
     [Parameter(Mandatory)][Func[int]]$CleanupScheduledTasks,
     [Parameter(Mandatory)][Func[int]]$CleanupBitsJobs,
@@ -252,14 +280,26 @@ function Assert-QuarantineSequenceFailure {
   )
 
   $steps = [Collections.Generic.List[string]]::new()
+  $cleanupScheduledTasksProbe = $CleanupScheduledTasks
+  $cleanupBitsJobsProbe = $CleanupBitsJobs
+  $drainProcessesProbe = $DrainProcesses
   $failed = $false
   try {
     Invoke-QuarantineSequenceProbe `
       -Steps $steps `
       -DisableAccount $DisableAccount `
-      -CleanupScheduledTasks $CleanupScheduledTasks `
-      -CleanupBitsJobs $CleanupBitsJobs `
-      -DrainProcesses $DrainProcesses `
+      -CleanupScheduledTasks ([Func[int]]{
+        $steps.Add('scheduler')
+        return $cleanupScheduledTasksProbe.Invoke()
+      }) `
+      -CleanupBitsJobs ([Func[int]]{
+        $steps.Add('bits')
+        return $cleanupBitsJobsProbe.Invoke()
+      }) `
+      -DrainProcesses ([Func[int]]{
+        $steps.Add('processes')
+        return $drainProcessesProbe.Invoke()
+      }) `
       -MaximumRounds $MaximumRounds
   } catch {
     $failed = $true
@@ -343,20 +383,25 @@ if (
 ) {
   throw 'Artifact security ordering guard changed.'
 }
-$artifactCaptureReached = $false
+$artifactFailureSteps = [Collections.Generic.List[string]]::new()
 try {
   $artifactSequence.Invoke(
     $null,
     [object[]]@(
-      [Action]{},
-      [Action]{ throw 'ACL sealing failed' },
-      [Action]{},
-      [Action]{ $artifactCaptureReached = $true }
+      [Action]{ $artifactFailureSteps.Add('quarantine-proof') },
+      [Action]{
+        $artifactFailureSteps.Add('seal')
+        throw 'ACL sealing failed'
+      },
+      [Action]{ $artifactFailureSteps.Add('post-seal') },
+      [Action]{ $artifactFailureSteps.Add('capture') }
     )
   )
 } catch {
 }
-if ($artifactCaptureReached) {
+if (
+  [string]::Join(',', $artifactFailureSteps) -cne 'quarantine-proof,seal'
+) {
   throw 'Artifact ACL sealing failure did not fail closed.'
 }
 

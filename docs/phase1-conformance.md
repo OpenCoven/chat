@@ -887,7 +887,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
 | `scripts/windows-job-supervisor.cs` | 255,395 | `057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc` |
-| `scripts/windows-job-supervisor.test.ps1` | 148,453 | `d935e74986dc812809e29401bb7e29484e49f4ac56bb77778f8938f133309c77` |
+| `scripts/windows-job-supervisor.test.ps1` | 150,114 | `61dd2c7af1a0540a0d3e02be239e393d225ad6a3876cd577f7b2a68188f00c3c` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
 production Unix source files by the sizes and digests above before compiling or
