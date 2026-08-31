@@ -3267,7 +3267,7 @@ foreach (`$exactSidRegistration in @(
   }
 }
 `$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
+if (-not `$?) {
   throw 'BITS service-mediated test job could not be created.'
 }
 [IO.File]::WriteAllText(
@@ -3643,7 +3643,7 @@ if (
 }
 Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters
 `$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$failureEscapeBitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
+if (-not `$?) {
   throw 'Nonzero producer BITS job could not be created.'
 }
 [IO.File]::WriteAllText(
@@ -3900,7 +3900,7 @@ if (`$enginePid -ne 0) {
   )
 }
 `$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
+if (-not `$?) {
   throw 'Terminal failure BITS job could not be created.'
 }
 [IO.File]::WriteAllText(

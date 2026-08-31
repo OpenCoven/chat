@@ -1692,6 +1692,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(
       runtimeTest.match(/`\$null = & \(Join-Path `\$env:SystemRoot 'System32\\bitsadmin\.exe'\)/g),
     ).toHaveLength(3);
+    expect(
+      runtimeTest.match(
+        /`\$null = & \(Join-Path `\$env:SystemRoot 'System32\\bitsadmin\.exe'\)[^\r\n]+\r?\nif \(-not `\$\?\) \{/g,
+      ),
+    ).toHaveLength(3);
     expect(runtimeTest).not.toContain("'$bitsName' *>&1 |");
     expect(runtimeTest).not.toContain("'$failureEscapeBitsName' *>&1 |");
     expect(runtimeTest).toContain(
