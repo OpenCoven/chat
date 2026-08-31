@@ -1400,8 +1400,7 @@ try {
   for (`$depth = 0; `$depth -lt 8 -and `$null -ne `$candidateError; `$depth++) {
     if (
       `$candidateError -is [Microsoft.Management.Infrastructure.CimException] -and
-      `$candidateError.StatusCode -eq
-        [Microsoft.Management.Infrastructure.CimStatusCode]::AccessDenied
+      `$candidateError.StatusCode.ToString() -ceq 'AccessDenied'
     ) {
       `$cimDenied = `$true
       break
