@@ -1511,7 +1511,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Permissive-DACL artifact handoff unexpectedly succeeded.',
       'Artifact replacement race exposed supervisor-only canary bytes.',
       'Task Scheduler escape registration survived broker cleanup.',
-      'Task Scheduler escape action rewrote the sealed artifact.',
+      'Service-mediated persistence rewrote the sealed artifact.',
       'A task registered after account disablement survived repeated cleanup.',
       'Pre-existing shared Task Scheduler parent was removed by quarantine.',
       'Pre-existing Task Scheduler folder was removed by quarantine.',
@@ -1536,12 +1536,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'CreateServiceW was not denied with ERROR_ACCESS_DENIED.',
       'Denied native service creation left a registered service.',
       'Permanent WMI subscription creation unexpectedly succeeded.',
-      'Task Scheduler action did not write its started marker.',
-      'Task Scheduler action did not expose a running instance.',
-      'Task Scheduler action process did not run as the exact isolated SID.',
       'Nonzero producer result changed during terminal quarantine.',
       'Nonzero producer artifact capture was not rejected.',
-      'A task started after account disablement was not exercised.',
       'Ephemeral local user survived cleanup.',
       'Ephemeral Windows profile survived cleanup.',
       'Ephemeral bootstrap root survived cleanup.',
@@ -1561,8 +1557,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).not.toContain('& `$sc create');
     expect(runtimeTest).toContain('$definition.Principal.LogonType = 3');
     expect(runtimeTest).toContain('.CreateFolder(');
-    expect(runtimeTest).toContain('.Run(');
-    expect(runtimeTest).toContain('.GetInstances(');
     expect(runtimeTest).toContain('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
     expect(runtimeTest).toContain('.RunProducerAsUserAndQuarantine(');
     expect(runtimeTest).toContain('OpenCoven-PrincipalOnly-');
@@ -1574,12 +1568,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'OpenProcessToken',
       'GetTokenInformation',
       'GetExitCodeProcess',
-      'Primary scheduled action EnginePID',
-      'Primary scheduled action process PID',
-      'Post-disable scheduled action EnginePID',
-      'Post-disable scheduled action process PID',
-      'Nonzero producer scheduled action EnginePID',
-      'Nonzero producer scheduled action process PID',
+      'Late registrar process PID',
+      'Terminal failure persistence process PID',
     ]) {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
     }
@@ -1611,13 +1601,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '$metadataValues',
       'Principal-only task metadata contained an attributable identity.',
       'RegisteredTask = $registeredTask',
-      '[switch]$Start',
-      'if ($Start) {',
-      '$runningTask = $registeredTask.Run($null)',
-      'RunningTask = $runningTask',
     ]) {
       expect(principalOnlyTask).toContain(required);
     }
+    expect(principalOnlyTask).not.toContain('$registeredTask.Run(');
     for (const forbidden of [
       '.UserName',
       '.RootPath',
@@ -1652,16 +1639,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest.slice(serviceEscapeProducerStart, serviceEscapeTaskParameters)).not.toMatch(
       /Register-PrincipalOnlyInteractiveTask `\r?\n/,
     );
-    const primaryTaskRegistration = runtimeTest.indexOf(
-      '`$taskProbe = Register-IsolatedInteractiveTask @taskParameters',
-      serviceEscapeTaskParameters,
-    );
-    const principalOnlyRegistration = runtimeTest.indexOf(
-      '`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask',
-      serviceEscapeProducerStart,
-    );
-    expect(primaryTaskRegistration).toBeGreaterThan(serviceEscapeTaskParameters);
-    expect(principalOnlyRegistration).toBeGreaterThan(primaryTaskRegistration);
     const terminalPersistenceSetup = runtimeTest.slice(
       runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
       runtimeTest.indexOf(
@@ -1669,9 +1646,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
         runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
       ),
     );
-    expect(terminalPersistenceSetup).toContain(
-      '`$task = Register-PrincipalOnlyInteractiveTask `\n  -Start `',
-    );
+    expect(terminalPersistenceSetup).not.toContain('\n  -Start `');
+    expect(terminalPersistenceSetup).toContain('Start-Sleep -Seconds 300');
+    expect(runtimeTest).not.toContain('$registeredTask.Run($null)');
+    expect(runtimeTest).not.toContain('scheduled action EnginePID');
+    expect(runtimeTest).not.toContain('scheduled action process PID');
+    expect(runtimeTest).not.toContain('Task Scheduler action did not write its started marker.');
     for (const principalIdentityGuard of [
       'function Resolve-RegisteredPrincipalSid {',
       '[Security.Principal.SecurityIdentifier]::new(`$UserId).Value',

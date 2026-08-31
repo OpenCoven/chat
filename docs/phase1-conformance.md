@@ -567,37 +567,33 @@ a second hard link, a parent junction, wrong record ownership, a permissive
 DACL, and an active replacement race; the success case exercises stdin
 revalidation plus create-new, owner-private publication.
 The same job retains the frozen Rust supervisor artifact behavior tests.
-The suite also runs a deterministic scheduler case that creates a hidden
-interactive-token task inside a unique nested
-Task Scheduler folder, starts it explicitly through `IRegisteredTask.Run`, and
-waits for its started marker and running instance, then uses native
-`OpenJobObjectW`, `OpenProcess`, and `IsProcessInJob` checks on both the
-reported process PID and `EnginePID` while each is alive. Both PIDs must be
-outside the supervised Job and have the isolated SID as their primary-token
-SID. The case also creates a genuinely principal-only
-`TASK_LOGON_INTERACTIVE_TOKEN` task: its folder, path, name, description,
-source, signed system `ping.exe` action, arguments, and working directory are
-runtime-rejected if they contain the run identity, user name, isolated root, or
-supervised workspace. It is observed only through its running instance and
-`EnginePID`; its registration can therefore be found only by exact
-`Principal.UserId`/SID matching. Before the supervisor is created, the broker
-also creates a unique shared parent and one empty child folder. Restricted
-production then registers exact-SID running tasks both directly in that
-pre-existing child and in a new sibling child. Quarantine must remove both
-registrations and the run-created child while preserving the complete
-pre-existing folder chain. An already-live token waits for account disablement,
-then registers and starts a second task and performs the same alive, out-of-Job,
-primary-token SID proof. The test fails unless every action actually ran and
-quarantine removes all registrations, running instances, action processes,
-owned nested folders, and the BITS job before capture without deleting shared
-Task Scheduler folders. A separate nonzero producer recreates a running
-scheduled action, proves its live
-`EnginePID` and process PID are out of Job with the exact SID, and creates a
-BITS job before verifying terminal quarantine and complete
-account/profile/root cleanup without allowing capture.
+The suite also runs a deterministic scheduler case that registers hidden
+`TASK_LOGON_INTERACTIVE_TOKEN` tasks inside unique nested Task Scheduler
+folders. Hosted runners do not provide the ephemeral account with a desktop
+logon, so correctness does not depend on those task actions being scheduled.
+Every registration is checked by exact path and canonical
+`Principal.UserId`/SID. The principal-only fixtures also reject folder, name,
+description, source, signed system action, arguments, or working-directory
+metadata containing the run identity, user name, isolated root, or supervised
+workspace. Before the supervisor is created, the broker creates a unique
+shared parent and one empty child folder. Restricted production then registers
+exact-SID tasks both directly in that pre-existing child and in a new sibling
+child. Quarantine must remove both registrations and the run-created child
+while preserving the complete pre-existing folder chain.
 
-Four additional native cases stage an exact-SID principal-only running task,
-process, and BITS job, then invoke
+An unsupervised exact-SID registrar process is proven alive and outside the
+supervised Job through native `OpenJobObjectW`, `OpenProcess`,
+`IsProcessInJob`, and primary-token SID checks. It waits for account
+disablement, registers a second exact-SID task, and remains alive until
+quarantine terminates it. The same case creates a BITS job and fails unless
+quarantine removes all registrations, the unsupervised process, owned nested
+folders, and the BITS job before capture without deleting shared Task Scheduler
+folders. A separate nonzero producer registers another exact-SID task and BITS
+job before verifying terminal quarantine and complete account/profile/root
+cleanup without allowing capture.
+
+Four additional native cases stage an exact-SID principal-only task,
+unsupervised process, and BITS job, then invoke
 `RunProducerAsUserAndQuarantine` through stdout overflow, stderr overflow,
 directory-quota failure, and a `CreateProcessWithLogonW` launch exception.
 Each requires verified account disablement, completed quarantine, external
@@ -970,7 +966,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 153,132 | `dd79f8cac34038c842173c5941f6f108afe0ff65b62290f25598ab6de971040c` |
+| `scripts/windows-job-supervisor.test.ps1` | 148,957 | `d75f17bd34040bf0ce8df2975a7b200b6db422bd814b8576e8e0abca952845f2` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
