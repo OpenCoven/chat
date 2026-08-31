@@ -2586,7 +2586,9 @@ function Register-IsolatedInteractiveTask {
 function Assert-SchedulerRunAttemptResult {
   param(
     [Parameter(Mandatory)][pscustomobject]$Probe,
-    [Parameter(Mandatory)][string]$StartedMarker
+    [Parameter(Mandatory)][string]$StartedMarker,
+    [Parameter(Mandatory)][string]$PidMarker,
+    [Parameter(Mandatory)][string]$SidMarker
   )
 
   if (-not $Probe.RunAttempted) {
@@ -2596,11 +2598,106 @@ function Assert-SchedulerRunAttemptResult {
     if (
       $Probe.RunErrorHResult -eq 0 -or
       $Probe.RegisteredTask.GetInstances(0).Count -ne 0 -or
-      [IO.File]::Exists($StartedMarker)
+      [IO.File]::Exists($StartedMarker) -or
+      [IO.File]::Exists($PidMarker) -or
+      [IO.File]::Exists($SidMarker)
     ) {
       throw 'Task Scheduler run attempt failed without a fail-closed non-running state.'
     }
   }
+}
+
+function Assert-ScheduledActionRunIsolation {
+  param(
+    [Parameter(Mandatory)][pscustomobject]$Probe,
+    [Parameter(Mandatory)][string]$StartedMarker,
+    [Parameter(Mandatory)][string]$PidMarker,
+    [Parameter(Mandatory)][string]$SidMarker,
+    [Parameter(Mandatory)][string]$ExpectedSid,
+    [Parameter(Mandatory)][string]$JobName,
+    [Parameter(Mandatory)][string]$ProcessLabel,
+    [Parameter(Mandatory)][string]$EngineLabel
+  )
+
+  Assert-SchedulerRunAttemptResult `
+    -Probe $Probe `
+    -StartedMarker $StartedMarker `
+    -PidMarker $PidMarker `
+    -SidMarker $SidMarker
+
+  $deadline = [DateTime]::UtcNow.AddSeconds(2)
+  [uint32]$enginePid = 0
+  do {
+    try {
+      $enginePid = [uint32]$Probe.RunningTask.EnginePID
+    } catch {
+      $enginePid = [uint32]0
+    }
+    $hasStartedMarker = [IO.File]::Exists($StartedMarker)
+    $hasPidMarker = [IO.File]::Exists($PidMarker)
+    $hasSidMarker = [IO.File]::Exists($SidMarker)
+    if (
+      $enginePid -ne 0 -or
+      ($hasPidMarker -and $hasSidMarker)
+    ) {
+      break
+    }
+    if (
+      -not (
+        $hasStartedMarker -or $hasPidMarker -or $hasSidMarker -or
+        $enginePid -ne 0
+      )
+    ) {
+      Start-Sleep -Milliseconds 20
+      continue
+    }
+    Start-Sleep -Milliseconds 20
+  } while ([DateTime]::UtcNow -lt $deadline)
+
+  if ($enginePid -ne 0) {
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+      $EngineLabel,
+      $JobName,
+      $enginePid,
+      $ExpectedSid
+    )
+  }
+
+  $hasStartedMarker = [IO.File]::Exists($StartedMarker)
+  $hasPidMarker = [IO.File]::Exists($PidMarker)
+  $hasSidMarker = [IO.File]::Exists($SidMarker)
+  if (-not ($hasStartedMarker -or $hasPidMarker -or $hasSidMarker)) {
+    return
+  }
+  if (-not $hasPidMarker -or -not $hasSidMarker) {
+    throw 'Task Scheduler action process readiness was incomplete.'
+  }
+  if (
+    $hasStartedMarker -and
+    [IO.File]::ReadAllText($StartedMarker).Trim() -cne 'started'
+  ) {
+    throw 'Task Scheduler action started marker was invalid.'
+  }
+  $actualSid = [IO.File]::ReadAllText($SidMarker).Trim()
+  if ($actualSid -cne $ExpectedSid) {
+    throw 'Task Scheduler action process did not run as the exact isolated SID.'
+  }
+  [uint32]$actionPid = 0
+  if (
+    -not [uint32]::TryParse(
+      [IO.File]::ReadAllText($PidMarker).Trim(),
+      [ref]$actionPid
+    ) -or
+    $actionPid -eq 0
+  ) {
+    throw 'Task Scheduler action process identifier was invalid.'
+  }
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    $ProcessLabel,
+    $JobName,
+    $actionPid,
+    $ExpectedSid
+  )
 }
 '@,
       [Text.UTF8Encoding]::new($false)
@@ -2824,9 +2921,15 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
   UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
 }
 `$lateTask = Register-IsolatedInteractiveTask @taskParameters
-Assert-SchedulerRunAttemptResult `
+Assert-ScheduledActionRunIsolation `
   -Probe `$lateTask `
-  -StartedMarker '$($lateActionMarker.Replace("'", "''"))'
+  -StartedMarker '$($lateActionMarker.Replace("'", "''"))' `
+  -PidMarker '$($lateActionPid.Replace("'", "''"))' `
+  -SidMarker '$($lateActionSid.Replace("'", "''"))' `
+  -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
+  -JobName '$serviceEscapeJobName' `
+  -ProcessLabel 'Post-disable scheduled action process PID' `
+  -EngineLabel 'Post-disable scheduled action EnginePID'
 `$registeredLateUserId =
   [string]`$lateTask.RegisteredTask.Definition.Principal.UserId
 `$registeredLateSid = if (
@@ -3061,9 +3164,6 @@ function Resolve-RegisteredPrincipalSid {
   UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
 }
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
-Assert-SchedulerRunAttemptResult `
-  -Probe `$taskProbe `
-  -StartedMarker '$($serviceEscapeActionMarker.Replace("'", "''"))'
 if (
   `$taskProbe.TaskPath -cne '$serviceEscapeTaskPath' -or
   `$taskProbe.RegisteredTask.Path -cne '$serviceEscapeTaskPath' -or
@@ -3073,56 +3173,15 @@ if (
 ) {
   throw 'Primary exact-SID task registration changed.'
 }
-`$taskObservationDeadline = [DateTime]::UtcNow.AddSeconds(2)
-`$primaryEnginePid = [uint32]0
-do {
-  try {
-    `$primaryEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
-  } catch {
-    `$primaryEnginePid = [uint32]0
-  }
-  if (
-    [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))') -or
-    `$primaryEnginePid -ne 0
-  ) {
-    break
-  }
-  Start-Sleep -Milliseconds 20
-} while ([DateTime]::UtcNow -lt `$taskObservationDeadline)
-if (
-  [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))')
-) {
-  if (
-    -not [IO.File]::Exists('$($serviceEscapeActionPid.Replace("'", "''"))') -or
-    -not [IO.File]::Exists('$($serviceEscapeActionSid.Replace("'", "''"))')
-  ) {
-    throw 'Task Scheduler action process readiness was incomplete.'
-  }
-  `$expectedTaskSid =
-    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  `$actualTaskSid =
-    [IO.File]::ReadAllText('$($serviceEscapeActionSid.Replace("'", "''"))').Trim()
-  if (`$actualTaskSid -cne `$expectedTaskSid) {
-    throw 'Task Scheduler action process did not run as the exact isolated SID.'
-  }
-  `$taskActionPid = [uint32][IO.File]::ReadAllText(
-    '$($serviceEscapeActionPid.Replace("'", "''"))'
-  )
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-    'Primary scheduled action process PID',
-    '$serviceEscapeJobName',
-    `$taskActionPid,
-    `$expectedTaskSid
-  )
-}
-if (`$primaryEnginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-    'Primary scheduled action EnginePID',
-    '$serviceEscapeJobName',
-    `$primaryEnginePid,
-    '$($serviceEscapeContext.User.Sid)'
-  )
-}
+Assert-ScheduledActionRunIsolation `
+  -Probe `$taskProbe `
+  -StartedMarker '$($serviceEscapeActionMarker.Replace("'", "''"))' `
+  -PidMarker '$($serviceEscapeActionPid.Replace("'", "''"))' `
+  -SidMarker '$($serviceEscapeActionSid.Replace("'", "''"))' `
+  -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
+  -JobName '$serviceEscapeJobName' `
+  -ProcessLabel 'Primary scheduled action process PID' `
+  -EngineLabel 'Primary scheduled action EnginePID'
 `$forbiddenTaskFragments = @(
   '$serviceEscapeJobName',
   '$serviceEscapeNonce',
@@ -3511,9 +3570,6 @@ Add-Type -TypeDefinition (
   UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
 }
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
-Assert-SchedulerRunAttemptResult `
-  -Probe `$taskProbe `
-  -StartedMarker '$($failureEscapeStarted.Replace("'", "''"))'
 `$registeredUserId =
   [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
 `$registeredSid = if (
@@ -3533,55 +3589,15 @@ if (
 ) {
   throw 'Nonzero producer exact-SID task registration changed.'
 }
-`$observationDeadline = [DateTime]::UtcNow.AddSeconds(2)
-`$nonzeroEnginePid = [uint32]0
-do {
-  try {
-    `$nonzeroEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
-  } catch {
-    `$nonzeroEnginePid = [uint32]0
-  }
-  if (
-    [IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))') -or
-    `$nonzeroEnginePid -ne 0
-  ) {
-    break
-  }
-  Start-Sleep -Milliseconds 20
-} while ([DateTime]::UtcNow -lt `$observationDeadline)
-if ([IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))')) {
-  if (
-    -not [IO.File]::Exists('$($failureEscapePid.Replace("'", "''"))') -or
-    -not [IO.File]::Exists('$($failureEscapeSid.Replace("'", "''"))')
-  ) {
-    throw 'Nonzero producer task action readiness was incomplete.'
-  }
-  `$expectedSid =
-    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  if (
-    [IO.File]::ReadAllText('$($failureEscapeSid.Replace("'", "''"))').Trim() -cne
-      `$expectedSid
-  ) {
-    throw 'Nonzero producer task action SID changed.'
-  }
-  `$nonzeroProcessPid = [uint32][IO.File]::ReadAllText(
-    '$($failureEscapePid.Replace("'", "''"))'
-  )
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-    'Nonzero producer scheduled action process PID',
-    '$failureEscapeJobName',
-    `$nonzeroProcessPid,
-    `$expectedSid
-  )
-}
-if (`$nonzeroEnginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-    'Nonzero producer scheduled action EnginePID',
-    '$failureEscapeJobName',
-    `$nonzeroEnginePid,
-    '$($failureEscapeContext.User.Sid)'
-  )
-}
+Assert-ScheduledActionRunIsolation `
+  -Probe `$taskProbe `
+  -StartedMarker '$($failureEscapeStarted.Replace("'", "''"))' `
+  -PidMarker '$($failureEscapePid.Replace("'", "''"))' `
+  -SidMarker '$($failureEscapeSid.Replace("'", "''"))' `
+  -ExpectedSid '$($failureEscapeContext.User.Sid)' `
+  -JobName '$failureEscapeJobName' `
+  -ProcessLabel 'Nonzero producer scheduled action process PID' `
+  -EngineLabel 'Nonzero producer scheduled action EnginePID'
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
   /create `
   '$failureEscapeBitsName' *>&1 | Out-Null

@@ -1675,6 +1675,24 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(terminalPersistenceSetup).toContain(
       'Assert-PrincipalOnlySchedulerRunAttemptResult -Probe `$task',
     );
+    for (const scheduledActionIsolationCall of [
+      'Assert-ScheduledActionRunIsolation `\n  -Probe `$lateTask `',
+      "Assert-ScheduledActionRunIsolation `\n  -Probe `$taskProbe `\n  -StartedMarker '$($serviceEscapeActionMarker.Replace(\"'\", \"''\"))'",
+      "Assert-ScheduledActionRunIsolation `\n  -Probe `$taskProbe `\n  -StartedMarker '$($failureEscapeStarted.Replace(\"'\", \"''\"))'",
+    ]) {
+      expect(runtimeTest).toContain(scheduledActionIsolationCall);
+    }
+    for (const schedulerStartEvidence of [
+      'function Assert-ScheduledActionRunIsolation {',
+      '$hasStartedMarker = [IO.File]::Exists($StartedMarker)',
+      '$hasPidMarker = [IO.File]::Exists($PidMarker)',
+      '$hasSidMarker = [IO.File]::Exists($SidMarker)',
+      '$hasStartedMarker -or $hasPidMarker -or $hasSidMarker -or',
+      "'Task Scheduler action process readiness was incomplete.'",
+      '[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(',
+    ]) {
+      expect(runtimeTest).toContain(schedulerStartEvidence);
+    }
     expect(terminalPersistenceSetup).toContain(
       'Terminal failure principal-only scheduled action EnginePID',
     );

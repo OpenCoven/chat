@@ -572,10 +572,13 @@ interactive-token task inside a unique nested Task Scheduler folder and
 explicitly attempts `IRegisteredTask.Run`. A hosted ephemeral account does not
 necessarily have a Task Scheduler-recognized interactive session, so action
 execution is not treated as a prerequisite for the cleanup proof. If the action
-does start, its committed PID/SID markers and any live `EnginePID` are checked
-with native `OpenJobObjectW`, `OpenProcess`, `IsProcessInJob`, and primary-token
-SID queries; the action must be outside the supervised Job, use the exact
-isolated SID, and be gone after quarantine. The case also creates a genuinely
+does start, any started, PID, or SID marker, or a live `EnginePID`, is treated
+as execution evidence. The test requires a bounded live proof using native
+`OpenJobObjectW`, `OpenProcess`, `IsProcessInJob`, and primary-token SID
+queries; the action must be outside the supervised Job, use the exact isolated
+SID, and be gone after quarantine. Partial marker publication and a process
+that exits before this proof fail closed. The same requirement applies to the
+post-disable and nonzero scheduler attempts. The case also creates a genuinely
 principal-only
 `TASK_LOGON_INTERACTIVE_TOKEN` task: its folder, path, name, description,
 source, signed system `ping.exe` action, arguments, and working directory are
@@ -980,7 +983,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 160,366 | `40fe29d6ff05916f8798027972a0f6e4cced7117cf51b63e3203ee4e5a6dbc72` |
+| `scripts/windows-job-supervisor.test.ps1` | 160,905 | `338d630b957e032aa7c9c04041041c3d1e46c955b3c333e9c86863cae35979cd` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
