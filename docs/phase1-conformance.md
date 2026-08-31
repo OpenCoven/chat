@@ -582,12 +582,12 @@ source, signed system `ping.exe` action, arguments, and working directory are
 runtime-rejected if they contain the run identity, user name, isolated root, or
 supervised workspace. The neutral, hidden, and cross-folder variants are
 registration-only fixtures, so quarantine can find them only by exact
-`Principal.UserId`/SID matching rather than run markers. Before the supervisor
-is created, the broker also creates a unique shared parent and one empty child
-folder. Restricted production then registers exact-SID tasks both directly in
-that pre-existing child and in a new sibling child. Quarantine must remove both
-registrations and the run-created child while preserving the complete
-pre-existing folder chain.
+`Principal.UserId`/SID matching rather than run markers. Before restricted
+production runs, the broker also creates a unique shared parent and one empty
+child folder. Restricted production then registers exact-SID tasks both
+directly in that pre-existing child and in a new sibling child. Quarantine must
+remove both registrations and the run-created child while preserving the
+complete pre-existing folder chain.
 
 Independently of scheduler session availability, the trusted test broker uses
 `CreateProcessWithLogonW` and the retained ephemeral credentials to launch a
@@ -979,7 +979,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 156,844 | `528c2aa892c625dddf5d621c01dc994aa02101ff6a70832aa34a524b4d5176a3` |
+| `scripts/windows-job-supervisor.test.ps1` | 157,926 | `054424e4351b3650f232f1ed1e443fb768d87746df1a9099a835ab6dd69ee8c2` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and

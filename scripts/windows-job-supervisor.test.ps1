@@ -2575,6 +2575,7 @@ function Register-IsolatedInteractiveTask {
     $runErrorHResult = $_.Exception.HResult
   }
   return [pscustomobject]@{
+    TaskPath = "$FolderPath\$TaskName"
     RegisteredTask = $registeredTask
     RunningTask = $runningTask
     RunAttempted = $true
@@ -2826,11 +2827,6 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
 Assert-SchedulerRunAttemptResult `
   -Probe `$lateTask `
   -StartedMarker '$($lateActionMarker.Replace("'", "''"))'
-if (`$lateTask.RegisteredTask.Path -cne '$lateTaskPath') {
-  throw 'Post-disable task path changed.'
-}
-`$expectedLateSid =
-  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 `$registeredLateUserId =
   [string]`$lateTask.RegisteredTask.Definition.Principal.UserId
 `$registeredLateSid = if (
@@ -2845,8 +2841,12 @@ if (`$lateTask.RegisteredTask.Path -cne '$lateTaskPath') {
     [Security.Principal.SecurityIdentifier]
   ).Value
 }
-if (`$registeredLateSid -cne `$expectedLateSid) {
-  throw 'Post-disable task was not registered for the exact isolated SID.'
+if (
+  `$lateTask.TaskPath -cne '$lateTaskFolderPath\$lateTaskName' -or
+  `$lateTask.RegisteredTask.Path -cne '$lateTaskFolderPath\$lateTaskName' -or
+  `$registeredLateSid -cne '$($serviceEscapeContext.User.Sid)'
+) {
+  throw 'Post-disable exact-SID task registration changed.'
 }
 [IO.File]::WriteAllText(
   '$($lateRegistrationMarker.Replace("'", "''"))',
@@ -2977,6 +2977,10 @@ public static class UnsupervisedLogonProcess
     )
     $serviceEscapePassword =
       [string]$passwordProperty.GetValue($serviceEscapeContext.User)
+    $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
+      $serviceEscapeJobName,
+      $serviceEscapeContext.User
+    )
     $lateRegistrarPid = [int][UnsupervisedLogonProcess]::Start(
       $serviceEscapeContext.User.UserName,
       [Environment]::MachineName,
@@ -2998,6 +3002,17 @@ public static class UnsupervisedLogonProcess
       }
       Start-Sleep -Milliseconds 20
     }
+    if (
+      [IO.File]::ReadAllText($lateRegistrarReady).Trim() -cne 'ready'
+    ) {
+      throw 'Deterministic service-equivalent process marker was invalid.'
+    }
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+      'Deterministic service-equivalent exact-SID process',
+      $serviceEscapeJobName,
+      [uint32]$lateRegistrarPid,
+      $serviceEscapeContext.User.Sid
+    )
 
     $serviceEscapeProducer = Join-Path `
       $serviceEscapeContext.User.RootPath `
@@ -3049,15 +3064,14 @@ function Resolve-RegisteredPrincipalSid {
 Assert-SchedulerRunAttemptResult `
   -Probe `$taskProbe `
   -StartedMarker '$($serviceEscapeActionMarker.Replace("'", "''"))'
-if (`$taskProbe.RegisteredTask.Path -cne '$serviceEscapeTaskPath') {
-  throw 'Primary task path changed.'
-}
 if (
+  `$taskProbe.TaskPath -cne '$serviceEscapeTaskPath' -or
+  `$taskProbe.RegisteredTask.Path -cne '$serviceEscapeTaskPath' -or
   (Resolve-RegisteredPrincipalSid -UserId (
     [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
   )) -cne '$($serviceEscapeContext.User.Sid)'
 ) {
-  throw 'Primary task was not registered for the exact isolated SID.'
+  throw 'Primary exact-SID task registration changed.'
 }
 `$taskObservationDeadline = [DateTime]::UtcNow.AddSeconds(2)
 `$primaryEnginePid = [uint32]0
@@ -3177,21 +3191,6 @@ exit 0
         $preExistingFolder = $preExistingFolder.CreateFolder($segment, $null)
       }
     }
-    $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
-      $serviceEscapeJobName,
-      $serviceEscapeContext.User
-    )
-    if (
-      [IO.File]::ReadAllText($lateRegistrarReady).Trim() -cne 'ready'
-    ) {
-      throw 'Deterministic service-equivalent process marker was invalid.'
-    }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-      'Deterministic service-equivalent exact-SID process',
-      $serviceEscapeJobName,
-      [uint32]$lateRegistrarPid,
-      $serviceEscapeContext.User.Sid
-    )
     $serviceEscapeResult =
       $serviceEscapeJob.RunProducerAsUserAndQuarantine(
       $serviceEscapeContext.User,
@@ -3307,7 +3306,7 @@ exit 0
         $serviceEscapeArtifact.Bytes
       ) -cne $serviceEscapeTrustedText
     ) {
-      throw 'Task Scheduler escape action rewrote the sealed artifact.'
+      throw 'Service-mediated persistence rewrote the sealed artifact.'
     }
   } finally {
     if ($lateRegistrarPid -ne 0) {
@@ -3495,12 +3494,6 @@ Add-Type -TypeDefinition (
 Assert-SchedulerRunAttemptResult `
   -Probe `$taskProbe `
   -StartedMarker '$($failureEscapeStarted.Replace("'", "''"))'
-if (
-  `$taskProbe.RegisteredTask.Path -cne
-    '$failureEscapeFolderPath\$failureEscapeTaskName'
-) {
-  throw 'Nonzero producer task path changed.'
-}
 `$registeredUserId =
   [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
 `$registeredSid = if (
@@ -3512,8 +3505,13 @@ if (
     [Security.Principal.SecurityIdentifier]
   ).Value
 }
-if (`$registeredSid -cne '$($failureEscapeContext.User.Sid)') {
-  throw 'Nonzero producer task was not registered for the exact isolated SID.'
+if (
+  `$taskProbe.TaskPath -cne '$failureEscapeFolderPath\$failureEscapeTaskName' -or
+  `$taskProbe.RegisteredTask.Path -cne
+    '$failureEscapeFolderPath\$failureEscapeTaskName' -or
+  `$registeredSid -cne '$($failureEscapeContext.User.Sid)'
+) {
+  throw 'Nonzero producer exact-SID task registration changed.'
 }
 `$observationDeadline = [DateTime]::UtcNow.AddSeconds(2)
 `$nonzeroEnginePid = [uint32]0
@@ -3733,6 +3731,19 @@ Add-Type -TypeDefinition (
 if (`$task.TaskPath -cne '$taskPath') {
   throw 'Terminal failure persistence task path changed.'
 }
+`$registeredPrincipal = [string]`$task.RegisteredTask.Definition.Principal.UserId
+`$registeredSid = if (
+  `$registeredPrincipal.StartsWith('S-1-', [StringComparison]::OrdinalIgnoreCase)
+) {
+  [Security.Principal.SecurityIdentifier]::new(`$registeredPrincipal).Value
+} else {
+  [Security.Principal.NTAccount]::new(`$registeredPrincipal).Translate(
+    [Security.Principal.SecurityIdentifier]
+  ).Value
+}
+if (`$registeredSid -cne '$($Context.User.Sid)') {
+  throw 'Terminal failure persistence task principal changed.'
+}
 Assert-PrincipalOnlySchedulerRunAttemptResult -Probe `$task
 `$deadline = [DateTime]::UtcNow.AddSeconds(2)
 `$enginePid = [uint32]0
@@ -3859,6 +3870,7 @@ Start-Sleep -Seconds 300
 
     $Context = New-IsolatedTestContext -Label "terminal-$Label"
     $Job = $null
+    $persistence = $null
     $userName = $Context.User.UserName
     $profilePath = $Context.User.OperatingSystemProfilePath
     $rootPath = $Context.User.RootPath
@@ -4022,6 +4034,24 @@ Start-Sleep -Seconds 300
       }
     } finally {
       $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+      if ($null -ne $persistence) {
+        try {
+          $setupProcess = [Diagnostics.Process]::GetProcessById(
+            [int]$persistence.SetupPid
+          )
+          try {
+            if (-not $setupProcess.HasExited) {
+              $setupProcess.Kill($true)
+              $setupProcess.WaitForExit()
+            }
+          } finally {
+            $setupProcess.Dispose()
+          }
+        } catch [ArgumentException] {
+        } catch {
+          $cleanupErrors.Add($_.Exception)
+        }
+      }
       try {
         Remove-IsolatedTestContext -Context $Context
       } catch {

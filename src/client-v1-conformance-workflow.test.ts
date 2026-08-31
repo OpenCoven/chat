@@ -1511,7 +1511,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Permissive-DACL artifact handoff unexpectedly succeeded.',
       'Artifact replacement race exposed supervisor-only canary bytes.',
       'Task Scheduler escape registration survived broker cleanup.',
-      'Task Scheduler escape action rewrote the sealed artifact.',
+      'Service-mediated persistence rewrote the sealed artifact.',
       'A task registered after account disablement survived repeated cleanup.',
       'Pre-existing shared Task Scheduler parent was removed by quarantine.',
       'Pre-existing Task Scheduler folder was removed by quarantine.',
@@ -1560,8 +1560,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).not.toContain('& `$sc create');
     expect(runtimeTest).toContain('$definition.Principal.LogonType = 3');
     expect(runtimeTest).toContain('.CreateFolder(');
-    expect(runtimeTest).toContain('.Run(');
-    expect(runtimeTest).toContain('.GetInstances(');
     expect(runtimeTest).toContain('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
     expect(runtimeTest).toContain('.RunProducerAsUserAndQuarantine(');
     expect(runtimeTest).toContain('OpenCoven-PrincipalOnly-');
@@ -1623,7 +1621,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '[switch]$Start',
       'if ($Start) {',
       '$runningTask = $registeredTask.Run($null)',
-      'RunningTask = $runningTask',
+      'RunAttempted = $runAttempted',
+      'RunErrorHResult = $runErrorHResult',
     ]) {
       expect(principalOnlyTask).toContain(required);
     }
@@ -1661,16 +1660,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest.slice(serviceEscapeProducerStart, serviceEscapeTaskParameters)).not.toMatch(
       /Register-PrincipalOnlyInteractiveTask `\r?\n/,
     );
-    const primaryTaskRegistration = runtimeTest.indexOf(
-      '`$taskProbe = Register-IsolatedInteractiveTask @taskParameters',
-      serviceEscapeTaskParameters,
-    );
-    const principalOnlyRegistration = runtimeTest.indexOf(
-      '`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask',
-      serviceEscapeProducerStart,
-    );
-    expect(primaryTaskRegistration).toBeGreaterThan(serviceEscapeTaskParameters);
-    expect(principalOnlyRegistration).toBeGreaterThan(primaryTaskRegistration);
     const terminalPersistenceSetup = runtimeTest.slice(
       runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
       runtimeTest.indexOf(
