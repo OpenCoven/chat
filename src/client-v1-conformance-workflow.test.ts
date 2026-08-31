@@ -1611,10 +1611,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '$metadataValues',
       'Principal-only task metadata contained an attributable identity.',
       'RegisteredTask = $registeredTask',
+      '[switch]$Start',
+      'if ($Start) {',
+      '$runningTask = $registeredTask.Run($null)',
+      'RunningTask = $runningTask',
     ]) {
       expect(principalOnlyTask).toContain(required);
     }
-    expect(principalOnlyTask).not.toContain('$registeredTask.Run(');
     for (const forbidden of [
       '.UserName',
       '.RootPath',
@@ -1648,6 +1651,26 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(serviceEscapeTaskParameters).toBeGreaterThan(serviceEscapeProducerStart);
     expect(runtimeTest.slice(serviceEscapeProducerStart, serviceEscapeTaskParameters)).not.toMatch(
       /Register-PrincipalOnlyInteractiveTask `\r?\n/,
+    );
+    const primaryTaskRegistration = runtimeTest.indexOf(
+      '`$taskProbe = Register-IsolatedInteractiveTask @taskParameters',
+      serviceEscapeTaskParameters,
+    );
+    const principalOnlyRegistration = runtimeTest.indexOf(
+      '`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask',
+      serviceEscapeProducerStart,
+    );
+    expect(primaryTaskRegistration).toBeGreaterThan(serviceEscapeTaskParameters);
+    expect(principalOnlyRegistration).toBeGreaterThan(primaryTaskRegistration);
+    const terminalPersistenceSetup = runtimeTest.slice(
+      runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
+      runtimeTest.indexOf(
+        '    $password = [string]$passwordProperty.GetValue($Context.User)',
+        runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
+      ),
+    );
+    expect(terminalPersistenceSetup).toContain(
+      '`$task = Register-PrincipalOnlyInteractiveTask `\n  -Start `',
     );
     for (const principalIdentityGuard of [
       'function Resolve-RegisteredPrincipalSid {',

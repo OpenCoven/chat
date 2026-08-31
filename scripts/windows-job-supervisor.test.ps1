@@ -2547,6 +2547,7 @@ function Register-PrincipalOnlyInteractiveTask {
     [string]$TaskNonce,
     [string]$FolderPath,
     [string]$TaskName = 'IdentityMatchOnly',
+    [switch]$Start,
     [Parameter(Mandatory)][string[]]$ForbiddenFragments
   )
 
@@ -2618,9 +2619,14 @@ function Register-PrincipalOnlyInteractiveTask {
     3,
     $null
   )
+  $runningTask = $null
+  if ($Start) {
+    $runningTask = $registeredTask.Run($null)
+  }
   return [pscustomobject]@{
     TaskPath = "$FolderPath\$TaskName"
     RegisteredTask = $registeredTask
+    RunningTask = $runningTask
   }
 }
 '@,
@@ -2944,47 +2950,6 @@ function Resolve-RegisteredPrincipalSid {
   '$($serviceEscapeRecord.Replace("'", "''"))',
   [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
 )
-`$forbiddenTaskFragments = @(
-  '$serviceEscapeJobName',
-  '$serviceEscapeNonce',
-  '$($serviceEscapeContext.User.UserName)',
-  '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
-  '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
-  '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
-)
-`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
-`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-foreach (`$exactSidRegistration in @(
-  [pscustomobject]@{
-    Probe = `$principalOnlyTask
-    ExpectedPath = '$principalOnlyTaskPath'
-  },
-  [pscustomobject]@{
-    Probe = `$sharedChildTask
-    ExpectedPath = '$sharedChildTaskPath'
-  },
-  [pscustomobject]@{
-    Probe = `$preExistingFolderTask
-    ExpectedPath = '$preExistingFolderTaskPath'
-  }
-)) {
-  if (
-    `$exactSidRegistration.Probe.TaskPath -cne `$exactSidRegistration.ExpectedPath -or
-    `$exactSidRegistration.Probe.RegisteredTask.Path -cne
-      `$exactSidRegistration.ExpectedPath
-  ) {
-    throw 'Exact-SID task path changed.'
-  }
-  if (
-    (Resolve-RegisteredPrincipalSid -UserId (
-      [string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId
-    )) -cne
-      '$($serviceEscapeContext.User.Sid)'
-  ) {
-    throw 'Task was not registered for the exact isolated SID.'
-  }
-}
 `$taskParameters = @{
   FolderPath = '$taskFolderPath'
   TaskName = '$serviceEscapeName'
@@ -3050,6 +3015,47 @@ if (`$actualTaskSid -cne `$expectedTaskSid) {
   `$taskActionPid,
   `$expectedTaskSid
 )
+`$forbiddenTaskFragments = @(
+  '$serviceEscapeJobName',
+  '$serviceEscapeNonce',
+  '$($serviceEscapeContext.User.UserName)',
+  '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+  '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+  '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+)
+`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
+`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
+`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
+foreach (`$exactSidRegistration in @(
+  [pscustomobject]@{
+    Probe = `$principalOnlyTask
+    ExpectedPath = '$principalOnlyTaskPath'
+  },
+  [pscustomobject]@{
+    Probe = `$sharedChildTask
+    ExpectedPath = '$sharedChildTaskPath'
+  },
+  [pscustomobject]@{
+    Probe = `$preExistingFolderTask
+    ExpectedPath = '$preExistingFolderTaskPath'
+  }
+)) {
+  if (
+    `$exactSidRegistration.Probe.TaskPath -cne `$exactSidRegistration.ExpectedPath -or
+    `$exactSidRegistration.Probe.RegisteredTask.Path -cne
+      `$exactSidRegistration.ExpectedPath
+  ) {
+    throw 'Exact-SID task path changed.'
+  }
+  if (
+    (Resolve-RegisteredPrincipalSid -UserId (
+      [string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId
+    )) -cne
+      '$($serviceEscapeContext.User.Sid)'
+  ) {
+    throw 'Task was not registered for the exact isolated SID.'
+  }
+}
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
   Out-Null
 if (`$LASTEXITCODE -ne 0) {
@@ -3602,6 +3608,7 @@ Add-Type -TypeDefinition (
   [IO.File]::ReadAllText('$($probePath.Replace("'", "''"))')
 ) -Language CSharp
 `$task = Register-PrincipalOnlyInteractiveTask `
+  -Start `
   -UserSid '$($Context.User.Sid)' `
   -TaskNonce '$taskNonce' `
   -ForbiddenFragments @(
