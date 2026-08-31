@@ -1686,6 +1686,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     ]) {
       expect(runtimeTest).toContain(scheduledActionIsolationCall);
     }
+    expect(runtimeTest).toContain(
+      "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
+    );
+    expect(runtimeTest).not.toContain('$serviceEscapeTaskPath');
     for (const schedulerStartEvidence of [
       'function Assert-ScheduledActionRunIsolation {',
       '$hasStartedMarker = [IO.File]::Exists($StartedMarker)',

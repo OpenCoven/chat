@@ -3189,8 +3189,8 @@ function Resolve-RegisteredPrincipalSid {
 }
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
 if (
-  `$taskProbe.TaskPath -cne '$serviceEscapeTaskPath' -or
-  `$taskProbe.RegisteredTask.Path -cne '$serviceEscapeTaskPath' -or
+  `$taskProbe.TaskPath -cne '$taskFolderPath\$serviceEscapeName' -or
+  `$taskProbe.RegisteredTask.Path -cne '$taskFolderPath\$serviceEscapeName' -or
   (Resolve-RegisteredPrincipalSid -UserId (
     [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
   )) -cne '$($serviceEscapeContext.User.Sid)'
