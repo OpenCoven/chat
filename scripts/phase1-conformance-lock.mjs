@@ -11,6 +11,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   rmSync,
   statSync,
 } from 'node:fs';
@@ -138,6 +139,7 @@ const defaultVerificationLimits = Object.freeze({
 const gitChildMaxBuffer = 32 * 1024 * 1024;
 const localMetadataMaxBytes = 64 * 1024;
 const trackedAttributeBatchSize = 256;
+const harnessAuthorityVerifications = new WeakMap();
 
 export function createGitEnvironment(inheritedEnvironment = process.env) {
   const environment = {};
@@ -620,6 +622,207 @@ export function readPhase1ConformanceLock(lockPath = defaultLockPath) {
     release: normalizeRelease(lockData.release),
     evidence: normalizeEvidence(lockData.evidence),
   });
+}
+
+function runAuthorityGit(repositoryRoot, args) {
+  return runSupervisedSync(
+    'git',
+    [
+      ...gitConfigurationOverrides,
+      '-c',
+      `safe.directory=${repositoryRoot}`,
+      '-C',
+      repositoryRoot,
+      ...args,
+    ],
+    {
+      encoding: 'utf8',
+      env: createGitEnvironment(),
+      maxBuffer: gitChildMaxBuffer,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: defaultVerificationLimits.repositoryDeadlineMs,
+      killSignal: 'SIGKILL',
+    },
+  ).trim();
+}
+
+function readAuthorityBlobs(repositoryRoot, paths) {
+  const output = runAuthorityGit(repositoryRoot, [
+    'ls-tree',
+    '-z',
+    '--full-tree',
+    'HEAD',
+    '--',
+    ...paths,
+  ]);
+  const blobs = new Map();
+
+  for (const entry of output.split('\0')) {
+    if (entry.length === 0) {
+      continue;
+    }
+    const match = /^100(?:644|755) blob ([0-9a-f]{40})\t(.+)$/u.exec(entry);
+    if (match === null) {
+      throw new Error('Phase 1 authority contains a non-file Git entry.');
+    }
+    blobs.set(match[2], match[1]);
+  }
+  return blobs;
+}
+
+function authorityFileMatches(repositoryRoot, file, blob) {
+  const path = resolve(repositoryRoot, file.path);
+  let descriptor;
+  let matches = false;
+
+  try {
+    const before = lstatSync(path, { bigint: true });
+    if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1n) {
+      return false;
+    }
+    descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = fstatSync(descriptor, { bigint: true });
+    if (
+      !opened.isFile() ||
+      opened.dev !== before.dev ||
+      opened.ino !== before.ino ||
+      opened.size !== before.size
+    ) {
+      return false;
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    const pathAfter = lstatSync(path, { bigint: true });
+    matches =
+      opened.dev === after.dev &&
+      opened.ino === after.ino &&
+      opened.size === after.size &&
+      opened.mtimeNs === after.mtimeNs &&
+      opened.ctimeNs === after.ctimeNs &&
+      after.dev === pathAfter.dev &&
+      after.ino === pathAfter.ino &&
+      after.size === pathAfter.size &&
+      after.mtimeNs === pathAfter.mtimeNs &&
+      after.ctimeNs === pathAfter.ctimeNs &&
+      blob === file.blob &&
+      createHash('sha256').update(bytes).digest('hex') === file.sha256;
+  } catch {
+    matches = false;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        matches = false;
+      }
+    }
+  }
+  return matches;
+}
+
+export function assertPhase1HarnessAuthorityCheckout(lock, repositoryRoot) {
+  const root = realpathSync(requirePathString(repositoryRoot, 'Phase 1 harness checkout root'));
+  const authority = requireRecord(
+    requireRecord(lock, 'Phase 1 conformance lock').harnessAuthority,
+    'Phase 1 harness authority',
+  );
+  const harness = requireRecord(lock.harness, 'Phase 1 harness lock entry');
+  const [revision, tree] = runAuthorityGit(root, ['rev-parse', 'HEAD', 'HEAD^{tree}']).split('\n');
+
+  if (
+    authority.revision !== harness.revision ||
+    revision !== authority.revision ||
+    tree !== authority.tree
+  ) {
+    throw new Error('Executing Phase 1 harness revision does not match its immutable authority.');
+  }
+  if (!Array.isArray(authority.files) || authority.files.length !== harnessAuthorityPaths.length) {
+    throw new Error('Executing Phase 1 harness module does not match its immutable authority.');
+  }
+  const blobs = readAuthorityBlobs(
+    root,
+    authority.files.map(({ path }) => path),
+  );
+  for (const file of authority.files) {
+    if (!authorityFileMatches(root, file, blobs.get(file.path))) {
+      throw new Error('Executing Phase 1 harness module does not match its immutable authority.');
+    }
+  }
+  return Object.freeze({ revision, tree });
+}
+
+export function assertExecutingPhase1HarnessAuthority(
+  lock,
+  executingRoot = projectRoot,
+  environment = process.env,
+) {
+  const configuredRoot = environment.OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT;
+  if (
+    environment.OPENCOVEN_PHASE1_VERIFIED_RUNNER !== '1' ||
+    typeof configuredRoot !== 'string' ||
+    realpathSync(configuredRoot) !== realpathSync(executingRoot)
+  ) {
+    throw new Error('Phase 1 runner is not executing from its verified harness checkout.');
+  }
+  const root = realpathSync(executingRoot);
+  const identity = assertPhase1HarnessAuthorityCheckout(lock, root);
+  const verification = Object.freeze({});
+  harnessAuthorityVerifications.set(
+    verification,
+    Object.freeze({ lock, root, revision: identity.revision, tree: identity.tree }),
+  );
+  return verification;
+}
+
+export function requirePhase1HarnessAuthorityVerification(
+  verification,
+  lock,
+  executingRoot = projectRoot,
+) {
+  const verified = harnessAuthorityVerifications.get(verification);
+  if (
+    verified === undefined ||
+    verified.lock !== lock ||
+    verified.root !== realpathSync(executingRoot) ||
+    verified.revision !== lock.harnessAuthority.revision ||
+    verified.tree !== lock.harnessAuthority.tree
+  ) {
+    throw new Error('Schema-v2 execution requires verified Phase 1 harness authority.');
+  }
+}
+
+export function assertPhase1ProducerAuthority(lock, producerRoot) {
+  const root = realpathSync(requirePathString(producerRoot, 'Schema-v2 producer checkout root'));
+  assertPhase1HarnessAuthorityCheckout(lock, root);
+  const expectedDeltas = lock.harnessAuthority.productionDeltas;
+  const changed = runAuthorityGit(root, [
+    'diff',
+    '--name-only',
+    lock.chat.revision,
+    'HEAD',
+    '--',
+    ...productionDeltaPaths,
+  ])
+    .split('\n')
+    .filter(Boolean)
+    .sort();
+
+  if (
+    !Array.isArray(expectedDeltas) ||
+    expectedDeltas.length !== productionDeltaPaths.length ||
+    JSON.stringify(changed) !== JSON.stringify(expectedDeltas.map(({ path }) => path).sort())
+  ) {
+    throw new Error('Chat conformance native delta set is not exactly allowlisted.');
+  }
+  const blobs = readAuthorityBlobs(
+    root,
+    expectedDeltas.map(({ path }) => path),
+  );
+  for (const delta of expectedDeltas) {
+    if (!authorityFileMatches(root, delta, blobs.get(delta.path))) {
+      throw new Error('Chat conformance native delta does not match its immutable allowlist.');
+    }
+  }
 }
 
 function normalizeCheckoutRoots(checkoutRoots) {

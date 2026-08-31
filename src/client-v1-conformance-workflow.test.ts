@@ -898,11 +898,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
-  test('pins the complete static harness module graph before Windows or Unix executes it', () => {
+  test('pins the complete harness module graph before Windows or Unix executes it', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const windowsStep = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
     const windowsRunBody = workflowRunBody(windowsStep);
     const unixStep = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const unixRunBody = workflowRunBody(unixStep);
     const lock = JSON.parse(
       readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
     ) as {
@@ -910,9 +911,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
         files: Array<{ path: string; sha256: string }>;
       };
     };
-    const moduleGraph = staticLocalMjsModuleGraph('scripts/phase1-conformance.mjs');
+    const moduleGraph = [
+      ...new Set([
+        ...staticLocalMjsModuleGraph('scripts/phase1-conformance.mjs'),
+        ...staticLocalMjsModuleGraph('scripts/phase1-schema-v2-producer.mjs'),
+        'scripts/contract-canary.mjs',
+        'scripts/phase1-process-supervisor.mjs',
+      ]),
+    ].sort();
 
     expect(moduleGraph).toContain('scripts/phase1-schema-v2-producer.mjs');
+    expect(moduleGraph).toContain('scripts/contract-canary.mjs');
+    expect(moduleGraph).toContain('scripts/phase1-process-supervisor.mjs');
     for (const path of moduleGraph) {
       const bytes = readFileSync(resolve(projectRoot, path));
       const authority = lock.harnessAuthority.files.find((entry) => entry.path === path);
@@ -922,6 +932,20 @@ describe('Chat-local protected Windows conformance workflow', () => {
       );
       expect(unixStep).toContain(`['${path}', [${bytes.byteLength}, '${sha256(bytes)}']]`);
     }
+    const windowsPinnedModules = [
+      ...windowsStep.matchAll(/@\('(scripts\\[^']+\.mjs)', \d+, '[0-9a-f]{64}'\)/gu),
+    ]
+      .map((match) => match[1]?.replaceAll('\\', '/'))
+      .filter((path): path is string => path !== undefined)
+      .sort();
+    const unixPinnedModules = [
+      ...unixStep.matchAll(/\['(scripts\/[^']+\.mjs)', \[\d+, '[0-9a-f]{64}'\]\]/gu),
+    ]
+      .map((match) => match[1])
+      .filter((path): path is string => path !== undefined)
+      .sort();
+    expect(windowsPinnedModules).toEqual(moduleGraph);
+    expect(unixPinnedModules).toEqual(moduleGraph);
 
     const pinStart = windowsRunBody.indexOf('$trustedHarnessModules = @(');
     const pinComplete = windowsRunBody.indexOf(
@@ -936,6 +960,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(pinComplete).toBeGreaterThan(pinStart);
     expect(nodeStarts.length).toBeGreaterThan(0);
     expect(pinComplete).toBeLessThan(Math.min(...nodeStarts));
+
+    const unixPinStart = unixRunBody.indexOf('const expected = new Map([');
+    const unixPinComplete = unixRunBody.indexOf(
+      "console.log('Frozen harness module graph verified.');",
+    );
+    expect(unixPinStart).toBeGreaterThan(-1);
+    expect(unixPinComplete).toBeGreaterThan(unixPinStart);
+    expect(unixPinComplete).toBeLessThan(unixRunBody.indexOf('\n          EOF'));
   });
 
   test('orders the fail-closed Windows artifact boundary before capture and publication', () => {

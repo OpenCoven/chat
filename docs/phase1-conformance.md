@@ -38,6 +38,15 @@ The runner verifies that the evidence-authority commit descends from the
 candidate and that all four candidate source package identities match the
 frozen manifest. It never rebuilds replacement per-platform SDK tarballs.
 
+After reading the lock and configuring the frozen Windows supervisor, the
+verified entrypoint authenticates its own Chat revision, tree, and every
+`harnessAuthority.files` blob and SHA-256 before schema-v2 dispatch. The
+schema-v2 producer accepts only that in-process verification receipt. After
+cloning its producer checkout, it independently verifies the same harness
+authority and the exact ten `productionDeltas` paths, blobs, and SHA-256
+digests before loading SDK authority, packaging dependencies, or invoking
+Cargo.
+
 Supported records are exactly `darwin-arm64`, `linux-x64`, and `win32-x64`.
 The validator remains separate from the packed SDK candidate. The required
 protected-run `validator_revision` input must exactly equal the lowercase
@@ -878,18 +887,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 387,348 | `b69d01fd4c09cecf22cf6fc9a5e5d17ea7a5098f4f5060befb6a9082f08c9edd` |
+| `.github/workflows/client-v1-conformance.yml` | 387,916 | `f5240a2e04b577ab2681912b20c608e4f00b8da501326b5b7f8831d03de62a5f` |
+| `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 41,080 | `2ace05f78ea23c5b59db7aa7e08ab1aeca9b26da9cf86a38001af535e65f5542` |
-| `scripts/phase1-conformance.mjs` | 187,319 | `20b448d71fd4ad3da0023b71a4886c6cbfeb862f670fd7285dc9a14d3e057ba9` |
+| `scripts/phase1-conformance-lock.mjs` | 47,411 | `cfd8f160d21dc9eeae16237944914b3af60b5da2e4ee8fc432d084da438a42b0` |
+| `scripts/phase1-conformance.mjs` | 184,598 | `cec4b1db382c98b6e7c3370c7a70d35dcaafc89aa1d934201e984b3cc9b9fd67` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
+| `scripts/phase1-process-supervisor.mjs` | 3,311 | `a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
+| `scripts/phase1-schema-v2-producer.mjs` | 129,149 | `4d68939e066503bb29bf29e87e8768e7a74db0f265cf34af66f345ab550d1154` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,802 | `149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -903,9 +914,11 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.test.ps1` | 150,114 | `61dd2c7af1a0540a0d3e02be239e393d225ad6a3876cd577f7b2a68188f00c3c` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
-harness module executes, Windows verifies the complete 14-module static `.mjs`
-graph with trusted inline PowerShell, while Unix verifies the same graph plus
-the four production shell/C helper sources before compiling or executing them.
+harness module executes, Windows verifies the complete 16-module static and
+runtime `.mjs` graph with trusted inline PowerShell, including
+`phase1-process-supervisor.mjs` and `contract-canary.mjs`. Unix verifies the
+same graph plus the four production shell/C helper sources before compiling or
+executing them.
 Its production job remains `platform-conformance`; the fresh validation, OIDC
 attestation, and terminal confirmation jobs remain
 `validate-conformance-artifacts`, `attest-conformance-artifacts`, and

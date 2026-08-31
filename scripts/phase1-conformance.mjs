@@ -22,7 +22,9 @@ import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
   assertCleanPhase1Checkouts,
+  assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
+  assertPhase1ProducerAuthority,
   createGitEnvironment,
   readPhase1ConformanceLock,
 } from './phase1-conformance-lock.mjs';
@@ -1116,48 +1118,7 @@ export function assertExecutingHarnessAuthority(
   executingRoot = projectRoot,
   environment = process.env,
 ) {
-  const configuredRoot = environment[verifiedRunnerRootEnvironment];
-  if (
-    environment[verifiedRunnerEnvironment] !== '1' ||
-    typeof configuredRoot !== 'string' ||
-    realpathSync(configuredRoot) !== realpathSync(executingRoot)
-  ) {
-    throw new Error('Phase 1 runner is not executing from its verified harness checkout.');
-  }
-  const authority = lock.harnessAuthority;
-  if (
-    authority === undefined ||
-    authority.revision !== lock.harness.revision ||
-    runSupervisedSync('git', ['rev-parse', 'HEAD'], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim() !== authority.revision ||
-    runSupervisedSync('git', ['rev-parse', 'HEAD^{tree}'], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim() !== authority.tree
-  ) {
-    throw new Error('Executing Phase 1 harness revision does not match its immutable authority.');
-  }
-  for (const file of authority.files) {
-    const path = resolve(executingRoot, file.path);
-    const stats = lstatSync(path);
-    const blob = runSupervisedSync('git', ['rev-parse', `HEAD:${file.path}`], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim();
-    if (
-      stats.isSymbolicLink() ||
-      !stats.isFile() ||
-      blob !== file.blob ||
-      sha256File(path) !== file.sha256
-    ) {
-      throw new Error('Executing Phase 1 harness module does not match its immutable authority.');
-    }
-  }
+  return assertExecutingPhase1HarnessAuthority(lock, executingRoot, environment);
 }
 
 async function bootstrapVerifiedRunner(options) {
@@ -1687,55 +1648,7 @@ export function nativeAdapterTestEnvironment(
 }
 
 export function assertProductionAdapterAtRevision(harnessRoot, lock) {
-  const productionPaths = [
-    'src-tauri/Cargo.toml',
-    'src-tauri/Cargo.lock',
-    'src-tauri/src/bin/phase1-native-rpc.rs',
-    'src-tauri/src/cave.rs',
-    'src-tauri/src/cleanup_grant.rs',
-    'src-tauri/src/conformance.rs',
-    'src-tauri/src/connection.rs',
-    'src-tauri/src/coven.rs',
-    'src-tauri/src/keyring.rs',
-    'src-tauri/src/lib.rs',
-  ];
-  const expectedDeltas = lock.harnessAuthority.productionDeltas;
-  const changed = runSupervisedSync(
-    'git',
-    ['diff', '--name-only', lock.chat.revision, 'HEAD', '--', ...productionPaths],
-    {
-      cwd: harnessRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    },
-  )
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .sort();
-  if (
-    !Array.isArray(expectedDeltas) ||
-    JSON.stringify(changed) !== JSON.stringify(expectedDeltas.map(({ path }) => path).sort())
-  ) {
-    throw new Error('Chat conformance native delta set is not exactly allowlisted.');
-  }
-  for (const delta of expectedDeltas) {
-    const path = resolve(harnessRoot, delta.path);
-    const stats = lstatSync(path);
-    const blob = runSupervisedSync('git', ['rev-parse', `HEAD:${delta.path}`], {
-      cwd: harnessRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim();
-    if (
-      stats.isSymbolicLink() ||
-      !stats.isFile() ||
-      blob !== delta.blob ||
-      sha256File(path) !== delta.sha256
-    ) {
-      throw new Error('Chat conformance native delta does not match its immutable allowlist.');
-    }
-  }
+  assertPhase1ProducerAuthority(lock, harnessRoot);
   const covenPath = 'src-tauri/src/coven.rs';
   const releaseSource = runSupervisedSync('git', ['show', `${lock.chat.revision}:${covenPath}`], {
     cwd: harnessRoot,
@@ -5159,15 +5072,16 @@ export function buildObservedSchemaV2Assertions({
 
 export async function runPhase1Conformance(options = parseArgs([])) {
   assertNoNodeRuntimeInjection();
-  if (options.platform !== undefined) {
-    return runSchemaV2Conformance(options);
-  }
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );
-  runPublicPhase1Stage('phase1.stage.harness-authority.failed', () =>
-    assertExecutingHarnessAuthority(lock),
+  const harnessAuthorityVerification = runPublicPhase1Stage(
+    'phase1.stage.harness-authority.failed',
+    () => assertExecutingHarnessAuthority(lock),
   );
+  if (options.platform !== undefined) {
+    return runSchemaV2Conformance(options, lock, harnessAuthorityVerification);
+  }
   runPublicPhase1Stage('phase1.stage.native-provider.failed', () =>
     assertNativeCredentialProviderIsolated(),
   );

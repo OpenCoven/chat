@@ -29,6 +29,12 @@ export function readPhase1ConformanceLock(lockPath?: string): {
     tree: string;
     files: Array<{ path: string; blob: string; sha256: string }>;
   };
+  harnessAuthority: {
+    revision: string;
+    tree: string;
+    files: Array<{ path: string; blob: string; sha256: string }>;
+    productionDeltas: Array<{ path: string; blob: string; sha256: string }>;
+  };
   tools: {
     windowsSupervisor: {
       source: {
@@ -79,6 +85,24 @@ export function readPhase1ConformanceLock(lockPath?: string): {
     assertionRegistry: { path: string; sha256: string };
   };
 };
+export function assertPhase1HarnessAuthorityCheckout(
+  lock: ReturnType<typeof readPhase1ConformanceLock>,
+  repositoryRoot: string,
+): { revision: string; tree: string };
+export function assertExecutingPhase1HarnessAuthority(
+  lock: ReturnType<typeof readPhase1ConformanceLock>,
+  executingRoot?: string,
+  environment?: NodeJS.ProcessEnv,
+): object;
+export function requirePhase1HarnessAuthorityVerification(
+  verification: object,
+  lock: ReturnType<typeof readPhase1ConformanceLock>,
+  executingRoot?: string,
+): void;
+export function assertPhase1ProducerAuthority(
+  lock: ReturnType<typeof readPhase1ConformanceLock>,
+  producerRoot: string,
+): void;
 export function assertCleanPhase1Checkouts(options: {
   chatRoot: string;
   chatHarnessRoot?: string;

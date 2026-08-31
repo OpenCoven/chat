@@ -30,10 +30,11 @@ import {
   assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
+  assertPhase1ProducerAuthority,
   createGitCheckoutEnvironment,
   createGitEnvironment,
   readPhase1CheckoutIdentity,
-  readPhase1ConformanceLock,
+  requirePhase1HarnessAuthorityVerification,
 } from './phase1-conformance-lock.mjs';
 import {
   buildIsolationEvidence,
@@ -3662,9 +3663,9 @@ function fillMissingAssertions(results, status, diagnosticId) {
   }
 }
 
-export async function runSchemaV2Conformance(options) {
+export async function runSchemaV2Conformance(options, lock, harnessAuthorityVerification) {
   scrubEvidenceAuthorizationEnvironment();
-  const lock = readPhase1ConformanceLock(options.lockPath);
+  requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot);
   const schemaV2 = options.platform !== undefined;
   if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
     throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
@@ -3718,6 +3719,7 @@ export async function runSchemaV2Conformance(options) {
   try {
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
+      assertPhase1ProducerAuthority(lock, roots.producerRoot);
       sdkContract = await loadSdkEvidenceContract({
         validatorRoot: roots.validatorRoot,
         validatorIdentity: {
@@ -4014,35 +4016,4 @@ export async function runSchemaV2Conformance(options) {
     throw wrapInfrastructureFailure(infrastructureFailure, report);
   }
   return report;
-}
-
-async function main(argv = process.argv.slice(2)) {
-  const options = parseArgs(argv);
-  const report = await runSchemaV2Conformance(options);
-  if (report.schemaVersion === 2) {
-    process.stdout.write(
-      `phase1-conformance: passed (${report.platform}, ${report.sdkAssertions.length} SDK assertions, ${report.chatAssertions.length} Chat assertions)\n`,
-    );
-    return;
-  }
-  process.stdout.write(
-    `phase1-conformance: ${report.status} (${report.summary.passed} passed, ${report.summary.failed} failed, ${report.summary.blocked} blocked)\n`,
-  );
-  for (const assertion of report.assertions) {
-    if (assertion.status !== 'passed') {
-      process.stdout.write(
-        `${assertion.status.toUpperCase()} ${assertion.id} ${assertion.diagnosticIds.join(',')}\n`,
-      );
-    }
-  }
-  process.exitCode = report.status === 'passed' ? 0 : 1;
-}
-
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    const message =
-      error instanceof CommandExecutionError ? error.message : 'Phase 1 conformance failed.';
-    process.stderr.write(`phase1-conformance: ${message}\n`);
-    process.exitCode = 1;
-  });
 }

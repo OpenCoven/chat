@@ -73,7 +73,10 @@ import {
   withOwnedArtifactRoot,
   wrapInfrastructureFailure,
 } from '../scripts/phase1-conformance.mjs';
-import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
+import {
+  assertPhase1ProducerAuthority,
+  readPhase1ConformanceLock,
+} from '../scripts/phase1-conformance-lock.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -370,6 +373,52 @@ describe('Phase 1 real-authority conformance harness', () => {
       runSource.indexOf('createExactCheckouts('),
     );
     expect(runSource).toContain("OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1'");
+  });
+
+  test('authenticates the executing harness before schema-v2 dispatch', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-conformance.mjs'),
+      'utf8',
+    );
+    const runStart = source.indexOf('export async function runPhase1Conformance');
+    const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
+    const lockBootstrap = runSource.indexOf('bootstrapWindowsSupervisor(options)');
+    const authorityCheck = runSource.indexOf('assertExecutingHarnessAuthority(lock)');
+    const schemaDispatch = runSource.indexOf('runSchemaV2Conformance(options,');
+    const legacyCredentialCheck = runSource.indexOf('assertNativeCredentialProviderIsolated()');
+
+    expect(lockBootstrap).toBeGreaterThan(-1);
+    expect(authorityCheck).toBeGreaterThan(lockBootstrap);
+    expect(schemaDispatch).toBeGreaterThan(authorityCheck);
+    expect(legacyCredentialCheck).toBeGreaterThan(schemaDispatch);
+    expect(runSource.slice(schemaDispatch, schemaDispatch + 160)).toContain('lock');
+    expect(runSource.slice(schemaDispatch, schemaDispatch + 160)).toContain(
+      'harnessAuthorityVerification',
+    );
+  });
+
+  test('validates the cloned schema-v2 producer authority before SDK authority, package, or Cargo work', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const runStart = source.indexOf('export async function runSchemaV2Conformance');
+    const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
+    const checkout = runSource.indexOf('createExactCheckouts(');
+    const producerAuthority = runSource.indexOf('assertPhase1ProducerAuthority(');
+    const sdkAuthority = runSource.indexOf('loadSdkEvidenceContract(');
+    const packageWork = runSource.indexOf('packageLockedArtifacts(');
+    const cargoObservations = runSource.indexOf('runSchemaV2ObservationSuites(');
+
+    expect(checkout).toBeGreaterThan(-1);
+    expect(producerAuthority).toBeGreaterThan(checkout);
+    expect(sdkAuthority).toBeGreaterThan(producerAuthority);
+    expect(packageWork).toBeGreaterThan(producerAuthority);
+    expect(cargoObservations).toBeGreaterThan(producerAuthority);
+    expect(runSource.indexOf('requirePhase1HarnessAuthorityVerification(')).toBeLessThan(
+      runSource.indexOf('assertWindowsJobMembership('),
+    );
+    expect(source).not.toContain('const report = await runSchemaV2Conformance(options);');
   });
 
   test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
@@ -678,6 +727,8 @@ describe('Phase 1 real-authority conformance harness', () => {
         expect(() =>
           assertExecutingHarnessAuthority(lock, harnessRoot, verifiedEnvironment),
         ).not.toThrow();
+        expect(assertPhase1ProducerAuthority).toBeTypeOf('function');
+        expect(() => assertPhase1ProducerAuthority(lock, harnessRoot)).not.toThrow();
         expect(() => assertProductionAdapterAtRevision(harnessRoot, lock)).not.toThrow();
 
         const runner = resolve(harnessRoot, 'scripts', 'phase1-conformance.mjs');
@@ -685,6 +736,9 @@ describe('Phase 1 real-authority conformance harness', () => {
         expect(() =>
           assertExecutingHarnessAuthority(lock, harnessRoot, verifiedEnvironment),
         ).toThrow('Executing Phase 1 harness module does not match its immutable authority.');
+        expect(() => assertPhase1ProducerAuthority(lock, harnessRoot)).toThrow(
+          'Executing Phase 1 harness module does not match its immutable authority.',
+        );
         execFileSync('git', ['checkout', '--quiet', '--', 'scripts/phase1-conformance.mjs'], {
           cwd: harnessRoot,
         });
@@ -698,6 +752,9 @@ describe('Phase 1 real-authority conformance harness', () => {
         );
         appendFileSync(nativeEntrypoint, '\n// substituted\n');
         expect(() => assertProductionAdapterAtRevision(harnessRoot, lock)).toThrow(
+          'Chat conformance native delta does not match its immutable allowlist.',
+        );
+        expect(() => assertPhase1ProducerAuthority(lock, harnessRoot)).toThrow(
           'Chat conformance native delta does not match its immutable allowlist.',
         );
       } finally {
