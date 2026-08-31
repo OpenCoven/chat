@@ -2090,7 +2090,7 @@ try {
         1MB
       )
       if ($result.ExitCode -ne 0) {
-        throw "Artifact handoff producer '$Label' failed."
+        throw "Artifact handoff producer '$Label' failed: $($result.Stderr)"
       }
       return [pscustomobject]@{
         Context = $context
