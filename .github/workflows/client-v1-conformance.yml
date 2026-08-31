@@ -961,19 +961,36 @@ jobs:
                           }
                           try
                           {
-                              if (!CheckTokenMembership(
+                              IntPtr membershipToken;
+                              if (!DuplicateToken(
                                       token,
-                                      administrators,
-                                      out isAdministrator))
+                                      2,
+                                      out membershipToken))
                               {
                                   throw new Win32Exception(
                                       Marshal.GetLastWin32Error(),
-                                      "Ephemeral token group validation failed.");
+                                      "Ephemeral token membership handle could not be created.");
                               }
-                              if (isAdministrator)
+                              try
                               {
-                                  throw new InvalidOperationException(
-                                      "Restricted identity unexpectedly belongs to Administrators.");
+                                  if (!CheckTokenMembership(
+                                          membershipToken,
+                                          administrators,
+                                          out isAdministrator))
+                                  {
+                                      throw new Win32Exception(
+                                          Marshal.GetLastWin32Error(),
+                                          "Ephemeral token group validation failed.");
+                                  }
+                                  if (isAdministrator)
+                                  {
+                                      throw new InvalidOperationException(
+                                          "Restricted identity unexpectedly belongs to Administrators.");
+                                  }
+                              }
+                              finally
+                              {
+                                  CloseHandle(membershipToken);
                               }
                           }
                           finally
@@ -1615,6 +1632,13 @@ jobs:
                       IntPtr token,
                       IntPtr sidToCheck,
                       [MarshalAs(UnmanagedType.Bool)] out bool isMember);
+
+                  [DllImport("advapi32.dll", SetLastError = true)]
+                  [return: MarshalAs(UnmanagedType.Bool)]
+                  private static extern bool DuplicateToken(
+                      IntPtr existingToken,
+                      int impersonationLevel,
+                      out IntPtr duplicateToken);
 
                   [DllImport("advapi32.dll", SetLastError = true)]
                   [return: MarshalAs(UnmanagedType.Bool)]
