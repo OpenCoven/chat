@@ -2932,44 +2932,20 @@ Add-Type -TypeDefinition (
   '$($serviceEscapeRecord.Replace("'", "''"))',
   [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
 )
-`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask `
-  -UserSid '$($serviceEscapeContext.User.Sid)' `
-  -TaskNonce '$principalOnlyNonce' `
-  -ForbiddenFragments @(
-    '$serviceEscapeJobName',
-    '$serviceEscapeNonce',
-    '$($serviceEscapeContext.User.UserName)',
-    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
-    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
-    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
-  )
+`$forbiddenTaskFragments = @(
+  '$serviceEscapeJobName',
+  '$serviceEscapeNonce',
+  '$($serviceEscapeContext.User.UserName)',
+  '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+  '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+  '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+)
+`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
 if (`$principalOnlyTask.TaskPath -cne '$principalOnlyTaskPath') {
   throw 'Principal-only task path changed.'
 }
-`$sharedChildTask = Register-PrincipalOnlyInteractiveTask `
-  -UserSid '$($serviceEscapeContext.User.Sid)' `
-  -FolderPath '$runCreatedSharedChildPath' `
-  -TaskName '$sharedChildTaskName' `
-  -ForbiddenFragments @(
-    '$serviceEscapeJobName',
-    '$serviceEscapeNonce',
-    '$($serviceEscapeContext.User.UserName)',
-    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
-    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
-    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
-  )
-`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask `
-  -UserSid '$($serviceEscapeContext.User.Sid)' `
-  -FolderPath '$preExistingTaskFolderPath' `
-  -TaskName '$preExistingFolderTaskName' `
-  -ForbiddenFragments @(
-    '$serviceEscapeJobName',
-    '$serviceEscapeNonce',
-    '$($serviceEscapeContext.User.UserName)',
-    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
-    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
-    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
-  )
+`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
+`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
 foreach (`$sharedTask in @(`$sharedChildTask, `$preExistingFolderTask)) {
   `$sharedTaskDeadline = [DateTime]::UtcNow.AddSeconds(20)
   while (`$sharedTask.RegisteredTask.GetInstances(0).Count -eq 0) {

@@ -1629,6 +1629,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain("-TaskNonce '$principalOnlyNonce'");
     expect(runtimeTest).not.toContain("-TaskNonce '$serviceEscapeNonce'");
     expect(runtimeTest).not.toContain("-TaskNonce '$failureEscapeNonce'");
+    for (const generatedInvocation of [
+      "`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments",
+      "`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments",
+      "`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments",
+    ]) {
+      expect(runtimeTest).toContain(generatedInvocation);
+    }
+    const serviceEscapeProducerStart = runtimeTest.indexOf(
+      '    $serviceEscapeProducer = Join-Path',
+    );
+    const serviceEscapeTaskParameters = runtimeTest.indexOf(
+      '`$taskParameters = @{',
+      serviceEscapeProducerStart,
+    );
+    expect(serviceEscapeProducerStart).toBeGreaterThan(-1);
+    expect(serviceEscapeTaskParameters).toBeGreaterThan(serviceEscapeProducerStart);
+    expect(runtimeTest.slice(serviceEscapeProducerStart, serviceEscapeTaskParameters)).not.toMatch(
+      /Register-PrincipalOnlyInteractiveTask `\r?\n/,
+    );
     expect(runtimeTest).toContain(
       "-Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'",
     );
