@@ -934,7 +934,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 411,069 | `c153a878d869e2ee5327014953ed0d9587ebcd5fbf560f4f50f89669c32c609c` |
+| `.github/workflows/client-v1-conformance.yml` | 411,069 | `982ba8969e9115fa4b5c3481e40d5e1fd74ee8e72ebe760e743b45464918c255` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -954,7 +954,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,186 | `cb4a9dad362edadeb2cb4d26d0a9bcbd5f17630d6445a8fb5bb43eaaa2f2fdd1` |
-| `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
+| `scripts/unix-producer-supervisor.sh` | 25,070 | `afaf1d9f02949e7e1e937a54a99d26ba0930a2d04f01751904c99c92cad1459e` |
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |

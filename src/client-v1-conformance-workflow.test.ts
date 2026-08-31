@@ -1862,6 +1862,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toContain('phase1-artifact-secret-scan.mjs');
     expect(validation).toContain('scanPhase1ArtifactText');
     expect(validation).toContain('schemaVersion !== 2');
+    expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
+    expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('/usr/bin/dsmemberutil checkmembership');
+    expect(supervisor).not.toContain('/usr/sbin/dsmemberutil');
 
     for (const forbiddenStep of [
       'Install frozen dependencies',

@@ -12,7 +12,7 @@ destination_path=
 temp_root=
 handoff_helper=
 command_path=
-tool_path='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+tool_path='/usr/bin:/bin:/usr/sbin:/sbin'
 timeout_seconds=3300
 validator_revision=
 command_arguments=()
@@ -422,7 +422,7 @@ else
   [[ "$observed_producer_uid" == "$producer_uid" ]] ||
     { echo 'unix-producer-supervisor: restricted identity launch changed UID' >&2; exit 1; }
   admin_membership="$(
-    /usr/sbin/dsmemberutil checkmembership -U "$producer_name" -G admin
+    /usr/bin/dsmemberutil checkmembership -U "$producer_name" -G admin
   )" ||
     { echo 'unix-producer-supervisor: administrator membership query failed' >&2; exit 1; }
   [[ "$admin_membership" == *'is not a member'* ]] ||
@@ -676,7 +676,7 @@ if [[ "$host_os" == Linux ]]; then
 else
   /usr/sbin/dseditgroup -o edit -a "$broker_name" -t user "$handoff_group"
   broker_group_added=1
-  /usr/sbin/dsmemberutil checkmembership -U "$broker_name" -G "$handoff_group" |
+  /usr/bin/dsmemberutil checkmembership -U "$broker_name" -G "$handoff_group" |
     grep -q 'is a member' ||
     { echo 'unix-producer-supervisor: broker handoff group membership failed' >&2; exit 1; }
   /usr/bin/sudo -n -u "#$broker_uid" "$trusted_handoff" copy \
