@@ -1649,6 +1649,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
       /Register-PrincipalOnlyInteractiveTask `\r?\n/,
     );
     expect(runtimeTest).toContain(
+      '`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId -cne',
+    );
+    expect(runtimeTest).toContain(
+      "throw 'Shared-folder task was not registered for the exact isolated SID.'",
+    );
+    expect(runtimeTest).not.toContain(
+      "throw 'Shared-folder principal task did not expose a running instance.'",
+    );
+    expect(runtimeTest).toContain(
       "-Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'",
     );
     expect(runtimeTest).toContain(

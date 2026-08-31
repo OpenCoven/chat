@@ -2946,13 +2946,28 @@ if (`$principalOnlyTask.TaskPath -cne '$principalOnlyTaskPath') {
 }
 `$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
 `$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-foreach (`$sharedTask in @(`$sharedChildTask, `$preExistingFolderTask)) {
-  `$sharedTaskDeadline = [DateTime]::UtcNow.AddSeconds(20)
-  while (`$sharedTask.RegisteredTask.GetInstances(0).Count -eq 0) {
-    if ([DateTime]::UtcNow -ge `$sharedTaskDeadline) {
-      throw 'Shared-folder principal task did not expose a running instance.'
-    }
-    Start-Sleep -Milliseconds 10
+foreach (`$sharedRegistration in @(
+  [pscustomobject]@{
+    Probe = `$sharedChildTask
+    ExpectedPath = '$sharedChildTaskPath'
+  },
+  [pscustomobject]@{
+    Probe = `$preExistingFolderTask
+    ExpectedPath = '$preExistingFolderTaskPath'
+  }
+)) {
+  if (
+    `$sharedRegistration.Probe.TaskPath -cne `$sharedRegistration.ExpectedPath -or
+    `$sharedRegistration.Probe.RegisteredTask.Path -cne
+      `$sharedRegistration.ExpectedPath
+  ) {
+    throw 'Shared-folder principal task path changed.'
+  }
+  if (
+    `$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId -cne
+      '$($serviceEscapeContext.User.Sid)'
+  ) {
+    throw 'Shared-folder task was not registered for the exact isolated SID.'
   }
 }
 `$principalOnlyDeadline = [DateTime]::UtcNow.AddSeconds(20)
