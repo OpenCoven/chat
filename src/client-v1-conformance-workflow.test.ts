@@ -30,6 +30,9 @@ const validatorAvailable = existsSync(
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
+const uploadedSupervisorArtifactIdExpression =
+  '${' + '{ steps.upload-supervisor.outputs.artifact-id }}';
+const supervisorArtifactIdExpression = '${' + '{ needs.windows-supervisor.outputs.artifact_id }}';
 const platformTemplateExpression = '${' + 'platform}';
 const downloadArtifactAction = 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c';
 const attestBuildProvenanceAction =
@@ -423,10 +426,10 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(workflow).toContain('    needs: windows-supervisor');
     expect(workflow).toContain('        run: bash scripts/phase1-windows-supervisor-build.sh');
     expect(workflow).toContain('          name: phase1-process-supervisor-win32-x64');
-    expect(workflow).toContain('artifact_id: ${{ steps.upload-supervisor.outputs.artifact-id }}');
+    expect(workflow).toContain(`artifact_id: ${uploadedSupervisorArtifactIdExpression}`);
     expect(workflow).toContain('function Download-WindowsSupervisorArtifact');
     expect(workflow).toContain(
-      'OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs.windows-supervisor.outputs.artifact_id }}',
+      `OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${supervisorArtifactIdExpression}`,
     );
     expect(workflow).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH = $fleetSupervisorPath');
     expect(bootstrap.indexOf('$job = [OpenCoven.WindowsJobSupervisor]::Create')).toBeLessThan(
