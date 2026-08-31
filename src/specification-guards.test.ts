@@ -387,6 +387,14 @@ describe('Phase 1 specification guards', () => {
     expect(webJob).toContain('- run: pnpm test:unit');
   });
 
+  it('fetches the locked harness revision for protected platform evidence', () => {
+    const workflow = readText('.github/workflows/client-v1-conformance.yml');
+
+    expect(workflow).toMatch(
+      /actions\/checkout@[0-9a-f]{40}\n {8}with:\n {10}fetch-depth: 0\n {10}persist-credentials: false\n {10}ref: \$\{\{ github\.sha \}\}/u,
+    );
+  });
+
   it('uses a POSIX shell fixture without exposing Node internal descriptors to status forgery', () => {
     const testSource = readText('src/phase1-conformance.test.ts');
     const start = testSource.indexOf(

@@ -8,9 +8,41 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-supervisor:
+    name: build-windows-supervisor
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload-supervisor.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.1
+      - name: Set up frozen Rust
+        run: rustup toolchain install 1.95.0 --profile minimal && rustup default 1.95.0
+      - name: Build frozen Windows supervisor
+        run: bash scripts/phase1-windows-supervisor-build.sh
+      - id: upload-supervisor
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: phase1-process-supervisor-win32-x64
+          path: tools/phase1-process-supervisor/target/x86_64-pc-windows-gnu/release/phase1-process-supervisor.exe
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: false
+          include-hidden-files: false
   platform-conformance:
     name: platform-conformance (${{ matrix.platform }})
     if: github.ref == 'refs/heads/main'
+    needs: windows-supervisor
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -25,6 +57,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: client-v1-conformance
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Bootstrap supervised Windows conformance
@@ -48,6 +81,10 @@ jobs:
           OPENCOVEN_WINDOWS_LINK_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe'
           OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0'
           OPENCOVEN_WINDOWS_RC_PATH: 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe'
+          OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs.windows-supervisor.outputs.artifact_id }}
+          OPENCOVEN_WINDOWS_GITHUB_API_URL: ${{ github.api_url }}
+          OPENCOVEN_WINDOWS_GITHUB_REPOSITORY: ${{ github.repository }}
+          OPENCOVEN_WINDOWS_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
@@ -92,6 +129,137 @@ jobs:
             }
           }
 
+          function Download-WindowsSupervisorArtifact {
+            param(
+              [Parameter(Mandatory)][string]$Destination,
+              [Parameter(Mandatory)][string]$Token
+            )
+            if (
+              $env:OPENCOVEN_WINDOWS_GITHUB_API_URL -cne 'https://api.github.com' -or
+              $env:OPENCOVEN_WINDOWS_GITHUB_REPOSITORY -cne 'OpenCoven/chat' -or
+              $env:OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID -cnotmatch '^[1-9][0-9]{0,19}$' -or
+              [String]::IsNullOrWhiteSpace($Token) -or
+              $Token.Contains("`r") -or
+              $Token.Contains("`n")
+            ) {
+              throw 'The frozen Windows supervisor artifact binding is invalid.'
+            }
+            $artifactUri = [uri](
+              "$($env:OPENCOVEN_WINDOWS_GITHUB_API_URL)/repos/" +
+              "$($env:OPENCOVEN_WINDOWS_GITHUB_REPOSITORY)/actions/artifacts/" +
+              "$($env:OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID)/zip"
+            )
+            $handler = [Net.Http.HttpClientHandler]::new()
+            $handler.AllowAutoRedirect = $false
+            $handler.UseProxy = $false
+            $client = [Net.Http.HttpClient]::new($handler)
+            $client.Timeout = [TimeSpan]::FromSeconds(30)
+            try {
+              $request = [Net.Http.HttpRequestMessage]::new(
+                [Net.Http.HttpMethod]::Get,
+                $artifactUri
+              )
+              $request.Headers.Authorization =
+                [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $Token)
+              $request.Headers.UserAgent.ParseAdd('OpenCoven-Chat-Conformance')
+              $response = $client.Send(
+                $request,
+                [Net.Http.HttpCompletionOption]::ResponseHeadersRead
+              )
+              $request.Dispose()
+              try {
+                if ([int]$response.StatusCode -ne 302 -or $null -eq $response.Headers.Location) {
+                  throw 'The frozen Windows supervisor artifact did not return one redirect.'
+                }
+                $downloadUri = $response.Headers.Location
+              } finally {
+                $response.Dispose()
+              }
+              if (
+                -not $downloadUri.IsAbsoluteUri -or
+                $downloadUri.Scheme -cne 'https' -or
+                -not $downloadUri.Host.EndsWith(
+                  '.blob.core.windows.net',
+                  [StringComparison]::OrdinalIgnoreCase
+                )
+              ) {
+                throw 'The frozen Windows supervisor artifact redirect left its host allowlist.'
+              }
+              $downloadRequest = [Net.Http.HttpRequestMessage]::new(
+                [Net.Http.HttpMethod]::Get,
+                $downloadUri
+              )
+              $downloadResponse = $client.Send(
+                $downloadRequest,
+                [Net.Http.HttpCompletionOption]::ResponseHeadersRead
+              )
+              $downloadRequest.Dispose()
+              try {
+                if (-not $downloadResponse.IsSuccessStatusCode) {
+                  throw 'The frozen Windows supervisor artifact download failed.'
+                }
+                if (
+                  $null -ne $downloadResponse.Content.Headers.ContentLength -and
+                  $downloadResponse.Content.Headers.ContentLength -gt 1MB
+                ) {
+                  throw 'The frozen Windows supervisor artifact archive exceeded its limit.'
+                }
+                $archiveBytes = (
+                  $downloadResponse.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+                )
+              } finally {
+                $downloadResponse.Dispose()
+              }
+            } finally {
+              $client.Dispose()
+              $handler.Dispose()
+            }
+            if ($archiveBytes.Length -lt 1 -or $archiveBytes.Length -gt 1MB) {
+              throw 'The frozen Windows supervisor artifact archive size is invalid.'
+            }
+            $archiveStream = [IO.MemoryStream]::new($archiveBytes, $false)
+            $archive = [IO.Compression.ZipArchive]::new(
+              $archiveStream,
+              [IO.Compression.ZipArchiveMode]::Read,
+              $false
+            )
+            try {
+              if (
+                $archive.Entries.Count -ne 1 -or
+                $archive.Entries[0].FullName -cne 'phase1-process-supervisor.exe' -or
+                $archive.Entries[0].Length -ne 333824
+              ) {
+                throw 'The frozen Windows supervisor artifact archive shape changed.'
+              }
+              $input = $archive.Entries[0].Open()
+              $output = [IO.File]::Open(
+                $Destination,
+                [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write,
+                [IO.FileShare]::None
+              )
+              try {
+                $input.CopyTo($output)
+                $output.Flush($true)
+              } finally {
+                $output.Dispose()
+                $input.Dispose()
+              }
+            } finally {
+              $archive.Dispose()
+              $archiveStream.Dispose()
+            }
+            if (
+              (Get-Item -LiteralPath $Destination).Length -ne 333824 -or
+              (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                '372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5'
+            ) {
+              throw 'The frozen Windows supervisor artifact bytes changed.'
+            }
+          }
+
+          $windowsSupervisorToken = $env:OPENCOVEN_WINDOWS_GITHUB_TOKEN
+          Remove-Item Env:OPENCOVEN_WINDOWS_GITHUB_TOKEN
           $validatorRevision = Require-LowercaseGitOid `
             -Value $env:OPENCOVEN_VALIDATOR_REVISION_INPUT
           $protectedValidatorRevision = Require-LowercaseGitOid `
@@ -7053,6 +7221,9 @@ jobs:
           $artifactWorkspacePin = $null
           $artifactDirectoryPin = $null
           $bootstrapRoot = $null
+          $fleetSupervisorParent = 'C:\OpenCoven'
+          $fleetSupervisorRoot = Join-Path $fleetSupervisorParent 'conformance'
+          $fleetSupervisorPath = Join-Path $fleetSupervisorRoot 'phase1-process-supervisor.exe'
           try {
             $nonce = [Convert]::ToHexString(
               [Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
@@ -7069,6 +7240,78 @@ jobs:
               [OpenCoven.WindowsJobSupervisor]::PinDirectory($artifactWorkspace)
             $artifactDirectoryPin =
               [OpenCoven.WindowsJobSupervisor]::PinDirectory($artifactDirectory)
+
+            if (Test-Path -LiteralPath $fleetSupervisorParent) {
+              throw 'The frozen Windows supervisor destination already exists.'
+            }
+            [IO.Directory]::CreateDirectory($fleetSupervisorRoot) | Out-Null
+            Download-WindowsSupervisorArtifact `
+              -Destination $fleetSupervisorPath `
+              -Token $windowsSupervisorToken
+            $windowsSupervisorToken = $null
+            $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+            $isolatedSid = [Security.Principal.SecurityIdentifier]::new($isolatedUser.Sid)
+            $systemSid = [Security.Principal.SecurityIdentifier]::new(
+              [Security.Principal.WellKnownSidType]::LocalSystemSid,
+              $null
+            )
+            $administratorsSid = [Security.Principal.SecurityIdentifier]::new(
+              [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,
+              $null
+            )
+            $directorySecurity = [Security.AccessControl.DirectorySecurity]::new()
+            $directorySecurity.SetOwner($currentSid)
+            $directorySecurity.SetAccessRuleProtection($true, $false)
+            foreach ($sid in @($currentSid, $systemSid, $administratorsSid)) {
+              $directorySecurity.AddAccessRule(
+                [Security.AccessControl.FileSystemAccessRule]::new(
+                  $sid,
+                  [Security.AccessControl.FileSystemRights]::FullControl,
+                  [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                    [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+                  [Security.AccessControl.PropagationFlags]::None,
+                  [Security.AccessControl.AccessControlType]::Allow
+                )
+              )
+            }
+            $directorySecurity.AddAccessRule(
+              [Security.AccessControl.FileSystemAccessRule]::new(
+                $isolatedSid,
+                [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                  [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+              )
+            )
+            [IO.FileSystemAclExtensions]::SetAccessControl(
+              [IO.DirectoryInfo]::new($fleetSupervisorRoot),
+              $directorySecurity
+            )
+            $fileSecurity = [Security.AccessControl.FileSecurity]::new()
+            $fileSecurity.SetOwner($currentSid)
+            $fileSecurity.SetAccessRuleProtection($true, $false)
+            foreach ($sid in @($currentSid, $systemSid, $administratorsSid)) {
+              $fileSecurity.AddAccessRule(
+                [Security.AccessControl.FileSystemAccessRule]::new(
+                  $sid,
+                  [Security.AccessControl.FileSystemRights]::FullControl,
+                  [Security.AccessControl.AccessControlType]::Allow
+                )
+              )
+            }
+            $fileSecurity.AddAccessRule(
+              [Security.AccessControl.FileSystemAccessRule]::new(
+                $isolatedSid,
+                [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+                [Security.AccessControl.AccessControlType]::Allow
+              )
+            )
+            [IO.FileSystemAclExtensions]::SetAccessControl(
+              [IO.FileInfo]::new($fleetSupervisorPath),
+              $fileSecurity
+            )
+            Assert-NoReparsePath -Path $fleetSupervisorPath -Label 'Windows process supervisor'
 
             $supervisorSourcePath = Join-Path $bootstrapRoot 'windows-job-supervisor.cs'
             [IO.File]::WriteAllText(
@@ -7098,6 +7341,32 @@ jobs:
               "Local\OpenCoven.Chat.Conformance.$($env:OPENCOVEN_WINDOWS_JOB_NONCE)"
           ) {
             throw 'The supervised child is not bound to the expected Job Object nonce.'
+          }
+          $processSupervisor = Get-Item -LiteralPath (
+            $env:OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH
+          ) -Force
+          if (
+            $processSupervisor.PSIsContainer -or
+            (($processSupervisor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+            $processSupervisor.Length -ne 333824 -or
+            (Get-FileHash `
+              -LiteralPath $processSupervisor.FullName `
+              -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                '372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5'
+          ) {
+            throw 'The frozen Windows process supervisor changed before restricted execution.'
+          }
+          try {
+            $writeProbe = [IO.File]::Open(
+              $processSupervisor.FullName,
+              [IO.FileMode]::Open,
+              [IO.FileAccess]::Write,
+              [IO.FileShare]::None
+            )
+            $writeProbe.Dispose()
+            throw 'The restricted identity can mutate the Windows process supervisor.'
+          } catch [UnauthorizedAccessException] {
+            # The isolated account must have read/execute access without write access.
           }
           foreach ($directory in @(
             $env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT,
@@ -7270,6 +7539,89 @@ jobs:
           $git = Join-Path $gitRoot 'cmd\git.exe'
           if ((& $git --version).Trim() -ne 'git version 2.55.0.windows.5') {
             throw 'Pinned PortableGit version changed.'
+          }
+          function Checkout-ExactRepository {
+            param(
+              [Parameter(Mandatory)][string]$Repository,
+              [Parameter(Mandatory)][string]$Revision,
+              [Parameter(Mandatory)][string]$Destination,
+              [Parameter(Mandatory)][string]$Label
+            )
+            if (
+              $Repository -cnotin @(
+                'OpenCoven/sdk',
+                'OpenCoven/coven-cave',
+                'OpenCoven/coven'
+              ) -or
+              $Revision -cnotmatch '^[0-9a-f]{40}$' -or
+              [IO.Directory]::Exists($Destination) -or
+              [IO.File]::Exists($Destination)
+            ) {
+              throw "$Label source binding is invalid."
+            }
+            [IO.Directory]::CreateDirectory($Destination) | Out-Null
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @('-C', $Destination, 'init', '--initial-branch=detached-bootstrap') `
+              -Label "$Label repository initialization"
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-C',
+                $Destination,
+                '-c',
+                'credential.helper=',
+                '-c',
+                'core.hooksPath=NUL',
+                'remote',
+                'add',
+                'origin',
+                "https://github.com/$Repository.git"
+              ) `
+              -Label "$Label origin configuration"
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-C',
+                $Destination,
+                '-c',
+                'credential.helper=',
+                '-c',
+                'core.hooksPath=NUL',
+                '-c',
+                'fetch.fsckObjects=true',
+                '-c',
+                'transfer.fsckObjects=true',
+                '-c',
+                'protocol.https.allow=always',
+                'fetch',
+                '--quiet',
+                '--no-tags',
+                '--depth=1',
+                'origin',
+                $Revision
+              ) `
+              -Label "$Label exact-SHA fetch"
+            Invoke-Checked `
+              -FilePath $git `
+              -ArgumentList @(
+                '-C',
+                $Destination,
+                '-c',
+                'core.hooksPath=NUL',
+                'checkout',
+                '--detach',
+                '--force',
+                'FETCH_HEAD'
+              ) `
+              -Label "$Label detached checkout"
+            if (
+              (& $git -C $Destination rev-parse HEAD).Trim() -cne $Revision -or
+              (& $git -C $Destination status --porcelain=v2 --untracked-files=all).Count -ne 0 -or
+              (Test-Path -LiteralPath (Join-Path $Destination '.gitmodules'))
+            ) {
+              throw "$Label checkout verification failed."
+            }
           }
 
           $nodeParent = Join-Path $tools 'node'
@@ -7446,7 +7798,7 @@ jobs:
             @('scripts\phase1-macos-keychain.mjs', 5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4'),
             @('scripts\phase1-process-supervisor.mjs', 3311, 'a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5'),
             @('scripts\phase1-schema-v2-evidence.mjs', 40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8'),
-            @('scripts\phase1-schema-v2-producer.mjs', 138125, '3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01'),
+            @('scripts\phase1-schema-v2-producer.mjs', 138202, 'd49a809b9d568358a1294c04b9971b8537387b433c022a44362a76484f7bab2a'),
             @('scripts\process-owned-artifact-root.mjs', 11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a'),
             @('scripts\supervised-exec.mjs', 2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b'),
             @('scripts\supervisor-status.mjs', 854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e')
@@ -7465,6 +7817,97 @@ jobs:
             }
           }
           Write-Host 'Frozen harness module graph verified.'
+
+          $phase1Lock = Get-Content `
+            -LiteralPath (Join-Path $workspace 'phase1-conformance.lock.json') `
+            -Raw |
+            ConvertFrom-Json
+          if (
+            $phase1Lock.version -ne 5 -or
+            $phase1Lock.harness.repository -cne 'OpenCoven/chat' -or
+            $phase1Lock.harness.revision -cnotmatch '^[0-9a-f]{40}$' -or
+            $phase1Lock.sdk.repository -cne 'OpenCoven/sdk' -or
+            $phase1Lock.sdk.revision -cnotmatch '^[0-9a-f]{40}$' -or
+            $phase1Lock.evidence.repository -cne 'OpenCoven/sdk' -or
+            $phase1Lock.evidence.revision -cnotmatch '^[0-9a-f]{40}$' -or
+            $phase1Lock.cave.repository -cne 'OpenCoven/coven-cave' -or
+            $phase1Lock.cave.revision -cnotmatch '^[0-9a-f]{40}$' -or
+            $phase1Lock.coven.repository -cne 'OpenCoven/coven' -or
+            $phase1Lock.coven.revision -cnotmatch '^[0-9a-f]{40}$'
+          ) {
+            throw 'The protected Windows source lock is invalid.'
+          }
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              '-c',
+              'credential.helper=',
+              '-c',
+              'core.hooksPath=NUL',
+              '-c',
+              'fetch.fsckObjects=true',
+              '-c',
+              'transfer.fsckObjects=true',
+              '-c',
+              'protocol.https.allow=always',
+              'fetch',
+              '--quiet',
+              '--no-tags',
+              '--depth=1',
+              'origin',
+              $phase1Lock.harness.revision
+            ) `
+            -Label 'Chat harness exact-SHA fetch'
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              'update-ref',
+              'refs/opencoven/phase1-harness',
+              $phase1Lock.harness.revision
+            ) `
+            -Label 'Chat harness authority ref'
+
+          $counterpartsRoot = Join-Path $root 'counterparts'
+          $sdkRoot = Join-Path $counterpartsRoot 'sdk'
+          $sdkEvidenceRoot = Join-Path $counterpartsRoot 'sdk-evidence'
+          $sdkValidatorRoot = Join-Path $counterpartsRoot 'sdk-validator'
+          $caveRoot = Join-Path $counterpartsRoot 'coven-cave'
+          $covenRoot = Join-Path $counterpartsRoot 'coven'
+          Checkout-ExactRepository `
+            -Repository $phase1Lock.sdk.repository `
+            -Revision $phase1Lock.sdk.revision `
+            -Destination $sdkRoot `
+            -Label 'SDK candidate'
+          Checkout-ExactRepository `
+            -Repository $phase1Lock.evidence.repository `
+            -Revision $phase1Lock.evidence.revision `
+            -Destination $sdkEvidenceRoot `
+            -Label 'SDK evidence authority'
+          Checkout-ExactRepository `
+            -Repository 'OpenCoven/sdk' `
+            -Revision $env:OPENCOVEN_VALIDATOR_REVISION `
+            -Destination $sdkValidatorRoot `
+            -Label 'SDK validator'
+          Checkout-ExactRepository `
+            -Repository $phase1Lock.cave.repository `
+            -Revision $phase1Lock.cave.revision `
+            -Destination $caveRoot `
+            -Label 'Cave authority'
+          Checkout-ExactRepository `
+            -Repository $phase1Lock.coven.repository `
+            -Revision $phase1Lock.coven.revision `
+            -Destination $covenRoot `
+            -Label 'Coven authority'
+          $env:OPENCOVEN_CHAT_ROOT = $workspace
+          $env:OPENCOVEN_SDK_ROOT = $sdkRoot
+          $env:OPENCOVEN_SDK_EVIDENCE_ROOT = $sdkEvidenceRoot
+          $env:OPENCOVEN_SDK_VALIDATOR_ROOT = $sdkValidatorRoot
+          $env:OPENCOVEN_CAVE_ROOT = $caveRoot
+          $env:OPENCOVEN_COVEN_ROOT = $covenRoot
 
           if ((& $node --version).Trim() -ne 'v24.18.1') {
             throw 'Pinned Node version changed.'
@@ -7587,6 +8030,7 @@ jobs:
               OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
               OPENCOVEN_WINDOWS_JOB_NAME = $jobName
               OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
+              OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH = $fleetSupervisorPath
               OPENCOVEN_WINDOWS_WORKSPACE = $workspace
               OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY = (Join-Path $workspace '.artifacts')
               OPENCOVEN_WINDOWS_SOURCE_RECORD = (Join-Path $workspace '.artifacts\client-v1-conformance-win32-x64.json')
@@ -7876,6 +8320,29 @@ jobs:
                 $cleanupErrors.Add($_.Exception)
               }
             }
+            if (Test-Path -LiteralPath $fleetSupervisorPath) {
+              try {
+                Assert-NoReparsePath `
+                  -Path $fleetSupervisorPath `
+                  -Label 'Windows process supervisor cleanup'
+                Remove-Item -LiteralPath $fleetSupervisorPath -Force
+              } catch {
+                $cleanupErrors.Add($_.Exception)
+              }
+            }
+            foreach ($directory in @($fleetSupervisorRoot, $fleetSupervisorParent)) {
+              if (Test-Path -LiteralPath $directory) {
+                try {
+                  Assert-NoReparsePath `
+                    -Path $directory `
+                    -Label 'Windows process supervisor directory cleanup'
+                  [IO.Directory]::Delete($directory, $false)
+                } catch {
+                  $cleanupErrors.Add($_.Exception)
+                }
+              }
+            }
+            $windowsSupervisorToken = $null
             if ($cleanupErrors.Count -ne 0) {
               throw [AggregateException]::new(
                 'Trusted Windows identity cleanup failed.',
@@ -7900,12 +8367,52 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
         with:
+          fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         if: matrix.platform != 'win32-x64'
         with:
           node-version: 24.18.1
+      - id: phase1-revisions
+        name: Read Phase 1 reviewed revisions
+        if: matrix.platform != 'win32-x64'
+        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { readPhase1ConformanceLock } from ''./scripts/phase1-conformance-lock.mjs''; const lock = readPhase1ConformanceLock(); for (const repository of [''sdk'', ''cave'', ''coven'']) { appendFileSync(process.env.GITHUB_OUTPUT, repository + ''_repository='' + lock[repository].repository + ''\n''); appendFileSync(process.env.GITHUB_OUTPUT, repository + ''_revision='' + lock[repository].revision + ''\n''); } appendFileSync(process.env.GITHUB_OUTPUT, ''evidence_repository='' + lock.evidence.repository + ''\n''); appendFileSync(process.env.GITHUB_OUTPUT, ''evidence_revision='' + lock.evidence.revision + ''\n'');"'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.sdk_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.sdk_revision }}
+          path: .phase1-counterparts/sdk
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.evidence_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.evidence_revision }}
+          path: .phase1-counterparts/sdk-evidence
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
+        with:
+          repository: OpenCoven/sdk
+          ref: ${{ inputs.validator_revision }}
+          path: .phase1-counterparts/sdk-validator
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.cave_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.cave_revision }}
+          path: .phase1-counterparts/coven-cave
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: matrix.platform != 'win32-x64'
+        with:
+          repository: ${{ steps.phase1-revisions.outputs.coven_repository }}
+          ref: ${{ steps.phase1-revisions.outputs.coven_revision }}
+          path: .phase1-counterparts/coven
+          persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         if: matrix.platform != 'win32-x64'
         with:
@@ -7955,13 +8462,13 @@ jobs:
             ['scripts/phase1-macos-keychain.mjs', [5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4']],
             ['scripts/phase1-process-supervisor.mjs', [3311, 'a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5']],
             ['scripts/phase1-schema-v2-evidence.mjs', [40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8']],
-            ['scripts/phase1-schema-v2-producer.mjs', [138125, '3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01']],
+            ['scripts/phase1-schema-v2-producer.mjs', [138202, 'd49a809b9d568358a1294c04b9971b8537387b433c022a44362a76484f7bab2a']],
             ['scripts/process-owned-artifact-root.mjs', [11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a']],
             ['scripts/supervised-exec.mjs', [2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b']],
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
-            ['scripts/unix-producer-command.sh', [2663, 'a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1']],
+            ['scripts/unix-producer-command.sh', [3186, 'cb4a9dad362edadeb2cb4d26d0a9bcbd5f17630d6445a8fb5bb43eaaa2f2fdd1']],
             ['scripts/unix-producer-supervisor.sh', [25087, '9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d']],
           ]);
           for (const [path, [size, digest]] of expected) {

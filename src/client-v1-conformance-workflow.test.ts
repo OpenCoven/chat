@@ -10,6 +10,17 @@ import { describe, expect, test } from 'vitest';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
+const windowsSupervisorBuildPath = resolve(
+  projectRoot,
+  'scripts',
+  'phase1-windows-supervisor-build.sh',
+);
+const windowsSupervisorInstallPath = resolve(
+  projectRoot,
+  'scripts',
+  'phase1-windows-supervisor-install.ps1',
+);
+const unixProducerCommandPath = resolve(projectRoot, 'scripts', 'unix-producer-command.sh');
 const validatorRoot =
   process.env.OPENCOVEN_SDK_VALIDATOR_ROOT ??
   resolve(projectRoot, '..', 'build-conformance-contract');
@@ -44,6 +55,7 @@ const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_RC_PATH:
     'C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe',
 } as const;
+const evidenceRevisionExpression = '${' + '{ steps.phase1-revisions.outputs.evidence_revision }}';
 
 function sha256(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -166,12 +178,14 @@ function verifyExactMainRefConstraint(label: string, job: string): void {
 }
 
 function verifyHardenedWorkflowGraph(workflow: string): void {
+  const windowsSupervisor = workflowJob(workflow, 'windows-supervisor');
   const producer = workflowJob(workflow, 'platform-conformance');
   const validation = workflowJob(workflow, 'validate-conformance-artifacts');
   const attestation = workflowJob(workflow, 'attest-conformance-artifacts');
   const aggregate = workflowJob(workflow, 'aggregate-conformance');
 
   for (const [label, job] of [
+    ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
     ['attestation', attestation],
@@ -181,13 +195,14 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
   }
 
   for (const [label, job] of [
+    ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
   ] as const) {
     if (
       job.includes('id-token: write') ||
       job.includes('attestations: write') ||
-      !job.includes('permissions:\n      contents: read')
+      !job.includes('contents: read')
     ) {
       throw new Error(`${label} job has privileged permissions`);
     }
@@ -219,7 +234,13 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
 
   const artifacts = ['darwin-arm64', 'linux-x64', 'win32-x64'];
   if (
-    countOccurrences(workflow, 'uses: actions/upload-artifact@') !== 1 ||
+    countOccurrences(workflow, 'uses: actions/upload-artifact@') !== 2 ||
+    countOccurrences(windowsSupervisor, 'uses: actions/upload-artifact@') !== 1 ||
+    !windowsSupervisor.includes('name: phase1-process-supervisor-win32-x64') ||
+    !windowsSupervisor.includes(
+      'path: tools/phase1-process-supervisor/target/x86_64-pc-windows-gnu/release/phase1-process-supervisor.exe',
+    ) ||
+    countOccurrences(producer, 'uses: actions/upload-artifact@') !== 1 ||
     !producer.includes(`name: client-v1-conformance-${matrixPlatformExpression}`) ||
     validation.includes('uses: actions/upload-artifact@') ||
     attestation.includes('uses: actions/upload-artifact@')
@@ -345,6 +366,93 @@ async function workflowFixture() {
   return { producer, toolchain, verifyProtectedWorkflow, workflow };
 }
 
+describe('client-v1 conformance workflow bootstrap', () => {
+  test('checks out every reviewed source root and resolves tools safely on every platform', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const unixProducerCommand = readFileSync(unixProducerCommandPath, 'utf8');
+
+    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(2);
+    expect(workflow).toContain('scripts/executable-resolution.mjs');
+    expect(workflow).toContain('      - id: phase1-revisions');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk-evidence');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk-validator');
+    expect(workflow).toContain('          path: .phase1-counterparts/coven-cave');
+    expect(workflow).toContain('          path: .phase1-counterparts/coven');
+    expect(workflow).toContain(`          ref: ${evidenceRevisionExpression}`);
+    expect(workflow).toContain(`          ref: ${validatorInputExpression}`);
+    expect(unixProducerCommand).toContain('--chat-root "$OPENCOVEN_UNIX_WORKSPACE"');
+    expect(unixProducerCommand).toContain(
+      '--sdk-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk"',
+    );
+    expect(unixProducerCommand).toContain(
+      '--sdk-evidence-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk-evidence"',
+    );
+    expect(unixProducerCommand).toContain(
+      '--validator-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk-validator"',
+    );
+    expect(unixProducerCommand).toContain(
+      '--cave-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven-cave"',
+    );
+    expect(unixProducerCommand).toContain(
+      '--coven-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven"',
+    );
+    expect(workflow).toContain('function Checkout-ExactRepository');
+    expect(workflow).toContain("-Label 'SDK candidate'");
+    expect(workflow).toContain("-Label 'SDK validator'");
+    expect(workflow).toContain("-Label 'Cave authority'");
+    expect(workflow).toContain("-Label 'Coven authority'");
+  });
+
+  test('builds and transfers the exact frozen Windows supervisor without a pre-Job action', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const buildScript = readFileSync(windowsSupervisorBuildPath, 'utf8');
+    const installScript = readFileSync(windowsSupervisorInstallPath, 'utf8');
+    const bootstrap = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const childEnvironmentStart = bootstrap.indexOf('$childEnvironment = [ordered]@{');
+    const childEnvironmentEnd = bootstrap.indexOf('\n            }', childEnvironmentStart);
+    const childEnvironment = bootstrap.slice(childEnvironmentStart, childEnvironmentEnd);
+
+    expect(workflow).toContain('  windows-supervisor:');
+    expect(workflow).toContain(
+      "  windows-supervisor:\n    name: build-windows-supervisor\n    if: github.ref == 'refs/heads/main'",
+    );
+    expect(workflow).toContain('    runs-on: macos-latest');
+    expect(workflow).toContain('    needs: windows-supervisor');
+    expect(workflow).toContain('        run: bash scripts/phase1-windows-supervisor-build.sh');
+    expect(workflow).toContain('          name: phase1-process-supervisor-win32-x64');
+    expect(workflow).toContain('artifact_id: ${{ steps.upload-supervisor.outputs.artifact-id }}');
+    expect(workflow).toContain('function Download-WindowsSupervisorArtifact');
+    expect(workflow).toContain(
+      'OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs.windows-supervisor.outputs.artifact_id }}',
+    );
+    expect(workflow).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH = $fleetSupervisorPath');
+    expect(bootstrap.indexOf('$job = [OpenCoven.WindowsJobSupervisor]::Create')).toBeLessThan(
+      bootstrap.indexOf('Download-WindowsSupervisorArtifact `'),
+    );
+    expect(bootstrap.indexOf('Remove-Item Env:OPENCOVEN_WINDOWS_GITHUB_TOKEN')).toBeLessThan(
+      bootstrap.indexOf('$job = [OpenCoven.WindowsJobSupervisor]::Create'),
+    );
+    expect(childEnvironment).not.toContain('OPENCOVEN_WINDOWS_GITHUB_TOKEN');
+    expect(childEnvironment).not.toContain('github.token');
+    expect(workflow).not.toContain('      - name: Install frozen Windows supervisor');
+    expect(workflow).not.toContain(
+      '        run: pwsh -NoProfile -File scripts/phase1-windows-supervisor-install.ps1',
+    );
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: Verifies the literal shell expansion.
+    expect(buildScript).toContain('-H "Authorization: Bearer ${token}"');
+    expect(buildScript).not.toContain('Authorization: ******');
+    expect(buildScript).toContain('source.manifestSha256');
+    expect(buildScript).toContain('source.lockSha256');
+    expect(buildScript).toContain('source.configSha256');
+    expect(buildScript).toContain('stats.isSymbolicLink()');
+    expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
+    expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');
+  });
+});
+
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
   test('is expected to be rejected by the pre-repin SDK workflow validator', async () => {
     const fixture = await workflowFixture();
@@ -357,6 +465,8 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain(
       `          OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`,
     );
+    expect(fixture.workflow).toContain('          fetch-depth: 0');
+    expect(fixture.workflow).toContain('scripts/executable-resolution.mjs');
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
@@ -714,12 +824,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('runs one inline supervised Windows production before every action or repository command', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
-    const stepsStart = workflow.indexOf('    steps:\n');
-    const bootstrapStart = workflow.indexOf(
+    const producer = workflowJob(workflow, 'platform-conformance');
+    const stepsStart = producer.indexOf('    steps:\n');
+    const bootstrapStart = producer.indexOf(
       '      - name: Bootstrap supervised Windows conformance',
       stepsStart,
     );
-    const firstAction = workflow.indexOf('      - uses:', stepsStart);
+    const firstAction = producer.indexOf('      - uses:', stepsStart);
 
     expect(bootstrapStart).toBe(stepsStart + '    steps:\n'.length);
     expect(bootstrapStart).toBeLessThan(firstAction);
@@ -739,17 +850,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
 
     for (const action of ['actions/checkout@', 'actions/setup-node@', 'pnpm/action-setup@']) {
-      const actionStart = workflow.indexOf(`      - uses: ${action}`);
-      const actionEnd = workflow.indexOf('\n      - ', actionStart + 1);
-      const step = workflow.slice(actionStart, actionEnd);
+      const actionStart = producer.indexOf(`      - uses: ${action}`);
+      const actionEnd = producer.indexOf('\n      - ', actionStart + 1);
+      const step = producer.slice(actionStart, actionEnd);
       expect(actionStart).toBeGreaterThan(bootstrapStart);
       expect(step).toContain("if: matrix.platform != 'win32-x64'");
     }
 
-    const platformSteps = workflow
-      .slice(stepsStart, workflow.indexOf('\n  validate-conformance-artifacts:'))
-      .split('\n      - ')
-      .slice(1);
+    const platformSteps = producer.slice(stepsStart).split('\n      - ').slice(1);
     for (const step of platformSteps) {
       if (
         step.startsWith('name: Bootstrap supervised Windows conformance') ||
@@ -1682,6 +1790,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'scripts/unix-producer-supervisor.sh',
       'scripts/unix-producer-supervisor-attack.c',
       'scripts/unix-producer-supervisor.test.sh',
+      'scripts/phase1-windows-supervisor-build.sh',
+      'scripts/phase1-windows-supervisor-install.ps1',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
     ];
@@ -1695,6 +1805,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('runs all Unix production under a distinct ephemeral UID before descriptor handoff', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
+    const producer = workflowJob(workflow, 'platform-conformance');
     const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
     const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
     const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
@@ -1747,7 +1858,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Produce platform evidence',
       'Validate canonical platform record',
     ]) {
-      expect(workflow).not.toContain(`      - name: ${forbiddenStep}\n`);
+      expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
       'pnpm install --frozen-lockfile --ignore-scripts',
@@ -1757,7 +1868,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'OPENCOVEN_UNIX_PRODUCER_REQUIRED',
     ]) {
       expect(command).toContain(required);
-      expect(workflow).not.toContain(`run: ${required}`);
+      expect(producer).not.toContain(`run: ${required}`);
     }
     for (const required of [
       'useradd',

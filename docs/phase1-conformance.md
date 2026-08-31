@@ -259,12 +259,16 @@ OCI bottle layer SHA-256
 `0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5`,
 and GNU ld `2.47.20260726`. CI verifies the exact OCI manifest annotation,
 installed package version, and linker version before building.
-Fleet provisioning installs it at
-`C:\OpenCoven\conformance\phase1-process-supervisor.exe`. The harness requires
-that exact absolute path and digest before its first Git, pnpm, Cargo, build, or
-tool command. The local frozen artifact is retained outside Git at
-`files/phase1-process-supervisor-ff415b6/win32-x64/phase1-process-supervisor.exe`
-in this implementation session's artifact area.
+The main-only `windows-supervisor` job uploads those exact bytes and exposes
+only the artifact ID. The first Windows platform step creates the native Job
+Object before using a trusted inline .NET client to download that artifact by
+ID. It accepts one HTTPS redirect to the Azure artifact host, requires one
+bounded ZIP entry, verifies the frozen size and SHA-256, installs it at
+`C:\OpenCoven\conformance\phase1-process-supervisor.exe`, and grants the
+isolated SID read/execute without write access. The GitHub artifact token is
+removed before the Job or any repository checkout receives an environment.
+The installed file is rechecked by the restricted child and removed during
+broker cleanup.
 
 ### Unix producer supervisor and descriptor handoff
 
@@ -300,6 +304,17 @@ platform, `getuid()` equal to the bound producer UID, a different broker UID,
 and the native containment kind before its first subprocess. Linux
 additionally requires its own `/proc/self/cgroup` membership to equal the
 nonce-bound cgroup-v2 path.
+
+On Darwin and Linux, pinned official actions fetch the exact SDK candidate,
+SDK evidence authority, selected validator, Cave, and Coven revisions beneath
+the workflow checkout before restricted execution. The root supervisor copies
+that complete checkout into its immutable source tree, and the restricted
+command passes those exact `.phase1-counterparts` roots explicitly. On Windows,
+the trusted child reads only lowercase commit IDs and repository allowlist
+entries from the verified lock, fetches the historical harness commit plus all
+five counterpart checkouts with pinned Git inside the Job, and then passes
+those roots to the relocated runner. Producer identity is always recomputed
+from the supplied workflow Chat checkout rather than the runner module path.
 
 On Linux, the trusted supervisor requires a writable unified cgroup v2 mount.
 It creates a dedicated child cgroup, starts only a trusted UID-dropping wrapper
@@ -919,7 +934,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 388,293 | `e08e49bd8d0b9bf4af4b25dd353dfe0d62742d80c5f6351d738afff099034cfd` |
+| `.github/workflows/client-v1-conformance.yml` | 410,918 | `4a09643332641f91d705eb29b52f6f2227c65664f337b01ccbf2c05798ce86a9` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -932,16 +947,18 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,311 | `a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 138,125 | `3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01` |
+| `scripts/phase1-schema-v2-producer.mjs` | 138,202 | `d49a809b9d568358a1294c04b9971b8537387b433c022a44362a76484f7bab2a` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,802 | `149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
-| `scripts/unix-producer-command.sh` | 2,663 | `a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1` |
+| `scripts/unix-producer-command.sh` | 3,186 | `cb4a9dad362edadeb2cb4d26d0a9bcbd5f17630d6445a8fb5bb43eaaa2f2fdd1` |
 | `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
+| `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
+| `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 255,395 | `057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc` |
 | `scripts/windows-job-supervisor.test.ps1` | 150,114 | `61dd2c7af1a0540a0d3e02be239e393d225ad6a3876cd577f7b2a68188f00c3c` |
 

@@ -25,6 +25,15 @@ unset \
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 export RUSTUP_TOOLCHAIN=1.95.0
 
+phase1_source_arguments=(
+  --chat-root "$OPENCOVEN_UNIX_WORKSPACE"
+  --sdk-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk"
+  --sdk-evidence-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk-evidence"
+  --validator-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/sdk-validator"
+  --cave-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven-cave"
+  --coven-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven"
+)
+
 pnpm --version | grep -qx '10.34.0'
 node --version | grep -qx 'v24.18.1'
 pnpm install --frozen-lockfile --ignore-scripts
@@ -37,12 +46,14 @@ if [[ "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" == linux-x64 ]]; then
   bash scripts/phase1-linux-secret-service.sh \
     --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" \
     --platform "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" \
-    --output "$OPENCOVEN_UNIX_SOURCE_RECORD"
+    --output "$OPENCOVEN_UNIX_SOURCE_RECORD" \
+    "${phase1_source_arguments[@]}"
 else
   node scripts/phase1-conformance.mjs \
     --validator-revision "$OPENCOVEN_VALIDATOR_REVISION" \
     --platform "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" \
-    --output "$OPENCOVEN_UNIX_SOURCE_RECORD"
+    --output "$OPENCOVEN_UNIX_SOURCE_RECORD" \
+    "${phase1_source_arguments[@]}"
 fi
 
 node --input-type=module --eval "

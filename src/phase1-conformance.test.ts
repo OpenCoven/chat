@@ -746,6 +746,28 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('binds schema-v2 producer identity to the supplied workflow checkout', async () => {
+    const producerModulePath = '../scripts/phase1-schema-v2-producer.mjs';
+    const { readSchemaV2ProducerIdentity } = await import(producerModulePath);
+    const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+
+    expect(readSchemaV2ProducerIdentity(projectRoot)).toEqual({ revision, tree });
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain(
+      'cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment)',
+    );
+  });
+
   test('preserves a private infrastructure cause only on the in-memory error object', () => {
     const cause = new Error('/private/operator/path should not be retained');
     const wrapped = wrapInfrastructureFailure(cause, { status: 'failed' });
@@ -1523,6 +1545,55 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(() =>
         parseArgs(['--validator-revision', 'd'.repeat(40), '--scenario', 'all'], runtime),
       ).toThrow(/only valid with schema-v2/u);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('binds schema output to the supervisor path while retaining the supplied Chat source', () => {
+    const platform = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
+    const fixture = createSupervisorArtifactFixture(platform);
+    const currentUid = process.getuid?.() ?? 1977;
+    const brokerUid = currentUid === 1 ? 2 : currentUid - 1;
+    const chatSourceRoot = resolve(fixture.root, 'workflow-chat-source');
+    mkdirSync(chatSourceRoot, { mode: 0o555 });
+    const environment = {
+      ...process.env,
+      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+      OPENCOVEN_UNIX_PRODUCER_PLATFORM: platform,
+      OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+      OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+      OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
+      OPENCOVEN_UNIX_CONTAINMENT: process.platform === 'darwin' ? 'macos-uid' : 'linux-cgroup-v2',
+      OPENCOVEN_UNIX_CGROUP_PATH:
+        process.platform === 'darwin' ? undefined : '/opencoven-chat-0123456789abcdef',
+      OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+      OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+      OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+    };
+    try {
+      const parsed = parseArgs(
+        [
+          '--chat-root',
+          chatSourceRoot,
+          '--validator-revision',
+          'd'.repeat(40),
+          '--platform',
+          platform,
+          '--output',
+          fixture.sourceRecord,
+        ],
+        {
+          environment,
+          platform: process.platform,
+          architecture: process.arch,
+          currentUid,
+          cgroupMembership:
+            process.platform === 'darwin' ? '' : '0::/opencoven-chat-0123456789abcdef\n',
+        },
+      );
+      expect(parsed.chatSourceRoot).toBe(chatSourceRoot);
+      expect(parsed.outputPath).toBe(fixture.sourceRecord);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
