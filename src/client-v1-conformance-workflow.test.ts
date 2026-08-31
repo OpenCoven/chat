@@ -31,7 +31,7 @@ const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
 const uploadedSupervisorArtifactIdExpression =
-  '${' + "{ steps.upload-supervisor.outputs['artifact-id'] }}";
+  '${' + "{ steps['upload-supervisor'].outputs['artifact-id'] }}";
 const supervisorArtifactIdExpression =
   '${' + "{ needs['windows-supervisor'].outputs.artifact_id }}";
 const platformTemplateExpression = '${' + 'platform}';
@@ -59,7 +59,8 @@ const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_RC_PATH:
     'C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe',
 } as const;
-const evidenceRevisionExpression = '${' + '{ steps.phase1-revisions.outputs.evidence_revision }}';
+const evidenceRevisionExpression =
+  '${' + "{ steps['phase1-revisions'].outputs.evidence_revision }}";
 
 function sha256(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');

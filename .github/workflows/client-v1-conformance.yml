@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      artifact_id: ${{ steps.upload-supervisor.outputs['artifact-id'] }}
+      artifact_id: ${{ steps['upload-supervisor'].outputs['artifact-id'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -8381,15 +8381,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
         with:
-          repository: ${{ steps.phase1-revisions.outputs.sdk_repository }}
-          ref: ${{ steps.phase1-revisions.outputs.sdk_revision }}
+          repository: ${{ steps['phase1-revisions'].outputs.sdk_repository }}
+          ref: ${{ steps['phase1-revisions'].outputs.sdk_revision }}
           path: .phase1-counterparts/sdk
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
         with:
-          repository: ${{ steps.phase1-revisions.outputs.evidence_repository }}
-          ref: ${{ steps.phase1-revisions.outputs.evidence_revision }}
+          repository: ${{ steps['phase1-revisions'].outputs.evidence_repository }}
+          ref: ${{ steps['phase1-revisions'].outputs.evidence_revision }}
           path: .phase1-counterparts/sdk-evidence
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -8402,15 +8402,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
         with:
-          repository: ${{ steps.phase1-revisions.outputs.cave_repository }}
-          ref: ${{ steps.phase1-revisions.outputs.cave_revision }}
+          repository: ${{ steps['phase1-revisions'].outputs.cave_repository }}
+          ref: ${{ steps['phase1-revisions'].outputs.cave_revision }}
           path: .phase1-counterparts/coven-cave
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
         with:
-          repository: ${{ steps.phase1-revisions.outputs.coven_repository }}
-          ref: ${{ steps.phase1-revisions.outputs.coven_revision }}
+          repository: ${{ steps['phase1-revisions'].outputs.coven_repository }}
+          ref: ${{ steps['phase1-revisions'].outputs.coven_revision }}
           path: .phase1-counterparts/coven
           persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
