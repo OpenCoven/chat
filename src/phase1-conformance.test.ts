@@ -252,6 +252,28 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain('chatRoot: roots.producerRoot');
   });
 
+  test('binds schema-v2 producer identity to the supplied workflow checkout', async () => {
+    const producerModulePath = '../scripts/phase1-schema-v2-producer.mjs';
+    const { readSchemaV2ProducerIdentity } = await import(producerModulePath);
+    const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+
+    expect(readSchemaV2ProducerIdentity(projectRoot)).toEqual({ revision, tree });
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain(
+      'cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment)',
+    );
+  });
+
   test('preserves a private infrastructure cause only on the in-memory error object', () => {
     const cause = new Error('/private/operator/path should not be retained');
     const wrapped = wrapInfrastructureFailure(cause, { status: 'failed' });

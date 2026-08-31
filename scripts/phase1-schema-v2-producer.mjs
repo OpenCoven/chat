@@ -1075,10 +1075,10 @@ export async function cloneExactCheckout({
   );
 }
 
-function currentProducerIdentity() {
+export function readSchemaV2ProducerIdentity(sourceRoot) {
   const environment = createGitEnvironment(process.env);
   const run = (value) =>
-    execFileSync('git', ['-C', projectRoot, 'rev-parse', value], {
+    execFileSync('git', ['-C', sourceRoot, 'rev-parse', value], {
       encoding: 'utf8',
       env: environment,
       maxBuffer: 1024 * 1024,
@@ -1092,12 +1092,12 @@ function currentProducerIdentity() {
   };
 }
 
-async function cloneProducerCheckout(artifactRoot, environment) {
-  const identity = currentProducerIdentity();
+async function cloneProducerCheckout(artifactRoot, sourceRoot, environment) {
+  const identity = readSchemaV2ProducerIdentity(sourceRoot);
   const producerRoot = resolve(artifactRoot.rootPath, 'checkouts', 'producer');
   await cloneExactCheckout({
     artifactRoot,
-    sourceRoot: projectRoot,
+    sourceRoot,
     destinationRoot: producerRoot,
     repository: 'OpenCoven/chat',
     revision: identity.revision,
@@ -1179,7 +1179,10 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
       throw new Error('SDK validator checkout does not match the selected revision.');
     }
     roots.validatorIdentity = validatorIdentity;
-    Object.assign(roots, await cloneProducerCheckout(artifactRoot, environment));
+    Object.assign(
+      roots,
+      await cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
+    );
   }
   return roots;
 }
