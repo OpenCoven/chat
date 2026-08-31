@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: 'b236604c3f7b51fdccec1ca6c7e2cebf45a600ca',
+    revision: 'fbabd6ffee21d4edcd4d76999fabd9e811276eea',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -462,10 +462,15 @@ function createCheckoutFixture() {
 
 describe('Phase 1 conformance lock', () => {
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
-    expect(readPhase1ConformanceLock()).toEqual({
+    const lock = readPhase1ConformanceLock();
+    expect(lock).toEqual({
       path: resolve(projectRoot, 'phase1-conformance.lock.json'),
       version: 5,
       ...expectedEntries,
+    });
+    expect(committedHarnessAuthority).toMatchObject({
+      revision: expectedEntries.harness.revision,
+      tree: '0d0d558bce2cfbb62ef6105ae2e42d1e3bb3e58a',
     });
   });
 

@@ -436,6 +436,46 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('binds every executable security helper and conformance-only Rust delta', () => {
+    const lock = readJson<{
+      harnessAuthority: {
+        files: Array<{ path: string; sha256: string }>;
+        productionDeltas: Array<{ path: string; sha256: string }>;
+      };
+    }>('phase1-conformance.lock.json');
+    const harnessFiles = new Map(lock.harnessAuthority.files.map((entry) => [entry.path, entry]));
+    const productionDeltas = new Map(
+      lock.harnessAuthority.productionDeltas.map((entry) => [entry.path, entry]),
+    );
+
+    for (const path of [
+      'scripts/unix-artifact-handoff.c',
+      'scripts/unix-producer-command.sh',
+      'scripts/unix-producer-supervisor.sh',
+      'scripts/windows-job-supervisor.cs',
+    ]) {
+      const authority = harnessFiles.get(path);
+      expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
+      expect(
+        createHash('sha256')
+          .update(readFileSync(resolve(projectRoot, path)))
+          .digest('hex'),
+      ).toBe(authority?.sha256);
+    }
+
+    for (const path of [
+      'src-tauri/Cargo.lock',
+      'src-tauri/src/cave.rs',
+      'src-tauri/src/cleanup_grant.rs',
+      'src-tauri/src/lib.rs',
+    ]) {
+      expect(
+        productionDeltas.get(path),
+        `${path} must be an explicit conformance production delta.`,
+      ).toBeDefined();
+    }
+  });
+
   it('keeps the frozen Windows supervisor in an isolated bin-only Cargo graph', () => {
     const crateRoot = resolve(projectRoot, 'tools/phase1-process-supervisor');
     const manifest = readText('tools/phase1-process-supervisor/Cargo.toml');

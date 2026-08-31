@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "b236604c3f7b51fdccec1ca6c7e2cebf45a600ca"
+    "revision": "fbabd6ffee21d4edcd4d76999fabd9e811276eea"
   },
   "harnessAuthority": {
-    "revision": "b236604c3f7b51fdccec1ca6c7e2cebf45a600ca",
-    "tree": "6bf5394c21876e1e54e095861b2ba3ef5d37916c",
+    "revision": "fbabd6ffee21d4edcd4d76999fabd9e811276eea",
+    "tree": "0d0d558bce2cfbb62ef6105ae2e42d1e3bb3e58a",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "4c5d2dd25f58ed95d18cf05b8f450b5c3c392278",
-        "sha256": "a94b76d45f23c4ad1fabf9e08c188c5da3d044e1aa8c1cc2cf1db269df0c3607"
+        "blob": "46542165ec63a310227c8719318ac4042fa7470d",
+        "sha256": "61a2c03b144779ae4d208a71c908551deabc79dfd167062793f4e5285553b3ac"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -61,8 +61,8 @@
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "4d45214b8cf38674f482a8bfe0513ec056f867d4",
-        "sha256": "e33d44acf061c4be950eb4ca496cf976bc50e884fd04ca1ac0d291d3c2493f88"
+        "blob": "1ff0feab595fcf9bc6f723cf5d28706ca0148eb1",
+        "sha256": "2ace05f78ea23c5b59db7aa7e08ab1aeca9b26da9cf86a38001af535e65f5542"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -76,13 +76,13 @@
       },
       {
         "path": "scripts/phase1-schema-v2-evidence.mjs",
-        "blob": "5d742e1af352c3b4a92891c7789c46e08474c80a",
-        "sha256": "236fb9c0c809e52f0a6a45dd8613d7da8130cc28300577a86b2758a76aa6d4c6"
+        "blob": "1bc5bce4e5abb42e50f0c4395bb5688112b87272",
+        "sha256": "4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8"
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "bae6525fc3e3a5371a57686281e9ce6849c847c9",
-        "sha256": "8fbf836246383c75f98e8a14f69b7302054d9332a610b86bc735f7fb14d3e572"
+        "blob": "23fc092f838dd544e36ec028424e8615f5b92558",
+        "sha256": "20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -91,13 +91,33 @@
       },
       {
         "path": "scripts/phase1-linux-secret-service.sh",
-        "blob": "b9c4a367dc3ba9c6dff0bd264217b6bcf97d6d4a",
-        "sha256": "fc866e44c86ec82fabd525734ccf090e7fd78dbf62a866210a4556b035ffac3a"
+        "blob": "176a073b64b6eca02e55dd9e1e9fed8c36997a6e",
+        "sha256": "83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476"
       },
       {
         "path": "scripts/phase1-macos-keychain.mjs",
         "blob": "126967928e0423629d86a33213b857f6130a7f44",
         "sha256": "ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4"
+      },
+      {
+        "path": "scripts/unix-artifact-handoff.c",
+        "blob": "8f5ad134547f1bd5c20b3c9ec103ae22ea02eb5d",
+        "sha256": "2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc"
+      },
+      {
+        "path": "scripts/unix-producer-command.sh",
+        "blob": "c73817ee64afbbe089584e0e808874f070cb73d5",
+        "sha256": "a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1"
+      },
+      {
+        "path": "scripts/unix-producer-supervisor.sh",
+        "blob": "6f5cf9cd104a55e9bc3b527086ed81cb5ad698ed",
+        "sha256": "9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d"
+      },
+      {
+        "path": "scripts/windows-job-supervisor.cs",
+        "blob": "96235c43bcf2fbbfdd283abb185015b9f45e1567",
+        "sha256": "057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -121,20 +141,25 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "735ac374b96659fadeb06372b8592822489d36b9",
-        "sha256": "784aef7a3f0be0978dae500db9cdcb0af29bdee06be13610f4f2ed27c9f50f37"
+        "blob": "bd10a0a97f7d450086319e9e644591337c574e7b",
+        "sha256": "62fe688a15e0ca7d8a244af51f3a6c87a2624e2ded8e312c2bb3590542ca6dc2"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "296297b0bc21d6b8ab726a56c7ac99fe3e312a16",
-        "sha256": "adfb5fd10d8c9ebf888161d58092ee099545a5c7f279921119f2fb26d847438b"
+        "blob": "868d11676a217e98e89aa8ff3e17bf79348e018c",
+        "sha256": "e20bb1bcf0b24310e51df07a4fd9078b4d322cc102bc77543b64a5254fe994cf"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "16c74629b9bf1927061c52c0069b60462ece7e8b",
-        "sha256": "a6ae7962bc5e50f0cb19b58a1e4ccb9ca0fb2e71688839aa866e0f5173d5a599"
+        "blob": "c22953300c55fb0bab640865ebc5806877c15402",
+        "sha256": "0777e4f050d691fc335dc041941b06629c9276c673cd33a513764cd6fa2bc313"
+      },
+      {
+        "path": "src-tauri/Cargo.lock",
+        "blob": "8fe3a6ffbf488e775f85bb2df231399e620fe80f",
+        "sha256": "17109b0bbe5306b83fe0bb6ba70bbbfd5f236972bc4f016db95bbdab1202dfac"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -142,9 +167,19 @@
         "sha256": "adfe422281e056ba5b9ab526c5889fc4c52601d5ac8538d1da7b5d56fdf90ec1"
       },
       {
+        "path": "src-tauri/src/cave.rs",
+        "blob": "1ff9a528520d4e198f258e830c201e02f00d95da",
+        "sha256": "1ccbd99f9efee038d9e7e39d0442aeb1130cfe5d68c8ba99c34ea30c731d4255"
+      },
+      {
+        "path": "src-tauri/src/cleanup_grant.rs",
+        "blob": "16d686a5c0d31f0f063b19be5bd346193055c403",
+        "sha256": "1440b7571065c20f3518dc86e88eb32a58a05647e908c28c17470af39cffead3"
+      },
+      {
         "path": "src-tauri/src/conformance.rs",
-        "blob": "ae0bab912bb3a55bccb7589b8581017bed9bc1f5",
-        "sha256": "27c40833b6d44949ae48555b0b12f9d9a257ac36cb49e9134b19d68fe858fa6f"
+        "blob": "0957051f3143fcbaac64d7b1813184a565c05e4b",
+        "sha256": "d9d25cc2c682f3f85b1c5f3b937b5161af10345bf808ee8a0d1d5ce944d2dc69"
       },
       {
         "path": "src-tauri/src/connection.rs",
@@ -158,8 +193,13 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "f6f9d5c9fe5070797d40342cc8ca290ff435f361",
-        "sha256": "9265e0bff86c9cfdc71d3cf814a54428443ccd4b267fc550ead98519b47355eb"
+        "blob": "54150c5700c664d8ed3993f2629a2d0c2d315dc8",
+        "sha256": "7fd9151397b8f465dec577f002ac547bc2ee646046a75721a0068d8662a9bc9c"
+      },
+      {
+        "path": "src-tauri/src/lib.rs",
+        "blob": "62d08ca73cb116614f2e4f4c78b05f677af38e80",
+        "sha256": "3559017a6818e2b8067c09f28676dfd7a6078792b44fc5eefb5c3d4e9d5d0301"
       }
     ]
   },
