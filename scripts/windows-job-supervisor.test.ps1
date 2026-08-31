@@ -1935,16 +1935,20 @@ try {
       $context.User
     )
     try {
-      $result = $job.RunProducerAsUserAndQuarantine(
-        $context.User,
-        $trustedPwsh,
-        "-NoLogo -NoProfile -NonInteractive -File `"$contextLiveRootScript`"",
-        $context.User.RootPath,
-        $environment,
-        [TimeSpan]::FromSeconds(30),
-        1MB,
-        1MB
-      )
+      try {
+        $result = $job.RunProducerAsUserAndQuarantine(
+          $context.User,
+          $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$contextLiveRootScript`"",
+          $context.User.RootPath,
+          $environment,
+          [TimeSpan]::FromSeconds(30),
+          1MB,
+          1MB
+        )
+      } catch {
+        throw "Live root '$Label' terminal quarantine failed: $($_.Exception.ToString())"
+      }
       if ($result.ExitCode -ne 0) {
         throw "Protected root process did not execute normally: $($result.Stderr)"
       }
