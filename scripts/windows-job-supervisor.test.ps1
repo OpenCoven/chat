@@ -4180,17 +4180,21 @@ Start-Sleep -Seconds 300
         } else {
           @()
         }
-        $Result = $Job.RunProducerAsUserAndQuarantine(
-          $Context.User,
-          $trustedPwsh,
-          "-NoLogo -NoProfile -NonInteractive -File `"$producerPath`"",
-          $Context.User.RootPath,
-          $Context.Environment,
-          [TimeSpan]::FromSeconds(30),
-          256,
-          256,
-          $directoryQuotas
-        )
+        try {
+          $Result = $Job.RunProducerAsUserAndQuarantine(
+            $Context.User,
+            $trustedPwsh,
+            "-NoLogo -NoProfile -NonInteractive -File `"$producerPath`"",
+            $Context.User.RootPath,
+            $Context.Environment,
+            [TimeSpan]::FromSeconds(30),
+            256,
+            256,
+            $directoryQuotas
+          )
+        } catch {
+          throw "Terminal failure '$Label' producer failed: $($_.Exception.ToString())"
+        }
         if (
           $Mode -eq 'stdout-overflow' -and
           (-not $Result.StdoutOverflow -or $Result.ExitCode -eq 0)
