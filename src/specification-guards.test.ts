@@ -979,13 +979,7 @@ describe('Phase 1 specification guards', () => {
       .filter(([, job]) => /^ {4}if: needs\.changes\.outputs\.docs_only != 'true'$/m.test(job))
       .map(([name]) => name);
 
-    expect(gatedJobs).toEqual([
-      'e2e',
-      'phase1-conformance',
-      'desktop',
-      'rust',
-      'unix-supervisor',
-    ]);
+    expect(gatedJobs).toEqual(['e2e', 'phase1-conformance', 'desktop', 'rust', 'unix-supervisor']);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
