@@ -4817,7 +4817,9 @@ namespace OpenCoven
                     }
                     byte[] canonical = SerializeCanonicalJson(root);
                     string canonicalText =
-                        new UTF8Encoding(false, true).GetString(canonical) +
+                        new UTF8Encoding(false, true)
+                            .GetString(canonical)
+                            .Replace("\r\n", "\n") +
                         "\n";
                     if (!String.Equals(
                             text,

@@ -944,7 +944,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 440,159 | `3873f5b85406667bd7be007e35b23283a54de08305330a6ebf023dda4b16d122` |
+| `.github/workflows/client-v1-conformance.yml` | 440,259 | `8521d524ba411cad236f2394b96c9b12983437e3fee089c9c1b2035e11614d5f` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -969,7 +969,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 7,434 | `04b9fc8fb84ea4c535da78e2a0caf9ddd280a894f0094328269363f5e8590341` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 278,685 | `0985231413dbc2f23c6489480cce42a285451eddeae179018302e88db705847a` |
+| `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
 | `scripts/windows-job-supervisor.test.ps1` | 153,092 | `2a22babab11fe928f27b99bb4da64a90f501e0e5b083f1fca0298414d1d5382a` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
