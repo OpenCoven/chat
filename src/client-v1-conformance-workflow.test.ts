@@ -1648,9 +1648,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest.slice(serviceEscapeProducerStart, serviceEscapeTaskParameters)).not.toMatch(
       /Register-PrincipalOnlyInteractiveTask `\r?\n/,
     );
-    expect(runtimeTest).toContain(
-      '`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId -cne',
-    );
+    for (const principalIdentityGuard of [
+      'function Resolve-RegisteredPrincipalSid {',
+      '[Security.Principal.SecurityIdentifier]::new(`$UserId).Value',
+      '[Security.Principal.NTAccount]::new(`$UserId).Translate(',
+      '(Resolve-RegisteredPrincipalSid -UserId (',
+      '[string]`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId',
+    ]) {
+      expect(runtimeTest).toContain(principalIdentityGuard);
+    }
     expect(runtimeTest).toContain(
       "throw 'Shared-folder task was not registered for the exact isolated SID.'",
     );

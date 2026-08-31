@@ -2925,6 +2925,20 @@ Set-StrictMode -Version Latest
 Add-Type -TypeDefinition (
   [IO.File]::ReadAllText('$($serviceEscapeProbeSource.Replace("'", "''"))')
 ) -Language CSharp
+function Resolve-RegisteredPrincipalSid {
+  param([Parameter(Mandatory)][string]`$UserId)
+
+  try {
+    if (`$UserId.StartsWith('S-1-', [StringComparison]::OrdinalIgnoreCase)) {
+      return [Security.Principal.SecurityIdentifier]::new(`$UserId).Value
+    }
+    return [Security.Principal.NTAccount]::new(`$UserId).Translate(
+      [Security.Principal.SecurityIdentifier]
+    ).Value
+  } catch {
+    throw 'Shared-folder task principal could not be resolved.'
+  }
+}
 [IO.Directory]::CreateDirectory(
   '$([IO.Directory]::GetParent($serviceEscapeRecord).FullName.Replace("'", "''"))'
 ) | Out-Null
@@ -2964,7 +2978,9 @@ foreach (`$sharedRegistration in @(
     throw 'Shared-folder principal task path changed.'
   }
   if (
-    `$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId -cne
+    (Resolve-RegisteredPrincipalSid -UserId (
+      [string]`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId
+    )) -cne
       '$($serviceEscapeContext.User.Sid)'
   ) {
     throw 'Shared-folder task was not registered for the exact isolated SID.'
