@@ -612,6 +612,15 @@ environment policy below are both required; neither substitutes for the other.
 
 That environment must have:
 
+- required reviewer user ID `68980965`;
+- wait timer `0`;
+- `prevent_self_review` enabled;
+- administrator bypass disabled;
+- deployment branch rules restricted to protected branches only; and
+- nonsecret environment variable
+  `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION`, set to the exact reviewed
+  lowercase 40-hex SDK validator commit for that run.
+
 On POSIX the supervisor reports through a private fd 3 pipe that is not inherited
 by the target; no status path or capability enters the target environment.
 Timeout and output-limit cancellation signal the live supervisor, which remains
