@@ -1569,6 +1569,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'GetTokenInformation',
       'GetExitCodeProcess',
       'Late registrar process PID',
+      'Nonzero persistence process PID',
       'Terminal failure persistence process PID',
     ]) {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
@@ -1652,6 +1653,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).not.toContain('scheduled action EnginePID');
     expect(runtimeTest).not.toContain('scheduled action process PID');
     expect(runtimeTest).not.toContain('Task Scheduler action did not write its started marker.');
+    expect(runtimeTest).toContain(
+      'Assert-NoExactSidPersistence -Sid $serviceEscapeContext.User.Sid',
+    );
+    expect(runtimeTest).toContain(
+      'Assert-NoExactSidPersistence -Sid $failureEscapeContext.User.Sid',
+    );
     for (const principalIdentityGuard of [
       'function Resolve-RegisteredPrincipalSid {',
       '[Security.Principal.SecurityIdentifier]::new(`$UserId).Value',

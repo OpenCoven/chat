@@ -3058,6 +3058,7 @@ exit 0
     }
     Assert-ProcessExited -ProcessId $lateRegistrarPid
     $lateRegistrarPid = 0
+    Assert-NoExactSidPersistence -Sid $serviceEscapeContext.User.Sid
     Assert-ScheduledTaskAbsent `
       -TaskPath "$taskFolderPath\$serviceEscapeName" `
       -Failure 'Task Scheduler escape registration survived broker cleanup.'
@@ -3218,6 +3219,7 @@ exit 0
   $failureEscapeContext =
     New-IsolatedTestContext -Label 'service-escape-nonzero'
   $failureEscapeJob = $null
+  $failureSleeperPid = 0
   try {
     $failureEscapeNonce = [Guid]::NewGuid().ToString('N')
     $failureEscapeJobName =
@@ -3247,6 +3249,12 @@ exit 0
     $failureEscapeReady = Join-Path `
       $failureEscapeContext.User.TempPath `
       'producer-ready.txt'
+    $failureSleeperReady = Join-Path `
+      $failureEscapeContext.User.TempPath `
+      'persistence-sleeper-ready.txt'
+    $failureSleeperScript = Join-Path `
+      $failureEscapeContext.User.RootPath `
+      'persistence-sleeper.ps1'
     $failureActionScript = Join-Path `
       $failureEscapeContext.User.RootPath `
       'task-action.ps1'
@@ -3272,6 +3280,18 @@ exit 0
     [IO.File]::WriteAllText(
       $failureTaskHelper,
       $taskHelperTemplate,
+      [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+      $failureSleeperScript,
+      @"
+[IO.File]::WriteAllText(
+  '$($failureSleeperReady.Replace("'", "''"))',
+  'ready',
+  [Text.UTF8Encoding]::new(`$false)
+)
+Start-Sleep -Seconds 300
+"@,
       [Text.UTF8Encoding]::new($false)
     )
     [IO.File]::WriteAllText(
@@ -3339,6 +3359,37 @@ exit 23
       $failureEscapeJobName,
       $failureEscapeContext.User
     )
+    $failureEscapePassword =
+      [string]$passwordProperty.GetValue($failureEscapeContext.User)
+    $failureSleeperPid = [int][UnsupervisedLogonProcess]::Start(
+      $failureEscapeContext.User.UserName,
+      [Environment]::MachineName,
+      $failureEscapePassword,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$failureSleeperScript`"",
+      $failureEscapeContext.User.RootPath
+    )
+    $failureSleeperDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while (-not [IO.File]::Exists($failureSleeperReady)) {
+      try {
+        $failureSleeper = [Diagnostics.Process]::GetProcessById(
+          $failureSleeperPid
+        )
+        $failureSleeper.Dispose()
+      } catch [ArgumentException] {
+        throw 'Nonzero persistence process exited before readiness.'
+      }
+      if ([DateTime]::UtcNow -ge $failureSleeperDeadline) {
+        throw 'Nonzero persistence process did not become ready.'
+      }
+      Start-Sleep -Milliseconds 20
+    }
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+      'Nonzero persistence process PID',
+      $failureEscapeJobName,
+      [uint32]$failureSleeperPid,
+      $failureEscapeContext.User.Sid
+    )
     $failureEscapeResult =
       $failureEscapeJob.RunProducerAsUserAndQuarantine(
         $failureEscapeContext.User,
@@ -3359,6 +3410,9 @@ exit 23
     if (-not [IO.File]::Exists($failureEscapeReady)) {
       throw 'Nonzero producer persistence was not registered.'
     }
+    Assert-NoExactSidPersistence -Sid $failureEscapeContext.User.Sid
+    Assert-ProcessExited -ProcessId $failureSleeperPid
+    $failureSleeperPid = 0
     Assert-ScheduledTaskAbsent `
       -TaskPath "$failureEscapeFolderPath\$failureEscapeTaskName" `
       -Failure 'Nonzero producer Task Scheduler escape survived quarantine.'
@@ -3390,6 +3444,24 @@ exit 23
   } finally {
     $failureEscapeCleanupErrors =
       [Collections.Generic.List[Exception]]::new()
+    if ($failureSleeperPid -ne 0) {
+      try {
+        $failureSleeper = [Diagnostics.Process]::GetProcessById(
+          $failureSleeperPid
+        )
+        try {
+          if (-not $failureSleeper.HasExited) {
+            $failureSleeper.Kill($true)
+            $failureSleeper.WaitForExit()
+          }
+        } finally {
+          $failureSleeper.Dispose()
+        }
+      } catch [ArgumentException] {
+      } catch {
+        $failureEscapeCleanupErrors.Add($_.Exception)
+      }
+    }
     try {
       Remove-IsolatedTestContext -Context $failureEscapeContext
     } catch {
