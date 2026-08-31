@@ -1000,6 +1000,28 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('binds the protected schema-v2 output to the checked-out Chat source root', () => {
+    expect(
+      parseArgs([
+        '--chat-root',
+        './.phase1-counterparts/chat-source',
+        '--validator-revision',
+        'd'.repeat(40),
+        '--platform',
+        'linux-x64',
+        '--output',
+        './.phase1-counterparts/chat-source/.artifacts/client-v1-conformance-linux-x64.json',
+      ]).outputPath,
+    ).toBe(
+      resolve(
+        '.phase1-counterparts',
+        'chat-source',
+        '.artifacts',
+        'client-v1-conformance-linux-x64.json',
+      ),
+    );
+  });
+
   test('rejects Node preload and loader runtime injection indicators', () => {
     for (const argument of [
       '-r',
