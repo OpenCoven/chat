@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-scratch_root="$project_root/test-results/unix-producer-supervisor-native"
+scratch_root="$(mktemp -d /tmp/opencoven-unix-supervisor-test.XXXXXXXX)"
+scratch_root="$(cd "$scratch_root" && pwd -P)"
 handoff_source="$project_root/scripts/unix-artifact-handoff.c"
 supervisor="$project_root/scripts/unix-producer-supervisor.sh"
 attack_source="$project_root/scripts/unix-producer-supervisor-attack.c"
@@ -10,8 +11,8 @@ handoff="$scratch_root/unix-artifact-handoff"
 handoff_test="$scratch_root/unix-artifact-handoff-test"
 attack="$scratch_root/unix-producer-supervisor-attack"
 
-rm -rf -- "$scratch_root"
-mkdir -p -m 700 "$scratch_root"
+chmod 700 "$scratch_root"
+chgrp "$(id -g)" "$scratch_root"
 trap 'rm -rf -- "$scratch_root"' EXIT
 
 cc -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O2 "$handoff_source" -o "$handoff"
