@@ -2960,15 +2960,17 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
   UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
 }
 `$lateTask = Register-IsolatedInteractiveTask @taskParameters
-Assert-ScheduledActionRunIsolation `
-  -Probe `$lateTask `
-  -StartedMarker '$($lateActionMarker.Replace("'", "''"))' `
-  -PidMarker '$($lateActionPid.Replace("'", "''"))' `
-  -SidMarker '$($lateActionSid.Replace("'", "''"))' `
-  -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
-  -JobName '$serviceEscapeJobName' `
-  -ProcessLabel 'Post-disable scheduled action process PID' `
-  -EngineLabel 'Post-disable scheduled action EnginePID'
+`$lateRunIsolationParameters = @{
+  Probe = `$lateTask
+  StartedMarker = '$($lateActionMarker.Replace("'", "''"))'
+  PidMarker = '$($lateActionPid.Replace("'", "''"))'
+  SidMarker = '$($lateActionSid.Replace("'", "''"))'
+  ExpectedSid = '$($serviceEscapeContext.User.Sid)'
+  JobName = '$serviceEscapeJobName'
+  ProcessLabel = 'Post-disable scheduled action process PID'
+  EngineLabel = 'Post-disable scheduled action EnginePID'
+}
+Assert-ScheduledActionRunIsolation @lateRunIsolationParameters
 `$registeredLateUserId =
   [string]`$lateTask.RegisteredTask.Definition.Principal.UserId
 `$registeredLateSid = if (
@@ -3212,15 +3214,17 @@ if (
 ) {
   throw 'Primary exact-SID task registration changed.'
 }
-Assert-ScheduledActionRunIsolation `
-  -Probe `$taskProbe `
-  -StartedMarker '$($serviceEscapeActionMarker.Replace("'", "''"))' `
-  -PidMarker '$($serviceEscapeActionPid.Replace("'", "''"))' `
-  -SidMarker '$($serviceEscapeActionSid.Replace("'", "''"))' `
-  -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
-  -JobName '$serviceEscapeJobName' `
-  -ProcessLabel 'Primary scheduled action process PID' `
-  -EngineLabel 'Primary scheduled action EnginePID'
+`$primaryRunIsolationParameters = @{
+  Probe = `$taskProbe
+  StartedMarker = '$($serviceEscapeActionMarker.Replace("'", "''"))'
+  PidMarker = '$($serviceEscapeActionPid.Replace("'", "''"))'
+  SidMarker = '$($serviceEscapeActionSid.Replace("'", "''"))'
+  ExpectedSid = '$($serviceEscapeContext.User.Sid)'
+  JobName = '$serviceEscapeJobName'
+  ProcessLabel = 'Primary scheduled action process PID'
+  EngineLabel = 'Primary scheduled action EnginePID'
+}
+Assert-ScheduledActionRunIsolation @primaryRunIsolationParameters
 `$forbiddenTaskFragments = @(
   '$serviceEscapeJobName',
   '$serviceEscapeNonce',
@@ -3628,15 +3632,17 @@ if (
 ) {
   throw 'Nonzero producer exact-SID task registration changed.'
 }
-Assert-ScheduledActionRunIsolation `
-  -Probe `$taskProbe `
-  -StartedMarker '$($failureEscapeStarted.Replace("'", "''"))' `
-  -PidMarker '$($failureEscapePid.Replace("'", "''"))' `
-  -SidMarker '$($failureEscapeSid.Replace("'", "''"))' `
-  -ExpectedSid '$($failureEscapeContext.User.Sid)' `
-  -JobName '$failureEscapeJobName' `
-  -ProcessLabel 'Nonzero producer scheduled action process PID' `
-  -EngineLabel 'Nonzero producer scheduled action EnginePID'
+`$nonzeroRunIsolationParameters = @{
+  Probe = `$taskProbe
+  StartedMarker = '$($failureEscapeStarted.Replace("'", "''"))'
+  PidMarker = '$($failureEscapePid.Replace("'", "''"))'
+  SidMarker = '$($failureEscapeSid.Replace("'", "''"))'
+  ExpectedSid = '$($failureEscapeContext.User.Sid)'
+  JobName = '$failureEscapeJobName'
+  ProcessLabel = 'Nonzero producer scheduled action process PID'
+  EngineLabel = 'Nonzero producer scheduled action EnginePID'
+}
+Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
   /create `
   '$failureEscapeBitsName' *>&1 | Out-Null
@@ -3845,17 +3851,19 @@ Set-StrictMode -Version Latest
 Add-Type -TypeDefinition (
   [IO.File]::ReadAllText('$($probePath.Replace("'", "''"))')
 ) -Language CSharp
-`$task = Register-PrincipalOnlyInteractiveTask `
-  -Start `
-  -UserSid '$($Context.User.Sid)' `
-  -TaskNonce '$taskNonce' `
-  -ForbiddenFragments @(
+`$terminalTaskParameters = @{
+  Start = `$true
+  UserSid = '$($Context.User.Sid)'
+  TaskNonce = '$taskNonce'
+  ForbiddenFragments = @(
     '$JobName',
     '$($Context.User.UserName)',
     '$([Environment]::MachineName)\$($Context.User.UserName)',
     '$($Context.User.RootPath.Replace("'", "''"))',
     '$($Context.User.WorkspacePath.Replace("'", "''"))'
   )
+}
+`$task = Register-PrincipalOnlyInteractiveTask @terminalTaskParameters
 if (`$task.TaskPath -cne '$taskPath') {
   throw 'Terminal failure persistence task path changed.'
 }

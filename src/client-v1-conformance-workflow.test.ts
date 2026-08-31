@@ -1670,19 +1670,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
         runtimeTest.indexOf("      'stage-terminal-persistence.ps1'"),
       ),
     );
+    expect(terminalPersistenceSetup).toContain('`$terminalTaskParameters = @{');
+    expect(terminalPersistenceSetup).toContain('  Start = `$true');
     expect(terminalPersistenceSetup).toContain(
-      '`$task = Register-PrincipalOnlyInteractiveTask `\n  -Start `',
+      '`$task = Register-PrincipalOnlyInteractiveTask @terminalTaskParameters',
     );
     expect(terminalPersistenceSetup).toContain(
       'Assert-PrincipalOnlySchedulerRunAttemptResult -Probe `$task',
     );
     for (const scheduledActionIsolationCall of [
-      'Assert-ScheduledActionRunIsolation `\n  -Probe `$lateTask `',
-      "Assert-ScheduledActionRunIsolation `\n  -Probe `$taskProbe `\n  -StartedMarker '$($serviceEscapeActionMarker.Replace(\"'\", \"''\"))'",
-      "Assert-ScheduledActionRunIsolation `\n  -Probe `$taskProbe `\n  -StartedMarker '$($failureEscapeStarted.Replace(\"'\", \"''\"))'",
+      '`$lateRunIsolationParameters = @{',
+      'Assert-ScheduledActionRunIsolation @lateRunIsolationParameters',
+      '`$primaryRunIsolationParameters = @{',
+      'Assert-ScheduledActionRunIsolation @primaryRunIsolationParameters',
+      '`$nonzeroRunIsolationParameters = @{',
+      'Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters',
     ]) {
       expect(runtimeTest).toContain(scheduledActionIsolationCall);
     }
+    expect(runtimeTest).not.toContain('Assert-ScheduledActionRunIsolation `\n');
     expect(runtimeTest).toContain(
       "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
     );
