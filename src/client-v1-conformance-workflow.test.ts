@@ -1541,6 +1541,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Permanent WMI subscription creation unexpectedly succeeded.',
       'Task Scheduler action markers were only partially present after quarantine.',
       'Task Scheduler action process did not run as the exact isolated SID.',
+      'Readiness marker could not be read within its bound.',
       'Nonzero producer result changed during terminal quarantine.',
       'Nonzero producer artifact capture was not rejected.',
       'A task registration/run attempt after account disablement was not exercised.',
@@ -1582,6 +1583,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
     }
     expect(runtimeTest).toContain('function Assert-OptionalScheduledActionDrained');
+    expect(runtimeTest).toContain('function Assert-BoundedTextMarker');
+    expect(runtimeTest.match(/Assert-BoundedTextMarker `/g)).toHaveLength(3);
+    expect(runtimeTest).toContain('catch [IO.IOException]');
     expect(runtimeTest).toContain('registered-after-disable-run-attempted');
     expect(runtimeTest).toContain('scheduler-run-attempted-and-bits-created');
     expect(runtimeTest).toContain('catch [Runtime.InteropServices.COMException]');

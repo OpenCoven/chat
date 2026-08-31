@@ -526,6 +526,28 @@ function Assert-ProcessExited {
   throw "Process $ProcessId survived Job Object termination."
 }
 
+function Assert-BoundedTextMarker {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$Expected
+  )
+
+  $deadline = [DateTime]::UtcNow.AddSeconds(5)
+  do {
+    try {
+      if ([IO.File]::Exists($Path)) {
+        if ([IO.File]::ReadAllText($Path).Trim() -cne $Expected) {
+          throw 'Readiness marker content was invalid.'
+        }
+        return
+      }
+    } catch [IO.IOException] {
+    }
+    Start-Sleep -Milliseconds 20
+  } while ([DateTime]::UtcNow -lt $deadline)
+  throw 'Readiness marker could not be read within its bound.'
+}
+
 function Assert-ScheduledTaskAbsent {
   param(
     [Parameter(Mandatory)][string]$TaskPath,
@@ -3253,11 +3275,9 @@ public static class UnsupervisedLogonProcess
       }
       Start-Sleep -Milliseconds 20
     }
-    if (
-      [IO.File]::ReadAllText($lateRegistrarReady).Trim() -cne 'ready'
-    ) {
-      throw 'Deterministic service-equivalent process marker was invalid.'
-    }
+    Assert-BoundedTextMarker `
+      -Path $lateRegistrarReady `
+      -Expected 'ready'
     [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Deterministic service-equivalent exact-SID process',
       $serviceEscapeJob.AuthoritativeHandleValue,
@@ -3778,6 +3798,9 @@ exit 23
       }
       Start-Sleep -Milliseconds 20
     }
+    Assert-BoundedTextMarker `
+      -Path $failureSleeperReady `
+      -Expected 'ready'
     [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Nonzero persistence process PID',
       $failureEscapeJob.AuthoritativeHandleValue,
@@ -4035,12 +4058,9 @@ Start-Sleep -Seconds 300
       }
       Start-Sleep -Milliseconds 20
     }
-    if (
-      [IO.File]::ReadAllText($readyPath).Trim() -cne
-        'exact-sid-task-run-attempt-process-and-bits-ready'
-    ) {
-      throw 'Terminal failure persistence readiness marker was invalid.'
-    }
+    Assert-BoundedTextMarker `
+      -Path $readyPath `
+      -Expected 'exact-sid-task-run-attempt-process-and-bits-ready'
     [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Terminal failure deterministic exact-SID process',
       $SupervisorJob.AuthoritativeHandleValue,
