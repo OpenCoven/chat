@@ -81,7 +81,7 @@ jobs:
           OPENCOVEN_WINDOWS_LINK_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe'
           OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0'
           OPENCOVEN_WINDOWS_RC_PATH: 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe'
-          OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs.windows-supervisor.outputs.artifact_id }}
+          OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs['windows-supervisor'].outputs.artifact_id }}
           OPENCOVEN_WINDOWS_GITHUB_API_URL: ${{ github.api_url }}
           OPENCOVEN_WINDOWS_GITHUB_REPOSITORY: ${{ github.repository }}
           OPENCOVEN_WINDOWS_GITHUB_TOKEN: ${{ github.token }}

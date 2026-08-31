@@ -32,7 +32,8 @@ const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
 const uploadedSupervisorArtifactIdExpression =
   '${' + "{ steps.upload-supervisor.outputs['artifact-id'] }}";
-const supervisorArtifactIdExpression = '${' + '{ needs.windows-supervisor.outputs.artifact_id }}';
+const supervisorArtifactIdExpression =
+  '${' + "{ needs['windows-supervisor'].outputs.artifact_id }}";
 const platformTemplateExpression = '${' + 'platform}';
 const downloadArtifactAction = 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c';
 const attestBuildProvenanceAction =
