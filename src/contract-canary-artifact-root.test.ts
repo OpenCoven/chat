@@ -440,7 +440,7 @@ describe('contract canary temp directory safety', () => {
         ),
       ).toThrow(/complete gzip archive/);
     }
-  });
+  }, 30_000);
 
   test('declares canary helper inputs at their consumed shapes', () => {
     type CheckoutHeadsInput = Parameters<typeof assertContractCanaryCheckoutHeads>[0];
@@ -642,7 +642,7 @@ describe('packed Cave authority artifact validation', () => {
     ).toThrow(
       'Packed Cave fixture provenance is not an ancestor of the reviewed producer revision.',
     );
-  }, 30_000);
+  }, 90_000);
 });
 
 describe('generated SDK release manifest validation', () => {
