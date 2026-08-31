@@ -45,6 +45,7 @@ namespace OpenCoven
         private const uint NERR_SUCCESS = 0;
         private const uint NERR_USER_NOT_FOUND = 2221;
         private const uint NERR_USER_EXISTS = 2224;
+        private const uint ERROR_MEMBER_IN_ALIAS = 1378;
         private const uint USER_PRIV_USER = 1;
         private const uint UF_SCRIPT = 0x0001;
         private const uint UF_ACCOUNTDISABLE = 0x0002;
@@ -209,6 +210,7 @@ namespace OpenCoven
                     Environment.MachineName,
                     userName).Translate(typeof(SecurityIdentifier));
                 sid = accountSid.Value;
+                EnsureUsersGroupMembership(userName);
                 string validationSummary =
                     ValidateStandardUser(userName, passwordValue, sid);
 
@@ -652,6 +654,38 @@ namespace OpenCoven
                 throw new Win32Exception(
                     unchecked((int)status),
                     "New ephemeral local user flags could not be normalized.");
+            }
+        }
+
+        private static void EnsureUsersGroupMembership(string userName)
+        {
+            NTAccount usersAccount = (NTAccount)new SecurityIdentifier(
+                "S-1-5-32-545").Translate(typeof(NTAccount));
+            string groupName = usersAccount.Value;
+            int separator = groupName.IndexOf('\\');
+            if (separator >= 0)
+            {
+                groupName = groupName.Substring(separator + 1);
+            }
+            if (String.IsNullOrWhiteSpace(groupName))
+            {
+                throw new InvalidOperationException(
+                    "Built-in Users local group name was unavailable.");
+            }
+            LOCALGROUP_MEMBERS_INFO_3 member = new LOCALGROUP_MEMBERS_INFO_3();
+            member.lgrmi3_domainandname =
+                Environment.MachineName + "\\" + userName;
+            uint status = NetLocalGroupAddMembers(
+                null,
+                groupName,
+                3,
+                ref member,
+                1);
+            if (status != NERR_SUCCESS && status != ERROR_MEMBER_IN_ALIAS)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user could not be added to built-in Users.");
             }
         }
 
@@ -1144,6 +1178,12 @@ namespace OpenCoven
             internal string lgrui0_name;
         }
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct LOCALGROUP_MEMBERS_INFO_3
+        {
+            internal string lgrmi3_domainandname;
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         private struct SID_AND_ATTRIBUTES
         {
@@ -1212,6 +1252,14 @@ namespace OpenCoven
             uint preferredMaximumLength,
             out uint entriesRead,
             out uint totalEntries);
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetLocalGroupAddMembers(
+            string serverName,
+            string groupName,
+            uint level,
+            ref LOCALGROUP_MEMBERS_INFO_3 buffer,
+            uint totalEntries);
 
         [DllImport("netapi32.dll")]
         private static extern uint NetApiBufferFree(IntPtr buffer);

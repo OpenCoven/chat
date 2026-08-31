@@ -146,6 +146,10 @@ function New-StandardUserSnapshotArguments {
 }
 $validAccountSnapshot = New-StandardUserSnapshotArguments -LegacyPrivilege 2
 $validateStandardUserSnapshot.Invoke($null, $validAccountSnapshot)
+$validateStandardUserSnapshot.Invoke(
+  $null,
+  (New-StandardUserSnapshotArguments -LegacyPrivilege 0)
+)
 
 foreach ($invalidSnapshot in @(
   (New-StandardUserSnapshotArguments -Flags 0x00010203),

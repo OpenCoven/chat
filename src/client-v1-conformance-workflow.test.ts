@@ -1004,7 +1004,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
       expect(source).not.toContain('private static extern bool CreateProcessW(');
       expect(source).not.toContain('Process.GetProcesses(');
-      expect(source).not.toContain('NetLocalGroupAddMembers');
+      const usersMembership = source.slice(
+        source.indexOf('private static void EnsureUsersGroupMembership'),
+        source.indexOf('private static void ValidateStandardUserSnapshot'),
+      );
+      expect(usersMembership).toContain('NetLocalGroupAddMembers');
+      expect(usersMembership).toContain('"S-1-5-32-545"');
+      expect(usersMembership).toContain('ERROR_MEMBER_IN_ALIAS');
+      expect(usersMembership).not.toContain('"S-1-5-32-544"');
       expect(source).toMatch(/"GetRunningTasks",\s+TASK_ENUM_HIDDEN/u);
       expect(source).toContain('Ephemeral local user cleanup failed during creation.');
       for (const failure of [
