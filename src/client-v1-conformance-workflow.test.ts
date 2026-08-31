@@ -959,6 +959,31 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(terminal).toContain('QuarantineIsolatedIdentity();');
       expect(terminal).toContain('new AggregateException(');
       expect(terminal).toContain('terminalProducerSucceeded =');
+      expect(terminal.indexOf('terminalProducerSucceeded = false;')).toBeLessThan(
+        terminal.indexOf('result = RunAsUserCore('),
+      );
+      expect(
+        terminal.indexOf(
+          'terminalProducerSucceeded =\n                        result.ExitCode == 0',
+        ),
+      ).toBeLessThan(terminal.indexOf('finally'));
+
+      const quarantineMethodStart = source.indexOf('public void QuarantineIsolatedIdentity()');
+      const quarantineMethodEnd = source.indexOf(
+        'private void RequireQuarantineCompleted(',
+        quarantineMethodStart,
+      );
+      const quarantineMethod = source.slice(quarantineMethodStart, quarantineMethodEnd);
+      const completedReturn = quarantineMethod.indexOf(
+        'if (quarantineCompleted)\n                {\n                    return;',
+      );
+      const inProgressReject = quarantineMethod.indexOf('if (quarantineInProgress)');
+      const executeSequence = quarantineMethod.indexOf('ExecuteQuarantineSecuritySequence(');
+      const markCompleted = quarantineMethod.indexOf('quarantineCompleted = true;');
+      expect(completedReturn).toBeGreaterThan(-1);
+      expect(inProgressReject).toBeGreaterThan(completedReturn);
+      expect(executeSequence).toBeGreaterThan(inProgressReject);
+      expect(markCompleted).toBeGreaterThan(executeSequence);
 
       const captureStart = source.indexOf(
         'public WindowsValidatedArtifact CaptureIsolatedArtifact(',
@@ -1275,12 +1300,110 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
     expect(runtimeTest).toContain('.RunProducerAsUserAndQuarantine(');
     expect(runtimeTest).toContain('OpenCoven-PrincipalOnly-');
+    for (const nativeTaskProbeToken of [
+      'ScheduledActionIsolationProbe',
+      'OpenJobObjectW',
+      'OpenProcess',
+      'IsProcessInJob',
+      'OpenProcessToken',
+      'GetTokenInformation',
+      'GetExitCodeProcess',
+      'Primary scheduled action EnginePID',
+      'Primary scheduled action process PID',
+      'Post-disable scheduled action EnginePID',
+      'Post-disable scheduled action process PID',
+      'Nonzero producer scheduled action EnginePID',
+      'Nonzero producer scheduled action process PID',
+      'Principal-only scheduled action EnginePID',
+    ]) {
+      expect(runtimeTest).toContain(nativeTaskProbeToken);
+    }
     expect(runtimeTest).toContain(
       '    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
     );
     expect(runtimeTest).not.toContain(
       '\n$taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
     );
+
+    const principalOnlyStart = runtimeTest.indexOf(
+      'function Register-PrincipalOnlyInteractiveTask {',
+    );
+    const principalOnlyEnd = runtimeTest.indexOf(
+      '\n    $lateRegistrarScript =',
+      principalOnlyStart,
+    );
+    const principalOnlyTask = runtimeTest.slice(principalOnlyStart, principalOnlyEnd);
+    expect(principalOnlyStart).toBeGreaterThan(-1);
+    expect(principalOnlyEnd).toBeGreaterThan(principalOnlyStart);
+    for (const required of [
+      '$definition.RegistrationInfo.Description =',
+      '$definition.RegistrationInfo.Source = $source',
+      '$definition.Principal.UserId = $UserSid',
+      '$definition.Principal.LogonType = 3',
+      "Join-Path $env:SystemRoot 'System32\\ping.exe'",
+      "$action.Arguments = '-t 127.0.0.1'",
+      '$action.WorkingDirectory =',
+      '$metadataValues',
+      'Principal-only task metadata contained an attributable identity.',
+    ]) {
+      expect(principalOnlyTask).toContain(required);
+    }
+    for (const forbidden of [
+      '.UserName',
+      '.RootPath',
+      '.WorkspacePath',
+      '$serviceEscapeJobName',
+      '$serviceEscapeNonce',
+      '$failureEscapeJobName',
+      'OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT',
+      'GITHUB_WORKSPACE',
+    ]) {
+      expect(principalOnlyTask).not.toContain(forbidden);
+    }
+    expect(runtimeTest).toContain("-TaskNonce '$principalOnlyNonce'");
+    expect(runtimeTest).not.toContain("-TaskNonce '$serviceEscapeNonce'");
+    expect(runtimeTest).not.toContain("-TaskNonce '$failureEscapeNonce'");
+    expect(runtimeTest).toContain(
+      "-Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'",
+    );
+  });
+
+  test('covers every terminal Windows producer failure with idempotent quarantine', () => {
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+
+    for (const failureCase of [
+      'stdout-overflow',
+      'stderr-overflow',
+      'directory-quota',
+      'launch-exception',
+    ]) {
+      expect(runtimeTest).toContain(`-Label '${failureCase}'`);
+    }
+    for (const required of [
+      'Assert-TerminalFailureQuarantine',
+      'Assert-NoExactSidPersistence',
+      'Get-ExactSidScheduledTaskCount',
+      'Get-ExactSidBitsJobCount',
+      'CountProcessesByPrimaryTokenSid',
+      'Terminal failure account was not disabled.',
+      'Terminal failure quarantine did not complete.',
+      'Terminal failure left an exact-SID process, task, or BITS job.',
+      'Terminal failure artifact capture was not rejected.',
+      '$Job.QuarantineIsolatedIdentity()',
+      'Second terminal quarantine invocation changed completed state.',
+      'Terminal failure ephemeral local user survived cleanup.',
+      'Terminal failure ephemeral Windows profile survived cleanup.',
+      'Terminal failure ephemeral bootstrap root survived cleanup.',
+      '$Result.StdoutOverflow',
+      '$Result.StderrOverflow',
+      '$Result.ResourceQuotaExceeded',
+      'Terminal producer attempt failed.',
+    ]) {
+      expect(runtimeTest).toContain(required);
+    }
   });
 
   test('creates a distinct non-admin Windows identity before supervised mutation', () => {

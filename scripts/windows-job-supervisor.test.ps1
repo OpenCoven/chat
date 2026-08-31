@@ -345,6 +345,420 @@ function Assert-ScheduledTaskAbsent {
   }
 }
 
+$scheduledActionIsolationProbeSource = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+
+public static class ScheduledActionIsolationProbe
+{
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint TOKEN_QUERY = 0x0008;
+    private const uint STILL_ACTIVE = 259;
+    private const uint WTS_ANY_SESSION = 0xffffffff;
+    private const int TokenUser = 1;
+    private const int WTSTypeProcessInfoLevel1 = 1;
+
+    public static void AssertAliveOutsideJobWithPrimaryTokenSid(
+        string label,
+        string jobName,
+        uint processId,
+        string expectedSid)
+    {
+        if (String.IsNullOrWhiteSpace(label) ||
+            String.IsNullOrWhiteSpace(jobName) ||
+            processId == 0 ||
+            String.IsNullOrWhiteSpace(expectedSid))
+        {
+            throw new ArgumentException(
+                "Scheduled action isolation probe input was invalid.");
+        }
+
+        IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, jobName);
+        if (job == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " could not open the supervised Job Object.");
+        }
+        IntPtr process = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            processId);
+        if (process == IntPtr.Zero)
+        {
+            CloseHandle(job);
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " could not open its process.");
+        }
+        try
+        {
+            RequireAlive(process, label);
+            bool member;
+            if (!IsProcessInJob(process, job, out member))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    label + " Job Object membership could not be queried.");
+            }
+            if (member)
+            {
+                throw new InvalidOperationException(
+                    label + " was inside the supervised Job Object.");
+            }
+            string actualSid = QueryPrimaryTokenSid(process, label);
+            if (!String.Equals(
+                    actualSid,
+                    expectedSid,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    label + " primary token SID was not the isolated SID.");
+            }
+            RequireAlive(process, label);
+        }
+        finally
+        {
+            CloseHandle(process);
+            CloseHandle(job);
+        }
+    }
+
+    public static int CountProcessesByPrimaryTokenSid(string expectedSid)
+    {
+        if (String.IsNullOrWhiteSpace(expectedSid))
+        {
+            throw new ArgumentException(
+                "Expected process SID was empty.",
+                "expectedSid");
+        }
+        uint level = 1;
+        IntPtr buffer;
+        uint count;
+        if (!WTSEnumerateProcessesExW(
+                IntPtr.Zero,
+                ref level,
+                WTS_ANY_SESSION,
+                out buffer,
+                out count))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Exact-SID process enumeration failed.");
+        }
+        try
+        {
+            if (level != 1 || (count != 0 && buffer == IntPtr.Zero))
+            {
+                throw new InvalidOperationException(
+                    "Exact-SID process enumeration was ambiguous.");
+            }
+            int matches = 0;
+            int size = Marshal.SizeOf(typeof(WTS_PROCESS_INFO_EXW));
+            for (uint index = 0; index < count; index++)
+            {
+                IntPtr entry = new IntPtr(
+                    buffer.ToInt64() + checked((long)index * size));
+                WTS_PROCESS_INFO_EXW information =
+                    (WTS_PROCESS_INFO_EXW)Marshal.PtrToStructure(
+                        entry,
+                        typeof(WTS_PROCESS_INFO_EXW));
+                if (information.pUserSid == IntPtr.Zero)
+                {
+                    if (information.ProcessId == 0)
+                    {
+                        continue;
+                    }
+                    throw new InvalidOperationException(
+                        "Exact-SID process entry had no primary token SID.");
+                }
+                string actualSid =
+                    new SecurityIdentifier(information.pUserSid).Value;
+                if (String.Equals(
+                        actualSid,
+                        expectedSid,
+                        StringComparison.Ordinal))
+                {
+                    matches++;
+                }
+            }
+            return matches;
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero &&
+                !WTSFreeMemoryExW(
+                    WTSTypeProcessInfoLevel1,
+                    buffer,
+                    count))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Exact-SID process enumeration buffer could not be released.");
+            }
+        }
+    }
+
+    private static void RequireAlive(IntPtr process, string label)
+    {
+        uint exitCode;
+        if (!GetExitCodeProcess(process, out exitCode))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " liveness could not be queried.");
+        }
+        if (exitCode != STILL_ACTIVE)
+        {
+            throw new InvalidOperationException(
+                label + " was not demonstrably alive.");
+        }
+    }
+
+    private static string QueryPrimaryTokenSid(
+        IntPtr process,
+        string label)
+    {
+        IntPtr token;
+        if (!OpenProcessToken(process, TOKEN_QUERY, out token))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " primary token could not be opened.");
+        }
+        try
+        {
+            uint length = 0;
+            GetTokenInformation(
+                token,
+                TokenUser,
+                IntPtr.Zero,
+                0,
+                out length);
+            if (length == 0 || Marshal.GetLastWin32Error() != 122)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    label + " primary token SID length could not be queried.");
+            }
+            IntPtr buffer = Marshal.AllocHGlobal(checked((int)length));
+            try
+            {
+                if (!GetTokenInformation(
+                        token,
+                        TokenUser,
+                        buffer,
+                        length,
+                        out length))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        label + " primary token SID could not be queried.");
+                }
+                TOKEN_USER user = (TOKEN_USER)Marshal.PtrToStructure(
+                    buffer,
+                    typeof(TOKEN_USER));
+                if (user.User.Sid == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        label + " primary token SID was ambiguous.");
+                }
+                return new SecurityIdentifier(user.User.Sid).Value;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            CloseHandle(token);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SID_AND_ATTRIBUTES
+    {
+        internal IntPtr Sid;
+        internal uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_USER
+    {
+        internal SID_AND_ATTRIBUTES User;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WTS_PROCESS_INFO_EXW
+    {
+        internal uint SessionId;
+        internal uint ProcessId;
+        internal IntPtr pProcessName;
+        internal IntPtr pUserSid;
+        internal uint NumberOfThreads;
+        internal uint HandleCount;
+        internal uint PagefileUsage;
+        internal uint PeakPagefileUsage;
+        internal uint WorkingSetSize;
+        internal uint PeakWorkingSetSize;
+        internal long UserTime;
+        internal long KernelTime;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(
+        uint desiredAccess,
+        bool inherit,
+        string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(
+        uint desiredAccess,
+        bool inherit,
+        uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsProcessInJob(
+        IntPtr process,
+        IntPtr job,
+        out bool member);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetExitCodeProcess(
+        IntPtr process,
+        out uint exitCode);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(
+        IntPtr process,
+        uint desiredAccess,
+        out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(
+        IntPtr token,
+        int tokenInformationClass,
+        IntPtr tokenInformation,
+        uint tokenInformationLength,
+        out uint returnLength);
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WTSEnumerateProcessesExW(
+        IntPtr server,
+        ref uint level,
+        uint sessionId,
+        out IntPtr processInfo,
+        out uint count);
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WTSFreeMemoryExW(
+        int typeClass,
+        IntPtr memory,
+        uint count);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@
+Add-Type -TypeDefinition $scheduledActionIsolationProbeSource -Language CSharp
+
+function Resolve-ExactAccountSid {
+  param([Parameter(Mandatory)][string]$Account)
+
+  if ($Account.StartsWith('S-1-', [StringComparison]::Ordinal)) {
+    return ([Security.Principal.SecurityIdentifier]::new($Account)).Value
+  }
+  return (
+    [Security.Principal.NTAccount]::new($Account).Translate(
+      [Security.Principal.SecurityIdentifier]
+    )
+  ).Value
+}
+
+function Get-ExactSidScheduledTaskCount {
+  param([Parameter(Mandatory)][string]$Sid)
+
+  $service = New-Object -ComObject 'Schedule.Service'
+  $service.Connect()
+  $pending = [Collections.Generic.Stack[object]]::new()
+  $pending.Push($service.GetFolder('\'))
+  $matches = 0
+  while ($pending.Count -ne 0) {
+    $folder = $pending.Pop()
+    $tasks = $folder.GetTasks(1)
+    for ($index = 1; $index -le $tasks.Count; $index++) {
+      $principal = $tasks.Item($index).Definition.Principal
+      foreach ($account in @(
+        [string]$principal.UserId,
+        [string]$principal.GroupId
+      )) {
+        if ([string]::IsNullOrWhiteSpace($account)) {
+          continue
+        }
+        try {
+          $ownerSid = Resolve-ExactAccountSid -Account $account
+        } catch {
+          continue
+        }
+        if ($ownerSid -ceq $Sid) {
+          $matches++
+          break
+        }
+      }
+    }
+    $folders = $folder.GetFolders(0)
+    for ($index = 1; $index -le $folders.Count; $index++) {
+      $pending.Push($folders.Item($index))
+    }
+  }
+  return $matches
+}
+
+function Get-ExactSidBitsJobCount {
+  param([Parameter(Mandatory)][string]$Sid)
+
+  Import-Module BitsTransfer -ErrorAction Stop
+  $matches = 0
+  foreach ($job in @(Get-BitsTransfer -AllUsers -ErrorAction Stop)) {
+    $owner = [string]$job.OwnerAccount
+    if ([string]::IsNullOrWhiteSpace($owner)) {
+      continue
+    }
+    try {
+      $ownerSid = Resolve-ExactAccountSid -Account $owner
+    } catch {
+      continue
+    }
+    if ($ownerSid -ceq $Sid) {
+      $matches++
+    }
+  }
+  return $matches
+}
+
+function Assert-NoExactSidPersistence {
+  param([Parameter(Mandatory)][string]$Sid)
+
+  $processes =
+    [ScheduledActionIsolationProbe]::CountProcessesByPrimaryTokenSid($Sid)
+  $tasks = Get-ExactSidScheduledTaskCount -Sid $Sid
+  $bitsJobs = Get-ExactSidBitsJobCount -Sid $Sid
+  if ($processes -ne 0 -or $tasks -ne 0 -or $bitsJobs -ne 0) {
+    throw 'Terminal failure left an exact-SID process, task, or BITS job.'
+  }
+}
+
 $trustedPwsh = (Get-Process -Id $PID).Path
 $root = Join-Path ([IO.Path]::GetTempPath()) "opencoven-job-runtime-$PID-$([Guid]::NewGuid().ToString('N'))"
 $isolatedUser = [OpenCoven.WindowsIsolatedUser]::Create($root)
@@ -1670,9 +2084,16 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     $serviceEscapeJobName =
       "Local\OpenCoven.Chat.SupervisorTest.$serviceEscapeNonce"
     $taskFolderRoot =
-      "OpenCoven-PrincipalOnly-$([Guid]::NewGuid().ToString('N'))"
+      "OpenCoven-SchedulerEscape-$([Guid]::NewGuid().ToString('N'))"
     $taskFolderPath = "\$taskFolderRoot\Hidden\Nested"
     $lateTaskFolderPath = "\$taskFolderRoot\Hidden\Late"
+    $principalOnlyNonce = [Guid]::NewGuid().ToString('N')
+    $principalOnlyFolderRoot = "OpenCoven-PrincipalOnly-$principalOnlyNonce"
+    $principalOnlyFolderPath =
+      "\$principalOnlyFolderRoot\Neutral\Blocking"
+    $principalOnlyTaskName = 'IdentityMatchOnly'
+    $principalOnlyTaskPath =
+      "$principalOnlyFolderPath\$principalOnlyTaskName"
     $serviceEscapeName = 'PrimaryEscape'
     $lateTaskName = 'LateEscape'
     $bitsName =
@@ -1736,6 +2157,14 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     $serviceEscapeTrustedDigest = [Convert]::ToHexString(
       [Security.Cryptography.SHA256]::HashData($serviceEscapeTrustedBytes)
     ).ToLowerInvariant()
+    $serviceEscapeProbeSource = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'scheduled-action-isolation-probe.cs'
+    [IO.File]::WriteAllText(
+      $serviceEscapeProbeSource,
+      $scheduledActionIsolationProbeSource,
+      [Text.UTF8Encoding]::new($false)
+    )
 
     $taskActionScript = Join-Path `
       $serviceEscapeContext.User.RootPath `
@@ -1853,6 +2282,96 @@ function Register-IsolatedInteractiveTask {
     )
     $taskHelperTemplate = [IO.File]::ReadAllText($taskHelperScript)
 
+    $principalOnlyTaskHelperScript = Join-Path `
+      $serviceEscapeContext.User.RootPath `
+      'register-principal-only-task.ps1'
+    [IO.File]::WriteAllText(
+      $principalOnlyTaskHelperScript,
+      @'
+function Register-PrincipalOnlyInteractiveTask {
+  param(
+    [Parameter(Mandatory)][string]$UserSid,
+    [Parameter(Mandatory)][string]$TaskNonce,
+    [Parameter(Mandatory)][string[]]$ForbiddenFragments
+  )
+
+  $folderPath = "\OpenCoven-PrincipalOnly-$TaskNonce\Neutral\Blocking"
+  $taskName = 'IdentityMatchOnly'
+  $description = 'Neutral interactive-token blocking regression'
+  $source = 'Neutral scheduler runtime regression'
+  $actionPath = Join-Path $env:SystemRoot 'System32\ping.exe'
+  $actionArguments = '-t 127.0.0.1'
+  $workingDirectory = Join-Path $env:SystemRoot 'System32'
+  $metadataValues = @(
+    $folderPath,
+    "$folderPath\$taskName",
+    $taskName,
+    $description,
+    $source,
+    $actionPath,
+    $actionArguments,
+    $workingDirectory
+  )
+  foreach ($fragment in $ForbiddenFragments) {
+    if ([string]::IsNullOrWhiteSpace($fragment)) {
+      throw 'Principal-only task forbidden metadata fragment was empty.'
+    }
+    foreach ($value in $metadataValues) {
+      if ($value.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw 'Principal-only task metadata contained an attributable identity.'
+      }
+    }
+  }
+
+  $service = New-Object -ComObject 'Schedule.Service'
+  $service.Connect()
+  $folder = $service.GetFolder('\')
+  $currentPath = ''
+  foreach ($segment in $folderPath.Trim('\').Split('\')) {
+    $currentPath = "$currentPath\$segment"
+    try {
+      $folder = $service.GetFolder($currentPath)
+    } catch {
+      $folder = $folder.CreateFolder($segment, $null)
+    }
+  }
+  $definition = $service.NewTask(0)
+  $definition.RegistrationInfo.URI = "$folderPath\$taskName"
+  $definition.RegistrationInfo.Description = $description
+  $definition.RegistrationInfo.Source = $source
+  $definition.Principal.UserId = $UserSid
+  $definition.Principal.LogonType = 3
+  $definition.Principal.RunLevel = 0
+  $definition.Settings.Enabled = $true
+  $definition.Settings.Hidden = $true
+  $definition.Settings.StartWhenAvailable = $true
+  $definition.Settings.ExecutionTimeLimit = 'PT2M'
+  $action = $definition.Actions.Create(0)
+  $action.Path = $actionPath
+  $action.Arguments = '-t 127.0.0.1'
+  $action.WorkingDirectory = $workingDirectory
+  $registeredTask = $folder.RegisterTaskDefinition(
+    $taskName,
+    $definition,
+    6,
+    $null,
+    $null,
+    3,
+    $null
+  )
+  $runningTask = $registeredTask.Run($null)
+  return [pscustomobject]@{
+    TaskPath = "$folderPath\$taskName"
+    RegisteredTask = $registeredTask
+    RunningTask = $runningTask
+  }
+}
+'@,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $principalOnlyTaskHelperTemplate =
+      [IO.File]::ReadAllText($principalOnlyTaskHelperScript)
+
     $lateRegistrarScript = Join-Path `
       $serviceEscapeContext.User.RootPath `
       'late-task-registrar.ps1'
@@ -1863,6 +2382,9 @@ param([Parameter(Mandatory)][string]`$UserName)
 `$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . '$($taskHelperScript.Replace("'", "''"))'
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText('$($serviceEscapeProbeSource.Replace("'", "''"))')
+) -Language CSharp
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -1941,18 +2463,50 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
   UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
 }
 `$lateTask = Register-IsolatedInteractiveTask @taskParameters
-[IO.File]::WriteAllText(
-  '$($lateRegistrationMarker.Replace("'", "''"))',
-  'registered-after-disable',
-  [Text.UTF8Encoding]::new(`$false)
-)
 `$lateStartDeadline = [DateTime]::UtcNow.AddSeconds(10)
-while (-not [IO.File]::Exists('$($lateActionMarker.Replace("'", "''"))')) {
+`$lateEnginePid = 0
+`$lateRunningInstanceObserved = `$false
+while (
+  -not [IO.File]::Exists('$($lateActionMarker.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($lateActionPid.Replace("'", "''"))') -or
+  -not [IO.File]::Exists('$($lateActionSid.Replace("'", "''"))') -or
+  -not `$lateRunningInstanceObserved -or
+  `$lateEnginePid -eq 0
+) {
+  `$lateRunningInstanceObserved =
+    `$lateTask.RegisteredTask.GetInstances(0).Count -gt 0
+  try {
+    `$lateEnginePid = [uint32]`$lateTask.RunningTask.EnginePID
+  } catch {
+    `$lateEnginePid = 0
+  }
   if ([DateTime]::UtcNow -ge `$lateStartDeadline) {
-    throw 'Late task action did not start.'
+    throw 'Late task action did not expose a live running instance.'
   }
   Start-Sleep -Milliseconds 10
 }
+`$lateProcessPid = [uint32][IO.File]::ReadAllText(
+  '$($lateActionPid.Replace("'", "''"))'
+)
+`$expectedLateSid =
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Post-disable scheduled action EnginePID',
+  '$serviceEscapeJobName',
+  `$lateEnginePid,
+  `$expectedLateSid
+)
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Post-disable scheduled action process PID',
+  '$serviceEscapeJobName',
+  `$lateProcessPid,
+  `$expectedLateSid
+)
+[IO.File]::WriteAllText(
+  '$($lateRegistrationMarker.Replace("'", "''"))',
+  'registered-after-disable-and-proved-outside-job',
+  [Text.UTF8Encoding]::new(`$false)
+)
 Start-Sleep -Seconds 300
 "@,
       [Text.UTF8Encoding]::new($false)
@@ -2108,12 +2662,53 @@ public static class UnsupervisedLogonProcess
 `$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . '$($taskHelperScript.Replace("'", "''"))'
+. '$($principalOnlyTaskHelperScript.Replace("'", "''"))'
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText('$($serviceEscapeProbeSource.Replace("'", "''"))')
+) -Language CSharp
 [IO.Directory]::CreateDirectory(
   '$([IO.Directory]::GetParent($serviceEscapeRecord).FullName.Replace("'", "''"))'
 ) | Out-Null
 [IO.File]::WriteAllBytes(
   '$($serviceEscapeRecord.Replace("'", "''"))',
   [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
+)
+`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask `
+  -UserSid '$($serviceEscapeContext.User.Sid)' `
+  -TaskNonce '$principalOnlyNonce' `
+  -ForbiddenFragments @(
+    '$serviceEscapeJobName',
+    '$serviceEscapeNonce',
+    '$($serviceEscapeContext.User.UserName)',
+    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+  )
+if (`$principalOnlyTask.TaskPath -cne '$principalOnlyTaskPath') {
+  throw 'Principal-only task path changed.'
+}
+`$principalOnlyDeadline = [DateTime]::UtcNow.AddSeconds(20)
+`$principalOnlyEnginePid = 0
+`$principalOnlyRunning = `$false
+while (-not `$principalOnlyRunning -or `$principalOnlyEnginePid -eq 0) {
+  `$principalOnlyRunning =
+    `$principalOnlyTask.RegisteredTask.GetInstances(0).Count -gt 0
+  try {
+    `$principalOnlyEnginePid =
+      [uint32]`$principalOnlyTask.RunningTask.EnginePID
+  } catch {
+    `$principalOnlyEnginePid = 0
+  }
+  if ([DateTime]::UtcNow -ge `$principalOnlyDeadline) {
+    throw 'Principal-only scheduled action did not expose a live EnginePID.'
+  }
+  Start-Sleep -Milliseconds 10
+}
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Principal-only scheduled action EnginePID',
+  '$serviceEscapeJobName',
+  `$principalOnlyEnginePid,
+  '$($serviceEscapeContext.User.Sid)'
 )
 `$taskParameters = @{
   FolderPath = '$taskFolderPath'
@@ -2130,14 +2725,21 @@ Set-StrictMode -Version Latest
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
 `$taskStartDeadline = [DateTime]::UtcNow.AddSeconds(20)
 `$runningInstanceObserved = `$false
+`$primaryEnginePid = 0
 while (
   -not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))') -or
   -not [IO.File]::Exists('$($serviceEscapeActionPid.Replace("'", "''"))') -or
   -not [IO.File]::Exists('$($serviceEscapeActionSid.Replace("'", "''"))') -or
-  -not `$runningInstanceObserved
+  -not `$runningInstanceObserved -or
+  `$primaryEnginePid -eq 0
 ) {
   `$runningInstanceObserved =
     `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  try {
+    `$primaryEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
+  } catch {
+    `$primaryEnginePid = 0
+  }
   if ([DateTime]::UtcNow -ge `$taskStartDeadline) {
     if (-not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))')) {
       throw 'Task Scheduler action did not write its started marker.'
@@ -2156,10 +2758,23 @@ while (
 if (`$actualTaskSid -cne `$expectedTaskSid) {
   throw 'Task Scheduler action process did not run as the exact isolated SID.'
 }
-`$taskActionProcess = Get-Process -Id (
-  [int][IO.File]::ReadAllText('$($serviceEscapeActionPid.Replace("'", "''"))')
-) -ErrorAction Stop
+`$taskActionPid = [uint32][IO.File]::ReadAllText(
+  '$($serviceEscapeActionPid.Replace("'", "''"))'
+)
+`$taskActionProcess = Get-Process -Id `$taskActionPid -ErrorAction Stop
 `$taskActionProcess.Dispose()
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Primary scheduled action EnginePID',
+  '$serviceEscapeJobName',
+  `$primaryEnginePid,
+  `$expectedTaskSid
+)
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Primary scheduled action process PID',
+  '$serviceEscapeJobName',
+  `$taskActionPid,
+  `$expectedTaskSid
+)
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
   Out-Null
 if (`$LASTEXITCODE -ne 0) {
@@ -2253,16 +2868,21 @@ exit 0
     Assert-ScheduledTaskAbsent `
       -TaskPath "$lateTaskFolderPath\$lateTaskName" `
       -Failure 'A task registered after account disablement survived repeated cleanup.'
+    Assert-ScheduledTaskAbsent `
+      -TaskPath $principalOnlyTaskPath `
+      -Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'
     $scheduler = New-Object -ComObject 'Schedule.Service'
     $scheduler.Connect()
-    $folderSurvived = $false
-    try {
-      $scheduler.GetFolder("\$taskFolderRoot") | Out-Null
-      $folderSurvived = $true
-    } catch {
-    }
-    if ($folderSurvived) {
-      throw 'Nested Task Scheduler escape folder survived broker cleanup.'
+    foreach ($folderRoot in @($taskFolderRoot, $principalOnlyFolderRoot)) {
+      $folderSurvived = $false
+      try {
+        $scheduler.GetFolder("\$folderRoot") | Out-Null
+        $folderSurvived = $true
+      } catch {
+      }
+      if ($folderSurvived) {
+        throw 'Nested Task Scheduler escape folder survived broker cleanup.'
+      }
     }
     $bitsListing = & (Join-Path $env:SystemRoot 'System32\bitsadmin.exe') `
       /list `
@@ -2294,7 +2914,8 @@ exit 0
     }
     foreach ($taskPath in @(
       "$taskFolderPath\$serviceEscapeName",
-      "$lateTaskFolderPath\$lateTaskName"
+      "$lateTaskFolderPath\$lateTaskName",
+      $principalOnlyTaskPath
     )) {
       & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
         /End `
@@ -2387,6 +3008,14 @@ exit 0
     $failureProducer = Join-Path `
       $failureEscapeContext.User.RootPath `
       'nonzero-producer.ps1'
+    $failureEscapeProbeSource = Join-Path `
+      $failureEscapeContext.User.RootPath `
+      'scheduled-action-isolation-probe.cs'
+    [IO.File]::WriteAllText(
+      $failureEscapeProbeSource,
+      $scheduledActionIsolationProbeSource,
+      [Text.UTF8Encoding]::new($false)
+    )
     [IO.File]::WriteAllText(
       $failureActionScript,
       $taskActionTemplate,
@@ -2403,6 +3032,9 @@ exit 0
 `$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . '$($failureTaskHelper.Replace("'", "''"))'
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText('$($failureEscapeProbeSource.Replace("'", "''"))')
+) -Language CSharp
 [IO.Directory]::CreateDirectory(
   '$([IO.Directory]::GetParent($failureEscapeRecord).FullName.Replace("'", "''"))'
 ) | Out-Null
@@ -2425,13 +3057,20 @@ Set-StrictMode -Version Latest
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
 `$deadline = [DateTime]::UtcNow.AddSeconds(20)
 `$running = `$false
+`$nonzeroEnginePid = 0
 while (
   -not [IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))') -or
   -not [IO.File]::Exists('$($failureEscapePid.Replace("'", "''"))') -or
   -not [IO.File]::Exists('$($failureEscapeSid.Replace("'", "''"))') -or
-  -not `$running
+  -not `$running -or
+  `$nonzeroEnginePid -eq 0
 ) {
   `$running = `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  try {
+    `$nonzeroEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
+  } catch {
+    `$nonzeroEnginePid = 0
+  }
   if ([DateTime]::UtcNow -ge `$deadline) {
     throw 'Nonzero producer task never reached a running exact-SID action.'
   }
@@ -2445,6 +3084,21 @@ if (
 ) {
   throw 'Nonzero producer task action SID changed.'
 }
+`$nonzeroProcessPid = [uint32][IO.File]::ReadAllText(
+  '$($failureEscapePid.Replace("'", "''"))'
+)
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Nonzero producer scheduled action EnginePID',
+  '$failureEscapeJobName',
+  `$nonzeroEnginePid,
+  `$expectedSid
+)
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Nonzero producer scheduled action process PID',
+  '$failureEscapeJobName',
+  `$nonzeroProcessPid,
+  `$expectedSid
+)
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
   /create `
   '$failureEscapeBitsName' *>&1 | Out-Null
@@ -2563,6 +3217,396 @@ exit 23
   if ([IO.Directory]::Exists($failureEscapeRootPath)) {
     throw 'Failure-path ephemeral bootstrap root survived cleanup.'
   }
+
+  function Start-TerminalFailurePersistence {
+    param(
+      [Parameter(Mandatory)]$Context,
+      [Parameter(Mandatory)][string]$JobName,
+      [Parameter(Mandatory)][string]$Label
+    )
+
+    $taskNonce = [Guid]::NewGuid().ToString('N')
+    $taskPath =
+      "\OpenCoven-PrincipalOnly-$taskNonce\Neutral\Blocking\IdentityMatchOnly"
+    $bitsName =
+      "OpenCoven-TerminalFailure-$Label-$([Guid]::NewGuid().ToString('N'))"
+    $helperPath = Join-Path `
+      $Context.User.RootPath `
+      'register-principal-only-task.ps1'
+    $probePath = Join-Path `
+      $Context.User.RootPath `
+      'scheduled-action-isolation-probe.cs'
+    $setupPath = Join-Path `
+      $Context.User.RootPath `
+      'stage-terminal-persistence.ps1'
+    $readyPath = Join-Path `
+      $Context.User.TempPath `
+      'terminal-persistence-ready.txt'
+    [IO.File]::WriteAllText(
+      $helperPath,
+      $principalOnlyTaskHelperTemplate,
+      [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+      $probePath,
+      $scheduledActionIsolationProbeSource,
+      [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+      $setupPath,
+      @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. '$($helperPath.Replace("'", "''"))'
+Add-Type -TypeDefinition (
+  [IO.File]::ReadAllText('$($probePath.Replace("'", "''"))')
+) -Language CSharp
+`$task = Register-PrincipalOnlyInteractiveTask `
+  -UserSid '$($Context.User.Sid)' `
+  -TaskNonce '$taskNonce' `
+  -ForbiddenFragments @(
+    '$JobName',
+    '$($Context.User.UserName)',
+    '$([Environment]::MachineName)\$($Context.User.UserName)',
+    '$($Context.User.RootPath.Replace("'", "''"))',
+    '$($Context.User.WorkspacePath.Replace("'", "''"))'
+  )
+if (`$task.TaskPath -cne '$taskPath') {
+  throw 'Terminal failure persistence task path changed.'
+}
+`$deadline = [DateTime]::UtcNow.AddSeconds(20)
+`$enginePid = 0
+`$running = `$false
+while (-not `$running -or `$enginePid -eq 0) {
+  `$running = `$task.RegisteredTask.GetInstances(0).Count -gt 0
+  try {
+    `$enginePid = [uint32]`$task.RunningTask.EnginePID
+  } catch {
+    `$enginePid = 0
+  }
+  if ([DateTime]::UtcNow -ge `$deadline) {
+    throw 'Terminal failure persistence task did not expose a live EnginePID.'
+  }
+  Start-Sleep -Milliseconds 10
+}
+[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  'Terminal failure principal-only scheduled action EnginePID',
+  '$JobName',
+  `$enginePid,
+  '$($Context.User.Sid)'
+)
+& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
+  /create `
+  '$bitsName' *>&1 | Out-Null
+if (`$LASTEXITCODE -ne 0) {
+  throw 'Terminal failure BITS job could not be created.'
+}
+[IO.File]::WriteAllText(
+  '$($readyPath.Replace("'", "''"))',
+  'exact-sid-task-process-and-bits-ready',
+  [Text.UTF8Encoding]::new(`$false)
+)
+"@,
+      [Text.UTF8Encoding]::new($false)
+    )
+
+    $password = [string]$passwordProperty.GetValue($Context.User)
+    $setupPid = [int][UnsupervisedLogonProcess]::Start(
+      $Context.User.UserName,
+      [Environment]::MachineName,
+      $password,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$setupPath`"",
+      $Context.User.RootPath
+    )
+    $readyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not [IO.File]::Exists($readyPath)) {
+      try {
+        $setupProcess = [Diagnostics.Process]::GetProcessById($setupPid)
+        try {
+          if ($setupProcess.HasExited) {
+            throw 'Terminal failure persistence setup exited before readiness.'
+          }
+        } finally {
+          $setupProcess.Dispose()
+        }
+      } catch [ArgumentException] {
+        throw 'Terminal failure persistence setup exited before readiness.'
+      }
+      if ([DateTime]::UtcNow -ge $readyDeadline) {
+        throw 'Terminal failure persistence setup did not become ready.'
+      }
+      Start-Sleep -Milliseconds 20
+    }
+    try {
+      $setupProcess = [Diagnostics.Process]::GetProcessById($setupPid)
+      try {
+        if (-not $setupProcess.WaitForExit(10000)) {
+          throw 'Terminal failure persistence setup did not exit.'
+        }
+        if ($setupProcess.ExitCode -ne 0) {
+          throw 'Terminal failure persistence setup failed.'
+        }
+      } finally {
+        $setupProcess.Dispose()
+      }
+    } catch [ArgumentException] {
+    }
+    if (
+      (Get-ExactSidScheduledTaskCount -Sid $Context.User.Sid) -eq 0 -or
+      (Get-ExactSidBitsJobCount -Sid $Context.User.Sid) -eq 0 -or
+      [ScheduledActionIsolationProbe]::CountProcessesByPrimaryTokenSid(
+        $Context.User.Sid
+      ) -eq 0
+    ) {
+      throw 'Terminal failure exact-SID persistence was not staged.'
+    }
+    return [pscustomobject]@{
+      TaskPath = $taskPath
+      BitsName = $bitsName
+    }
+  }
+
+  function Get-TerminalQuarantineState {
+    param(
+      [Parameter(Mandatory)]$Job,
+      [Parameter(Mandatory)]$Context
+    )
+
+    return @(
+      [string]$Job.IsQuarantineComplete,
+      [string]$Context.User.IsDisabled,
+      [string](
+        [ScheduledActionIsolationProbe]::CountProcessesByPrimaryTokenSid(
+          $Context.User.Sid
+        )
+      ),
+      [string](Get-ExactSidScheduledTaskCount -Sid $Context.User.Sid),
+      [string](Get-ExactSidBitsJobCount -Sid $Context.User.Sid)
+    ) -join '|'
+  }
+
+  function Assert-TerminalFailureQuarantine {
+    param(
+      [Parameter(Mandatory)][string]$Label,
+      [Parameter(Mandatory)][ValidateSet(
+        'stdout-overflow',
+        'stderr-overflow',
+        'directory-quota',
+        'launch-exception'
+      )][string]$Mode
+    )
+
+    $Context = New-IsolatedTestContext -Label "terminal-$Label"
+    $Job = $null
+    $userName = $Context.User.UserName
+    $profilePath = $Context.User.OperatingSystemProfilePath
+    $rootPath = $Context.User.RootPath
+    try {
+      $jobName =
+        "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
+      $Job = [OpenCoven.WindowsJobSupervisor]::Create(
+        $jobName,
+        $Context.User
+      )
+      $persistence = Start-TerminalFailurePersistence `
+        -Context $Context `
+        -JobName $jobName `
+        -Label $Label
+      $recordPath = Join-Path `
+        $Context.User.WorkspacePath `
+        '.artifacts\record.json'
+      [IO.Directory]::CreateDirectory(
+        [IO.Directory]::GetParent($recordPath).FullName
+      ) | Out-Null
+      [IO.File]::WriteAllBytes($recordPath, $expectedHandoffBytes)
+      $producerPath = Join-Path $Context.User.RootPath 'terminal-failure.ps1'
+      $quotaPath = Join-Path $Context.User.WorkspacePath 'quota.bin'
+      if ($Mode -eq 'stdout-overflow') {
+        $producerText =
+          "[Console]::Out.Write(('O' * 8192)); Start-Sleep -Seconds 300"
+      } elseif ($Mode -eq 'stderr-overflow') {
+        $producerText =
+          "[Console]::Error.Write(('E' * 8192)); Start-Sleep -Seconds 300"
+      } elseif ($Mode -eq 'directory-quota') {
+        $producerText = @"
+[IO.File]::WriteAllBytes(
+  '$($quotaPath.Replace("'", "''"))',
+  [byte[]]::new(65536)
+)
+Start-Sleep -Seconds 300
+"@
+      } else {
+        $producerText = "throw 'unreachable launch exception producer'"
+      }
+      [IO.File]::WriteAllText(
+        $producerPath,
+        $producerText,
+        [Text.UTF8Encoding]::new($false)
+      )
+
+      $Result = $null
+      $launchExceptionObserved = $false
+      if ($Mode -eq 'launch-exception') {
+        $missingApplication = Join-Path `
+          $env:SystemRoot `
+          "System32\OpenCovenMissing-$([Guid]::NewGuid().ToString('N')).exe"
+        try {
+          $Job.RunProducerAsUserAndQuarantine(
+            $Context.User,
+            $missingApplication,
+            '',
+            $Context.User.RootPath,
+            $Context.Environment,
+            [TimeSpan]::FromSeconds(30),
+            256,
+            256
+          ) | Out-Null
+        } catch {
+          $launchExceptionObserved = $_.Exception.ToString().Contains(
+            'Terminal producer attempt failed.'
+          )
+        }
+        if (-not $launchExceptionObserved) {
+          throw 'Terminal producer launch exception was not observed.'
+        }
+      } else {
+        $directoryQuotas = if ($Mode -eq 'directory-quota') {
+          @(
+            [OpenCoven.WindowsDirectoryQuota]::new(
+              'terminal failure workspace',
+              $Context.User.WorkspacePath,
+              1KB
+            )
+          )
+        } else {
+          @()
+        }
+        $Result = $Job.RunProducerAsUserAndQuarantine(
+          $Context.User,
+          $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$producerPath`"",
+          $Context.User.RootPath,
+          $Context.Environment,
+          [TimeSpan]::FromSeconds(30),
+          256,
+          256,
+          $directoryQuotas
+        )
+        if (
+          $Mode -eq 'stdout-overflow' -and
+          (-not $Result.StdoutOverflow -or $Result.ExitCode -eq 0)
+        ) {
+          throw 'Terminal stdout overflow did not fail closed.'
+        }
+        if (
+          $Mode -eq 'stderr-overflow' -and
+          (-not $Result.StderrOverflow -or $Result.ExitCode -eq 0)
+        ) {
+          throw 'Terminal stderr overflow did not fail closed.'
+        }
+        if (
+          $Mode -eq 'directory-quota' -and
+          (-not $Result.ResourceQuotaExceeded -or $Result.ExitCode -eq 0)
+        ) {
+          throw 'Terminal directory quota failure did not fail closed.'
+        }
+      }
+
+      if (
+        -not $Context.User.IsDisabled -or
+        (Get-LocalUser -Name $Context.User.UserName).Enabled
+      ) {
+        throw 'Terminal failure account was not disabled.'
+      }
+      if (-not $Job.IsQuarantineComplete) {
+        throw 'Terminal failure quarantine did not complete.'
+      }
+      Assert-NoExactSidPersistence -Sid $Context.User.Sid
+      Assert-ScheduledTaskAbsent `
+        -TaskPath $persistence.TaskPath `
+        -Failure 'Terminal failure exact-SID scheduled task'
+      $bitsListing = & (Join-Path $env:SystemRoot 'System32\bitsadmin.exe') `
+        /list `
+        /allusers `
+        /verbose 2>&1 | Out-String
+      if ($LASTEXITCODE -ne 0 -or $bitsListing.Contains($persistence.BitsName)) {
+        throw 'Terminal failure exact-SID BITS job survived quarantine.'
+      }
+
+      $beforeSecondQuarantine =
+        Get-TerminalQuarantineState -Job $Job -Context $Context
+      $Job.QuarantineIsolatedIdentity()
+      $afterSecondQuarantine =
+        Get-TerminalQuarantineState -Job $Job -Context $Context
+      if ($afterSecondQuarantine -cne $beforeSecondQuarantine) {
+        throw 'Second terminal quarantine invocation changed completed state.'
+      }
+
+      $captureRejected = $false
+      try {
+        $Job.CaptureIsolatedArtifact(
+          $Context.User,
+          $Context.User.WorkspacePath,
+          $recordPath,
+          1MB
+        ) | Out-Null
+      } catch {
+        $captureRejected = $_.Exception.ToString().Contains(
+          'successful terminal producer attempt'
+        )
+      }
+      if (-not $captureRejected) {
+        throw 'Terminal failure artifact capture was not rejected.'
+      }
+    } finally {
+      $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+      try {
+        Remove-IsolatedTestContext -Context $Context
+      } catch {
+        $cleanupErrors.Add($_.Exception)
+      }
+      if ($null -ne $Job) {
+        try {
+          $Job.Dispose()
+        } catch {
+          $cleanupErrors.Add($_.Exception)
+        }
+      }
+      if ($cleanupErrors.Count -ne 0) {
+        throw [AggregateException]::new(
+          "Terminal failure '$Label' cleanup failed.",
+          $cleanupErrors
+        )
+      }
+    }
+    if (
+      $null -ne (
+        Get-LocalUser -Name $userName -ErrorAction SilentlyContinue
+      )
+    ) {
+      throw 'Terminal failure ephemeral local user survived cleanup.'
+    }
+    if ([IO.Directory]::Exists($profilePath)) {
+      throw 'Terminal failure ephemeral Windows profile survived cleanup.'
+    }
+    if ([IO.Directory]::Exists($rootPath)) {
+      throw 'Terminal failure ephemeral bootstrap root survived cleanup.'
+    }
+  }
+
+  Assert-TerminalFailureQuarantine `
+    -Label 'stdout-overflow' `
+    -Mode 'stdout-overflow'
+  Assert-TerminalFailureQuarantine `
+    -Label 'stderr-overflow' `
+    -Mode 'stderr-overflow'
+  Assert-TerminalFailureQuarantine `
+    -Label 'directory-quota' `
+    -Mode 'directory-quota'
+  Assert-TerminalFailureQuarantine `
+    -Label 'launch-exception' `
+    -Mode 'launch-exception'
 
   $disableFailureContext = New-IsolatedTestContext -Label 'disable-failure'
   $disableFailureJob = $null

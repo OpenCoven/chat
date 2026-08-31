@@ -515,7 +515,8 @@ descendant-retained-handle, kill-on-close, quota, positive membership,
 wrong-Job membership, and native binding cases. The protected lane executes the
 same process/ACL/membership preflight directly from the exact inline production
 source before its first download. macOS development can parse and compile the
-source but cannot claim those native Windows runtime results. The native suite
+source but cannot claim those native Windows runtime results; native Windows
+runtime evidence is CI-only. The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
 handoff fails without reading or publishing the canary. Separate cases reject
@@ -526,15 +527,36 @@ The same job retains the frozen Rust supervisor artifact behavior tests.
 The suite also runs a deterministic scheduler case that creates a hidden
 interactive-token task inside a unique nested
 Task Scheduler folder, starts it explicitly through `IRegisteredTask.Run`, and
-waits for its started marker, running instance, and exact isolated SID process
-before terminal quarantine and capture. An already-live token also waits for
-account disablement, then registers and starts a second task; the test fails
-unless both actions actually ran and quarantine removes both registrations,
-running instances, action processes, the nested folder, and the BITS job before
-capture. A separate nonzero producer recreates a running scheduled action,
-out-of-Job exact-SID action process, and BITS job, then verifies terminal
-quarantine and complete account/profile/root cleanup without allowing capture.
-A timeout producer verifies the same terminal quarantine path.
+waits for its started marker and running instance, then uses native
+`OpenJobObjectW`, `OpenProcess`, and `IsProcessInJob` checks on both the
+reported process PID and `EnginePID` while each is alive. Both PIDs must be
+outside the supervised Job and have the isolated SID as their primary-token
+SID. The case also creates a genuinely principal-only
+`TASK_LOGON_INTERACTIVE_TOKEN` task: its folder, path, name, description,
+source, signed system `ping.exe` action, arguments, and working directory are
+runtime-rejected if they contain the run identity, user name, isolated root, or
+supervised workspace. It is observed only through its running instance and
+`EnginePID`; its registration can therefore be found only by exact
+`Principal.UserId`/SID matching. An already-live token waits for account
+disablement, then registers and starts a second task and performs the same
+alive, out-of-Job, primary-token SID proof. The test fails unless every action
+actually ran and quarantine removes all registrations, running instances,
+action processes, nested folders, and the BITS job before capture. A separate
+nonzero producer recreates a running scheduled action, proves its live
+`EnginePID` and process PID are out of Job with the exact SID, and creates a
+BITS job before verifying terminal quarantine and complete
+account/profile/root cleanup without allowing capture.
+
+Four additional native cases stage an exact-SID principal-only running task,
+process, and BITS job, then invoke
+`RunProducerAsUserAndQuarantine` through stdout overflow, stderr overflow,
+directory-quota failure, and a `CreateProcessWithLogonW` launch exception.
+Each requires verified account disablement, completed quarantine, external
+zero counts for exact-SID processes/tasks/BITS, rejected artifact capture, and
+successful identity/profile/root deletion. Each invokes
+`QuarantineIsolatedIdentity` again after completion and requires an unchanged
+successful state. A timeout producer verifies the same terminal quarantine
+path.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -813,8 +835,11 @@ Diagnostics are stable IDs only.
   reappearance produces no artifact.
 - Windows producer success, nonzero exit, timeout, quota/output failure, and
   exception all enter the same terminal quarantine path before identity
-  deletion. Cleanup failures are aggregated after every cleanup action has
-  been attempted.
+  deletion. Native stdout-overflow, stderr-overflow, directory-quota, and
+  launch-exception cases each prove account disablement, zero exact-SID
+  process/task/BITS state, capture rejection, repeat-quarantine idempotence,
+  and final identity cleanup. Cleanup failures are aggregated after every
+  cleanup action has been attempted.
 - Uploaded bytes that fail fresh SDK validation, differ from the validation
   digest when downloaded for attestation, or use a validator input unequal to
   the protected environment variable are never attested.
@@ -845,7 +870,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
 | `scripts/windows-job-supervisor.cs` | 249,862 | `b723d1752f926a39a39a79d56d95a7611b1ce9a2f6454ae88ae942e1ed2229db` |
-| `scripts/windows-job-supervisor.test.ps1` | 107,284 | `c8a7e261a015e792a1cc6bcbf6a0ca49b7ecf5b72a16478f65b317dcc4556171` |
+| `scripts/windows-job-supervisor.test.ps1` | 141,017 | `893033dfe6bcdf47f093b539dcacd1c951379731eb3cb09ef0d26d5d24a0e65e` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
 production Unix source files by the sizes and digests above before compiling or
