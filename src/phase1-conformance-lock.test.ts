@@ -143,7 +143,7 @@ const expectedEntries = {
     windowsSupervisor: {
       source: {
         repository: 'OpenCoven/chat',
-        revision: '6bee23b645c0edb1dcb0afd4f8cc18d2d0e6bec6',
+        revision: 'e5bcc1922e7433b33d6d4418cfc8bb076496e2dc',
         path: 'tools/phase1-process-supervisor/src/main.rs',
         blob: '6a95b4db7612ed0a502e91c4c21a7df5cbfe9021',
         sha256: 'fa4c4759c0b01ce7f9bbd662ed3073b0aeed42dc7da0001026703482a5b9708a',
@@ -467,6 +467,20 @@ describe('Phase 1 conformance lock', () => {
       version: 5,
       ...expectedEntries,
     });
+  });
+
+  test('keeps the Windows supervisor source reachable from the frozen harness checkout', () => {
+    expect(() =>
+      runGit(
+        [
+          'merge-base',
+          '--is-ancestor',
+          expectedEntries.tools.windowsSupervisor.source.revision,
+          expectedEntries.harness.revision,
+        ],
+        projectRoot,
+      ),
+    ).not.toThrow();
   });
 
   test('rejects an unexpected repository', () => {

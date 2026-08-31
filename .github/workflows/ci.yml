@@ -542,27 +542,6 @@ jobs:
           const supervisor = readPhase1ConformanceLock('../../phase1-conformance.lock.json').tools.windowsSupervisor;
           const artifact = supervisor.artifact;
           const source = supervisor.source;
-          execFileSync(
-            'git',
-            [
-              '-C',
-              '../..',
-              '-c',
-              'credential.helper=',
-              'fetch',
-              '--no-tags',
-              '--depth=1',
-              `https://github.com/${source.repository}.git`,
-              source.revision,
-            ],
-            {
-              env: {
-                PATH: process.env.PATH,
-                GIT_TERMINAL_PROMPT: "0",
-              },
-              stdio: ['ignore', 'ignore', 'pipe'],
-            },
-          );
           const blob = execFileSync('git', ['-C', '../..', 'rev-parse', `${source.revision}:${source.path}`], {
             encoding: 'utf8',
           }).trim();

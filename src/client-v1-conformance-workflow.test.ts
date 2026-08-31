@@ -7,7 +7,6 @@ import { describe, expect, test } from 'vitest';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
-const ciWorkflowPath = resolve(projectRoot, '.github', 'workflows', 'ci.yml');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
 const windowsSupervisorBuildPath = resolve(
   projectRoot,
@@ -149,14 +148,6 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(buildScript).toContain('source.manifestSha256');
     expect(buildScript).toContain('source.lockSha256');
     expect(buildScript).toContain('source.configSha256');
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: Verifies the literal JavaScript template.
-    expect(buildScript).toContain('`https://github.com/${source.repository}.git`');
-    expect(buildScript).toContain("'--depth=1'");
-    expect(buildScript).toContain('source.revision');
-    expect(buildScript).toContain("GIT_TERMINAL_PROMPT: '0'");
-    const ciWorkflow = readFileSync(ciWorkflowPath, 'utf8');
-    expect(ciWorkflow).toMatch(/'credential\.helper=',\s+'fetch',\s+'--no-tags',\s+'--depth=1'/u);
-    expect(ciWorkflow).toContain('GIT_TERMINAL_PROMPT: "0"');
     expect(buildScript).toContain('stats.isSymbolicLink()');
     expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
     expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');
