@@ -1675,6 +1675,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(terminalPersistenceSetup).toContain(
       '`$task = Register-PrincipalOnlyInteractiveTask @terminalTaskParameters',
     );
+    expect(
+      runtimeTest.match(
+        /& \(Join-Path `\$env:SystemRoot 'System32\\bitsadmin\.exe'\) ``\r?\n {2}\/create ``/g,
+      ),
+    ).toHaveLength(2);
     expect(terminalPersistenceSetup).toContain(
       'Assert-PrincipalOnlySchedulerRunAttemptResult -Probe `$task',
     );

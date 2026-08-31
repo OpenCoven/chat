@@ -3643,8 +3643,8 @@ if (
   EngineLabel = 'Nonzero producer scheduled action EnginePID'
 }
 Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters
-& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
-  /create `
+& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') ``
+  /create ``
   '$failureEscapeBitsName' *>&1 | Out-Null
 if (`$LASTEXITCODE -ne 0) {
   throw 'Nonzero producer BITS job could not be created.'
@@ -3902,8 +3902,8 @@ if (`$enginePid -ne 0) {
     '$($Context.User.Sid)'
   )
 }
-& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
-  /create `
+& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') ``
+  /create ``
   '$bitsName' *>&1 | Out-Null
 if (`$LASTEXITCODE -ne 0) {
   throw 'Terminal failure BITS job could not be created.'
