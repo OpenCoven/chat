@@ -1387,10 +1387,7 @@ if (-not `$operatorDenied) {
 `$wmiDenied = `$false
 `$createdFilter = `$null
 try {
-  `$createdFilter = New-CimInstance `
-    -Namespace 'root/subscription' `
-    -ClassName '__EventFilter' `
-    -Property @{
+  `$createdFilter = New-CimInstance -Namespace 'root/subscription' -ClassName '__EventFilter' -Property @{
       Name = `$filterName
       EventNamespace = 'root/cimv2'
       QueryLanguage = 'WQL'
