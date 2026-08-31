@@ -573,12 +573,14 @@ explicitly attempts `IRegisteredTask.Run`. A hosted ephemeral account does not
 necessarily have a Task Scheduler-recognized interactive session, so action
 execution is not treated as a prerequisite for the cleanup proof. If the action
 does start, any started, PID, or SID marker, or a live `EnginePID`, is treated
-as execution evidence. The test requires a bounded live proof using native
-`OpenProcess` and primary-token SID queries; the action must use the exact
-isolated SID and be gone after quarantine. Partial marker publication and a
-process that exits before this proof fail closed. The same requirement applies
-to the post-disable and nonzero scheduler attempts. The case also creates a
-genuinely principal-only
+as execution evidence. Because the protected Job grants query-only reopen
+access to the isolated SID, the action can perform a bounded live proof using
+`OpenJobObjectW`, `OpenProcess`, `IsProcessInJob`, and primary-token SID
+queries. It must be outside the supervised Job, use the exact isolated SID, and
+be gone after quarantine. Partial marker publication and a process that exits
+before this proof fail closed. The same requirement applies to the post-disable
+and nonzero scheduler attempts. The case also creates a genuinely
+principal-only
 `TASK_LOGON_INTERACTIVE_TOKEN` task: its folder, path, name, description,
 source, signed system `ping.exe` action, arguments, and working directory are
 runtime-rejected if they contain the run identity, user name, isolated root, or
@@ -596,18 +598,18 @@ Independently of scheduler session availability, the trusted test broker uses
 long-lived process with the isolated user's primary token outside the
 supervised Job. That process writes a readiness marker, is proven alive,
 outside the Job through `IsProcessInJob` against the supervisor's still-live
-authoritative handle, and bound to the exact isolated SID. Reopening the
-protected Job by name remains intentionally denied. The process waits for
-verified account disablement, then registers and attempts to start a second
-task. The SID-wide quarantine must terminate this deterministic
-service-equivalent escape and remove both task registrations, any action
-process that actually started, all owned nested folders, and the BITS job
-before capture without deleting shared Task Scheduler folders. A separate
-nonzero scenario stages another live outside-Job exact-SID process, registers
-and attempts a scheduler action, and creates a BITS job. Scheduler action
-execution remains conditional, while the process drain, terminal quarantine,
-complete account/profile/root cleanup, and artifact-capture rejection are
-mandatory.
+authoritative handle, and bound to the exact isolated SID. The protected named
+Job DACL intentionally grants reopen access only to the isolated SID, so the
+broker does not reopen it by name. The process waits for verified account
+disablement, then registers and attempts to start a second task. The SID-wide
+quarantine must terminate this deterministic service-equivalent escape and
+remove both task registrations, any action process that actually started, all
+owned nested folders, and the BITS job before capture without deleting shared
+Task Scheduler folders. A separate nonzero scenario stages another live
+outside-Job exact-SID process, registers and attempts a scheduler action, and
+creates a BITS job. Scheduler action execution remains conditional, while the
+process drain, terminal quarantine, complete account/profile/root cleanup, and
+artifact-capture rejection are mandatory.
 
 Four additional native cases stage an exact-SID principal-only task
 registration and run attempt, a deterministic out-of-Job exact-SID process,
@@ -985,7 +987,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 161,519 | `6d8715298776570a779a09d0c77afa64a07e9a943040b09d0c97c5d3e3ceb3b3` |
+| `scripts/windows-job-supervisor.test.ps1` | 162,156 | `5c41d4a241355f715884fffe69cb23c771dd10c744780a8118198b1e8cc35ee5` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and

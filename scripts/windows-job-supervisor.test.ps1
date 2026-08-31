@@ -556,6 +556,7 @@ using System.Security.Principal;
 
 public static class ScheduledActionIsolationProbe
 {
+    private const uint JOB_OBJECT_QUERY = 0x0004;
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const uint TOKEN_QUERY = 0x0008;
     private const uint STILL_ACTIVE = 259;
@@ -563,14 +564,14 @@ public static class ScheduledActionIsolationProbe
     private const int TokenUser = 1;
     private const int WTSTypeProcessInfoLevel1 = 1;
 
-    public static void AssertAliveOutsideJobHandleWithPrimaryTokenSid(
+    public static void AssertAliveOutsideJobWithPrimaryTokenSid(
         string label,
-        long jobHandleValue,
+        string jobName,
         uint processId,
         string expectedSid)
     {
         if (String.IsNullOrWhiteSpace(label) ||
-            jobHandleValue == 0 ||
+            String.IsNullOrWhiteSpace(jobName) ||
             processId == 0 ||
             String.IsNullOrWhiteSpace(expectedSid))
         {
@@ -578,7 +579,54 @@ public static class ScheduledActionIsolationProbe
                 "Scheduled action isolation probe input was invalid.");
         }
 
-        IntPtr job = new IntPtr(jobHandleValue);
+        IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, jobName);
+        if (job == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " could not open the supervised Job Object.");
+        }
+        try
+        {
+            AssertAliveOutsideJobWithPrimaryTokenSid(
+                label,
+                job,
+                processId,
+                expectedSid);
+        }
+        finally
+        {
+            CloseHandle(job);
+        }
+    }
+
+    public static void AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
+        string label,
+        long authoritativeJobHandle,
+        uint processId,
+        string expectedSid)
+    {
+        if (String.IsNullOrWhiteSpace(label) ||
+            authoritativeJobHandle == 0 ||
+            processId == 0 ||
+            String.IsNullOrWhiteSpace(expectedSid))
+        {
+            throw new ArgumentException(
+                "Authoritative Job isolation probe input was invalid.");
+        }
+        AssertAliveOutsideJobWithPrimaryTokenSid(
+            label,
+            new IntPtr(authoritativeJobHandle),
+            processId,
+            expectedSid);
+    }
+
+    private static void AssertAliveOutsideJobWithPrimaryTokenSid(
+        string label,
+        IntPtr job,
+        uint processId,
+        string expectedSid)
+    {
         IntPtr process = OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION,
             false,
@@ -604,49 +652,6 @@ public static class ScheduledActionIsolationProbe
                 throw new InvalidOperationException(
                     label + " was inside the supervised Job Object.");
             }
-            string actualSid = QueryPrimaryTokenSid(process, label);
-            if (!String.Equals(
-                    actualSid,
-                    expectedSid,
-                    StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    label + " primary token SID was not the isolated SID.");
-            }
-            RequireAlive(process, label);
-        }
-        finally
-        {
-            CloseHandle(process);
-        }
-    }
-
-    public static void AssertAliveWithPrimaryTokenSid(
-        string label,
-        uint processId,
-        string expectedSid)
-    {
-        if (String.IsNullOrWhiteSpace(label) ||
-            processId == 0 ||
-            String.IsNullOrWhiteSpace(expectedSid))
-        {
-            throw new ArgumentException(
-                "Scheduled action process probe input was invalid.");
-        }
-
-        IntPtr process = OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION,
-            false,
-            processId);
-        if (process == IntPtr.Zero)
-        {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                label + " could not open its process.");
-        }
-        try
-        {
-            RequireAlive(process, label);
             string actualSid = QueryPrimaryTokenSid(process, label);
             if (!String.Equals(
                     actualSid,
@@ -845,6 +850,12 @@ public static class ScheduledActionIsolationProbe
         internal long UserTime;
         internal long KernelTime;
     }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(
+        uint desiredAccess,
+        bool inherit,
+        string name);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(
@@ -2642,6 +2653,7 @@ function Assert-ScheduledActionRunIsolation {
     [Parameter(Mandatory)][string]$PidMarker,
     [Parameter(Mandatory)][string]$SidMarker,
     [Parameter(Mandatory)][string]$ExpectedSid,
+    [Parameter(Mandatory)][string]$JobName,
     [Parameter(Mandatory)][string]$ProcessLabel,
     [Parameter(Mandatory)][string]$EngineLabel
   )
@@ -2682,8 +2694,9 @@ function Assert-ScheduledActionRunIsolation {
   } while ([DateTime]::UtcNow -lt $deadline)
 
   if ($enginePid -ne 0) {
-    [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
       $EngineLabel,
+      $JobName,
       $enginePid,
       $ExpectedSid
     )
@@ -2718,8 +2731,9 @@ function Assert-ScheduledActionRunIsolation {
   ) {
     throw 'Task Scheduler action process identifier was invalid.'
   }
-  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
     $ProcessLabel,
+    $JobName,
     $actionPid,
     $ExpectedSid
   )
@@ -2952,6 +2966,7 @@ Assert-ScheduledActionRunIsolation `
   -PidMarker '$($lateActionPid.Replace("'", "''"))' `
   -SidMarker '$($lateActionSid.Replace("'", "''"))' `
   -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
+  -JobName '$serviceEscapeJobName' `
   -ProcessLabel 'Post-disable scheduled action process PID' `
   -EngineLabel 'Post-disable scheduled action EnginePID'
 `$registeredLateUserId =
@@ -3134,7 +3149,7 @@ public static class UnsupervisedLogonProcess
     ) {
       throw 'Deterministic service-equivalent process marker was invalid.'
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Deterministic service-equivalent exact-SID process',
       $serviceEscapeJob.AuthoritativeHandleValue,
       [uint32]$lateRegistrarPid,
@@ -3203,6 +3218,7 @@ Assert-ScheduledActionRunIsolation `
   -PidMarker '$($serviceEscapeActionPid.Replace("'", "''"))' `
   -SidMarker '$($serviceEscapeActionSid.Replace("'", "''"))' `
   -ExpectedSid '$($serviceEscapeContext.User.Sid)' `
+  -JobName '$serviceEscapeJobName' `
   -ProcessLabel 'Primary scheduled action process PID' `
   -EngineLabel 'Primary scheduled action EnginePID'
 `$forbiddenTaskFragments = @(
@@ -3618,6 +3634,7 @@ Assert-ScheduledActionRunIsolation `
   -PidMarker '$($failureEscapePid.Replace("'", "''"))' `
   -SidMarker '$($failureEscapeSid.Replace("'", "''"))' `
   -ExpectedSid '$($failureEscapeContext.User.Sid)' `
+  -JobName '$failureEscapeJobName' `
   -ProcessLabel 'Nonzero producer scheduled action process PID' `
   -EngineLabel 'Nonzero producer scheduled action EnginePID'
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
@@ -3664,7 +3681,7 @@ exit 23
       }
       Start-Sleep -Milliseconds 20
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Nonzero persistence process PID',
       $failureEscapeJob.AuthoritativeHandleValue,
       [uint32]$failureSleeperPid,
@@ -3787,6 +3804,7 @@ exit 23
   function Start-TerminalFailurePersistence {
     param(
       [Parameter(Mandatory)]$Context,
+      [Parameter(Mandatory)]$SupervisorJob,
       [Parameter(Mandatory)][string]$JobName,
       [Parameter(Mandatory)][string]$Label
     )
@@ -3869,8 +3887,9 @@ do {
   Start-Sleep -Milliseconds 20
 } while ([DateTime]::UtcNow -lt `$deadline)
 if (`$enginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
     'Terminal failure principal-only scheduled action EnginePID',
+    '$JobName',
     `$enginePid,
     '$($Context.User.Sid)'
   )
@@ -3925,9 +3944,9 @@ Start-Sleep -Seconds 300
     ) {
       throw 'Terminal failure persistence readiness marker was invalid.'
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideAuthoritativeJobWithPrimaryTokenSid(
       'Terminal failure deterministic exact-SID process',
-      $Job.AuthoritativeHandleValue,
+      $SupervisorJob.AuthoritativeHandleValue,
       [uint32]$setupPid,
       $Context.User.Sid
     )
@@ -3992,6 +4011,7 @@ Start-Sleep -Seconds 300
       )
       $persistence = Start-TerminalFailurePersistence `
         -Context $Context `
+        -SupervisorJob $Job `
         -JobName $jobName `
         -Label $Label
       $recordPath = Join-Path `
