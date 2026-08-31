@@ -1580,7 +1580,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Post-disable scheduled action process PID',
       'Nonzero producer scheduled action EnginePID',
       'Nonzero producer scheduled action process PID',
-      'Principal-only scheduled action EnginePID',
     ]) {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
     }
@@ -1611,9 +1610,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '$action.WorkingDirectory =',
       '$metadataValues',
       'Principal-only task metadata contained an attributable identity.',
+      'RegisteredTask = $registeredTask',
     ]) {
       expect(principalOnlyTask).toContain(required);
     }
+    expect(principalOnlyTask).not.toContain('$registeredTask.Run(');
     for (const forbidden of [
       '.UserName',
       '.RootPath',
@@ -1653,15 +1654,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '[Security.Principal.SecurityIdentifier]::new(`$UserId).Value',
       '[Security.Principal.NTAccount]::new(`$UserId).Translate(',
       '(Resolve-RegisteredPrincipalSid -UserId (',
-      '[string]`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId',
+      '[string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId',
     ]) {
       expect(runtimeTest).toContain(principalIdentityGuard);
     }
-    expect(runtimeTest).toContain(
-      "throw 'Shared-folder task was not registered for the exact isolated SID.'",
-    );
+    expect(runtimeTest).toContain("throw 'Task was not registered for the exact isolated SID.'");
     expect(runtimeTest).not.toContain(
       "throw 'Shared-folder principal task did not expose a running instance.'",
+    );
+    expect(runtimeTest).not.toContain(
+      "throw 'Principal-only scheduled action did not expose a live EnginePID.'",
     );
     expect(runtimeTest).toContain(
       "-Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'",

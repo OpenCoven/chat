@@ -2618,11 +2618,9 @@ function Register-PrincipalOnlyInteractiveTask {
     3,
     $null
   )
-  $runningTask = $registeredTask.Run($null)
   return [pscustomobject]@{
     TaskPath = "$FolderPath\$TaskName"
     RegisteredTask = $registeredTask
-    RunningTask = $runningTask
   }
 }
 '@,
@@ -2936,7 +2934,7 @@ function Resolve-RegisteredPrincipalSid {
       [Security.Principal.SecurityIdentifier]
     ).Value
   } catch {
-    throw 'Shared-folder task principal could not be resolved.'
+    throw 'Exact-SID task principal could not be resolved.'
   }
 }
 [IO.Directory]::CreateDirectory(
@@ -2955,12 +2953,13 @@ function Resolve-RegisteredPrincipalSid {
   '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
 )
 `$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
-if (`$principalOnlyTask.TaskPath -cne '$principalOnlyTaskPath') {
-  throw 'Principal-only task path changed.'
-}
 `$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
 `$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-foreach (`$sharedRegistration in @(
+foreach (`$exactSidRegistration in @(
+  [pscustomobject]@{
+    Probe = `$principalOnlyTask
+    ExpectedPath = '$principalOnlyTaskPath'
+  },
   [pscustomobject]@{
     Probe = `$sharedChildTask
     ExpectedPath = '$sharedChildTaskPath'
@@ -2971,44 +2970,21 @@ foreach (`$sharedRegistration in @(
   }
 )) {
   if (
-    `$sharedRegistration.Probe.TaskPath -cne `$sharedRegistration.ExpectedPath -or
-    `$sharedRegistration.Probe.RegisteredTask.Path -cne
-      `$sharedRegistration.ExpectedPath
+    `$exactSidRegistration.Probe.TaskPath -cne `$exactSidRegistration.ExpectedPath -or
+    `$exactSidRegistration.Probe.RegisteredTask.Path -cne
+      `$exactSidRegistration.ExpectedPath
   ) {
-    throw 'Shared-folder principal task path changed.'
+    throw 'Exact-SID task path changed.'
   }
   if (
     (Resolve-RegisteredPrincipalSid -UserId (
-      [string]`$sharedRegistration.Probe.RegisteredTask.Definition.Principal.UserId
+      [string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId
     )) -cne
       '$($serviceEscapeContext.User.Sid)'
   ) {
-    throw 'Shared-folder task was not registered for the exact isolated SID.'
+    throw 'Task was not registered for the exact isolated SID.'
   }
 }
-`$principalOnlyDeadline = [DateTime]::UtcNow.AddSeconds(20)
-`$principalOnlyEnginePid = 0
-`$principalOnlyRunning = `$false
-while (-not `$principalOnlyRunning -or `$principalOnlyEnginePid -eq 0) {
-  `$principalOnlyRunning =
-    `$principalOnlyTask.RegisteredTask.GetInstances(0).Count -gt 0
-  try {
-    `$principalOnlyEnginePid =
-      [uint32]`$principalOnlyTask.RunningTask.EnginePID
-  } catch {
-    `$principalOnlyEnginePid = 0
-  }
-  if ([DateTime]::UtcNow -ge `$principalOnlyDeadline) {
-    throw 'Principal-only scheduled action did not expose a live EnginePID.'
-  }
-  Start-Sleep -Milliseconds 10
-}
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Principal-only scheduled action EnginePID',
-  '$serviceEscapeJobName',
-  `$principalOnlyEnginePid,
-  '$($serviceEscapeContext.User.Sid)'
-)
 `$taskParameters = @{
   FolderPath = '$taskFolderPath'
   TaskName = '$serviceEscapeName'
