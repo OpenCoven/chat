@@ -132,7 +132,7 @@ const gitConfigurationOverrides = [
   `core.fileMode=${process.platform === 'win32' ? 'false' : 'true'}`,
 ];
 const defaultVerificationLimits = Object.freeze({
-  repositoryDeadlineMs: 15_000,
+  repositoryDeadlineMs: 30_000,
   trackedEntryLimit: 100_000,
   trackedPathByteLimit: 16 * 1024 * 1024,
 });
@@ -1558,6 +1558,7 @@ function createTestVerificationLimits(options) {
 }
 
 export const phase1ConformanceTestOnly = Object.freeze({
+  verificationLimits: defaultVerificationLimits,
   assertCleanPhase1Checkouts(checkoutRoots, options) {
     return assertCleanPhase1CheckoutsWithLimits(
       checkoutRoots,

@@ -618,6 +618,14 @@ describe('Phase 1 conformance lock', () => {
 });
 
 describe('Phase 1 checkout verification', () => {
+  test('budgets large frozen checkout verification without removing the deadline', () => {
+    expect(phase1ConformanceTestOnly.verificationLimits).toEqual({
+      repositoryDeadlineMs: 30_000,
+      trackedEntryLimit: 100_000,
+      trackedPathByteLimit: 16 * 1024 * 1024,
+    });
+  });
+
   gitTest('verifies the pinned Chat harness checkout with the hardened paths', () => {
     const fixture = createCheckoutFixture();
     const harnessRoot = resolve(createScratchRoot('harness-checkout'), 'chat');

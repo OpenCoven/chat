@@ -105,7 +105,9 @@ platform, including Windows; runtime digest checks never normalize line endings.
 
 The harness creates clean detached clones at exact revisions and rejects dirty,
 substituted, hidden-index, filtered, replacement-ref, submodule, oversized, or
-timed-out release checkouts.
+timed-out release checkouts. Each repository's complete verification command
+sequence shares a finite 30-second deadline, which accommodates the frozen
+Cave tree without permitting an unbounded Git child.
 
 ## Native Coven identity
 
@@ -887,12 +889,12 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 387,916 | `f5240a2e04b577ab2681912b20c608e4f00b8da501326b5b7f8831d03de62a5f` |
+| `.github/workflows/client-v1-conformance.yml` | 387,916 | `72f22e6a0adc3c13357526bbd2de5fbd625a1fb2afdda5a4fcc6b792c7e6dd6a` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 47,411 | `cfd8f160d21dc9eeae16237944914b3af60b5da2e4ee8fc432d084da438a42b0` |
+| `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
 | `scripts/phase1-conformance.mjs` | 184,598 | `cec4b1db382c98b6e7c3370c7a70d35dcaafc89aa1d934201e984b3cc9b9fd67` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |

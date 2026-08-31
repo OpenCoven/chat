@@ -127,6 +127,11 @@ export function assertPhase1CheckoutHeads(
   },
 ): { chat: string; sdk: string; cave: string; coven: string; harness?: string };
 export const phase1ConformanceTestOnly: {
+  verificationLimits: Readonly<{
+    repositoryDeadlineMs: number;
+    trackedEntryLimit: number;
+    trackedPathByteLimit: number;
+  }>;
   assertCleanPhase1Checkouts(
     options: {
       chatRoot: string;
