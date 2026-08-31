@@ -8,6 +8,16 @@ import { describe, expect, test } from 'vitest';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
+const windowsSupervisorBuildPath = resolve(
+  projectRoot,
+  'scripts',
+  'phase1-windows-supervisor-build.sh',
+);
+const windowsSupervisorInstallPath = resolve(
+  projectRoot,
+  'scripts',
+  'phase1-windows-supervisor-install.ps1',
+);
 const validatorRoot =
   process.env.OPENCOVEN_SDK_VALIDATOR_ROOT ??
   resolve(projectRoot, '..', 'build-conformance-contract');
@@ -16,6 +26,8 @@ const validatorAvailable = existsSync(
 );
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
+const githubWorkspaceExpression = '${' + '{ github.workspace }}';
+const evidenceRevisionExpression = '${' + '{ steps.phase1-revisions.outputs.evidence_revision }}';
 
 function sha256(bytes: string | Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -83,6 +95,65 @@ async function workflowFixture() {
   return { producer, toolchain, verifyProtectedWorkflow, workflow };
 }
 
+describe('client-v1 conformance workflow bootstrap', () => {
+  test('checks out every reviewed source root and resolves tools safely on every platform', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+
+    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(2);
+    expect(workflow).toContain('resolveExecutableInvocation');
+    expect(workflow).toContain('      - id: phase1-revisions');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk-evidence');
+    expect(workflow).toContain('          path: .phase1-counterparts/sdk-validator');
+    expect(workflow).toContain('          path: .phase1-counterparts/coven-cave');
+    expect(workflow).toContain('          path: .phase1-counterparts/coven');
+    expect(workflow).toContain(`          ref: ${evidenceRevisionExpression}`);
+    expect(workflow).toContain(`          ref: ${validatorInputExpression}`);
+    expect(workflow).toContain(`          OPENCOVEN_CHAT_ROOT: ${githubWorkspaceExpression}`);
+    expect(workflow).toContain(
+      `          OPENCOVEN_SDK_ROOT: ${githubWorkspaceExpression}/.phase1-counterparts/sdk`,
+    );
+    expect(workflow).toContain(
+      `          OPENCOVEN_SDK_EVIDENCE_ROOT: ${githubWorkspaceExpression}/.phase1-counterparts/sdk-evidence`,
+    );
+    expect(workflow).toContain(
+      `          OPENCOVEN_SDK_VALIDATOR_ROOT: ${githubWorkspaceExpression}/.phase1-counterparts/sdk-validator`,
+    );
+    expect(workflow).toContain(
+      `          OPENCOVEN_CAVE_ROOT: ${githubWorkspaceExpression}/.phase1-counterparts/coven-cave`,
+    );
+    expect(workflow).toContain(
+      `          OPENCOVEN_COVEN_ROOT: ${githubWorkspaceExpression}/.phase1-counterparts/coven`,
+    );
+    expect(workflow).not.toMatch(/^[ ]*[A-Za-z0-9_-]+:\s*[|>][+-]?\s*(?:#.*)?$/mu);
+  });
+
+  test('builds, transfers, and installs the exact frozen Windows supervisor', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const buildScript = readFileSync(windowsSupervisorBuildPath, 'utf8');
+    const installScript = readFileSync(windowsSupervisorInstallPath, 'utf8');
+
+    expect(workflow).toContain('  windows-supervisor:');
+    expect(workflow).toContain('    runs-on: macos-latest');
+    expect(workflow).toContain('    needs: windows-supervisor');
+    expect(workflow).toContain('        run: bash scripts/phase1-windows-supervisor-build.sh');
+    expect(workflow).toContain('          name: phase1-process-supervisor-win32-x64');
+    expect(workflow).toContain('      - name: Install frozen Windows supervisor');
+    expect(workflow).toContain(
+      '        run: pwsh -NoProfile -File scripts/phase1-windows-supervisor-install.ps1',
+    );
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: Verifies the literal shell expansion.
+    expect(buildScript).toContain('-H "Authorization: Bearer ${token}"');
+    expect(buildScript).not.toContain('Authorization: ******');
+    expect(buildScript).toContain('source.manifestSha256');
+    expect(buildScript).toContain('source.lockSha256');
+    expect(buildScript).toContain('source.configSha256');
+    expect(buildScript).toContain('stats.isSymbolicLink()');
+    expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
+    expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');
+  });
+});
+
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
   test('matches the exact frozen SDK workflow graph', async () => {
     const fixture = await workflowFixture();
@@ -92,6 +163,8 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain(
       `          OPENCOVEN_VALIDATOR_REVISION: ${validatorInputExpression}`,
     );
+    expect(fixture.workflow).toContain('          fetch-depth: 0');
+    expect(fixture.workflow).toContain('resolveExecutableInvocation');
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
