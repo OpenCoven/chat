@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "9dd89a8c64a15c39bee004f1bce4d5cc0fdbced0"
+    "revision": "4adcc612374f3a1c6a17354b1e1702667c612999"
   },
   "harnessAuthority": {
-    "revision": "9dd89a8c64a15c39bee004f1bce4d5cc0fdbced0",
-    "tree": "73378e0a5e69ee64cc48474c91e20bbe5d8b7b02",
+    "revision": "4adcc612374f3a1c6a17354b1e1702667c612999",
+    "tree": "c473f253578f7e0eace9f15f15f1cdffa4a97dad",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -61,8 +61,8 @@
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "8da11cbc6eae8788fa66deb2c5467cab172bc828",
-        "sha256": "cfd8f160d21dc9eeae16237944914b3af60b5da2e4ee8fc432d084da438a42b0"
+        "blob": "ae9e95c8c290cd4158a0b26ad757fcb815d3a70e",
+        "sha256": "e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "b9d5534468a6abdfe8b4f0f9dd926a5532412808",
-        "sha256": "f5240a2e04b577ab2681912b20c608e4f00b8da501326b5b7f8831d03de62a5f"
+        "blob": "95a55ac90c61a570c5f9d71a1d67ec9387f55177",
+        "sha256": "72f22e6a0adc3c13357526bbd2de5fbd625a1fb2afdda5a4fcc6b792c7e6dd6a"
       }
     ],
     "productionDeltas": [
