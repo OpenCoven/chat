@@ -3266,8 +3266,7 @@ foreach (`$exactSidRegistration in @(
     throw 'Task was not registered for the exact isolated SID.'
   }
 }
-& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
-  Out-Null
+`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
 if (`$LASTEXITCODE -ne 0) {
   throw 'BITS service-mediated test job could not be created.'
 }
@@ -3643,9 +3642,7 @@ if (
   EngineLabel = 'Nonzero producer scheduled action EnginePID'
 }
 Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters
-& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
-  /create `
-  '$failureEscapeBitsName' *>&1 | Out-Null
+`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$failureEscapeBitsName' 2>&1
 if (`$LASTEXITCODE -ne 0) {
   throw 'Nonzero producer BITS job could not be created.'
 }
@@ -3902,9 +3899,7 @@ if (`$enginePid -ne 0) {
     '$($Context.User.Sid)'
   )
 }
-& (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
-  /create `
-  '$bitsName' *>&1 | Out-Null
+`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
 if (`$LASTEXITCODE -ne 0) {
   throw 'Terminal failure BITS job could not be created.'
 }

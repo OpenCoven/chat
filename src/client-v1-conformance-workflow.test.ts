@@ -1689,6 +1689,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(runtimeTest).toContain(scheduledActionIsolationCall);
     }
     expect(runtimeTest).not.toContain('Assert-ScheduledActionRunIsolation `\n');
+    expect(
+      runtimeTest.match(/`\$null = & \(Join-Path `\$env:SystemRoot 'System32\\bitsadmin\.exe'\)/g),
+    ).toHaveLength(3);
+    expect(runtimeTest).not.toContain("'$bitsName' *>&1 |");
+    expect(runtimeTest).not.toContain("'$failureEscapeBitsName' *>&1 |");
     expect(runtimeTest).toContain(
       "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
     );
