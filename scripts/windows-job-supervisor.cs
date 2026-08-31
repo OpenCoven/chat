@@ -906,6 +906,7 @@ namespace OpenCoven
         private const int ERROR_ACCESS_DENIED = 5;
         private const int ERROR_FILE_NOT_FOUND = 2;
         private const int ERROR_PATH_NOT_FOUND = 3;
+        private const int ERROR_INVALID_PARAMETER = 87;
         private const int ERROR_NOT_FOUND = 1168;
         private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
@@ -935,6 +936,7 @@ namespace OpenCoven
         private readonly string runIdentityToken;
         private readonly WindowsIsolatedUser isolatedUser;
         private readonly object quarantineSync = new object();
+        private readonly HashSet<string> preProductionScheduledTaskFolders;
         private readonly HashSet<string> attributableScheduledTaskFolders =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private WindowsIsolatedUser sealedIsolatedUser;
@@ -948,8 +950,13 @@ namespace OpenCoven
         private WindowsJobSupervisor(
             IntPtr handle,
             WindowsIsolatedUser isolatedUser,
-            string identity)
+            string identity,
+            HashSet<string> existingScheduledTaskFolders)
         {
+            if (existingScheduledTaskFolders == null)
+            {
+                throw new ArgumentNullException("existingScheduledTaskFolders");
+            }
             jobHandle = handle;
             this.isolatedUser = isolatedUser;
             supervisedSid = isolatedUser.Sid;
@@ -962,6 +969,8 @@ namespace OpenCoven
             runIdentityToken = tokenSeparator >= 0
                 ? identity.Substring(tokenSeparator + 1)
                 : identity;
+            preProductionScheduledTaskFolders =
+                existingScheduledTaskFolders;
         }
 
         public long AuthoritativeHandleValue
@@ -1065,7 +1074,13 @@ namespace OpenCoven
                     {
                         Marshal.FreeHGlobal(buffer);
                     }
-                    return new WindowsJobSupervisor(handle, isolatedUser, name);
+                    HashSet<string> existingScheduledTaskFolders =
+                        SnapshotExistingScheduledTaskFolders();
+                    return new WindowsJobSupervisor(
+                        handle,
+                        isolatedUser,
+                        name,
+                        existingScheduledTaskFolders);
                 }
                 catch
                 {
@@ -2462,6 +2477,31 @@ namespace OpenCoven
             return service;
         }
 
+        private static HashSet<string>
+            SnapshotExistingScheduledTaskFolders()
+        {
+            object service = null;
+            try
+            {
+                service = CreateTaskService();
+                List<string> paths = new List<string>();
+                CollectTaskFolderPaths(service, "\\", paths);
+                return new HashSet<string>(
+                    paths,
+                    StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Pre-production Task Scheduler folder snapshot failed.",
+                    error);
+            }
+            finally
+            {
+                ReleaseComObject(service);
+            }
+        }
+
         private static void CollectTaskFolderPaths(
             object service,
             string folderPath,
@@ -2715,12 +2755,22 @@ namespace OpenCoven
             string current = folderPath;
             while (!String.Equals(current, "\\", StringComparison.Ordinal))
             {
-                attributableScheduledTaskFolders.Add(current);
+                if (IsRunCreatedScheduledTaskFolder(current))
+                {
+                    attributableScheduledTaskFolders.Add(current);
+                }
                 int separator = current.LastIndexOf('\\');
                 current = separator <= 0
                     ? "\\"
                     : current.Substring(0, separator);
             }
+        }
+
+        private bool IsRunCreatedScheduledTaskFolder(string path)
+        {
+            return !String.IsNullOrWhiteSpace(path) &&
+                !String.Equals(path, "\\", StringComparison.Ordinal) &&
+                !preProductionScheduledTaskFolders.Contains(path);
         }
 
         private void RememberRunIdentityScheduledTaskFolders()
@@ -2761,7 +2811,9 @@ namespace OpenCoven
                 int matches = 0;
                 foreach (string path in attributableScheduledTaskFolders)
                 {
-                    if (existing.Contains(path))
+                    if (existing.Contains(path) &&
+                        IsRunCreatedScheduledTaskFolder(path) &&
+                        ScheduledTaskFolderIsEmpty(service, path))
                     {
                         matches++;
                     }
@@ -2789,17 +2841,26 @@ namespace OpenCoven
                 List<string> paths = new List<string>();
                 foreach (string path in attributableScheduledTaskFolders)
                 {
-                    if (existing.Contains(path))
+                    if (existing.Contains(path) &&
+                        IsRunCreatedScheduledTaskFolder(path))
                     {
                         paths.Add(path);
                     }
                 }
                 paths.Sort(delegate(string left, string right)
                 {
-                    return right.Length.CompareTo(left.Length);
+                    int depth = ScheduledTaskFolderDepth(right).CompareTo(
+                        ScheduledTaskFolderDepth(left));
+                    return depth != 0
+                        ? depth
+                        : StringComparer.OrdinalIgnoreCase.Compare(right, left);
                 });
                 foreach (string path in paths)
                 {
+                    if (!ScheduledTaskFolderIsEmpty(service, path))
+                    {
+                        continue;
+                    }
                     int separator = path.LastIndexOf('\\');
                     string parentPath = separator == 0
                         ? "\\"
@@ -2829,6 +2890,50 @@ namespace OpenCoven
             finally
             {
                 ReleaseComObject(service);
+            }
+        }
+
+        private static int ScheduledTaskFolderDepth(string path)
+        {
+            int depth = 0;
+            foreach (char value in path)
+            {
+                if (value == '\\')
+                {
+                    depth++;
+                }
+            }
+            return depth;
+        }
+
+        private static bool ScheduledTaskFolderIsEmpty(
+            object service,
+            string path)
+        {
+            object folder = null;
+            object tasks = null;
+            object folders = null;
+            try
+            {
+                folder = InvokeComMethod(service, "GetFolder", path);
+                tasks = InvokeComMethod(
+                    folder,
+                    "GetTasks",
+                    TASK_ENUM_HIDDEN);
+                folders = InvokeComMethod(folder, "GetFolders", 0);
+                int taskCount = Convert.ToInt32(
+                    GetComProperty(tasks, "Count"),
+                    CultureInfo.InvariantCulture);
+                int folderCount = Convert.ToInt32(
+                    GetComProperty(folders, "Count"),
+                    CultureInfo.InvariantCulture);
+                return taskCount == 0 && folderCount == 0;
+            }
+            finally
+            {
+                ReleaseComObject(folders);
+                ReleaseComObject(tasks);
+                ReleaseComObject(folder);
             }
         }
 
@@ -3155,9 +3260,16 @@ namespace OpenCoven
                     processId);
                 if (process == IntPtr.Zero)
                 {
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Matching isolated-SID process could not be opened.");
+                    int openError = Marshal.GetLastWin32Error();
+                    if (RevalidateFailedProcessOpen(
+                            processId,
+                            supervisedSid,
+                            openError,
+                            new Func<Dictionary<uint, string>>(
+                                EnumerateProcessPrimaryTokenSids)))
+                    {
+                        continue;
+                    }
                 }
                 try
                 {
@@ -3202,6 +3314,45 @@ namespace OpenCoven
                 }
             }
             return matches.Count;
+        }
+
+        private static bool RevalidateFailedProcessOpen(
+            uint processId,
+            string expectedSid,
+            int openError,
+            Func<Dictionary<uint, string>> enumerateProcesses)
+        {
+            if (openError != ERROR_INVALID_PARAMETER &&
+                openError != ERROR_NOT_FOUND)
+            {
+                throw new Win32Exception(
+                    openError,
+                    "Matching isolated-SID process could not be opened.");
+            }
+            if (enumerateProcesses == null)
+            {
+                throw new ArgumentNullException("enumerateProcesses");
+            }
+
+            Dictionary<uint, string> currentProcesses =
+                enumerateProcesses();
+            if (currentProcesses == null)
+            {
+                throw new InvalidOperationException(
+                    "Failed process-open WTS revalidation was ambiguous.");
+            }
+            string currentSid;
+            if (!currentProcesses.TryGetValue(processId, out currentSid) ||
+                !String.Equals(
+                    currentSid,
+                    expectedSid,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+            throw new Win32Exception(
+                openError,
+                "Matching isolated-SID process still matched after failed open revalidation.");
         }
 
         private int CountProcessesByPrimaryTokenSid()

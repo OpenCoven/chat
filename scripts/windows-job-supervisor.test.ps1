@@ -79,6 +79,108 @@ if ($null -eq $quarantineSequence) {
   throw 'The fail-closed terminal quarantine sequence is missing.'
 }
 
+$revalidateFailedProcessOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'RevalidateFailedProcessOpen',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $revalidateFailedProcessOpen) {
+  throw 'The stale process-open revalidation hook is missing.'
+}
+$revalidationSteps = [Collections.Generic.List[string]]::new()
+$missingProcessSnapshot =
+  [Collections.Generic.Dictionary[uint32, string]]::new()
+$missingProcessAccepted = [bool]$revalidateFailedProcessOpen.Invoke(
+  $null,
+  [object[]]@(
+    [uint32]424242,
+    'S-1-5-21-1-2-3-1001',
+    87,
+    [Func[Collections.Generic.Dictionary[uint32, string]]]{
+      $revalidationSteps.Add('missing')
+      return $missingProcessSnapshot
+    }
+  )
+)
+if (
+  -not $missingProcessAccepted -or
+  [string]::Join(',', $revalidationSteps) -cne 'missing'
+) {
+  throw 'Matching isolated-SID process disappearance was not revalidated.'
+}
+
+$revalidationSteps.Clear()
+$reusedProcessSnapshot =
+  [Collections.Generic.Dictionary[uint32, string]]::new()
+$reusedProcessSnapshot.Add([uint32]424242, 'S-1-5-18')
+$reusedProcessAccepted = [bool]$revalidateFailedProcessOpen.Invoke(
+  $null,
+  [object[]]@(
+    [uint32]424242,
+    'S-1-5-21-1-2-3-1001',
+    1168,
+    [Func[Collections.Generic.Dictionary[uint32, string]]]{
+      $revalidationSteps.Add('reused')
+      return $reusedProcessSnapshot
+    }
+  )
+)
+if (
+  -not $reusedProcessAccepted -or
+  [string]::Join(',', $revalidationSteps) -cne 'reused'
+) {
+  throw 'Reused PID with a different SID was not accepted after revalidation.'
+}
+
+$revalidationSteps.Clear()
+$matchingProcessSnapshot =
+  [Collections.Generic.Dictionary[uint32, string]]::new()
+$matchingProcessSnapshot.Add([uint32]424242, 'S-1-5-21-1-2-3-1001')
+$matchingProcessAccepted = $false
+try {
+  $revalidateFailedProcessOpen.Invoke(
+    $null,
+    [object[]]@(
+      [uint32]424242,
+      'S-1-5-21-1-2-3-1001',
+      87,
+      [Func[Collections.Generic.Dictionary[uint32, string]]]{
+        $revalidationSteps.Add('matching')
+        return $matchingProcessSnapshot
+      }
+    )
+  )
+  $matchingProcessAccepted = $true
+} catch [Reflection.TargetInvocationException] {
+}
+if (
+  $matchingProcessAccepted -or
+  [string]::Join(',', $revalidationSteps) -cne 'matching'
+) {
+  throw 'Still-matching PID was accepted after failed OpenProcess revalidation.'
+}
+
+$revalidationSteps.Clear()
+$accessDeniedAccepted = $false
+try {
+  $revalidateFailedProcessOpen.Invoke(
+    $null,
+    [object[]]@(
+      [uint32]424242,
+      'S-1-5-21-1-2-3-1001',
+      5,
+      [Func[Collections.Generic.Dictionary[uint32, string]]]{
+        $revalidationSteps.Add('access-denied')
+        return $missingProcessSnapshot
+      }
+    )
+  )
+  $accessDeniedAccepted = $true
+} catch [Reflection.TargetInvocationException] {
+}
+if ($accessDeniedAccepted -or $revalidationSteps.Count -ne 0) {
+  throw 'Matching process access denial did not remain fail closed.'
+}
+
 function Invoke-QuarantineSequenceProbe {
   param(
     [Parameter(Mandatory)][Collections.Generic.List[string]]$Steps,
@@ -2094,6 +2196,19 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     $principalOnlyTaskName = 'IdentityMatchOnly'
     $principalOnlyTaskPath =
       "$principalOnlyFolderPath\$principalOnlyTaskName"
+    $preExistingSharedFolderRoot =
+      "OpenCoven-Shared-$([Guid]::NewGuid().ToString('N'))"
+    $preExistingSharedFolderPath = "\$preExistingSharedFolderRoot"
+    $preExistingTaskFolderPath =
+      "$preExistingSharedFolderPath\Existing"
+    $runCreatedSharedChildPath =
+      "$preExistingSharedFolderPath\CreatedDuringRun"
+    $sharedChildTaskName = 'NewChildIdentityMatch'
+    $preExistingFolderTaskName = 'ExistingFolderIdentityMatch'
+    $sharedChildTaskPath =
+      "$runCreatedSharedChildPath\$sharedChildTaskName"
+    $preExistingFolderTaskPath =
+      "$preExistingTaskFolderPath\$preExistingFolderTaskName"
     $serviceEscapeName = 'PrimaryEscape'
     $lateTaskName = 'LateEscape'
     $bitsName =
@@ -2291,21 +2406,27 @@ function Register-IsolatedInteractiveTask {
 function Register-PrincipalOnlyInteractiveTask {
   param(
     [Parameter(Mandatory)][string]$UserSid,
-    [Parameter(Mandatory)][string]$TaskNonce,
+    [string]$TaskNonce,
+    [string]$FolderPath,
+    [string]$TaskName = 'IdentityMatchOnly',
     [Parameter(Mandatory)][string[]]$ForbiddenFragments
   )
 
-  $folderPath = "\OpenCoven-PrincipalOnly-$TaskNonce\Neutral\Blocking"
-  $taskName = 'IdentityMatchOnly'
+  if ([string]::IsNullOrWhiteSpace($FolderPath)) {
+    if ([string]::IsNullOrWhiteSpace($TaskNonce)) {
+      throw 'Principal-only task folder identity is missing.'
+    }
+    $FolderPath = "\OpenCoven-PrincipalOnly-$TaskNonce\Neutral\Blocking"
+  }
   $description = 'Neutral interactive-token blocking regression'
   $source = 'Neutral scheduler runtime regression'
   $actionPath = Join-Path $env:SystemRoot 'System32\ping.exe'
   $actionArguments = '-t 127.0.0.1'
   $workingDirectory = Join-Path $env:SystemRoot 'System32'
   $metadataValues = @(
-    $folderPath,
-    "$folderPath\$taskName",
-    $taskName,
+    $FolderPath,
+    "$FolderPath\$TaskName",
+    $TaskName,
     $description,
     $source,
     $actionPath,
@@ -2327,7 +2448,7 @@ function Register-PrincipalOnlyInteractiveTask {
   $service.Connect()
   $folder = $service.GetFolder('\')
   $currentPath = ''
-  foreach ($segment in $folderPath.Trim('\').Split('\')) {
+  foreach ($segment in $FolderPath.Trim('\').Split('\')) {
     $currentPath = "$currentPath\$segment"
     try {
       $folder = $service.GetFolder($currentPath)
@@ -2336,7 +2457,7 @@ function Register-PrincipalOnlyInteractiveTask {
     }
   }
   $definition = $service.NewTask(0)
-  $definition.RegistrationInfo.URI = "$folderPath\$taskName"
+  $definition.RegistrationInfo.URI = "$FolderPath\$TaskName"
   $definition.RegistrationInfo.Description = $description
   $definition.RegistrationInfo.Source = $source
   $definition.Principal.UserId = $UserSid
@@ -2351,7 +2472,7 @@ function Register-PrincipalOnlyInteractiveTask {
   $action.Arguments = '-t 127.0.0.1'
   $action.WorkingDirectory = $workingDirectory
   $registeredTask = $folder.RegisterTaskDefinition(
-    $taskName,
+    $TaskName,
     $definition,
     6,
     $null,
@@ -2361,7 +2482,7 @@ function Register-PrincipalOnlyInteractiveTask {
   )
   $runningTask = $registeredTask.Run($null)
   return [pscustomobject]@{
-    TaskPath = "$folderPath\$taskName"
+    TaskPath = "$FolderPath\$TaskName"
     RegisteredTask = $registeredTask
     RunningTask = $runningTask
   }
@@ -2687,6 +2808,39 @@ Add-Type -TypeDefinition (
 if (`$principalOnlyTask.TaskPath -cne '$principalOnlyTaskPath') {
   throw 'Principal-only task path changed.'
 }
+`$sharedChildTask = Register-PrincipalOnlyInteractiveTask `
+  -UserSid '$($serviceEscapeContext.User.Sid)' `
+  -FolderPath '$runCreatedSharedChildPath' `
+  -TaskName '$sharedChildTaskName' `
+  -ForbiddenFragments @(
+    '$serviceEscapeJobName',
+    '$serviceEscapeNonce',
+    '$($serviceEscapeContext.User.UserName)',
+    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+  )
+`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask `
+  -UserSid '$($serviceEscapeContext.User.Sid)' `
+  -FolderPath '$preExistingTaskFolderPath' `
+  -TaskName '$preExistingFolderTaskName' `
+  -ForbiddenFragments @(
+    '$serviceEscapeJobName',
+    '$serviceEscapeNonce',
+    '$($serviceEscapeContext.User.UserName)',
+    '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+    '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+    '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+  )
+foreach (`$sharedTask in @(`$sharedChildTask, `$preExistingFolderTask)) {
+  `$sharedTaskDeadline = [DateTime]::UtcNow.AddSeconds(20)
+  while (`$sharedTask.RegisteredTask.GetInstances(0).Count -eq 0) {
+    if ([DateTime]::UtcNow -ge `$sharedTaskDeadline) {
+      throw 'Shared-folder principal task did not expose a running instance.'
+    }
+    Start-Sleep -Milliseconds 10
+  }
+}
 `$principalOnlyDeadline = [DateTime]::UtcNow.AddSeconds(20)
 `$principalOnlyEnginePid = 0
 `$principalOnlyRunning = `$false
@@ -2789,6 +2943,19 @@ exit 0
 "@,
       [Text.UTF8Encoding]::new($false)
     )
+    $preExistingScheduler = New-Object -ComObject 'Schedule.Service'
+    $preExistingScheduler.Connect()
+    $preExistingFolder = $preExistingScheduler.GetFolder('\')
+    $preExistingCurrentPath = ''
+    foreach ($segment in $preExistingTaskFolderPath.Trim('\').Split('\')) {
+      $preExistingCurrentPath = "$preExistingCurrentPath\$segment"
+      try {
+        $preExistingFolder =
+          $preExistingScheduler.GetFolder($preExistingCurrentPath)
+      } catch {
+        $preExistingFolder = $preExistingFolder.CreateFolder($segment, $null)
+      }
+    }
     $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
       $serviceEscapeJobName,
       $serviceEscapeContext.User
@@ -2871,6 +3038,12 @@ exit 0
     Assert-ScheduledTaskAbsent `
       -TaskPath $principalOnlyTaskPath `
       -Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'
+    Assert-ScheduledTaskAbsent `
+      -TaskPath $sharedChildTaskPath `
+      -Failure 'Task in a run-created shared child survived quarantine.'
+    Assert-ScheduledTaskAbsent `
+      -TaskPath $preExistingFolderTaskPath `
+      -Failure 'Matching task registration in a pre-existing folder survived quarantine.'
     $scheduler = New-Object -ComObject 'Schedule.Service'
     $scheduler.Connect()
     foreach ($folderRoot in @($taskFolderRoot, $principalOnlyFolderRoot)) {
@@ -2883,6 +3056,25 @@ exit 0
       if ($folderSurvived) {
         throw 'Nested Task Scheduler escape folder survived broker cleanup.'
       }
+    }
+    try {
+      $scheduler.GetFolder($preExistingSharedFolderPath) | Out-Null
+    } catch {
+      throw 'Pre-existing shared Task Scheduler parent was removed by quarantine.'
+    }
+    try {
+      $scheduler.GetFolder($preExistingTaskFolderPath) | Out-Null
+    } catch {
+      throw 'Pre-existing Task Scheduler folder was removed by quarantine.'
+    }
+    $runCreatedSharedChildSurvived = $false
+    try {
+      $scheduler.GetFolder($runCreatedSharedChildPath) | Out-Null
+      $runCreatedSharedChildSurvived = $true
+    } catch {
+    }
+    if ($runCreatedSharedChildSurvived) {
+      throw 'Run-created Task Scheduler child survived quarantine.'
     }
     $bitsListing = & (Join-Path $env:SystemRoot 'System32\bitsadmin.exe') `
       /list `
@@ -2915,7 +3107,9 @@ exit 0
     foreach ($taskPath in @(
       "$taskFolderPath\$serviceEscapeName",
       "$lateTaskFolderPath\$lateTaskName",
-      $principalOnlyTaskPath
+      $principalOnlyTaskPath,
+      $sharedChildTaskPath,
+      $preExistingFolderTaskPath
     )) {
       & (Join-Path $env:SystemRoot 'System32\schtasks.exe') `
         /End `
@@ -2924,6 +3118,31 @@ exit 0
         /Delete `
         /F `
         /TN $taskPath *>&1 | Out-Null
+    }
+    try {
+      $cleanupScheduler = New-Object -ComObject 'Schedule.Service'
+      $cleanupScheduler.Connect()
+      foreach ($folderPath in @(
+        $runCreatedSharedChildPath,
+        $preExistingTaskFolderPath,
+        $preExistingSharedFolderPath
+      )) {
+        $separator = $folderPath.LastIndexOf('\')
+        $parentPath = if ($separator -eq 0) {
+          '\'
+        } else {
+          $folderPath.Substring(0, $separator)
+        }
+        $folderName = $folderPath.Substring($separator + 1)
+        try {
+          $cleanupScheduler.GetFolder($parentPath).DeleteFolder(
+            $folderName,
+            0
+          )
+        } catch {
+        }
+      }
+    } catch {
     }
     try {
       Import-Module BitsTransfer -ErrorAction Stop

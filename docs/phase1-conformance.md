@@ -537,12 +537,18 @@ source, signed system `ping.exe` action, arguments, and working directory are
 runtime-rejected if they contain the run identity, user name, isolated root, or
 supervised workspace. It is observed only through its running instance and
 `EnginePID`; its registration can therefore be found only by exact
-`Principal.UserId`/SID matching. An already-live token waits for account
-disablement, then registers and starts a second task and performs the same
-alive, out-of-Job, primary-token SID proof. The test fails unless every action
-actually ran and quarantine removes all registrations, running instances,
-action processes, nested folders, and the BITS job before capture. A separate
-nonzero producer recreates a running scheduled action, proves its live
+`Principal.UserId`/SID matching. Before the supervisor is created, the broker
+also creates a unique shared parent and one empty child folder. Restricted
+production then registers exact-SID running tasks both directly in that
+pre-existing child and in a new sibling child. Quarantine must remove both
+registrations and the run-created child while preserving the complete
+pre-existing folder chain. An already-live token waits for account disablement,
+then registers and starts a second task and performs the same alive, out-of-Job,
+primary-token SID proof. The test fails unless every action actually ran and
+quarantine removes all registrations, running instances, action processes,
+owned nested folders, and the BITS job before capture without deleting shared
+Task Scheduler folders. A separate nonzero producer recreates a running
+scheduled action, proves its live
 `EnginePID` and process PID are out of Job with the exact SID, and creates a
 BITS job before verifying terminal quarantine and complete
 account/profile/root cleanup without allowing capture.
@@ -556,7 +562,11 @@ zero counts for exact-SID processes/tasks/BITS, rejected artifact capture, and
 successful identity/profile/root deletion. Each invokes
 `QuarantineIsolatedIdentity` again after completion and requires an unchanged
 successful state. A timeout producer verifies the same terminal quarantine
-path.
+path. A deterministic native decision-seam regression also injects the exact
+race where WTS reported an isolated-SID PID but `OpenProcess` observes that it
+has disappeared. The stale failure is accepted only after a second WTS
+enumeration proves the PID absent or reused by another SID; a still-matching PID
+and access denial remain fatal.
 
 Windows command lookup accepts only regular `.exe`, `.cmd`, `.bat`, or `.com`
 files, follows case-insensitive `PATHEXT` order, rejects ambiguous or relative
@@ -633,22 +643,29 @@ The broker first terminates and reaps the Job Object and verifies zero active
 Job processes. It then disables the ephemeral local account with
 `NetUserSetInfo` and independently re-reads the account with `NetUserGetInfo`;
 an absent or ambiguous `UF_ACCOUNTDISABLE` bit is fatal. The trusted broker
-recursively enumerates Task Scheduler folders and hidden registrations through
-`Schedule.Service`, matches exact SID and local-account principals plus
-run-root identities, stops all matching instances, deletes registrations and
-attributable nested folders, and verifies absence. It also enumerates all-user
-BITS jobs, cancels every job whose owner SID is the isolated SID, and verifies
-absence.
+snapshots the complete Task Scheduler folder path set before restricted
+production begins. During quarantine it recursively enumerates folders and
+hidden registrations through `Schedule.Service`, matches exact SID and
+local-account principals plus run-root identities, and stops and deletes all
+matching instances and registrations. Folder cleanup considers only paths
+absent from the pre-production snapshot, never the root or a pre-existing
+ancestor, rechecks that each candidate is empty, and deletes run-created
+descendants deepest-first. Pre-existing folders remain even when empty. It also
+enumerates all-user BITS jobs, cancels every job whose owner SID is the isolated
+SID, and verifies absence.
 
 System-wide process proof uses `WTSEnumerateProcessesExW` level 1, whose
 `WTS_PROCESS_INFO_EXW.pUserSid` is the primary-token user SID. It does not
-infer absence from Job membership or from failed `OpenProcess` calls. Every
-exact-SID process must be opened, rechecked by primary token, terminated,
-waited, and reaped; enumeration, SID query, access, termination, or wait
-failures are fatal. Scheduler cleanup, BITS cleanup, and SID-wide drain repeat
-until three bounded consecutive rounds observe no attributable registration,
-running task, folder, BITS job, or process, over a bounded observation window.
-The final proof independently rechecks the disabled account, Job count,
+infer absence from Job membership. Every exact-SID process must normally be
+opened, rechecked by primary token, terminated, waited, and reaped. If
+`OpenProcess` reports only a reviewed stale/nonexistent PID error, the broker
+immediately repeats the WTS enumeration and accepts the race only when the PID
+is absent or no longer has the exact isolated SID. A still-matching PID, access
+denial, WTS/SID-query ambiguity, termination failure, or wait failure is fatal.
+Scheduler cleanup, BITS cleanup, and SID-wide drain repeat until three bounded
+consecutive rounds observe no attributable registration, running task,
+run-created empty folder, BITS job, or process, over a bounded observation
+window. The final proof independently rechecks the disabled account, Job count,
 scheduler state, BITS state, and SID-wide process count. Cleanup delegates,
 final proof, Job close, profile/root deletion, and account deletion are all
 attempted even when another cleanup action fails; failures are aggregated
@@ -860,7 +877,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 377,149 | `bf87889821d75885fedbcb80d766156eb793239c4343097e6371eef202bdde11` |
+| `.github/workflows/client-v1-conformance.yml` | 384,132 | `79eb73d899870e7b83e99ddff53da8e25279497ef37b3286eb702ad04d390c02` |
 | `scripts/phase1-conformance.mjs` | 187,106 | `652b3eeb0264f44d50091a7afd65f322b4de54d994eacec14d00bdbed0463981` |
 | `scripts/phase1-schema-v2-producer.mjs` | 130,161 | `20f2a400ede2198143c6c2a2208e446cd04065ae3f366cf4619134af9de1f1dc` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -869,8 +886,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.sh` | 25,087 | `9f09b5d57886b0977477185c50c5a31390c356312b16954d11baa84c2208c37d` |
 | `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
 | `scripts/unix-producer-supervisor.test.sh` | 7,387 | `62f4fc2e80257c95da6aa6238099a8ff2299d514fd00f64662686c906280d69a` |
-| `scripts/windows-job-supervisor.cs` | 249,862 | `b723d1752f926a39a39a79d56d95a7611b1ce9a2f6454ae88ae942e1ed2229db` |
-| `scripts/windows-job-supervisor.test.ps1` | 141,017 | `893033dfe6bcdf47f093b539dcacd1c951379731eb3cb09ef0d26d5d24a0e65e` |
+| `scripts/windows-job-supervisor.cs` | 255,395 | `057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc` |
+| `scripts/windows-job-supervisor.test.ps1` | 148,453 | `d935e74986dc812809e29401bb7e29484e49f4ac56bb77778f8938f133309c77` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte and pins the six
 production Unix source files by the sizes and digests above before compiling or

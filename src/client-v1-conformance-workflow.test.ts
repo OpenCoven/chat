@@ -944,6 +944,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(quarantine).toContain('stableRounds < MinimumStableIsolationRounds');
       expect(quarantine).toContain('cleanupFailures');
       expect(source).toContain('RememberScheduledTaskFolderChain(match.FolderPath);');
+      expect(source).toContain('preProductionScheduledTaskFolders');
+      expect(source).toContain('SnapshotExistingScheduledTaskFolders');
+      expect(source).toContain('IsRunCreatedScheduledTaskFolder');
+      expect(source).toContain('ScheduledTaskFolderIsEmpty');
+      expect(source).toContain('RevalidateFailedProcessOpen');
+      expect(source).toContain('ERROR_INVALID_PARAMETER');
+      expect(source).toContain('Matching isolated-SID process identity changed.');
+      expect(source).toContain(
+        'RevalidateFailedProcessOpen(\n                            processId,\n                            supervisedSid,\n                            openError,',
+      );
 
       const terminalStart = source.indexOf(
         'private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(',
@@ -1255,6 +1265,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Task Scheduler escape registration survived broker cleanup.',
       'Task Scheduler escape action rewrote the sealed artifact.',
       'A task registered after account disablement survived repeated cleanup.',
+      'Pre-existing shared Task Scheduler parent was removed by quarantine.',
+      'Pre-existing Task Scheduler folder was removed by quarantine.',
+      'Run-created Task Scheduler child survived quarantine.',
+      'Matching task registration in a pre-existing folder survived quarantine.',
       'BITS service-mediated job survived broker cleanup.',
       'Ephemeral account was not disabled by terminal quarantine.',
       'Account-disable verification failure did not fail closed.',
@@ -1263,6 +1277,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'WTS process enumeration failure did not fail closed.',
       'Matching process access failure did not fail closed.',
       'Matching process termination failure did not fail closed.',
+      'Matching isolated-SID process disappearance was not revalidated.',
+      'Reused PID with a different SID was not accepted after revalidation.',
+      'Still-matching PID was accepted after failed OpenProcess revalidation.',
+      'Matching process access denial did not remain fail closed.',
       'Unstable SID-wide process drain did not fail closed.',
       'Artifact ACL sealing failure did not fail closed.',
       'Service creation unexpectedly succeeded for the restricted identity.',
@@ -1366,6 +1384,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain(
       "-Failure 'Principal-only exact-SID Task Scheduler registration survived cleanup.'",
     );
+    expect(runtimeTest).toContain(
+      "-Failure 'Matching task registration in a pre-existing folder survived quarantine.'",
+    );
+    expect(runtimeTest).toContain('$preExistingSharedFolderPath');
+    expect(runtimeTest).toContain('$runCreatedSharedChildPath');
   });
 
   test('covers every terminal Windows producer failure with idempotent quarantine', () => {
