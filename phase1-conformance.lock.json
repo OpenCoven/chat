@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "d6967a4e46c56d3d33a8474cfd4bb54f60eb0682"
+    "revision": "35e8b738b5a67ecd2b4e08a9140a63ebaec3d406"
   },
   "harnessAuthority": {
-    "revision": "d6967a4e46c56d3d33a8474cfd4bb54f60eb0682",
-    "tree": "315265918a4732f96840152e06bbad91f4427bbc",
+    "revision": "35e8b738b5a67ecd2b4e08a9140a63ebaec3d406",
+    "tree": "de40b059748957636035a602dcd83ededbf1ab8d",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "9e5021a613f5c54a5339743f7fba30b0ce9408ec",
-        "sha256": "3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01"
+        "blob": "e03080e2891b07ccb964f24ea81a5efcdfdee656",
+        "sha256": "d49a809b9d568358a1294c04b9971b8537387b433c022a44362a76484f7bab2a"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -106,8 +106,8 @@
       },
       {
         "path": "scripts/unix-producer-command.sh",
-        "blob": "c73817ee64afbbe089584e0e808874f070cb73d5",
-        "sha256": "a985671cbf7ec3ee4349e9626b8d8b13a0bc225583ea1dd51e1d7847e5b6c3c1"
+        "blob": "51df7e8c1772807176759a1fad4a703a43aec8c7",
+        "sha256": "cb4a9dad362edadeb2cb4d26d0a9bcbd5f17630d6445a8fb5bb43eaaa2f2fdd1"
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "aabb4f3e57619f6b76596869c6376e6d08b86f81",
-        "sha256": "e08e49bd8d0b9bf4af4b25dd353dfe0d62742d80c5f6351d738afff099034cfd"
+        "blob": "7e6f0dff440ef5ffa04b5a912248b568de72aa3c",
+        "sha256": "4a09643332641f91d705eb29b52f6f2227c65664f337b01ccbf2c05798ce86a9"
       }
     ],
     "productionDeltas": [
