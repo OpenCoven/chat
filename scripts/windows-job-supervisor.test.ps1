@@ -1394,11 +1394,28 @@ try {
       Query = 'SELECT * FROM Win32_ProcessStartTrace'
     }
 } catch {
+  `$cimError = if (
+    `$_.Exception -is [Microsoft.Management.Infrastructure.CimException]
+  ) {
+    `$_.Exception
+  } elseif (
+    `$_.Exception.InnerException -is
+      [Microsoft.Management.Infrastructure.CimException]
+  ) {
+    `$_.Exception.InnerException
+  } else {
+    `$null
+  }
   if (
     `$_.CategoryInfo.Category -eq
       [Management.Automation.ErrorCategory]::PermissionDenied -or
     `$_.Exception -is [UnauthorizedAccessException] -or
-    `$_.Exception.InnerException -is [UnauthorizedAccessException]
+    `$_.Exception.InnerException -is [UnauthorizedAccessException] -or
+    (
+      `$null -ne `$cimError -and
+      `$cimError.StatusCode -eq
+        [Microsoft.Management.Infrastructure.CimStatusCode]::AccessDenied
+    )
   ) {
     `$wmiDenied = `$true
   } else {
