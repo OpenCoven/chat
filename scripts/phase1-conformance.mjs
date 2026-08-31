@@ -808,7 +808,7 @@ export function parseArgs(argv) {
       );
     }
     const expectedOutput = resolve(
-      projectRoot,
+      options.chatSourceRoot,
       '.artifacts',
       `client-v1-conformance-${options.platform}.json`,
     );
