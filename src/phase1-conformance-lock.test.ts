@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: '34a705e8638431bc551449a2d0612017ad7b051b',
+    revision: '6adffbd88169964e1e2a70eba56b1a816bf31f39',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -467,6 +467,20 @@ describe('Phase 1 conformance lock', () => {
       version: 5,
       ...expectedEntries,
     });
+  });
+
+  test('keeps the Windows supervisor source reachable from the frozen harness checkout', () => {
+    expect(() =>
+      runGit(
+        [
+          'merge-base',
+          '--is-ancestor',
+          expectedEntries.tools.windowsSupervisor.source.revision,
+          expectedEntries.harness.revision,
+        ],
+        projectRoot,
+      ),
+    ).not.toThrow();
   });
 
   test('rejects an unexpected repository', () => {
