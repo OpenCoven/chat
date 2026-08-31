@@ -598,10 +598,11 @@ disablement, then registers and attempts to start a second task. The SID-wide
 quarantine must terminate this deterministic service-equivalent escape and
 remove both task registrations, any action process that actually started, all
 owned nested folders, and the BITS job before capture without deleting shared
-Task Scheduler folders. A separate nonzero producer likewise registers and
-attempts a scheduler action and creates a BITS job; action execution remains
-conditional, while terminal quarantine and complete account/profile/root
-cleanup are mandatory and artifact capture remains forbidden.
+Task Scheduler folders. A separate nonzero scenario stages another live
+outside-Job exact-SID process, registers and attempts a scheduler action, and
+creates a BITS job. Scheduler action execution remains conditional, while the
+process drain, terminal quarantine, complete account/profile/root cleanup, and
+artifact-capture rejection are mandatory.
 
 Four additional native cases stage an exact-SID principal-only task
 registration and run attempt, a deterministic out-of-Job exact-SID process,
@@ -979,7 +980,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 157,926 | `054424e4351b3650f232f1ed1e443fb768d87746df1a9099a835ab6dd69ee8c2` |
+| `scripts/windows-job-supervisor.test.ps1` | 160,366 | `40fe29d6ff05916f8798027972a0f6e4cced7117cf51b63e3203ee4e5a6dbc72` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and

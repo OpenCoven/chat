@@ -1572,6 +1572,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'GetTokenInformation',
       'GetExitCodeProcess',
       'Deterministic service-equivalent exact-SID process',
+      'Nonzero persistence process PID',
+      'Terminal failure deterministic exact-SID process',
     ]) {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
     }
@@ -1681,6 +1683,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest).toContain('Assert-ProcessExited -ProcessId $persistence.SetupPid');
     expect(runtimeTest).not.toContain(
       'Terminal failure persistence task did not expose a live EnginePID.',
+    );
+    expect(runtimeTest).toContain(
+      'Assert-NoExactSidPersistence -Sid $serviceEscapeContext.User.Sid',
+    );
+    expect(runtimeTest).toContain(
+      'Assert-NoExactSidPersistence -Sid $failureEscapeContext.User.Sid',
     );
     for (const principalIdentityGuard of [
       'function Resolve-RegisteredPrincipalSid {',
