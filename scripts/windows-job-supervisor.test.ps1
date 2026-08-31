@@ -991,6 +991,7 @@ $childEnvironment = @{
   TMP = $isolatedUser.TempPath
   GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
+  OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
   OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE = $sourcePath
 }
 

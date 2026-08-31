@@ -970,7 +970,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,685 | `0985231413dbc2f23c6489480cce42a285451eddeae179018302e88db705847a` |
-| `scripts/windows-job-supervisor.test.ps1` | 153,045 | `4a2ac566a350da9a40ac549ff48152d636421c942d3fd78a977e382cc662e817` |
+| `scripts/windows-job-supervisor.test.ps1` | 153,092 | `2a22babab11fe928f27b99bb4da64a90f501e0e5b083f1fca0298414d1d5382a` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
