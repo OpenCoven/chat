@@ -556,7 +556,6 @@ using System.Security.Principal;
 
 public static class ScheduledActionIsolationProbe
 {
-    private const uint JOB_OBJECT_QUERY = 0x0004;
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const uint TOKEN_QUERY = 0x0008;
     private const uint STILL_ACTIVE = 259;
@@ -564,14 +563,14 @@ public static class ScheduledActionIsolationProbe
     private const int TokenUser = 1;
     private const int WTSTypeProcessInfoLevel1 = 1;
 
-    public static void AssertAliveOutsideJobWithPrimaryTokenSid(
+    public static void AssertAliveOutsideJobHandleWithPrimaryTokenSid(
         string label,
-        string jobName,
+        long jobHandleValue,
         uint processId,
         string expectedSid)
     {
         if (String.IsNullOrWhiteSpace(label) ||
-            String.IsNullOrWhiteSpace(jobName) ||
+            jobHandleValue == 0 ||
             processId == 0 ||
             String.IsNullOrWhiteSpace(expectedSid))
         {
@@ -579,20 +578,13 @@ public static class ScheduledActionIsolationProbe
                 "Scheduled action isolation probe input was invalid.");
         }
 
-        IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, jobName);
-        if (job == IntPtr.Zero)
-        {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                label + " could not open the supervised Job Object.");
-        }
+        IntPtr job = new IntPtr(jobHandleValue);
         IntPtr process = OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION,
             false,
             processId);
         if (process == IntPtr.Zero)
         {
-            CloseHandle(job);
             throw new Win32Exception(
                 Marshal.GetLastWin32Error(),
                 label + " could not open its process.");
@@ -626,7 +618,49 @@ public static class ScheduledActionIsolationProbe
         finally
         {
             CloseHandle(process);
-            CloseHandle(job);
+        }
+    }
+
+    public static void AssertAliveWithPrimaryTokenSid(
+        string label,
+        uint processId,
+        string expectedSid)
+    {
+        if (String.IsNullOrWhiteSpace(label) ||
+            processId == 0 ||
+            String.IsNullOrWhiteSpace(expectedSid))
+        {
+            throw new ArgumentException(
+                "Scheduled action process probe input was invalid.");
+        }
+
+        IntPtr process = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            processId);
+        if (process == IntPtr.Zero)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                label + " could not open its process.");
+        }
+        try
+        {
+            RequireAlive(process, label);
+            string actualSid = QueryPrimaryTokenSid(process, label);
+            if (!String.Equals(
+                    actualSid,
+                    expectedSid,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    label + " primary token SID was not the isolated SID.");
+            }
+            RequireAlive(process, label);
+        }
+        finally
+        {
+            CloseHandle(process);
         }
     }
 
@@ -811,12 +845,6 @@ public static class ScheduledActionIsolationProbe
         internal long UserTime;
         internal long KernelTime;
     }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr OpenJobObjectW(
-        uint desiredAccess,
-        bool inherit,
-        string name);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(
@@ -3007,9 +3035,9 @@ public static class UnsupervisedLogonProcess
     ) {
       throw 'Deterministic service-equivalent process marker was invalid.'
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
       'Deterministic service-equivalent exact-SID process',
-      $serviceEscapeJobName,
+      $serviceEscapeJob.AuthoritativeHandleValue,
       [uint32]$lateRegistrarPid,
       $serviceEscapeContext.User.Sid
     )
@@ -3108,17 +3136,15 @@ if (
   `$taskActionPid = [uint32][IO.File]::ReadAllText(
     '$($serviceEscapeActionPid.Replace("'", "''"))'
   )
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
     'Primary scheduled action process PID',
-    '$serviceEscapeJobName',
     `$taskActionPid,
     `$expectedTaskSid
   )
 }
 if (`$primaryEnginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
     'Primary scheduled action EnginePID',
-    '$serviceEscapeJobName',
     `$primaryEnginePid,
     '$($serviceEscapeContext.User.Sid)'
   )
@@ -3567,17 +3593,15 @@ if ([IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))')) {
   `$nonzeroProcessPid = [uint32][IO.File]::ReadAllText(
     '$($failureEscapePid.Replace("'", "''"))'
   )
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
     'Nonzero producer scheduled action process PID',
-    '$failureEscapeJobName',
     `$nonzeroProcessPid,
     `$expectedSid
   )
 }
 if (`$nonzeroEnginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
     'Nonzero producer scheduled action EnginePID',
-    '$failureEscapeJobName',
     `$nonzeroEnginePid,
     '$($failureEscapeContext.User.Sid)'
   )
@@ -3626,9 +3650,9 @@ exit 23
       }
       Start-Sleep -Milliseconds 20
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
       'Nonzero persistence process PID',
-      $failureEscapeJobName,
+      $failureEscapeJob.AuthoritativeHandleValue,
       [uint32]$failureSleeperPid,
       $failureEscapeContext.User.Sid
     )
@@ -3831,9 +3855,8 @@ do {
   Start-Sleep -Milliseconds 20
 } while ([DateTime]::UtcNow -lt `$deadline)
 if (`$enginePid -ne 0) {
-  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+  [ScheduledActionIsolationProbe]::AssertAliveWithPrimaryTokenSid(
     'Terminal failure principal-only scheduled action EnginePID',
-    '$JobName',
     `$enginePid,
     '$($Context.User.Sid)'
   )
@@ -3888,9 +3911,9 @@ Start-Sleep -Seconds 300
     ) {
       throw 'Terminal failure persistence readiness marker was invalid.'
     }
-    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobHandleWithPrimaryTokenSid(
       'Terminal failure deterministic exact-SID process',
-      $JobName,
+      $Job.AuthoritativeHandleValue,
       [uint32]$setupPid,
       $Context.User.Sid
     )

@@ -1571,6 +1571,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'OpenProcessToken',
       'GetTokenInformation',
       'GetExitCodeProcess',
+      'AssertAliveOutsideJobHandleWithPrimaryTokenSid',
+      'AssertAliveWithPrimaryTokenSid',
+      'AuthoritativeHandleValue',
       'Deterministic service-equivalent exact-SID process',
       'Nonzero persistence process PID',
       'Terminal failure deterministic exact-SID process',
@@ -1592,6 +1595,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Nonzero producer task never reached a running exact-SID action.',
     );
     expect(runtimeTest).not.toContain('Nonzero producer scheduled action did not actually run.');
+    expect(runtimeTest).not.toContain('could not open the supervised Job Object.');
     expect(runtimeTest).toContain(
       '    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
     );
