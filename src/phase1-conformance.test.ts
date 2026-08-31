@@ -596,6 +596,17 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain('configuredWindowsSupervisorPath');
   });
 
+  test('runs the shared-home Coven health integration suite serially', () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
+      'utf8',
+    );
+
+    expect(source).toMatch(
+      /\[\s*'health',\s*\[\s*'test',\s*'--locked',\s*'--package',\s*'coven-client',\s*'--test',\s*'health',\s*'--',\s*'--test-threads=1',\s*\],\s*\]/u,
+    );
+  });
+
   test.skipIf(process.platform === 'win32')(
     'keeps locked Coven lifecycle sockets within the Darwin path limit',
     async () => {
