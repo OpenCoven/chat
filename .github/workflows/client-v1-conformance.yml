@@ -1001,16 +1001,7 @@ jobs:
                           elevationType = ReadTokenElevationType(token);
                           integrityRid = ReadTokenIntegrityRid(token);
                           tokenPrivileges = ReadTokenPrivileges(token);
-                          ValidateStandardUserSnapshot(
-                              legacyPrivilege,
-                              accountFlags,
-                              localGroupSids,
-                              isAdministrator,
-                              isElevated,
-                              elevationType,
-                              integrityRid,
-                              tokenPrivileges);
-                          return String.Format(
+                          string summary = String.Format(
                               CultureInfo.InvariantCulture,
                               "legacyPriv={0};flags=0x{1:x8};groups={2};elevated={3};" +
                                   "elevationType={4};integrity=0x{5:x8};tokenPrivileges={6};" +
@@ -1024,6 +1015,25 @@ jobs:
                               tokenPrivileges.Length == 0
                                   ? "none"
                                   : String.Join(",", tokenPrivileges));
+                          try
+                          {
+                              ValidateStandardUserSnapshot(
+                                  legacyPrivilege,
+                                  accountFlags,
+                                  localGroupSids,
+                                  isAdministrator,
+                                  isElevated,
+                                  elevationType,
+                                  integrityRid,
+                                  tokenPrivileges);
+                          }
+                          catch (InvalidOperationException error)
+                          {
+                              throw new InvalidOperationException(
+                                  error.Message + " " + summary,
+                                  error);
+                          }
+                          return summary;
                       }
                       finally
                       {
