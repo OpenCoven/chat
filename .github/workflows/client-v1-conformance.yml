@@ -66,6 +66,8 @@ jobs:
         env:
           OPENCOVEN_VALIDATOR_REVISION_INPUT: ${{ inputs.validator_revision }}
           OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
+          OPENCOVEN_CHAT_REPOSITORY: ${{ github.repository }}
+          OPENCOVEN_CHAT_SHA: ${{ github.sha }}
           OPENCOVEN_WINDOWS_IMAGE_OS: 'win25'
           OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.239.3'
           OPENCOVEN_WINDOWS_BUILD: '26100.33296'
@@ -8022,8 +8024,8 @@ jobs:
               NUGET_PACKAGES = (Join-Path $bootstrapRoot 'nuget')
               NPM_CONFIG_CACHE = (Join-Path $bootstrapRoot 'npm-cache')
               GITHUB_WORKSPACE = $workspace
-              OPENCOVEN_CHAT_REPOSITORY = '${{ github.repository }}'
-              OPENCOVEN_CHAT_SHA = '${{ github.sha }}'
+              OPENCOVEN_CHAT_REPOSITORY = $env:OPENCOVEN_CHAT_REPOSITORY
+              OPENCOVEN_CHAT_SHA = $env:OPENCOVEN_CHAT_SHA
               OPENCOVEN_VALIDATOR_REVISION = $validatorRevision
               OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $bootstrapRoot
               OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'

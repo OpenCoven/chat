@@ -30,6 +30,9 @@ const validatorAvailable = existsSync(
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
+const githubRepositoryExpression = '${' + '{ github.repository }}';
+const githubShaExpression = '${' + '{ github.sha }}';
+const expressionOpening = '${' + '{';
 const uploadedSupervisorArtifactIdExpression =
   '${' + "{ steps['upload-supervisor'].outputs['artifact-id'] }}";
 const supervisorArtifactIdExpression =
@@ -771,7 +774,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(environment).toContain(
       `OPENCOVEN_VALIDATOR_REVISION_INPUT: ${validatorInputExpression}`,
     );
+    expect(environment).toContain(`OPENCOVEN_CHAT_REPOSITORY: ${githubRepositoryExpression}`);
+    expect(environment).toContain(`OPENCOVEN_CHAT_SHA: ${githubShaExpression}`);
     expect(runBody).not.toContain(validatorInputExpression);
+    expect(runBody).not.toContain(expressionOpening);
     expect(runBody).not.toMatch(/\$\{\{\s*inputs\./u);
     expect(runBody).toMatch(
       /\$validatorRevision = Require-LowercaseGitOid\s+`\s+-Value \$env:OPENCOVEN_VALIDATOR_REVISION_INPUT/u,
