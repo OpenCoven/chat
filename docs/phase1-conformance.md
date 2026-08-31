@@ -154,14 +154,15 @@ a circular producer/validator pin while every cloned source, validator tree,
 contract, registry, schema, and final canonical record is verified at runtime.
 
 A schema-v2 platform run is accepted only inside the protected native
-producer supervisor. The supervisor supplies the exact output path and a
-distinct-UID containment binding:
+producer supervisor. The supervisor supplies and owns the exact private source
+record path; it is not derived from whichever immutable harness checkout is
+currently executing:
 
 ```bash
 node scripts/phase1-conformance.mjs \
   --validator-revision <full-sdk-validator-commit> \
   --platform darwin-arm64 \
-  --output .artifacts/client-v1-conformance-darwin-arm64.json
+  --output "$OPENCOVEN_UNIX_SOURCE_RECORD"
 ```
 
 Replace the platform with `linux-x64` or `win32-x64` on the matching native
@@ -169,7 +170,12 @@ host. This inner command is documentation for the restricted producer, not a
 supported broker-identity invocation. A direct macOS/Linux schema-v2 launch
 without the supervisor UID and native cgroup/UID binding fails before authority
 work. Platform and host OS/architecture mismatches also fail before authority
-work.
+work. The outer launcher validates the supervisor workspace, private artifact
+directory, canonical platform filename, owner/mode, containment, and process
+identity once, then projects only those exact values into the relocated
+verified runner. That runner and the schema-v2 producer independently
+revalidate the same binding. An arbitrary caller path, substituted binding, or
+preexisting record is rejected.
 
 The producer records only assertions that its package, native, Cave, Coven,
 and exact observation suites actually passed; missing, duplicate, skipped, or
@@ -657,6 +663,21 @@ supervisor. Windows routes around those actions through the pre-bootstrap Job
 root. Production preserves the existing native behavior and uses the pinned
 official artifact upload exactly once per matrix expansion.
 
+The verified-runner environment is an explicit projection, not an ambient
+inheritance. Unix carries only the validated UID/name, broker UID, native
+containment and cgroup membership, source workspace, private artifact
+directory, and source-record path, plus the isolated Secret Service values
+where applicable. Windows carries only the nonce-bound Job identity, trusted
+system PowerShell path, exact bootstrap/workspace/artifact paths, required
+system directories and command processor, isolated temporary directories,
+`PATH`/`PATHEXT`, and the reviewed `LIB`/`INCLUDE` toolchain paths. GitHub and
+OIDC bearer variables are never projected.
+
+The Windows Job membership probe uses pinned PowerShell 7.6.5
+`-CommandWithArgs`, so the nonce-bound Job name and decimal process ID arrive
+as exactly two literal arguments. It does not use `-Command` positional
+parsing, a shell command line, or caller-controlled interpolation.
+
 Every Windows producer invocation uses a broker-only terminal transition.
 The trusted `finally` path enters idempotent identity quarantine after success,
 nonzero exit, timeout, output overflow, resource-quota failure, or exception.
@@ -898,20 +919,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 387,916 | `72f22e6a0adc3c13357526bbd2de5fbd625a1fb2afdda5a4fcc6b792c7e6dd6a` |
+| `.github/workflows/client-v1-conformance.yml` | 388,293 | `e08e49bd8d0b9bf4af4b25dd353dfe0d62742d80c5f6351d738afff099034cfd` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 184,598 | `cec4b1db382c98b6e7c3370c7a70d35dcaafc89aa1d934201e984b3cc9b9fd67` |
+| `scripts/phase1-conformance.mjs` | 186,646 | `6d017aa9d7653e76b6a0d7858c6952b30139cec66873bc8ed2a5d5ad74ce799c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,311 | `a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 129,149 | `4d68939e066503bb29bf29e87e8768e7a74db0f265cf34af66f345ab550d1154` |
+| `scripts/phase1-schema-v2-producer.mjs` | 138,125 | `3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,802 | `149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

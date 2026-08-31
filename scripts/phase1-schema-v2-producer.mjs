@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { devNull, homedir } from 'node:os';
-import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
@@ -113,6 +113,17 @@ export function windowsJobBindingEnvironment(
   const nonce = environment.OPENCOVEN_WINDOWS_JOB_NONCE;
   const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
   const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
+  const bootstrapRoot = environment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT;
+  const workspace = environment.OPENCOVEN_WINDOWS_WORKSPACE;
+  const artifactDirectory = environment.OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY;
+  const sourceRecord = environment.OPENCOVEN_WINDOWS_SOURCE_RECORD;
+  const systemRoot = environment.SYSTEMROOT;
+  const windowsDirectory = environment.WINDIR;
+  const commandProcessor = environment.COMSPEC;
+  const temporaryDirectory = environment.TEMP;
+  const secondaryTemporaryDirectory = environment.TMP;
+  const executablePath = environment.PATH;
+  const pathExtensions = environment.PATHEXT;
   const compilerLibraryPath = environment.LIB;
   const compilerIncludePath = environment.INCLUDE;
   if (required !== '1') {
@@ -155,11 +166,99 @@ export function windowsJobBindingEnvironment(
       throw new Error(`Windows Job Object ${label} path is outside trusted toolchain roots.`);
     }
   }
+  const requireCanonicalWindowsPath = (value, label) => {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.includes('\0') ||
+      value.includes('\n') ||
+      value.includes('\r') ||
+      !windowsPath.isAbsolute(value) ||
+      windowsPath.normalize(value) !== value
+    ) {
+      throw new Error(`Windows Job Object ${label} path is invalid.`);
+    }
+    return value;
+  };
+  const requireDescendant = (root, candidate, label) => {
+    const relativePath = windowsPath.relative(root, candidate);
+    if (
+      relativePath.length === 0 ||
+      relativePath === '..' ||
+      relativePath.startsWith(`..${windowsPath.sep}`) ||
+      windowsPath.isAbsolute(relativePath)
+    ) {
+      throw new Error(`Windows Job Object ${label} path is outside the bootstrap root.`);
+    }
+  };
+  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot, 'bootstrap root');
+  const canonicalWorkspace = requireCanonicalWindowsPath(workspace, 'workspace');
+  const canonicalArtifactDirectory = requireCanonicalWindowsPath(
+    artifactDirectory,
+    'artifact directory',
+  );
+  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord, 'artifact record');
+  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory, 'temporary');
+  const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
+    secondaryTemporaryDirectory,
+    'secondary temporary',
+  );
+  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace, 'workspace');
+  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory, 'temporary');
+  if (
+    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    canonicalWorkspace.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'workspace').toLowerCase() ||
+    canonicalTemporaryDirectory.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'temp').toLowerCase() ||
+    canonicalSecondaryTemporaryDirectory.toLowerCase() !==
+      canonicalTemporaryDirectory.toLowerCase() ||
+    canonicalArtifactDirectory.toLowerCase() !==
+      windowsPath.join(canonicalWorkspace, '.artifacts').toLowerCase() ||
+    canonicalSourceRecord.toLowerCase() !==
+      windowsPath
+        .join(canonicalArtifactDirectory, 'client-v1-conformance-win32-x64.json')
+        .toLowerCase() ||
+    existsSync(canonicalSourceRecord)
+  ) {
+    throw new Error('Windows Job Object artifact or temporary binding is invalid.');
+  }
+  if (
+    typeof systemRoot !== 'string' ||
+    typeof windowsDirectory !== 'string' ||
+    systemRoot.toLowerCase() !== 'c:\\windows' ||
+    windowsDirectory.toLowerCase() !== 'c:\\windows' ||
+    typeof commandProcessor !== 'string' ||
+    commandProcessor.toLowerCase() !== 'c:\\windows\\system32\\cmd.exe'
+  ) {
+    throw new Error('Windows Job Object base system environment is invalid.');
+  }
+  if (
+    typeof executablePath !== 'string' ||
+    executablePath.length === 0 ||
+    executablePath.includes('\0') ||
+    executablePath.includes('\n') ||
+    executablePath.includes('\r') ||
+    pathExtensions !== '.COM;.EXE;.BAT;.CMD'
+  ) {
+    throw new Error('Windows Job Object executable environment is invalid.');
+  }
   return {
     OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
     OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
     OPENCOVEN_WINDOWS_JOB_NAME: name,
     OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
+    OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: canonicalBootstrapRoot,
+    OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
+    OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
+    OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
+    SYSTEMROOT: systemRoot,
+    WINDIR: windowsDirectory,
+    COMSPEC: commandProcessor,
+    TEMP: canonicalTemporaryDirectory,
+    TMP: canonicalSecondaryTemporaryDirectory,
+    PATH: executablePath,
+    PATHEXT: pathExtensions,
     LIB: compilerLibraryPath,
     INCLUDE: compilerIncludePath,
   };
@@ -184,9 +283,13 @@ export function unixProducerBindingEnvironment(
   const required = environment.OPENCOVEN_UNIX_PRODUCER_REQUIRED;
   const evidencePlatform = environment.OPENCOVEN_UNIX_PRODUCER_PLATFORM;
   const producerUidText = environment.OPENCOVEN_UNIX_PRODUCER_UID;
+  const producerName = environment.OPENCOVEN_UNIX_PRODUCER_NAME;
   const brokerUidText = environment.OPENCOVEN_UNIX_BROKER_UID;
   const containment = environment.OPENCOVEN_UNIX_CONTAINMENT;
   const cgroupPath = environment.OPENCOVEN_UNIX_CGROUP_PATH;
+  const workspace = environment.OPENCOVEN_UNIX_WORKSPACE;
+  const artifactDirectory = environment.OPENCOVEN_UNIX_ARTIFACT_DIRECTORY;
+  const sourceRecord = environment.OPENCOVEN_UNIX_SOURCE_RECORD;
   const canonicalUid = /^(?:0|[1-9][0-9]{0,9})$/u;
   if (
     required !== '1' ||
@@ -198,7 +301,53 @@ export function unixProducerBindingEnvironment(
     producerUidText === brokerUidText ||
     Number(producerUidText) === 0 ||
     Number(brokerUidText) === 0 ||
-    evidencePlatform !== `${platform}-${architecture}`
+    evidencePlatform !== `${platform}-${architecture}` ||
+    typeof producerName !== 'string' ||
+    !/^ocv[0-9a-f]{16}$/u.test(producerName)
+  ) {
+    fail();
+  }
+  const requireCanonicalDirectory = (path) => {
+    if (
+      typeof path !== 'string' ||
+      path.length === 0 ||
+      path.includes('\0') ||
+      path.includes('\n') ||
+      path.includes('\r') ||
+      !isAbsolute(path) ||
+      resolve(path) !== path
+    ) {
+      fail();
+    }
+    let stats;
+    try {
+      stats = lstatSync(path);
+      if (stats.isSymbolicLink() || !stats.isDirectory() || realpathSync(path) !== path) {
+        fail();
+      }
+    } catch {
+      fail();
+    }
+    return stats;
+  };
+  requireCanonicalDirectory(workspace);
+  const artifactStats = requireCanonicalDirectory(artifactDirectory);
+  const expectedArtifactDirectory = resolve(
+    dirname(workspace),
+    'producer',
+    'workspace',
+    '.artifacts',
+  );
+  const expectedSourceRecord = resolve(
+    artifactDirectory,
+    `client-v1-conformance-${evidencePlatform}.json`,
+  );
+  if (
+    artifactDirectory !== expectedArtifactDirectory ||
+    sourceRecord !== expectedSourceRecord ||
+    existsSync(sourceRecord) ||
+    artifactStats.uid !== currentUid ||
+    (artifactStats.mode & 0o077) !== 0
   ) {
     fail();
   }
@@ -206,14 +355,20 @@ export function unixProducerBindingEnvironment(
     OPENCOVEN_UNIX_PRODUCER_REQUIRED: required,
     OPENCOVEN_UNIX_PRODUCER_PLATFORM: evidencePlatform,
     OPENCOVEN_UNIX_PRODUCER_UID: producerUidText,
+    OPENCOVEN_UNIX_PRODUCER_NAME: producerName,
     OPENCOVEN_UNIX_BROKER_UID: brokerUidText,
     OPENCOVEN_UNIX_CONTAINMENT: containment,
+    OPENCOVEN_UNIX_WORKSPACE: workspace,
+    OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: artifactDirectory,
+    OPENCOVEN_UNIX_SOURCE_RECORD: sourceRecord,
   };
   if (platform === 'linux') {
+    const producerNonce = producerName.slice(3);
     if (
       containment !== 'linux-cgroup-v2' ||
       typeof cgroupPath !== 'string' ||
       !/^\/(?:[A-Za-z0-9_.-]+\/)*opencoven-chat-[0-9a-f]{16}$/u.test(cgroupPath) ||
+      !cgroupPath.endsWith(`/opencoven-chat-${producerNonce}`) ||
       !cgroupMembership.split(/\r?\n/u).includes(`0::${cgroupPath}`)
     ) {
       fail();
@@ -227,6 +382,68 @@ export function unixProducerBindingEnvironment(
     fail();
   }
   return binding;
+}
+
+export function schemaV2SupervisorEnvironment(
+  environment = process.env,
+  platform = process.platform,
+  architecture = process.arch,
+  currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+  cgroupMembership = platform === 'linux' ? readFileSync('/proc/self/cgroup', 'utf8') : '',
+) {
+  return platform === 'win32'
+    ? windowsJobBindingEnvironment(environment, platform)
+    : unixProducerBindingEnvironment(
+        environment,
+        platform,
+        architecture,
+        currentUid,
+        cgroupMembership,
+      );
+}
+
+export function supervisorArtifactOutputPath(binding, platform = process.platform) {
+  const path =
+    platform === 'win32'
+      ? binding.OPENCOVEN_WINDOWS_SOURCE_RECORD
+      : binding.OPENCOVEN_UNIX_SOURCE_RECORD;
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new Error('Schema-v2 evidence supervisor artifact path is unavailable.');
+  }
+  return path;
+}
+
+export function runPowerShellCommandWithArgs(
+  executable,
+  script,
+  args,
+  { cwd = projectRoot, env = {}, timeout = 15_000 } = {},
+) {
+  if (
+    typeof executable !== 'string' ||
+    executable.length === 0 ||
+    typeof script !== 'string' ||
+    script.length === 0 ||
+    !Array.isArray(args) ||
+    args.some((argument) => typeof argument !== 'string' || argument.includes('\0')) ||
+    !Number.isSafeInteger(timeout) ||
+    timeout <= 0
+  ) {
+    throw new Error('PowerShell command-with-arguments invocation is invalid.');
+  }
+  return execFileSync(
+    executable,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-CommandWithArgs', script, ...args],
+    {
+      cwd,
+      encoding: 'utf8',
+      env,
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout,
+      windowsHide: true,
+    },
+  );
 }
 
 function assertWindowsJobMembership(binding) {
@@ -278,32 +495,22 @@ public static class OpenCovenExpectedJobMembership {
 Add-Type -TypeDefinition $source -Language CSharp
 [OpenCovenExpectedJobMembership]::Require($args[0], [uint32]$args[1])
 `;
-  const output = execFileSync(
+  const output = runPowerShellCommandWithArgs(
     binding.OPENCOVEN_WINDOWS_SYSTEM_PWSH,
-    [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      script,
-      binding.OPENCOVEN_WINDOWS_JOB_NAME,
-      String(process.pid),
-    ],
+    script,
+    [binding.OPENCOVEN_WINDOWS_JOB_NAME, String(process.pid)],
     {
       cwd: projectRoot,
-      encoding: 'utf8',
       env: {
-        SYSTEMROOT: process.env.SYSTEMROOT,
-        WINDIR: process.env.WINDIR,
-        COMSPEC: process.env.COMSPEC,
-        PATH: process.env.PATH,
-        TEMP: process.env.TEMP,
-        TMP: process.env.TMP,
+        SYSTEMROOT: binding.SYSTEMROOT,
+        WINDIR: binding.WINDIR,
+        COMSPEC: binding.COMSPEC,
+        PATH: binding.PATH,
+        PATHEXT: binding.PATHEXT,
+        TEMP: binding.TEMP,
+        TMP: binding.TMP,
       },
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 15_000,
-      windowsHide: true,
     },
   );
   if (output.trim() !== '') {
@@ -399,7 +606,20 @@ function requireString(value, label) {
   return value;
 }
 
-export function parseArgs(argv) {
+export function parseArgs(argv, runtime = {}) {
+  const runtimeEnvironment = runtime.environment ?? process.env;
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
   const options = {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
@@ -465,7 +685,9 @@ export function parseArgs(argv) {
       continue;
     }
     if (argument === '--output') {
-      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      const output = requireString(argv[index + 1], '--output');
+      options.outputPath =
+        runtimePlatform === 'win32' ? windowsPath.resolve(output) : resolve(output);
       index += 1;
       continue;
     }
@@ -493,13 +715,19 @@ export function parseArgs(argv) {
         'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
       );
     }
-    const expectedOutput = resolve(
-      projectRoot,
-      '.artifacts',
-      `client-v1-conformance-${options.platform}.json`,
+    if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
+      throw new Error('schema-v2 --platform must match the supervised native host.');
+    }
+    const supervisorEnvironment = schemaV2SupervisorEnvironment(
+      runtimeEnvironment,
+      runtimePlatform,
+      runtimeArchitecture,
+      runtimeCurrentUid,
+      runtimeCgroupMembership,
     );
+    const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the platform artifact path.');
+      throw new Error('schema-v2 --output must match the supervisor artifact path.');
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
@@ -3675,10 +3903,15 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
     );
   }
-  const windowsJobBinding =
-    schemaV2 && process.platform === 'win32' ? windowsJobBindingEnvironment(process.env) : {};
-  const unixProducerBinding =
-    schemaV2 && process.platform !== 'win32' ? unixProducerBindingEnvironment(process.env) : {};
+  const supervisorEnvironment = schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {};
+  if (
+    schemaV2 &&
+    options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
+  ) {
+    throw new Error('Schema-v2 evidence output changed after supervisor validation.');
+  }
+  const windowsJobBinding = schemaV2 && process.platform === 'win32' ? supervisorEnvironment : {};
+  const unixProducerBinding = schemaV2 && process.platform !== 'win32' ? supervisorEnvironment : {};
   assertWindowsJobMembership(windowsJobBinding);
   options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
   const startedAt = new Date().toISOString();

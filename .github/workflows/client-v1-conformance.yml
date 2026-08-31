@@ -7220,7 +7220,10 @@ jobs:
           }
 
           $root = $env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT
-          $workspace = $env:GITHUB_WORKSPACE
+          $workspace = $env:OPENCOVEN_WINDOWS_WORKSPACE
+          if ($env:GITHUB_WORKSPACE -cne $workspace) {
+            throw 'The isolated Windows workspace binding changed.'
+          }
           $downloads = Join-Path $root 'downloads'
           $tools = Join-Path $root 'tools'
           [IO.Directory]::CreateDirectory($downloads) | Out-Null
@@ -7436,14 +7439,14 @@ jobs:
             @('scripts\owned-temp-directory.mjs', 6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095'),
             @('scripts\phase1-artifact-secret-scan.mjs', 21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a'),
             @('scripts\phase1-conformance-lock.mjs', 47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789'),
-            @('scripts\phase1-conformance.mjs', 184598, 'cec4b1db382c98b6e7c3370c7a70d35dcaafc89aa1d934201e984b3cc9b9fd67'),
+            @('scripts\phase1-conformance.mjs', 186646, '6d017aa9d7653e76b6a0d7858c6952b30139cec66873bc8ed2a5d5ad74ce799c'),
             @('scripts\phase1-evidence-contract.mjs', 15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f'),
             @('scripts\phase1-evidence-runtime.mjs', 6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159'),
             @('scripts\phase1-linux-secret-service.mjs', 4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92'),
             @('scripts\phase1-macos-keychain.mjs', 5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4'),
             @('scripts\phase1-process-supervisor.mjs', 3311, 'a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5'),
             @('scripts\phase1-schema-v2-evidence.mjs', 40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8'),
-            @('scripts\phase1-schema-v2-producer.mjs', 129149, '4d68939e066503bb29bf29e87e8768e7a74db0f265cf34af66f345ab550d1154'),
+            @('scripts\phase1-schema-v2-producer.mjs', 138125, '3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01'),
             @('scripts\process-owned-artifact-root.mjs', 11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a'),
             @('scripts\supervised-exec.mjs', 2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b'),
             @('scripts\supervisor-status.mjs', 854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e')
@@ -7510,7 +7513,7 @@ jobs:
             }
 
             $harnessPath = Join-Path $workspace 'scripts\phase1-conformance.mjs'
-            $recordPath = Join-Path $workspace '.artifacts\client-v1-conformance-win32-x64.json'
+            $recordPath = $env:OPENCOVEN_WINDOWS_SOURCE_RECORD
             Invoke-Checked `
               -FilePath $node `
               -ArgumentList @(
@@ -7584,6 +7587,9 @@ jobs:
               OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
               OPENCOVEN_WINDOWS_JOB_NAME = $jobName
               OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
+              OPENCOVEN_WINDOWS_WORKSPACE = $workspace
+              OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY = (Join-Path $workspace '.artifacts')
+              OPENCOVEN_WINDOWS_SOURCE_RECORD = (Join-Path $workspace '.artifacts\client-v1-conformance-win32-x64.json')
               OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE = $supervisorSourcePath
               OPENCOVEN_MSVC_BIN = $msvcBin
               OPENCOVEN_MSVC_LIB = $msvcLib
@@ -7942,14 +7948,14 @@ jobs:
             ['scripts/owned-temp-directory.mjs', [6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095']],
             ['scripts/phase1-artifact-secret-scan.mjs', [21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a']],
             ['scripts/phase1-conformance-lock.mjs', [47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789']],
-            ['scripts/phase1-conformance.mjs', [184598, 'cec4b1db382c98b6e7c3370c7a70d35dcaafc89aa1d934201e984b3cc9b9fd67']],
+            ['scripts/phase1-conformance.mjs', [186646, '6d017aa9d7653e76b6a0d7858c6952b30139cec66873bc8ed2a5d5ad74ce799c']],
             ['scripts/phase1-evidence-contract.mjs', [15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f']],
             ['scripts/phase1-evidence-runtime.mjs', [6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159']],
             ['scripts/phase1-linux-secret-service.mjs', [4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92']],
             ['scripts/phase1-macos-keychain.mjs', [5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4']],
             ['scripts/phase1-process-supervisor.mjs', [3311, 'a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5']],
             ['scripts/phase1-schema-v2-evidence.mjs', [40969, '4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8']],
-            ['scripts/phase1-schema-v2-producer.mjs', [129149, '4d68939e066503bb29bf29e87e8768e7a74db0f265cf34af66f345ab550d1154']],
+            ['scripts/phase1-schema-v2-producer.mjs', [138125, '3e5f4728a1da57cb95060ee28354638ebfe86104961589bf12f79b108d060f01']],
             ['scripts/process-owned-artifact-root.mjs', [11205, '9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a']],
             ['scripts/supervised-exec.mjs', [2802, '149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b']],
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],

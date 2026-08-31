@@ -40,12 +40,19 @@ import {
   CANONICAL_PLATFORM_ENVIRONMENTS,
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
-import { runSchemaV2Conformance } from './phase1-schema-v2-producer.mjs';
+import {
+  runSchemaV2Conformance,
+  schemaV2SupervisorEnvironment,
+  supervisorArtifactOutputPath,
+} from './phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 export {
+  runPowerShellCommandWithArgs,
+  schemaV2SupervisorEnvironment,
+  supervisorArtifactOutputPath,
   unixProducerBindingEnvironment,
   windowsJobBindingEnvironment,
 } from './phase1-schema-v2-producer.mjs';
@@ -712,7 +719,20 @@ function requireString(value, label) {
   return value;
 }
 
-export function parseArgs(argv) {
+export function parseArgs(argv, runtime = {}) {
+  const runtimeEnvironment = runtime.environment ?? process.env;
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
   const options = {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
@@ -785,7 +805,9 @@ export function parseArgs(argv) {
       continue;
     }
     if (argument === '--output') {
-      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      const output = requireString(argv[index + 1], '--output');
+      options.outputPath =
+        runtimePlatform === 'win32' ? windowsPath.resolve(output) : resolve(output);
       index += 1;
       continue;
     }
@@ -813,13 +835,19 @@ export function parseArgs(argv) {
         'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
       );
     }
-    const expectedOutput = resolve(
-      projectRoot,
-      '.artifacts',
-      `client-v1-conformance-${options.platform}.json`,
+    if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
+      throw new Error('schema-v2 --platform must match the supervised native host.');
+    }
+    const supervisorEnvironment = schemaV2SupervisorEnvironment(
+      runtimeEnvironment,
+      runtimePlatform,
+      runtimeArchitecture,
+      runtimeCurrentUid,
+      runtimeCgroupMembership,
     );
+    const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the platform artifact path.');
+      throw new Error('schema-v2 --output must match the supervisor artifact path.');
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
@@ -1113,6 +1141,74 @@ function compactEnvironment(environment) {
   );
 }
 
+export function createVerifiedRunnerEnvironment(
+  options,
+  harnessRoot,
+  environment = process.env,
+  runtime = {},
+) {
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
+  const supervisionEnvironment =
+    options.platform === undefined
+      ? {}
+      : schemaV2SupervisorEnvironment(
+          environment,
+          runtimePlatform,
+          runtimeArchitecture,
+          runtimeCurrentUid,
+          runtimeCgroupMembership,
+        );
+  if (
+    options.platform !== undefined &&
+    options.outputPath !== supervisorArtifactOutputPath(supervisionEnvironment, runtimePlatform)
+  ) {
+    throw new Error('Schema-v2 verified runner output does not match its supervisor binding.');
+  }
+  return compactEnvironment({
+    PATH: environment.PATH,
+    HOME: environment.HOME,
+    TMPDIR: environment.TMPDIR,
+    LANG: environment.LANG,
+    LC_ALL: environment.LC_ALL,
+    CI: environment.CI,
+    RUSTUP_HOME: environment.RUSTUP_HOME,
+    CARGO_HOME: environment.CARGO_HOME,
+    OPENCOVEN_CHAT_ROOT: options.chatSourceRoot,
+    OPENCOVEN_SDK_ROOT: options.sdkSourceRoot,
+    OPENCOVEN_SDK_EVIDENCE_ROOT: options.sdkEvidenceSourceRoot,
+    OPENCOVEN_SDK_VALIDATOR_ROOT: options.sdkValidatorSourceRoot,
+    OPENCOVEN_CAVE_ROOT: options.caveSourceRoot,
+    OPENCOVEN_COVEN_ROOT: options.covenSourceRoot,
+    OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: options.windowsSupervisorPath,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT: environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:
+      environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:
+      environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP,
+    OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED: environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED,
+    PHASE1_TEST_KEYCHAIN: environment.PHASE1_TEST_KEYCHAIN,
+    DBUS_SESSION_BUS_ADDRESS: environment.DBUS_SESSION_BUS_ADDRESS,
+    GNOME_KEYRING_CONTROL: environment.GNOME_KEYRING_CONTROL,
+    XDG_RUNTIME_DIR: environment.XDG_RUNTIME_DIR,
+    XDG_DATA_HOME: environment.XDG_DATA_HOME,
+    XDG_CONFIG_HOME: environment.XDG_CONFIG_HOME,
+    ...supervisionEnvironment,
+    [verifiedRunnerEnvironment]: '1',
+    [verifiedRunnerRootEnvironment]: harnessRoot,
+  });
+}
+
 export function assertExecutingHarnessAuthority(
   lock,
   executingRoot = projectRoot,
@@ -1198,39 +1294,7 @@ async function bootstrapVerifiedRunner(options) {
             [runner, ...verifiedArgs],
             {
               cwd: harnessRoot,
-              env: compactEnvironment({
-                PATH: process.env.PATH,
-                HOME: process.env.HOME,
-                TMPDIR: process.env.TMPDIR,
-                LANG: process.env.LANG,
-                LC_ALL: process.env.LC_ALL,
-                CI: process.env.CI,
-                RUSTUP_HOME: process.env.RUSTUP_HOME,
-                CARGO_HOME: process.env.CARGO_HOME,
-                OPENCOVEN_CHAT_ROOT: options.chatSourceRoot,
-                OPENCOVEN_SDK_ROOT: options.sdkSourceRoot,
-                OPENCOVEN_SDK_EVIDENCE_ROOT: options.sdkEvidenceSourceRoot,
-                OPENCOVEN_SDK_VALIDATOR_ROOT: options.sdkValidatorSourceRoot,
-                OPENCOVEN_CAVE_ROOT: options.caveSourceRoot,
-                OPENCOVEN_COVEN_ROOT: options.covenSourceRoot,
-                OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: options.windowsSupervisorPath,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP,
-                OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED:
-                  process.env.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED,
-                PHASE1_TEST_KEYCHAIN: process.env.PHASE1_TEST_KEYCHAIN,
-                DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
-                GNOME_KEYRING_CONTROL: process.env.GNOME_KEYRING_CONTROL,
-                XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-                XDG_DATA_HOME: process.env.XDG_DATA_HOME,
-                XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-                [verifiedRunnerEnvironment]: '1',
-                [verifiedRunnerRootEnvironment]: harnessRoot,
-              }),
+              env: createVerifiedRunnerEnvironment(options, harnessRoot),
               timeoutMs: cargoBuildTimeoutMs * 3,
             },
           );

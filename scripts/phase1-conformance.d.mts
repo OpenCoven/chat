@@ -10,7 +10,38 @@ export function unixProducerBindingEnvironment(
   currentUid?: number,
   cgroupMembership?: string,
 ): Record<string, string>;
-export function parseArgs(argv: string[]): {
+export function schemaV2SupervisorEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+  architecture?: string,
+  currentUid?: number,
+  cgroupMembership?: string,
+): Record<string, string>;
+export function supervisorArtifactOutputPath(
+  binding: Record<string, string>,
+  platform?: NodeJS.Platform,
+): string;
+export function runPowerShellCommandWithArgs(
+  executable: string,
+  script: string,
+  args: string[],
+  options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeout?: number;
+  },
+): string;
+export type Phase1RuntimeContext = {
+  environment?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  architecture?: string;
+  currentUid?: number;
+  cgroupMembership?: string;
+};
+export function parseArgs(
+  argv: string[],
+  runtime?: Phase1RuntimeContext,
+): {
   lockPath: string;
   scenario: 'all';
   retainSanitizedReport: string;
@@ -25,6 +56,12 @@ export function parseArgs(argv: string[]): {
   covenSourceRoot: string;
   windowsSupervisorPath?: string;
 };
+export function createVerifiedRunnerEnvironment(
+  options: ReturnType<typeof parseArgs>,
+  harnessRoot: string,
+  environment?: NodeJS.ProcessEnv,
+  runtime?: Phase1RuntimeContext,
+): NodeJS.ProcessEnv;
 export function observeReleaseToolVersions(): {
   nodeVersion: 'v24.18.1';
   packageManagerVersion: 'pnpm@10.34.0';

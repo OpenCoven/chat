@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   appendFileSync,
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -39,6 +40,7 @@ import {
   cloneExactCheckout,
   covenIdentityFailureDiagnostic,
   createCleanupAdoptionRecovery,
+  createVerifiedRunnerEnvironment,
   diagnoseCovenLifecycleFailure,
   evidenceValidationFailureDiagnostic,
   extractVerifiedRunnerDiagnostic,
@@ -59,6 +61,7 @@ import {
   resolveRustupHome,
   runNativeScenarioOrchestrator,
   runOwnedProcessStatusForTest,
+  runPowerShellCommandWithArgs,
   runReservedNativePairing,
   runSupervisedCommandForTest,
   runtimeScenarioFailureDiagnostic,
@@ -80,6 +83,34 @@ import {
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
+
+function resolvePowerShellPath() {
+  try {
+    return execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['pwsh'], {
+      encoding: 'utf8',
+    })
+      .split(/\r?\n/u)
+      .find(Boolean);
+  } catch {
+    return undefined;
+  }
+}
+
+const powerShellPath = resolvePowerShellPath();
+
+function createSupervisorArtifactFixture(platform: string) {
+  const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'phase1-supervisor-artifact-')));
+  const workspace = resolve(root, 'source');
+  const artifactWorkspace = resolve(root, 'producer', 'workspace');
+  const artifactDirectory = resolve(artifactWorkspace, '.artifacts');
+  const sourceRecord = resolve(artifactDirectory, `client-v1-conformance-${platform}.json`);
+  mkdirSync(workspace, { recursive: true, mode: 0o555 });
+  mkdirSync(artifactDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(workspace, 0o555);
+  chmodSync(artifactWorkspace, 0o700);
+  chmodSync(artifactDirectory, 0o700);
+  return { root, workspace, artifactDirectory, sourceRecord };
+}
 
 function processIsLive(pid: number) {
   try {
@@ -251,11 +282,25 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('requires an exact nonce-bound Windows Job Object environment for Windows evidence', () => {
     const nonce = '0123456789abcdef0123456789abcdef';
+    const bootstrapRoot = `C:\\OpenCoven\\opencoven-win32-${nonce}`;
+    const workspace = `${bootstrapRoot}\\workspace`;
+    const artifactDirectory = `${workspace}\\.artifacts`;
     const binding = {
       OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
       OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
       OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
+      OPENCOVEN_WINDOWS_WORKSPACE: workspace,
+      OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
+      OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      SYSTEMROOT: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
+      COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
+      TEMP: `${bootstrapRoot}\\temp`,
+      TMP: `${bootstrapRoot}\\temp`,
+      PATH: 'C:\\trusted\\node;C:\\trusted\\cargo',
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
       LIB: [
         'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
@@ -287,69 +332,329 @@ describe('Phase 1 real-authority conformance harness', () => {
         'win32',
       ),
     ).toThrow(/system PowerShell/u);
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\replacement.json`,
+        },
+        'win32',
+      ),
+    ).toThrow(/artifact/u);
+    expect(() =>
+      windowsJobBindingEnvironment({ ...binding, TEMP: 'C:\\ambient\\temp' }, 'win32'),
+    ).toThrow(/temporary/u);
   });
 
   test('requires a distinct Unix producer UID and native containment binding', () => {
+    const fixture = createSupervisorArtifactFixture('linux-x64');
+    const currentUid = process.getuid?.() ?? 1977;
+    const brokerUid = currentUid === 1 ? 2 : currentUid - 1;
     const common = {
       OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
       OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'linux-x64',
-      OPENCOVEN_UNIX_PRODUCER_UID: '1977',
-      OPENCOVEN_UNIX_BROKER_UID: '1001',
+      OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+      OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+      OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
       OPENCOVEN_UNIX_CONTAINMENT: 'linux-cgroup-v2',
       OPENCOVEN_UNIX_CGROUP_PATH: '/opencoven-chat-0123456789abcdef',
+      OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+      OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+      OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
     };
 
-    expect(
-      unixProducerBindingEnvironment(
-        common,
-        'linux',
-        'x64',
-        1977,
-        '0::/opencoven-chat-0123456789abcdef\n',
-      ),
-    ).toEqual(common);
-    expect(
-      unixProducerBindingEnvironment(
-        {
+    try {
+      expect(
+        unixProducerBindingEnvironment(
+          common,
+          'linux',
+          'x64',
+          currentUid,
+          '0::/opencoven-chat-0123456789abcdef\n',
+        ),
+      ).toEqual(common);
+      const darwinFixture = createSupervisorArtifactFixture('darwin-arm64');
+      try {
+        const darwin = {
           ...common,
           OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'darwin-arm64',
           OPENCOVEN_UNIX_CONTAINMENT: 'macos-uid',
           OPENCOVEN_UNIX_CGROUP_PATH: undefined,
-        },
-        'darwin',
-        'arm64',
-        1977,
-        '',
-      ),
-    ).toEqual({
-      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
-      OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'darwin-arm64',
-      OPENCOVEN_UNIX_PRODUCER_UID: '1977',
-      OPENCOVEN_UNIX_BROKER_UID: '1001',
-      OPENCOVEN_UNIX_CONTAINMENT: 'macos-uid',
-    });
-    expect(unixProducerBindingEnvironment(common, 'win32', 'x64', undefined, '')).toEqual({});
+          OPENCOVEN_UNIX_WORKSPACE: darwinFixture.workspace,
+          OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: darwinFixture.artifactDirectory,
+          OPENCOVEN_UNIX_SOURCE_RECORD: darwinFixture.sourceRecord,
+        };
+        expect(unixProducerBindingEnvironment(darwin, 'darwin', 'arm64', currentUid, '')).toEqual(
+          darwin,
+        );
+      } finally {
+        rmSync(darwinFixture.root, { recursive: true, force: true });
+      }
+      expect(unixProducerBindingEnvironment(common, 'win32', 'x64', undefined, '')).toEqual({});
 
-    for (const invalid of [
-      { ...common, OPENCOVEN_UNIX_PRODUCER_REQUIRED: '0' },
-      { ...common, OPENCOVEN_UNIX_PRODUCER_UID: '1001' },
-      { ...common, OPENCOVEN_UNIX_BROKER_UID: '1977' },
-      { ...common, OPENCOVEN_UNIX_BROKER_UID: '0' },
-      { ...common, OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'linux-arm64' },
-      { ...common, OPENCOVEN_UNIX_CONTAINMENT: 'process-group' },
-      { ...common, OPENCOVEN_UNIX_CGROUP_PATH: '/other' },
-    ]) {
-      expect(() =>
-        unixProducerBindingEnvironment(
-          invalid,
-          'linux',
-          'x64',
-          1977,
-          '0::/opencoven-chat-0123456789abcdef\n',
-        ),
-      ).toThrow(/Unix schema-v2 evidence/u);
+      for (const invalid of [
+        { ...common, OPENCOVEN_UNIX_PRODUCER_REQUIRED: '0' },
+        { ...common, OPENCOVEN_UNIX_PRODUCER_UID: String(brokerUid) },
+        { ...common, OPENCOVEN_UNIX_BROKER_UID: String(currentUid) },
+        { ...common, OPENCOVEN_UNIX_BROKER_UID: '0' },
+        { ...common, OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'linux-arm64' },
+        { ...common, OPENCOVEN_UNIX_CONTAINMENT: 'process-group' },
+        { ...common, OPENCOVEN_UNIX_CGROUP_PATH: '/other' },
+        {
+          ...common,
+          OPENCOVEN_UNIX_SOURCE_RECORD: resolve(fixture.artifactDirectory, 'replacement.json'),
+        },
+      ]) {
+        expect(() =>
+          unixProducerBindingEnvironment(
+            invalid,
+            'linux',
+            'x64',
+            currentUid,
+            '0::/opencoven-chat-0123456789abcdef\n',
+          ),
+        ).toThrow(/Unix schema-v2 evidence/u);
+      }
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
+
+  test('projects only validated Unix supervision into the relocated verified runner', () => {
+    const platform = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
+    const fixture = createSupervisorArtifactFixture(platform);
+    const currentUid = process.getuid?.() ?? 1977;
+    const brokerUid = currentUid === 1 ? 2 : currentUid - 1;
+    const environment = {
+      ...process.env,
+      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+      OPENCOVEN_UNIX_PRODUCER_PLATFORM: platform,
+      OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+      OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+      OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
+      OPENCOVEN_UNIX_CONTAINMENT: process.platform === 'darwin' ? 'macos-uid' : 'linux-cgroup-v2',
+      OPENCOVEN_UNIX_CGROUP_PATH:
+        process.platform === 'darwin' ? undefined : '/opencoven-chat-0123456789abcdef',
+      OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+      OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+      OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      GITHUB_TOKEN: 'must-not-propagate',
+    };
+    const runtime = {
+      platform: process.platform,
+      architecture: process.arch,
+      currentUid,
+      cgroupMembership:
+        process.platform === 'darwin' ? '' : '0::/opencoven-chat-0123456789abcdef\n',
+    };
+
+    try {
+      const options = parseArgs(
+        [
+          '--validator-revision',
+          'd'.repeat(40),
+          '--platform',
+          platform,
+          '--output',
+          fixture.sourceRecord,
+        ],
+        { environment, ...runtime },
+      );
+      const projected = createVerifiedRunnerEnvironment(
+        options,
+        resolve(fixture.root, 'relocated-harness'),
+        environment,
+        runtime,
+      );
+      expect(projected).toMatchObject({
+        OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+        OPENCOVEN_UNIX_PRODUCER_PLATFORM: platform,
+        OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+        OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+        OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
+        OPENCOVEN_UNIX_CONTAINMENT: process.platform === 'darwin' ? 'macos-uid' : 'linux-cgroup-v2',
+        OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+        OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+        OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+        OPENCOVEN_PHASE1_VERIFIED_RUNNER: '1',
+        OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT: resolve(fixture.root, 'relocated-harness'),
+      });
+      expect(projected).not.toHaveProperty('GITHUB_TOKEN');
+      expect(() =>
+        createVerifiedRunnerEnvironment(
+          options,
+          resolve(fixture.root, 'relocated-harness'),
+          { ...environment, OPENCOVEN_UNIX_SOURCE_RECORD: undefined },
+          runtime,
+        ),
+      ).toThrow(/Unix schema-v2 evidence/u);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('projects only validated Windows Job and toolchain proof into the verified runner', () => {
+    const nonce = '0123456789abcdef0123456789abcdef';
+    const bootstrapRoot = `C:\\OpenCoven\\opencoven-win32-${nonce}`;
+    const workspace = `${bootstrapRoot}\\workspace`;
+    const artifactDirectory = `${workspace}\\.artifacts`;
+    const environment = {
+      PATH: 'C:\\trusted\\node;C:\\trusted\\cargo',
+      HOME: 'C:\\OpenCoven\\isolated\\profile',
+      OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
+      OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
+      OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
+      OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
+      OPENCOVEN_WINDOWS_WORKSPACE: workspace,
+      OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
+      OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      SYSTEMROOT: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
+      COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
+      TEMP: `${bootstrapRoot}\\temp`,
+      TMP: `${bootstrapRoot}\\temp`,
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      LIB: [
+        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
+      ].join(';'),
+      INCLUDE: [
+        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include',
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
+      ].join(';'),
+      GITHUB_TOKEN: 'must-not-propagate',
+    };
+    const runtime = {
+      platform: 'win32' as const,
+      architecture: 'x64',
+      cgroupMembership: '',
+    };
+    const options = parseArgs(
+      [
+        '--validator-revision',
+        'd'.repeat(40),
+        '--platform',
+        'win32-x64',
+        '--output',
+        environment.OPENCOVEN_WINDOWS_SOURCE_RECORD,
+      ],
+      { environment, ...runtime },
+    );
+    const projected = createVerifiedRunnerEnvironment(
+      options,
+      'C:\\OpenCoven\\bootstrap\\harness',
+      environment,
+      runtime,
+    );
+
+    expect(projected).toMatchObject({
+      OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
+      OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
+      OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
+      OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      OPENCOVEN_WINDOWS_WORKSPACE: workspace,
+      OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
+      OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      SYSTEMROOT: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
+      COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
+      TEMP: `${bootstrapRoot}\\temp`,
+      TMP: `${bootstrapRoot}\\temp`,
+      LIB: environment.LIB,
+      INCLUDE: environment.INCLUDE,
+      OPENCOVEN_PHASE1_VERIFIED_RUNNER: '1',
+      OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT: 'C:\\OpenCoven\\bootstrap\\harness',
+    });
+    expect(projected).not.toHaveProperty('GITHUB_TOKEN');
+    expect(() =>
+      createVerifiedRunnerEnvironment(
+        options,
+        'C:\\OpenCoven\\bootstrap\\harness',
+        { ...environment, OPENCOVEN_WINDOWS_JOB_NONCE: '0'.repeat(32) },
+        runtime,
+      ),
+    ).toThrow(/nonce-bound/u);
+  });
+
+  test.skipIf(process.platform !== 'darwin')(
+    'accepts the real Unix supervisor record path after verified-runner relocation',
+    () => {
+      const fixture = createSupervisorArtifactFixture('darwin-arm64');
+      const relocatedRoot = resolve(fixture.root, 'relocated-harness');
+      cpSync(resolve(projectRoot, 'scripts'), resolve(relocatedRoot, 'scripts'), {
+        recursive: true,
+      });
+      const currentUid = process.getuid?.();
+      if (currentUid === undefined) {
+        throw new Error('Darwin supervisor test requires a native UID.');
+      }
+      const brokerUid = currentUid === 1 ? 2 : currentUid - 1;
+      const result = spawnSync(
+        process.execPath,
+        [
+          resolve(relocatedRoot, 'scripts', 'phase1-conformance.mjs'),
+          '--lock',
+          resolve(fixture.root, 'missing.lock.json'),
+          '--validator-revision',
+          'd'.repeat(40),
+          '--platform',
+          'darwin-arm64',
+          '--output',
+          fixture.sourceRecord,
+        ],
+        {
+          cwd: relocatedRoot,
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            TMPDIR: process.env.TMPDIR,
+            OPENCOVEN_PHASE1_VERIFIED_RUNNER: '1',
+            OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT: relocatedRoot,
+            OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+            OPENCOVEN_UNIX_PRODUCER_PLATFORM: 'darwin-arm64',
+            OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+            OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+            OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
+            OPENCOVEN_UNIX_CONTAINMENT: 'macos-uid',
+            OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+            OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+            OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+          },
+        },
+      );
+      try {
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('phase1.stage.lock.failed');
+        expect(result.stderr).not.toContain('schema-v2 --output must match');
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(powerShellPath === undefined)(
+    'passes Windows Job name and PID as exactly two PowerShell arguments',
+    () => {
+      const jobName = 'Local\\OpenCoven.Chat.Conformance.0123456789abcdef0123456789abcdef';
+      const pid = '4242';
+      const output = runPowerShellCommandWithArgs(
+        powerShellPath as string,
+        '[Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args)))',
+        [jobName, pid],
+        {
+          cwd: projectRoot,
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+          },
+          timeout: 15_000,
+        },
+      );
+      expect(JSON.parse(output)).toEqual([jobName, pid]);
+    },
+  );
 
   test('has no module-scope subprocess and makes Windows membership the first schema-v2 subprocess', () => {
     const source = readFileSync(
@@ -362,9 +667,9 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(source.slice(0, firstExport)).not.toContain('execFileSync(');
     expect(runSource.indexOf('scrubEvidenceAuthorizationEnvironment()')).toBeLessThan(
-      runSource.indexOf('unixProducerBindingEnvironment(process.env)'),
+      runSource.indexOf('schemaV2SupervisorEnvironment(process.env)'),
     );
-    expect(runSource.indexOf('unixProducerBindingEnvironment(process.env)')).toBeLessThan(
+    expect(runSource.indexOf('schemaV2SupervisorEnvironment(process.env)')).toBeLessThan(
       runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)'),
     );
     expect(runSource.indexOf('assertWindowsJobMembership(windowsJobBinding)')).toBeLessThan(
@@ -1124,66 +1429,103 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test('parses the protected schema-v2 platform invocation without legacy output flags', () => {
-    expect(
-      parseArgs([
-        '--validator-revision',
-        'd'.repeat(40),
-        '--platform',
-        'darwin-arm64',
-        '--output',
-        './.artifacts/client-v1-conformance-darwin-arm64.json',
-      ]),
-    ).toMatchObject({
-      platform: 'darwin-arm64',
-      validatorRevision: 'd'.repeat(40),
-      outputPath: expect.stringContaining('.artifacts/client-v1-conformance-darwin-arm64.json'),
-    });
-    expect(() =>
-      parseArgs(['--validator-revision', 'd'.repeat(40), '--platform', 'linux-x64']),
-    ).toThrow(/requires --output/u);
-    expect(() =>
-      parseArgs([
-        '--platform',
-        'linux-x64',
-        '--output',
-        './.artifacts/client-v1-conformance-linux-x64.json',
-      ]),
-    ).toThrow(/requires --validator-revision/u);
-    expect(() =>
-      parseArgs([
-        '--validator-revision',
-        'D'.repeat(40),
-        '--platform',
-        'darwin-arm64',
-        '--output',
-        './.artifacts/client-v1-conformance-darwin-arm64.json',
-      ]),
-    ).toThrow(/lowercase immutable 40-character commit SHA/u);
-    expect(() =>
-      parseArgs([
-        '--platform',
-        'darwin-arm64',
-        '--validator-revision',
-        'd'.repeat(40),
-        '--output',
-        './.artifacts/client-v1-conformance-linux-x64.json',
-      ]),
-    ).toThrow(/must match the platform/u);
-    expect(() =>
-      parseArgs([
-        '--platform',
-        'darwin-arm64',
-        '--validator-revision',
-        'd'.repeat(40),
-        '--output',
-        './.artifacts/client-v1-conformance-darwin-arm64.json',
-        '--retain-sanitized-report',
-        './legacy.json',
-      ]),
-    ).toThrow(/cannot combine/u);
-    expect(() => parseArgs(['--validator-revision', 'd'.repeat(40), '--scenario', 'all'])).toThrow(
-      /only valid with schema-v2/u,
-    );
+    const platform = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
+    const fixture = createSupervisorArtifactFixture(platform);
+    const currentUid = process.getuid?.() ?? 1977;
+    const brokerUid = currentUid === 1 ? 2 : currentUid - 1;
+    const environment = {
+      ...process.env,
+      OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+      OPENCOVEN_UNIX_PRODUCER_PLATFORM: platform,
+      OPENCOVEN_UNIX_PRODUCER_UID: String(currentUid),
+      OPENCOVEN_UNIX_PRODUCER_NAME: 'ocv0123456789abcdef',
+      OPENCOVEN_UNIX_BROKER_UID: String(brokerUid),
+      OPENCOVEN_UNIX_CONTAINMENT: process.platform === 'darwin' ? 'macos-uid' : 'linux-cgroup-v2',
+      OPENCOVEN_UNIX_CGROUP_PATH:
+        process.platform === 'darwin' ? undefined : '/opencoven-chat-0123456789abcdef',
+      OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
+      OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
+      OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+    };
+    const runtime = {
+      environment,
+      platform: process.platform,
+      architecture: process.arch,
+      currentUid,
+      cgroupMembership:
+        process.platform === 'darwin' ? '' : '0::/opencoven-chat-0123456789abcdef\n',
+    };
+    try {
+      expect(
+        parseArgs(
+          [
+            '--validator-revision',
+            'd'.repeat(40),
+            '--platform',
+            platform,
+            '--output',
+            fixture.sourceRecord,
+          ],
+          runtime,
+        ),
+      ).toMatchObject({
+        platform,
+        validatorRevision: 'd'.repeat(40),
+        outputPath: fixture.sourceRecord,
+      });
+      expect(() =>
+        parseArgs(['--validator-revision', 'd'.repeat(40), '--platform', 'linux-x64'], runtime),
+      ).toThrow(/requires --output/u);
+      expect(() =>
+        parseArgs(['--platform', 'linux-x64', '--output', fixture.sourceRecord], runtime),
+      ).toThrow(/requires --validator-revision/u);
+      expect(() =>
+        parseArgs(
+          [
+            '--validator-revision',
+            'D'.repeat(40),
+            '--platform',
+            platform,
+            '--output',
+            fixture.sourceRecord,
+          ],
+          runtime,
+        ),
+      ).toThrow(/lowercase immutable 40-character commit SHA/u);
+      expect(() =>
+        parseArgs(
+          [
+            '--platform',
+            platform,
+            '--validator-revision',
+            'd'.repeat(40),
+            '--output',
+            resolve(fixture.artifactDirectory, 'client-v1-conformance-other.json'),
+          ],
+          runtime,
+        ),
+      ).toThrow(/artifact/u);
+      expect(() =>
+        parseArgs(
+          [
+            '--platform',
+            platform,
+            '--validator-revision',
+            'd'.repeat(40),
+            '--output',
+            fixture.sourceRecord,
+            '--retain-sanitized-report',
+            './legacy.json',
+          ],
+          runtime,
+        ),
+      ).toThrow(/cannot combine/u);
+      expect(() =>
+        parseArgs(['--validator-revision', 'd'.repeat(40), '--scenario', 'all'], runtime),
+      ).toThrow(/only valid with schema-v2/u);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   test('rejects Node preload and loader runtime injection indicators', () => {

@@ -1850,6 +1850,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'OPENCOVEN_WINDOWS_JOB_REQUIRED',
       'OPENCOVEN_WINDOWS_JOB_NONCE',
       'OPENCOVEN_WINDOWS_JOB_NAME',
+      'OPENCOVEN_WINDOWS_WORKSPACE',
+      'OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY',
+      'OPENCOVEN_WINDOWS_SOURCE_RECORD',
       'Get-AuthenticodeSignature',
       'ResourceQuotaExceeded',
       'phase1-conformance-run-*\\checkouts\\sdk',
@@ -1879,6 +1882,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runBody).not.toContain("'objects.githubusercontent.com'");
     expect(runBody).toContain('--config.store-dir=$($env:PNPM_STORE_DIR)');
     expect(runBody).toContain('CARGO_NET_GIT_FETCH_WITH_CLI');
+    expect(runBody).toContain('$recordPath = $env:OPENCOVEN_WINDOWS_SOURCE_RECORD');
+    expect(runBody).toContain(
+      "OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY = (Join-Path $workspace '.artifacts')",
+    );
+    expect(runBody).toContain(
+      "OPENCOVEN_WINDOWS_SOURCE_RECORD = (Join-Path $workspace '.artifacts\\client-v1-conformance-win32-x64.json')",
+    );
     expect(bootstrap).not.toMatch(/\b(?:curl|wget|Invoke-WebRequest)\b/u);
     expect(bootstrap).not.toContain('http://');
     expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
