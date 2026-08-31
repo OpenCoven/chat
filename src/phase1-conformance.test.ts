@@ -71,6 +71,7 @@ import {
   throwNativeScenarioFailures,
   unixProducerBindingEnvironment,
   validateSupervisorArtifactFile,
+  validateSchemaV2AuthorityCheckouts,
   windowsJobBindingEnvironment,
   withFixtureDaemon,
   withOwnedArtifactRoot,
@@ -265,6 +266,58 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
     30_000,
   );
+
+  test('keeps workflow producer HEAD distinct from the historical executable harness', () => {
+    const lock = readPhase1ConformanceLock();
+    const workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+    const workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+    expect(workflowRevision).not.toBe(lock.harness.revision);
+    const root = resolve(projectRoot, 'test-results', 'phase1-distinct-authorities', randomUUID());
+    const harnessRoot = resolve(root, 'harness');
+    const producerRoot = resolve(root, 'producer');
+    try {
+      mkdirSync(root, { recursive: true });
+      const checkouts: Array<readonly [string, string]> = [
+        [harnessRoot, lock.harness.revision],
+        [producerRoot, workflowRevision],
+      ];
+      for (const [destination, revision] of checkouts) {
+        execFileSync('git', ['clone', '--quiet', '--no-checkout', projectRoot, destination]);
+        execFileSync('git', ['checkout', '--quiet', '--detach', revision], {
+          cwd: destination,
+        });
+      }
+      const result = validateSchemaV2AuthorityCheckouts({
+        lock,
+        harnessRoot,
+        producerRoot,
+        producerIdentity: { revision: workflowRevision, tree: workflowTree },
+      });
+      expect(result).toEqual({
+        harness: {
+          revision: lock.harnessAuthority.revision,
+          tree: lock.harnessAuthority.tree,
+        },
+        producer: { revision: workflowRevision, tree: workflowTree },
+      });
+      expect(() =>
+        validateSchemaV2AuthorityCheckouts({
+          lock,
+          harnessRoot: producerRoot,
+          producerRoot: harnessRoot,
+          producerIdentity: { revision: workflowRevision, tree: workflowTree },
+        }),
+      ).toThrow(/harness|producer/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   test('scrubs OIDC and GitHub bearer variables before evidence work begins', () => {
     const environment = {
@@ -711,7 +764,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const runStart = source.indexOf('export async function runSchemaV2Conformance');
     const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
     const checkout = runSource.indexOf('createExactCheckouts(');
-    const producerAuthority = runSource.indexOf('assertPhase1ProducerAuthority(');
+    const producerAuthority = runSource.indexOf('validateSchemaV2AuthorityCheckouts(');
     const sdkAuthority = runSource.indexOf('loadSdkEvidenceContract(');
     const packageWork = runSource.indexOf('packageLockedArtifacts(');
     const cargoObservations = runSource.indexOf('runSchemaV2ObservationSuites(');
@@ -724,6 +777,8 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(runSource.indexOf('requirePhase1HarnessAuthorityVerification(')).toBeLessThan(
       runSource.indexOf('assertWindowsJobMembership('),
     );
+    expect(runSource).toContain('harnessRoot: projectRoot');
+    expect(runSource).toContain('producerRoot: roots.producerRoot');
     expect(source).not.toContain('const report = await runSchemaV2Conformance(options);');
   });
 

@@ -48,11 +48,49 @@ namespace OpenCoven
         private const uint USER_PRIV_USER = 1;
         private const uint UF_SCRIPT = 0x0001;
         private const uint UF_ACCOUNTDISABLE = 0x0002;
+        private const uint UF_LOCKOUT = 0x0010;
+        private const uint UF_PASSWD_NOTREQD = 0x0020;
+        private const uint UF_ENCRYPTED_TEXT_PASSWORD_ALLOWED = 0x0080;
+        private const uint UF_TEMP_DUPLICATE_ACCOUNT = 0x0100;
         private const uint UF_NORMAL_ACCOUNT = 0x0200;
+        private const uint UF_INTERDOMAIN_TRUST_ACCOUNT = 0x0800;
+        private const uint UF_WORKSTATION_TRUST_ACCOUNT = 0x1000;
+        private const uint UF_SERVER_TRUST_ACCOUNT = 0x2000;
         private const uint UF_DONT_EXPIRE_PASSWD = 0x10000;
+        private const uint UF_SMARTCARD_REQUIRED = 0x40000;
+        private const uint UF_TRUSTED_FOR_DELEGATION = 0x80000;
+        private const uint UF_USE_DES_KEY_ONLY = 0x200000;
+        private const uint UF_DONT_REQUIRE_PREAUTH = 0x400000;
+        private const uint UF_PASSWORD_EXPIRED = 0x800000;
+        private const uint UF_TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION = 0x1000000;
+        private const uint AccountTypeMask =
+            UF_TEMP_DUPLICATE_ACCOUNT |
+            UF_NORMAL_ACCOUNT |
+            UF_INTERDOMAIN_TRUST_ACCOUNT |
+            UF_WORKSTATION_TRUST_ACCOUNT |
+            UF_SERVER_TRUST_ACCOUNT;
+        private const uint UnsafeAccountFlagMask =
+            UF_ACCOUNTDISABLE |
+            UF_LOCKOUT |
+            UF_PASSWD_NOTREQD |
+            UF_ENCRYPTED_TEXT_PASSWORD_ALLOWED |
+            UF_SMARTCARD_REQUIRED |
+            UF_TRUSTED_FOR_DELEGATION |
+            UF_USE_DES_KEY_ONLY |
+            UF_DONT_REQUIRE_PREAUTH |
+            UF_PASSWORD_EXPIRED |
+            UF_TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION;
         private const int LOGON32_LOGON_INTERACTIVE = 2;
         private const int LOGON32_PROVIDER_DEFAULT = 0;
         private const int ERROR_INSUFFICIENT_BUFFER = 122;
+        private const uint MAX_PREFERRED_LENGTH = 0xffffffff;
+        private const uint LG_INCLUDE_INDIRECT = 0x0001;
+        private const int TokenPrivileges = 3;
+        private const int TokenElevationType = 18;
+        private const int TokenElevation = 20;
+        private const int TokenIntegrityLevel = 25;
+        private const uint TokenElevationTypeDefault = 1;
+        private const uint MediumIntegrityRid = 0x2000;
         private const int MaximumAccountCreationAttempts = 8;
 
         private string password;
@@ -69,7 +107,8 @@ namespace OpenCoven
             string profilePath,
             string tempPath,
             string workspacePath,
-            string operatingSystemProfilePath)
+            string operatingSystemProfilePath,
+            string validationSummary)
         {
             UserName = userName;
             password = passwordValue;
@@ -79,6 +118,7 @@ namespace OpenCoven
             TempPath = tempPath;
             WorkspacePath = workspacePath;
             OperatingSystemProfilePath = operatingSystemProfilePath;
+            ValidationSummary = validationSummary;
         }
 
         public string UserName { get; private set; }
@@ -88,6 +128,7 @@ namespace OpenCoven
         public string TempPath { get; private set; }
         public string WorkspacePath { get; private set; }
         public string OperatingSystemProfilePath { get; private set; }
+        public string ValidationSummary { get; private set; }
 
         internal string Password
         {
@@ -162,12 +203,14 @@ namespace OpenCoven
                     throw new InvalidOperationException(
                         "A unique ephemeral local user name could not be allocated.");
                 }
+                NormalizeNewStandardAccount(userName);
 
                 SecurityIdentifier accountSid = (SecurityIdentifier)new NTAccount(
                     Environment.MachineName,
                     userName).Translate(typeof(SecurityIdentifier));
                 sid = accountSid.Value;
-                ValidateStandardUser(userName, passwordValue, sid);
+                string validationSummary =
+                    ValidateStandardUser(userName, passwordValue, sid);
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
@@ -213,7 +256,8 @@ namespace OpenCoven
                     profilePath,
                     tempPath,
                     workspacePath,
-                    Path.Combine(GetProfilesRoot(), userName));
+                    Path.Combine(GetProfilesRoot(), userName),
+                    validationSummary);
             }
             catch (Exception original)
             {
@@ -416,12 +460,14 @@ namespace OpenCoven
             isQuarantineComplete = completion;
         }
 
-        private static void ValidateStandardUser(
+        private static string ValidateStandardUser(
             string userName,
             string passwordValue,
             string expectedSid)
         {
             IntPtr information = IntPtr.Zero;
+            uint legacyPrivilege;
+            uint accountFlags;
             uint status = NetUserGetInfo(null, userName, 1, out information);
             if (status != NERR_SUCCESS || information == IntPtr.Zero)
             {
@@ -429,23 +475,20 @@ namespace OpenCoven
                     unchecked((int)status),
                     "Ephemeral local user could not be queried.");
             }
+
             try
             {
                 USER_INFO_1 value = (USER_INFO_1)Marshal.PtrToStructure(
                     information,
                     typeof(USER_INFO_1));
-                if (value.usri1_priv != USER_PRIV_USER ||
-                    (value.usri1_flags & UF_NORMAL_ACCOUNT) == 0 ||
-                    (value.usri1_flags & UF_ACCOUNTDISABLE) != 0)
-                {
-                    throw new InvalidOperationException(
-                        "Ephemeral account is not a standard local user.");
-                }
+                legacyPrivilege = value.usri1_priv;
+                accountFlags = value.usri1_flags;
             }
             finally
             {
                 NetApiBufferFree(information);
             }
+            string[] localGroupSids = ReadLocalGroupSids(userName);
 
             IntPtr token;
             if (!LogonUserW(
@@ -462,6 +505,11 @@ namespace OpenCoven
             }
             try
             {
+                bool isAdministrator;
+                bool isElevated;
+                uint elevationType;
+                uint integrityRid;
+                string[] tokenPrivileges;
                 using (WindowsIdentity identity = new WindowsIdentity(token))
                 {
                     if (identity.User == null || identity.User.Value != expectedSid)
@@ -481,7 +529,6 @@ namespace OpenCoven
                 }
                 try
                 {
-                    bool isAdministrator;
                     if (!CheckTokenMembership(
                             token,
                             administrators,
@@ -501,10 +548,389 @@ namespace OpenCoven
                 {
                     LocalFree(administrators);
                 }
+                isElevated = ReadTokenElevation(token);
+                elevationType = ReadTokenElevationType(token);
+                integrityRid = ReadTokenIntegrityRid(token);
+                tokenPrivileges = ReadTokenPrivileges(token);
+                ValidateStandardUserSnapshot(
+                    legacyPrivilege,
+                    accountFlags,
+                    localGroupSids,
+                    isAdministrator,
+                    isElevated,
+                    elevationType,
+                    integrityRid,
+                    tokenPrivileges);
+                return String.Format(
+                    CultureInfo.InvariantCulture,
+                    "legacyPriv={0};flags=0x{1:x8};groups={2};elevated={3};" +
+                        "elevationType={4};integrity=0x{5:x8};tokenPrivileges={6};" +
+                        "dangerousPrivileges=none",
+                    legacyPrivilege,
+                    accountFlags,
+                    String.Join(",", localGroupSids),
+                    isElevated ? "true" : "false",
+                    elevationType,
+                    integrityRid,
+                    tokenPrivileges.Length == 0
+                        ? "none"
+                        : String.Join(",", tokenPrivileges));
             }
             finally
             {
                 CloseHandle(token);
+            }
+        }
+
+        private static void NormalizeNewStandardAccount(string userName)
+        {
+            IntPtr information = IntPtr.Zero;
+            uint status = NetUserGetInfo(null, userName, 1, out information);
+            if (status != NERR_SUCCESS || information == IntPtr.Zero)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "New ephemeral local user flags could not be queried.");
+            }
+            uint flags;
+            try
+            {
+                USER_INFO_1 value = (USER_INFO_1)Marshal.PtrToStructure(
+                    information,
+                    typeof(USER_INFO_1));
+                if ((value.usri1_flags & AccountTypeMask) != UF_NORMAL_ACCOUNT)
+                {
+                    throw new InvalidOperationException(
+                        "New ephemeral account type was not a normal local account.");
+                }
+                flags =
+                    (value.usri1_flags | UF_SCRIPT | UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD) &
+                    ~UnsafeAccountFlagMask;
+            }
+            finally
+            {
+                NetApiBufferFree(information);
+            }
+            USER_INFO_1008 update = new USER_INFO_1008();
+            update.usri1008_flags = flags;
+            uint parameterError;
+            status = NetUserSetInfo(
+                null,
+                userName,
+                1008,
+                ref update,
+                out parameterError);
+            if (status != NERR_SUCCESS)
+            {
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "New ephemeral local user flags could not be normalized.");
+            }
+        }
+
+        private static void ValidateStandardUserSnapshot(
+            uint legacyPrivilege,
+            uint accountFlags,
+            string[] localGroupSids,
+            bool isAdministrator,
+            bool isElevated,
+            uint elevationType,
+            uint integrityRid,
+            string[] tokenPrivileges)
+        {
+            bool groupsValid =
+                localGroupSids != null &&
+                localGroupSids.Length == 1 &&
+                String.Equals(
+                    localGroupSids[0],
+                    "S-1-5-32-545",
+                    StringComparison.Ordinal);
+            bool flagsValid =
+                (accountFlags & UF_SCRIPT) != 0 &&
+                (accountFlags & AccountTypeMask) == UF_NORMAL_ACCOUNT &&
+                (accountFlags & UnsafeAccountFlagMask) == 0;
+            bool privilegesValid = tokenPrivileges != null;
+            if (privilegesValid)
+            {
+                foreach (string privilege in tokenPrivileges)
+                {
+                    if (IsDangerousPrivilege(privilege))
+                    {
+                        privilegesValid = false;
+                        break;
+                    }
+                }
+            }
+            if (
+                legacyPrivilege > 2 ||
+                !flagsValid ||
+                !groupsValid ||
+                isAdministrator ||
+                isElevated ||
+                elevationType != TokenElevationTypeDefault ||
+                integrityRid != MediumIntegrityRid ||
+                !privilegesValid)
+            {
+                throw new InvalidOperationException(
+                    "Ephemeral account is not a restricted standard local user.");
+            }
+        }
+
+        private static bool IsDangerousPrivilege(string privilege)
+        {
+            switch (privilege)
+            {
+                case "SeAssignPrimaryTokenPrivilege":
+                case "SeAuditPrivilege":
+                case "SeBackupPrivilege":
+                case "SeCreatePermanentPrivilege":
+                case "SeCreateTokenPrivilege":
+                case "SeDebugPrivilege":
+                case "SeEnableDelegationPrivilege":
+                case "SeImpersonatePrivilege":
+                case "SeLoadDriverPrivilege":
+                case "SeManageVolumePrivilege":
+                case "SeRelabelPrivilege":
+                case "SeRestorePrivilege":
+                case "SeSecurityPrivilege":
+                case "SeSystemEnvironmentPrivilege":
+                case "SeTakeOwnershipPrivilege":
+                case "SeTcbPrivilege":
+                case "SeTrustedCredManAccessPrivilege":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static string[] ReadLocalGroupSids(string userName)
+        {
+            IntPtr buffer = IntPtr.Zero;
+            uint entriesRead;
+            uint totalEntries;
+            uint status = NetUserGetLocalGroups(
+                null,
+                userName,
+                0,
+                LG_INCLUDE_INDIRECT,
+                out buffer,
+                MAX_PREFERRED_LENGTH,
+                out entriesRead,
+                out totalEntries);
+            if (status != NERR_SUCCESS || entriesRead != totalEntries)
+            {
+                if (buffer != IntPtr.Zero)
+                {
+                    NetApiBufferFree(buffer);
+                }
+                throw new Win32Exception(
+                    unchecked((int)status),
+                    "Ephemeral local user group membership could not be queried.");
+            }
+            try
+            {
+                HashSet<string> groups =
+                    new HashSet<string>(StringComparer.Ordinal);
+                int size = Marshal.SizeOf(typeof(LOCALGROUP_USERS_INFO_0));
+                for (uint index = 0; index < entriesRead; index++)
+                {
+                    IntPtr entry = new IntPtr(
+                        buffer.ToInt64() + checked((long)index * size));
+                    LOCALGROUP_USERS_INFO_0 group =
+                        (LOCALGROUP_USERS_INFO_0)Marshal.PtrToStructure(
+                            entry,
+                            typeof(LOCALGROUP_USERS_INFO_0));
+                    if (String.IsNullOrWhiteSpace(group.lgrui0_name))
+                    {
+                        throw new InvalidOperationException(
+                            "Ephemeral local group membership was ambiguous.");
+                    }
+                    SecurityIdentifier sid = (SecurityIdentifier)new NTAccount(
+                        group.lgrui0_name).Translate(typeof(SecurityIdentifier));
+                    groups.Add(sid.Value);
+                }
+                string[] result = new List<string>(groups).ToArray();
+                Array.Sort(result, StringComparer.Ordinal);
+                return result;
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero)
+                {
+                    NetApiBufferFree(buffer);
+                }
+            }
+        }
+
+        private static IntPtr ReadTokenInformation(
+            IntPtr token,
+            int informationClass,
+            string label)
+        {
+            uint length = 0;
+            GetTokenInformation(
+                token,
+                informationClass,
+                IntPtr.Zero,
+                0,
+                out length);
+            if (length == 0 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    label + " length could not be queried.");
+            }
+            IntPtr buffer = Marshal.AllocHGlobal(checked((int)length));
+            if (!GetTokenInformation(
+                    token,
+                    informationClass,
+                    buffer,
+                    length,
+                    out length))
+            {
+                int error = Marshal.GetLastWin32Error();
+                Marshal.FreeHGlobal(buffer);
+                throw new Win32Exception(
+                    error,
+                    label + " could not be queried.");
+            }
+            return buffer;
+        }
+
+        private static bool ReadTokenElevation(IntPtr token)
+        {
+            IntPtr buffer = ReadTokenInformation(
+                token,
+                TokenElevation,
+                "Ephemeral token elevation");
+            try
+            {
+                TOKEN_ELEVATION elevation =
+                    (TOKEN_ELEVATION)Marshal.PtrToStructure(
+                        buffer,
+                        typeof(TOKEN_ELEVATION));
+                return elevation.TokenIsElevated != 0;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static uint ReadTokenElevationType(IntPtr token)
+        {
+            IntPtr buffer = ReadTokenInformation(
+                token,
+                TokenElevationType,
+                "Ephemeral token elevation type");
+            try
+            {
+                return unchecked((uint)Marshal.ReadInt32(buffer));
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static uint ReadTokenIntegrityRid(IntPtr token)
+        {
+            IntPtr buffer = ReadTokenInformation(
+                token,
+                TokenIntegrityLevel,
+                "Ephemeral token integrity");
+            try
+            {
+                TOKEN_MANDATORY_LABEL label =
+                    (TOKEN_MANDATORY_LABEL)Marshal.PtrToStructure(
+                        buffer,
+                        typeof(TOKEN_MANDATORY_LABEL));
+                if (label.Label.Sid == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral token integrity SID was unavailable.");
+                }
+                IntPtr countPointer =
+                    GetSidSubAuthorityCount(label.Label.Sid);
+                if (countPointer == IntPtr.Zero)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Ephemeral token integrity SID count could not be queried.");
+                }
+                byte count = Marshal.ReadByte(countPointer);
+                if (count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Ephemeral token integrity SID was malformed.");
+                }
+                IntPtr ridPointer =
+                    GetSidSubAuthority(label.Label.Sid, checked((uint)(count - 1)));
+                if (ridPointer == IntPtr.Zero)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Ephemeral token integrity RID could not be queried.");
+                }
+                return unchecked((uint)Marshal.ReadInt32(ridPointer));
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static string[] ReadTokenPrivileges(IntPtr token)
+        {
+            IntPtr buffer = ReadTokenInformation(
+                token,
+                TokenPrivileges,
+                "Ephemeral token privileges");
+            try
+            {
+                uint count = unchecked((uint)Marshal.ReadInt32(buffer));
+                int entrySize = Marshal.SizeOf(typeof(LUID_AND_ATTRIBUTES));
+                List<string> privileges = new List<string>();
+                for (uint index = 0; index < count; index++)
+                {
+                    IntPtr entry = new IntPtr(
+                        buffer.ToInt64() + sizeof(uint) + checked((long)index * entrySize));
+                    LUID_AND_ATTRIBUTES privilege =
+                        (LUID_AND_ATTRIBUTES)Marshal.PtrToStructure(
+                            entry,
+                            typeof(LUID_AND_ATTRIBUTES));
+                    uint length = 0;
+                    LookupPrivilegeNameW(
+                        null,
+                        ref privilege.Luid,
+                        null,
+                        ref length);
+                    if (length == 0 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Ephemeral token privilege name length could not be queried.");
+                    }
+                    StringBuilder name = new StringBuilder(checked((int)length + 1));
+                    if (!LookupPrivilegeNameW(
+                            null,
+                            ref privilege.Luid,
+                            name,
+                            ref length))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Ephemeral token privilege name could not be queried.");
+                    }
+                    privileges.Add(name.ToString());
+                }
+                string[] result = privileges.ToArray();
+                Array.Sort(result, StringComparer.Ordinal);
+                return result;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
             }
         }
 
@@ -663,6 +1089,45 @@ namespace OpenCoven
             internal uint usri1008_flags;
         }
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct LOCALGROUP_USERS_INFO_0
+        {
+            internal string lgrui0_name;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SID_AND_ATTRIBUTES
+        {
+            internal IntPtr Sid;
+            internal uint Attributes;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_MANDATORY_LABEL
+        {
+            internal SID_AND_ATTRIBUTES Label;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_ELEVATION
+        {
+            internal uint TokenIsElevated;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct LUID
+        {
+            internal uint LowPart;
+            internal int HighPart;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct LUID_AND_ATTRIBUTES
+        {
+            internal LUID Luid;
+            internal uint Attributes;
+        }
+
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
         private static extern uint NetUserAdd(
             string serverName,
@@ -688,6 +1153,17 @@ namespace OpenCoven
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
         private static extern uint NetUserDel(string serverName, string userName);
 
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint NetUserGetLocalGroups(
+            string serverName,
+            string userName,
+            uint level,
+            uint flags,
+            out IntPtr buffer,
+            uint preferredMaximumLength,
+            out uint entriesRead,
+            out uint totalEntries);
+
         [DllImport("netapi32.dll")]
         private static extern uint NetApiBufferFree(IntPtr buffer);
 
@@ -707,6 +1183,31 @@ namespace OpenCoven
             IntPtr token,
             IntPtr sidToCheck,
             [MarshalAs(UnmanagedType.Bool)] out bool isMember);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetTokenInformation(
+            IntPtr token,
+            int informationClass,
+            IntPtr tokenInformation,
+            uint tokenInformationLength,
+            out uint returnLength);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern IntPtr GetSidSubAuthority(
+            IntPtr sid,
+            uint subAuthority);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LookupPrivilegeNameW(
+            string systemName,
+            ref LUID luid,
+            StringBuilder name,
+            ref uint nameLength);
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

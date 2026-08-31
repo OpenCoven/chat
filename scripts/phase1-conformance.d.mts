@@ -62,6 +62,15 @@ export function createVerifiedRunnerEnvironment(
   environment?: NodeJS.ProcessEnv,
   runtime?: Phase1RuntimeContext,
 ): NodeJS.ProcessEnv;
+export function validateSchemaV2AuthorityCheckouts(options: {
+  lock: ReturnType<typeof import('./phase1-conformance-lock.mjs').readPhase1ConformanceLock>;
+  harnessRoot: string;
+  producerRoot: string;
+  producerIdentity: { revision: string; tree: string };
+}): {
+  harness: { revision: string; tree: string };
+  producer: { revision: string; tree: string };
+};
 export function observeReleaseToolVersions(): {
   nodeVersion: 'v24.18.1';
   packageManagerVersion: 'pnpm@10.34.0';

@@ -1585,6 +1585,41 @@ async function cloneProducerCheckout(artifactRoot, sourceRoot, environment) {
   return { producerRoot, producerIdentity: cloned };
 }
 
+export function validateSchemaV2AuthorityCheckouts({
+  lock,
+  harnessRoot,
+  producerRoot,
+  producerIdentity,
+}) {
+  assertPhase1ProducerAuthority(lock, harnessRoot);
+  assertCleanPhase1Checkout(producerRoot, 'Chat evidence producer checkout');
+  const harness = readPhase1CheckoutIdentity(harnessRoot, 'Historical Chat harness checkout');
+  const producer = readPhase1CheckoutIdentity(producerRoot, 'Chat evidence producer checkout');
+  if (
+    producerIdentity === null ||
+    typeof producerIdentity !== 'object' ||
+    !/^[0-9a-f]{40}$/u.test(producerIdentity.revision ?? '') ||
+    !/^[0-9a-f]{40}$/u.test(producerIdentity.tree ?? '') ||
+    producer.revision !== producerIdentity.revision ||
+    producer.tree !== producerIdentity.tree
+  ) {
+    throw new Error('Chat evidence producer checkout identity changed after cloning.');
+  }
+  if (
+    realpathSync(harnessRoot) === realpathSync(producerRoot) ||
+    harness.revision !== lock.harnessAuthority.revision ||
+    harness.tree !== lock.harnessAuthority.tree ||
+    producer.revision === harness.revision ||
+    producer.tree === harness.tree
+  ) {
+    throw new Error('Schema-v2 producer and historical harness authorities are not distinct.');
+  }
+  return Object.freeze({
+    harness: Object.freeze(harness),
+    producer: Object.freeze(producer),
+  });
+}
+
 async function createExactCheckouts(artifactRoot, options, lock, environment) {
   const checkoutsRoot = resolve(artifactRoot.rootPath, 'checkouts');
   mkdirSync(checkoutsRoot, { mode: 0o700 });
@@ -3955,7 +3990,12 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
   try {
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
-      assertPhase1ProducerAuthority(lock, roots.producerRoot);
+      validateSchemaV2AuthorityCheckouts({
+        lock,
+        harnessRoot: projectRoot,
+        producerRoot: roots.producerRoot,
+        producerIdentity: roots.producerIdentity,
+      });
       sdkContract = await loadSdkEvidenceContract({
         validatorRoot: roots.validatorRoot,
         validatorIdentity: {

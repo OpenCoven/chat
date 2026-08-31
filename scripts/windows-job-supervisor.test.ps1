@@ -115,6 +115,58 @@ function Assert-ExpectedReflectionFailure {
   throw $Failure
 }
 
+$validateStandardUserSnapshot = [OpenCoven.WindowsIsolatedUser].GetMethod(
+  'ValidateStandardUserSnapshot',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $validateStandardUserSnapshot) {
+  throw 'The exact standard-user account and token validator is missing.'
+}
+function New-StandardUserSnapshotArguments {
+  param(
+    [uint32]$LegacyPrivilege = 1,
+    [uint32]$Flags = 0x00010201,
+    [string[]]$Groups = @('S-1-5-32-545'),
+    [bool]$Administrator = $false,
+    [bool]$Elevated = $false,
+    [uint32]$ElevationType = 1,
+    [uint32]$Integrity = 0x2000,
+    [string[]]$Privileges = @('SeChangeNotifyPrivilege')
+  )
+  $arguments = [object[]]::new(8)
+  $arguments[0] = $LegacyPrivilege
+  $arguments[1] = $Flags
+  $arguments[2] = $Groups
+  $arguments[3] = $Administrator
+  $arguments[4] = $Elevated
+  $arguments[5] = $ElevationType
+  $arguments[6] = $Integrity
+  $arguments[7] = $Privileges
+  return ,$arguments
+}
+$validAccountSnapshot = New-StandardUserSnapshotArguments -LegacyPrivilege 2
+$validateStandardUserSnapshot.Invoke($null, $validAccountSnapshot)
+
+foreach ($invalidSnapshot in @(
+  (New-StandardUserSnapshotArguments -Flags 0x00010203),
+  (New-StandardUserSnapshotArguments `
+      -Groups @('S-1-5-32-544', 'S-1-5-32-545') `
+      -Administrator $true),
+  (New-StandardUserSnapshotArguments `
+      -Elevated $true `
+      -ElevationType 2 `
+      -Integrity 0x3000 `
+      -Privileges @('SeDebugPrivilege'))
+)) {
+  Assert-ExpectedReflectionFailure `
+    -Operation {
+      $validateStandardUserSnapshot.Invoke($null, $invalidSnapshot)
+    } `
+    -ExpectedType ([InvalidOperationException]) `
+    -ExpectedMessage 'Ephemeral account is not a restricted standard local user.' `
+    -Failure 'Unsafe Windows account or token snapshot was accepted.'
+}
+
 $revalidationSteps = [Collections.Generic.List[string]]::new()
 $missingProcessSnapshot =
   [Collections.Generic.Dictionary[uint32, string]]::new()
@@ -909,6 +961,14 @@ function Assert-NoExactSidPersistence {
 $trustedPwsh = (Get-Process -Id $PID).Path
 $root = Join-Path ([IO.Path]::GetTempPath()) "opencoven-job-runtime-$PID-$([Guid]::NewGuid().ToString('N'))"
 $isolatedUser = [OpenCoven.WindowsIsolatedUser]::Create($root)
+if (
+  [string]::IsNullOrWhiteSpace($isolatedUser.ValidationSummary) -or
+  $isolatedUser.ValidationSummary -notmatch
+    '^legacyPriv=[0-9]+;flags=0x[0-9a-f]{8};groups=S-1-5-32-545;elevated=false;elevationType=1;integrity=0x00002000;tokenPrivileges=(?:none|[A-Za-z0-9,]+);dangerousPrivileges=none$'
+) {
+  throw 'Hosted Windows isolated account validation summary was not exact.'
+}
+Write-Host "Windows isolated account validation: $($isolatedUser.ValidationSummary)"
 $ephemeralUserName = $isolatedUser.UserName
 $ephemeralProfilePath = $isolatedUser.OperatingSystemProfilePath
 $operatorPrivateRoot = Join-Path (

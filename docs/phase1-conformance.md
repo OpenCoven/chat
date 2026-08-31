@@ -405,11 +405,21 @@ Before any Windows network access or repository mutation, the trusted outer
 PowerShell process uses only the signed `advapi32.dll`, `netapi32.dll`,
 `userenv.dll`, and `kernel32.dll` facilities from the exact pinned image to
 create a cryptographically random ephemeral local account. `NetUserAdd` creates
-it as `USER_PRIV_USER`; no local-group API is used, and a real logon token is
-checked to prove that the account is not a member of Administrators. Its random
-password remains a private field in the trusted supervisor process and is
-never written to disk, placed in the child environment, or exposed to the
-checkout.
+it with the ordinary-user request and the broker then explicitly normalizes
+the enabled `UF_SCRIPT | UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD` flag set,
+rejecting trust-account, passwordless, disabled, locked, delegation, smartcard,
+reversible-password, expired-password, and DES/preauthentication exceptions.
+The legacy `usri1_priv` value is recorded for diagnosis but is not treated as
+an authorization source on Windows Server 2025. Instead,
+`NetUserGetLocalGroups` must resolve exactly the built-in Users SID, and a real
+interactive logon token must have the exact account SID, no Administrators
+membership, no elevation, default elevation type, medium integrity, and none
+of the dangerous token privileges such as debug, impersonate, backup,
+restore, TCB, driver-load, take-ownership, or primary-token assignment. Any
+API, SID translation, group enumeration, token-information, or privilege-name
+ambiguity fails closed. Its random password remains a private field in the
+trusted supervisor process and is never written to disk, placed in the child
+environment, or exposed to the checkout.
 
 The outer process creates a fresh bootstrap root, profile, temporary directory,
 and checkout workspace owned by that account. Each directory has a protected,
@@ -934,20 +944,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 411,069 | `982ba8969e9115fa4b5c3481e40d5e1fd74ee8e72ebe760e743b45464918c255` |
+| `.github/workflows/client-v1-conformance.yml` | 434,996 | `da2294382944e4dc54e796eccaac5be98f4418216a40c6b4e5c73bdffec4717b` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 186,646 | `6d017aa9d7653e76b6a0d7858c6952b30139cec66873bc8ed2a5d5ad74ce799c` |
+| `scripts/phase1-conformance.mjs` | 186,684 | `506230b789a4b83553509aafde9b6f6e37f18f783a497616e8649e6498319d9c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,311 | `a372832419f980e132f05fdc42c870473547e93927f4628a3a0ff7380a208fd5` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 138,202 | `d49a809b9d568358a1294c04b9971b8537387b433c022a44362a76484f7bab2a` |
+| `scripts/phase1-schema-v2-producer.mjs` | 139,653 | `c8e6140f6c7bd410c72916fee4ab2bbb2f8a12357229e81dfa5e989a27f0adf4` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,802 | `149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -959,8 +969,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 7,434 | `04b9fc8fb84ea4c535da78e2a0caf9ddd280a894f0094328269363f5e8590341` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 255,395 | `057f5339a2df8967721376236c2e8d7c97ed52631d5121adc5aad163fb6b48bc` |
-| `scripts/windows-job-supervisor.test.ps1` | 150,114 | `61dd2c7af1a0540a0d3e02be239e393d225ad6a3876cd577f7b2a68188f00c3c` |
+| `scripts/windows-job-supervisor.cs` | 274,522 | `3ac4c2659af3977979ecf9620c3288d2ab248d568ec673dc3c08ea9f76fdc454` |
+| `scripts/windows-job-supervisor.test.ps1` | 152,360 | `4427544c485884567185f0ff21b1c6821044104011606c3d86590545f3c86585` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
@@ -981,6 +991,16 @@ producer commit/tree, package manifest, harness, workflow, environment ID, and
 source/signer digests in a later validator commit. Operators dispatch the
 already-committed Chat workflow with that full SDK commit as
 `validator_revision`.
+
+The workflow producer and executable harness are intentionally distinct
+authorities. The workflow checkout remains at the final producer commit that
+the SDK will pin. It supplies source identity and is cloned separately for the
+SDK producer-contract check. The runner itself is fetched and executed from
+the historical `harnessAuthority.revision/tree`; those exact harness modules
+and native production deltas are verified before contract loading. Applying
+historical harness checks to the workflow checkout, or producer-contract checks
+to the historical harness checkout, is rejected rather than accepted as an
+alternate SHA.
 
 The pre-repin SDK validator is expected to reject this new workflow
 graph until that one-time metadata update is reviewed and merged. Chat-local

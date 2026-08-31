@@ -54,6 +54,7 @@ export {
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
   unixProducerBindingEnvironment,
+  validateSchemaV2AuthorityCheckouts,
   windowsJobBindingEnvironment,
 } from './phase1-schema-v2-producer.mjs';
 export { parseSupervisorStatusFrame } from './supervisor-status.mjs';
