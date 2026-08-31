@@ -1726,6 +1726,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runtimeTest.slice(mismatchFixtureStart, mismatchFixtureEnd)).toContain(
       "`$ErrorActionPreference = 'Stop'",
     );
+    const membershipFixtureStart = runtimeTest.indexOf(
+      "  $membershipScript = Join-Path $root 'membership.ps1'",
+    );
+    const membershipFixtureEnd = runtimeTest.indexOf('  try {', membershipFixtureStart);
+    expect(membershipFixtureStart).toBeGreaterThan(-1);
+    expect(membershipFixtureEnd).toBeGreaterThan(membershipFixtureStart);
+    expect(runtimeTest.slice(membershipFixtureStart, membershipFixtureEnd)).toContain(
+      "`$ErrorActionPreference = 'Stop'",
+    );
     const preExistingSchedulerSetup = runtimeTest.indexOf(
       '    $preExistingScheduler = New-Object -ComObject',
     );

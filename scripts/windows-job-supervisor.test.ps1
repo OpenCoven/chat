@@ -4658,6 +4658,8 @@ Start-Sleep -Seconds 300
   [IO.File]::WriteAllText(
     $membershipScript,
     @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''"))')) -Language CSharp
 [OpenCoven.WindowsJobSupervisor]::RequireCurrentProcessInJob(`$env:EXPECTED_JOB)
 "@,
