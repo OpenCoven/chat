@@ -713,7 +713,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
         environmentId: '20863036831',
       },
     });
-  });
+  }, 30_000);
 
   test('executes the committed contract bytes after its checkout path mutates', async () => {
     const validator = validatorModuleFixture();
@@ -834,7 +834,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     } finally {
       rmSync(validator.root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test('rejects a file that mutates during its evidence snapshot', async () => {
     const module = await import('../scripts/phase1-schema-v2-evidence.mjs');

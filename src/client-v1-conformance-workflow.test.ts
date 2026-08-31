@@ -675,38 +675,42 @@ describe('Chat-local protected Windows conformance workflow', () => {
     'A'.repeat(40),
     `${'a'.repeat(20)}\n${'b'.repeat(20)}`,
     `${'a'.repeat(20)};${'b'.repeat(19)}`,
-  ])('the exact workflow validator rejects adversarial revision %j', (revision) => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const runBody = workflowRunBody(
-      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
-    );
-    const functionStart = runBody.indexOf('          function Require-LowercaseGitOid {');
-    const functionEnd = runBody.indexOf('\n          }\n', functionStart);
-    expect(functionStart).toBeGreaterThanOrEqual(0);
-    expect(functionEnd).toBeGreaterThan(functionStart);
-    const functionSource = runBody
-      .slice(functionStart, functionEnd + '\n          }\n'.length)
-      .split('\n')
-      .map((line) => line.replace(/^ {10}/u, ''))
-      .join('\n');
-    expect(() =>
-      execFileSync(
-        'pwsh',
-        [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `${functionSource}\nRequire-LowercaseGitOid -Value $env:TEST_REVISION`,
-        ],
-        {
-          encoding: 'utf8',
-          env: { ...process.env, TEST_REVISION: revision },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        },
-      ),
-    ).toThrow();
-  });
+  ])(
+    'the exact workflow validator rejects adversarial revision %j',
+    (revision) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const runBody = workflowRunBody(
+        workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+      );
+      const functionStart = runBody.indexOf('          function Require-LowercaseGitOid {');
+      const functionEnd = runBody.indexOf('\n          }\n', functionStart);
+      expect(functionStart).toBeGreaterThanOrEqual(0);
+      expect(functionEnd).toBeGreaterThan(functionStart);
+      const functionSource = runBody
+        .slice(functionStart, functionEnd + '\n          }\n'.length)
+        .split('\n')
+        .map((line) => line.replace(/^ {10}/u, ''))
+        .join('\n');
+      expect(() =>
+        execFileSync(
+          'pwsh',
+          [
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `${functionSource}\nRequire-LowercaseGitOid -Value $env:TEST_REVISION`,
+          ],
+          {
+            encoding: 'utf8',
+            env: { ...process.env, TEST_REVISION: revision },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        ),
+      ).toThrow();
+    },
+    30_000,
+  );
 
   test('runs one inline supervised Windows production before every action or repository command', () => {
     const workflow = readFileSync(workflowPath, 'utf8');

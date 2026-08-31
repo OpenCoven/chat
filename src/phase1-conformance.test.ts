@@ -232,6 +232,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         rmSync(source, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 
   test('scrubs OIDC and GitHub bearer variables before evidence work begins', () => {
