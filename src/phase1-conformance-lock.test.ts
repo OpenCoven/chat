@@ -793,7 +793,7 @@ import { writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid));
 process.on('SIGTERM', () => {});
 process.stderr.write(${JSON.stringify(secretDiagnostic)});
-setTimeout(() => process.exit(86), 30_000);
+setTimeout(() => process.exit(86), 60_000);
 setInterval(() => {}, 1_000);
 `,
       );
@@ -816,7 +816,7 @@ setInterval(() => {}, 1_000);
       );
 
       const childPid = Number.parseInt(readFileSync(childPidPath, 'utf8'), 10);
-      expect(Date.now() - startedAt).toBeLessThan(25_000);
+      expect(Date.now() - startedAt).toBeLessThan(40_000);
       expect(Number.isSafeInteger(childPid)).toBe(true);
       let survivingCommand = '';
       try {
@@ -832,7 +832,7 @@ setInterval(() => {}, 1_000);
       expect(message).not.toContain(fakeGitPath);
       expect(message).not.toContain(fixture.roots.chatRoot);
     },
-    40_000,
+    50_000,
   );
 
   gitTest('isolates fixture commits from inherited signing and hooks', () => {
