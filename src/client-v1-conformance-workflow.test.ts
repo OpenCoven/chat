@@ -1714,6 +1714,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
       "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
     );
     expect(runtimeTest).not.toContain('$serviceEscapeTaskPath');
+    const mismatchFixtureStart = runtimeTest.indexOf(
+      "  $mismatchScript = Join-Path $root 'mismatch.ps1'",
+    );
+    const mismatchFixtureEnd = runtimeTest.indexOf(
+      '  $mismatchJob = [OpenCoven.WindowsJobSupervisor]::Create(',
+      mismatchFixtureStart,
+    );
+    expect(mismatchFixtureStart).toBeGreaterThan(-1);
+    expect(mismatchFixtureEnd).toBeGreaterThan(mismatchFixtureStart);
+    expect(runtimeTest.slice(mismatchFixtureStart, mismatchFixtureEnd)).toContain(
+      "`$ErrorActionPreference = 'Stop'",
+    );
     const preExistingSchedulerSetup = runtimeTest.indexOf(
       '    $preExistingScheduler = New-Object -ComObject',
     );

@@ -4575,6 +4575,8 @@ while (-not [IO.File]::Exists('$($retainedPidPath.Replace("'", "''"))')) {
   [IO.File]::WriteAllText(
     $mismatchScript,
     @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''"))')) -Language CSharp
 [OpenCoven.WindowsJobSupervisor]::RequireCurrentProcessInJob('Local\OpenCoven.Chat.SupervisorTest.mismatch')
 "@,
