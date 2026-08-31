@@ -2434,23 +2434,66 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-[IO.File]::WriteAllText($Marker, 'started', [Text.UTF8Encoding]::new($false))
-[IO.File]::WriteAllText(
-  $PidMarker,
-  [string]$PID,
-  [Text.UTF8Encoding]::new($false)
-)
 [IO.File]::WriteAllText(
   $SidMarker,
   [Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
   [Text.UTF8Encoding]::new($false)
 )
+[IO.File]::WriteAllText(
+  $PidMarker,
+  [string]$PID,
+  [Text.UTF8Encoding]::new($false)
+)
+[IO.File]::WriteAllText($Marker, 'started', [Text.UTF8Encoding]::new($false))
 Start-Sleep -Seconds 20
 [IO.File]::WriteAllBytes($Record, [Convert]::FromBase64String($ForgedBase64))
 '@,
       [Text.UTF8Encoding]::new($false)
     )
     $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)
+
+    function Assert-OptionalScheduledActionDrained {
+      param(
+        [Parameter(Mandatory)][string]$Marker,
+        [Parameter(Mandatory)][string]$PidMarker,
+        [Parameter(Mandatory)][string]$SidMarker,
+        [Parameter(Mandatory)][string]$ExpectedSid
+      )
+
+      $hasMarker = [IO.File]::Exists($Marker)
+      $hasPid = [IO.File]::Exists($PidMarker)
+      $hasSid = [IO.File]::Exists($SidMarker)
+      if ($hasMarker -and (-not $hasPid -or -not $hasSid)) {
+        throw 'Task Scheduler action markers were only partially present after quarantine.'
+      }
+      if ($hasPid -and -not $hasSid) {
+        throw 'Task Scheduler action markers were only partially present after quarantine.'
+      }
+      if (-not $hasMarker -and -not $hasPid -and -not $hasSid) {
+        return
+      }
+
+      $actualSid = [IO.File]::ReadAllText($SidMarker).Trim()
+      if ($actualSid -cne $ExpectedSid) {
+        throw 'Task Scheduler action process did not run as the exact isolated SID.'
+      }
+      if ($hasMarker -and [IO.File]::ReadAllText($Marker).Trim() -cne 'started') {
+        throw 'Task Scheduler action started marker was invalid.'
+      }
+      if ($hasPid) {
+        [uint32]$actionPid = 0
+        if (
+          -not [uint32]::TryParse(
+            [IO.File]::ReadAllText($PidMarker).Trim(),
+            [ref]$actionPid
+          ) -or
+          $actionPid -eq 0
+        ) {
+          throw 'Task Scheduler action process identifier was invalid.'
+        }
+        Assert-ProcessExited -ProcessId $actionPid
+      }
+    }
 
     $taskHelperScript = Join-Path `
       $serviceEscapeContext.User.RootPath `
@@ -2524,10 +2567,38 @@ function Register-IsolatedInteractiveTask {
     3,
     $null
   )
-  $runningTask = $registeredTask.Run($null)
+  $runningTask = $null
+  $runErrorHResult = 0
+  try {
+    $runningTask = $registeredTask.Run($null)
+  } catch [Runtime.InteropServices.COMException] {
+    $runErrorHResult = $_.Exception.HResult
+  }
   return [pscustomobject]@{
     RegisteredTask = $registeredTask
     RunningTask = $runningTask
+    RunAttempted = $true
+    RunErrorHResult = $runErrorHResult
+  }
+}
+
+function Assert-SchedulerRunAttemptResult {
+  param(
+    [Parameter(Mandatory)][pscustomobject]$Probe,
+    [Parameter(Mandatory)][string]$StartedMarker
+  )
+
+  if (-not $Probe.RunAttempted) {
+    throw 'Task Scheduler run was not attempted.'
+  }
+  if ($null -eq $Probe.RunningTask) {
+    if (
+      $Probe.RunErrorHResult -eq 0 -or
+      $Probe.RegisteredTask.GetInstances(0).Count -ne 0 -or
+      [IO.File]::Exists($StartedMarker)
+    ) {
+      throw 'Task Scheduler run attempt failed without a fail-closed non-running state.'
+    }
   }
 }
 '@,
@@ -2720,48 +2791,34 @@ while (-not [DisabledAccountProbe]::IsDisabled(`$UserName)) {
   UserId = '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)'
 }
 `$lateTask = Register-IsolatedInteractiveTask @taskParameters
-`$lateStartDeadline = [DateTime]::UtcNow.AddSeconds(10)
-`$lateEnginePid = 0
-`$lateRunningInstanceObserved = `$false
-while (
-  -not [IO.File]::Exists('$($lateActionMarker.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($lateActionPid.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($lateActionSid.Replace("'", "''"))') -or
-  -not `$lateRunningInstanceObserved -or
-  `$lateEnginePid -eq 0
-) {
-  `$lateRunningInstanceObserved =
-    `$lateTask.RegisteredTask.GetInstances(0).Count -gt 0
-  try {
-    `$lateEnginePid = [uint32]`$lateTask.RunningTask.EnginePID
-  } catch {
-    `$lateEnginePid = 0
-  }
-  if ([DateTime]::UtcNow -ge `$lateStartDeadline) {
-    throw 'Late task action did not expose a live running instance.'
-  }
-  Start-Sleep -Milliseconds 10
+Assert-SchedulerRunAttemptResult `
+  -Probe `$lateTask `
+  -StartedMarker '$($lateActionMarker.Replace("'", "''"))'
+if (`$lateTask.RegisteredTask.Path -cne '$lateTaskPath') {
+  throw 'Post-disable task path changed.'
 }
-`$lateProcessPid = [uint32][IO.File]::ReadAllText(
-  '$($lateActionPid.Replace("'", "''"))'
-)
 `$expectedLateSid =
   [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Post-disable scheduled action EnginePID',
-  '$serviceEscapeJobName',
-  `$lateEnginePid,
-  `$expectedLateSid
-)
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Post-disable scheduled action process PID',
-  '$serviceEscapeJobName',
-  `$lateProcessPid,
-  `$expectedLateSid
-)
+`$registeredLateUserId =
+  [string]`$lateTask.RegisteredTask.Definition.Principal.UserId
+`$registeredLateSid = if (
+  `$registeredLateUserId.StartsWith(
+    'S-1-',
+    [StringComparison]::OrdinalIgnoreCase
+  )
+) {
+  [Security.Principal.SecurityIdentifier]::new(`$registeredLateUserId).Value
+} else {
+  [Security.Principal.NTAccount]::new(`$registeredLateUserId).Translate(
+    [Security.Principal.SecurityIdentifier]
+  ).Value
+}
+if (`$registeredLateSid -cne `$expectedLateSid) {
+  throw 'Post-disable task was not registered for the exact isolated SID.'
+}
 [IO.File]::WriteAllText(
   '$($lateRegistrationMarker.Replace("'", "''"))',
-  'registered-after-disable-and-proved-outside-job',
+  'registered-after-disable-run-attempted',
   [Text.UTF8Encoding]::new(`$false)
 )
 Start-Sleep -Seconds 300
@@ -2998,58 +3055,69 @@ foreach (`$exactSidRegistration in @(
   UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
 }
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
-`$taskStartDeadline = [DateTime]::UtcNow.AddSeconds(20)
-`$runningInstanceObserved = `$false
-`$primaryEnginePid = 0
-while (
-  -not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($serviceEscapeActionPid.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($serviceEscapeActionSid.Replace("'", "''"))') -or
-  -not `$runningInstanceObserved -or
-  `$primaryEnginePid -eq 0
+Assert-SchedulerRunAttemptResult `
+  -Probe `$taskProbe `
+  -StartedMarker '$($serviceEscapeActionMarker.Replace("'", "''"))'
+if (`$taskProbe.RegisteredTask.Path -cne '$serviceEscapeTaskPath') {
+  throw 'Primary task path changed.'
+}
+if (
+  (Resolve-RegisteredPrincipalSid -UserId (
+    [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
+  )) -cne '$($serviceEscapeContext.User.Sid)'
 ) {
-  `$runningInstanceObserved =
-    `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  throw 'Primary task was not registered for the exact isolated SID.'
+}
+`$taskObservationDeadline = [DateTime]::UtcNow.AddSeconds(2)
+`$primaryEnginePid = [uint32]0
+do {
   try {
     `$primaryEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
   } catch {
-    `$primaryEnginePid = 0
+    `$primaryEnginePid = [uint32]0
   }
-  if ([DateTime]::UtcNow -ge `$taskStartDeadline) {
-    if (-not [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))')) {
-      throw 'Task Scheduler action did not write its started marker.'
-    }
-    if (-not `$runningInstanceObserved) {
-      throw 'Task Scheduler action did not expose a running instance.'
-    }
+  if (
+    [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))') -or
+    `$primaryEnginePid -ne 0
+  ) {
+    break
+  }
+  Start-Sleep -Milliseconds 20
+} while ([DateTime]::UtcNow -lt `$taskObservationDeadline)
+if (
+  [IO.File]::Exists('$($serviceEscapeActionMarker.Replace("'", "''"))')
+) {
+  if (
+    -not [IO.File]::Exists('$($serviceEscapeActionPid.Replace("'", "''"))') -or
+    -not [IO.File]::Exists('$($serviceEscapeActionSid.Replace("'", "''"))')
+  ) {
     throw 'Task Scheduler action process readiness was incomplete.'
   }
-  Start-Sleep -Milliseconds 10
+  `$expectedTaskSid =
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  `$actualTaskSid =
+    [IO.File]::ReadAllText('$($serviceEscapeActionSid.Replace("'", "''"))').Trim()
+  if (`$actualTaskSid -cne `$expectedTaskSid) {
+    throw 'Task Scheduler action process did not run as the exact isolated SID.'
+  }
+  `$taskActionPid = [uint32][IO.File]::ReadAllText(
+    '$($serviceEscapeActionPid.Replace("'", "''"))'
+  )
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    'Primary scheduled action process PID',
+    '$serviceEscapeJobName',
+    `$taskActionPid,
+    `$expectedTaskSid
+  )
 }
-`$expectedTaskSid =
-  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-`$actualTaskSid =
-  [IO.File]::ReadAllText('$($serviceEscapeActionSid.Replace("'", "''"))').Trim()
-if (`$actualTaskSid -cne `$expectedTaskSid) {
-  throw 'Task Scheduler action process did not run as the exact isolated SID.'
+if (`$primaryEnginePid -ne 0) {
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    'Primary scheduled action EnginePID',
+    '$serviceEscapeJobName',
+    `$primaryEnginePid,
+    '$($serviceEscapeContext.User.Sid)'
+  )
 }
-`$taskActionPid = [uint32][IO.File]::ReadAllText(
-  '$($serviceEscapeActionPid.Replace("'", "''"))'
-)
-`$taskActionProcess = Get-Process -Id `$taskActionPid -ErrorAction Stop
-`$taskActionProcess.Dispose()
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Primary scheduled action EnginePID',
-  '$serviceEscapeJobName',
-  `$primaryEnginePid,
-  `$expectedTaskSid
-)
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Primary scheduled action process PID',
-  '$serviceEscapeJobName',
-  `$taskActionPid,
-  `$expectedTaskSid
-)
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
   Out-Null
 if (`$LASTEXITCODE -ne 0) {
@@ -3057,7 +3125,7 @@ if (`$LASTEXITCODE -ne 0) {
 }
 [IO.File]::WriteAllText(
   '$($serviceEscapeReady.Replace("'", "''"))',
-  'task-running-bits-created',
+  'task-run-attempted-bits-created',
   [Text.UTF8Encoding]::new(`$false)
 )
 exit 0
@@ -3080,6 +3148,17 @@ exit 0
     $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
       $serviceEscapeJobName,
       $serviceEscapeContext.User
+    )
+    if (
+      [IO.File]::ReadAllText($lateRegistrarReady).Trim() -cne 'ready'
+    ) {
+      throw 'Deterministic service-equivalent process marker was invalid.'
+    }
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+      'Deterministic service-equivalent exact-SID process',
+      $serviceEscapeJobName,
+      [uint32]$lateRegistrarPid,
+      $serviceEscapeContext.User.Sid
     )
     $serviceEscapeResult =
       $serviceEscapeJob.RunProducerAsUserAndQuarantine(
@@ -3110,44 +3189,30 @@ exit 0
     ) {
       throw 'Ephemeral account was not disabled by terminal quarantine.'
     }
-    foreach ($requiredMarker in @(
-      $serviceEscapeReady,
-      $serviceEscapeActionMarker,
-      $serviceEscapeActionPid,
-      $serviceEscapeActionSid
-    )) {
-      if (-not [IO.File]::Exists($requiredMarker)) {
-        throw 'Task Scheduler action did not write its started marker.'
-      }
-    }
-    if (-not [IO.File]::Exists($lateRegistrationMarker)) {
-      throw 'A task registered after account disablement was not exercised.'
+    if (
+      -not [IO.File]::Exists($serviceEscapeReady) -or
+      [IO.File]::ReadAllText($serviceEscapeReady).Trim() -cne
+        'task-run-attempted-bits-created'
+    ) {
+      throw 'Primary Task Scheduler registration/run attempt was not completed.'
     }
     if (
-      -not [IO.File]::Exists($lateActionMarker) -or
-      -not [IO.File]::Exists($lateActionPid) -or
-      -not [IO.File]::Exists($lateActionSid)
+      -not [IO.File]::Exists($lateRegistrationMarker) -or
+      [IO.File]::ReadAllText($lateRegistrationMarker).Trim() -cne
+        'registered-after-disable-run-attempted'
     ) {
-      throw 'A task started after account disablement was not exercised.'
+      throw 'A task registration/run attempt after account disablement was not exercised.'
     }
-    if (
-      [IO.File]::ReadAllText($serviceEscapeActionSid).Trim() -cne
-        $serviceEscapeContext.User.Sid
-    ) {
-      throw 'Task Scheduler action process did not run as the exact isolated SID.'
-    }
-    if (
-      [IO.File]::ReadAllText($lateActionSid).Trim() -cne
-        $serviceEscapeContext.User.Sid
-    ) {
-      throw 'A task started after account disablement did not use the isolated SID.'
-    }
-    Assert-ProcessExited -ProcessId (
-      [int][IO.File]::ReadAllText($serviceEscapeActionPid)
-    )
-    Assert-ProcessExited -ProcessId (
-      [int][IO.File]::ReadAllText($lateActionPid)
-    )
+    Assert-OptionalScheduledActionDrained `
+      -Marker $serviceEscapeActionMarker `
+      -PidMarker $serviceEscapeActionPid `
+      -SidMarker $serviceEscapeActionSid `
+      -ExpectedSid $serviceEscapeContext.User.Sid
+    Assert-OptionalScheduledActionDrained `
+      -Marker $lateActionMarker `
+      -PidMarker $lateActionPid `
+      -SidMarker $lateActionSid `
+      -ExpectedSid $serviceEscapeContext.User.Sid
     Assert-ProcessExited -ProcessId $lateRegistrarPid
     $lateRegistrarPid = 0
     Assert-ScheduledTaskAbsent `
@@ -3395,50 +3460,78 @@ Add-Type -TypeDefinition (
   UserId = "`$env:COMPUTERNAME\`$env:USERNAME"
 }
 `$taskProbe = Register-IsolatedInteractiveTask @taskParameters
-`$deadline = [DateTime]::UtcNow.AddSeconds(20)
-`$running = `$false
-`$nonzeroEnginePid = 0
-while (
-  -not [IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($failureEscapePid.Replace("'", "''"))') -or
-  -not [IO.File]::Exists('$($failureEscapeSid.Replace("'", "''"))') -or
-  -not `$running -or
-  `$nonzeroEnginePid -eq 0
+Assert-SchedulerRunAttemptResult `
+  -Probe `$taskProbe `
+  -StartedMarker '$($failureEscapeStarted.Replace("'", "''"))'
+if (
+  `$taskProbe.RegisteredTask.Path -cne
+    '$failureEscapeFolderPath\$failureEscapeTaskName'
 ) {
-  `$running = `$taskProbe.RegisteredTask.GetInstances(0).Count -gt 0
+  throw 'Nonzero producer task path changed.'
+}
+`$registeredUserId =
+  [string]`$taskProbe.RegisteredTask.Definition.Principal.UserId
+`$registeredSid = if (
+  `$registeredUserId.StartsWith('S-1-', [StringComparison]::OrdinalIgnoreCase)
+) {
+  [Security.Principal.SecurityIdentifier]::new(`$registeredUserId).Value
+} else {
+  [Security.Principal.NTAccount]::new(`$registeredUserId).Translate(
+    [Security.Principal.SecurityIdentifier]
+  ).Value
+}
+if (`$registeredSid -cne '$($failureEscapeContext.User.Sid)') {
+  throw 'Nonzero producer task was not registered for the exact isolated SID.'
+}
+`$observationDeadline = [DateTime]::UtcNow.AddSeconds(2)
+`$nonzeroEnginePid = [uint32]0
+do {
   try {
     `$nonzeroEnginePid = [uint32]`$taskProbe.RunningTask.EnginePID
   } catch {
-    `$nonzeroEnginePid = 0
+    `$nonzeroEnginePid = [uint32]0
   }
-  if ([DateTime]::UtcNow -ge `$deadline) {
-    throw 'Nonzero producer task never reached a running exact-SID action.'
+  if (
+    [IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))') -or
+    `$nonzeroEnginePid -ne 0
+  ) {
+    break
   }
-  Start-Sleep -Milliseconds 10
-}
-`$expectedSid =
-  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-if (
-  [IO.File]::ReadAllText('$($failureEscapeSid.Replace("'", "''"))').Trim() -cne
+  Start-Sleep -Milliseconds 20
+} while ([DateTime]::UtcNow -lt `$observationDeadline)
+if ([IO.File]::Exists('$($failureEscapeStarted.Replace("'", "''"))')) {
+  if (
+    -not [IO.File]::Exists('$($failureEscapePid.Replace("'", "''"))') -or
+    -not [IO.File]::Exists('$($failureEscapeSid.Replace("'", "''"))')
+  ) {
+    throw 'Nonzero producer task action readiness was incomplete.'
+  }
+  `$expectedSid =
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  if (
+    [IO.File]::ReadAllText('$($failureEscapeSid.Replace("'", "''"))').Trim() -cne
+      `$expectedSid
+  ) {
+    throw 'Nonzero producer task action SID changed.'
+  }
+  `$nonzeroProcessPid = [uint32][IO.File]::ReadAllText(
+    '$($failureEscapePid.Replace("'", "''"))'
+  )
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    'Nonzero producer scheduled action process PID',
+    '$failureEscapeJobName',
+    `$nonzeroProcessPid,
     `$expectedSid
-) {
-  throw 'Nonzero producer task action SID changed.'
+  )
 }
-`$nonzeroProcessPid = [uint32][IO.File]::ReadAllText(
-  '$($failureEscapePid.Replace("'", "''"))'
-)
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Nonzero producer scheduled action EnginePID',
-  '$failureEscapeJobName',
-  `$nonzeroEnginePid,
-  `$expectedSid
-)
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Nonzero producer scheduled action process PID',
-  '$failureEscapeJobName',
-  `$nonzeroProcessPid,
-  `$expectedSid
-)
+if (`$nonzeroEnginePid -ne 0) {
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    'Nonzero producer scheduled action EnginePID',
+    '$failureEscapeJobName',
+    `$nonzeroEnginePid,
+    '$($failureEscapeContext.User.Sid)'
+  )
+}
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
   /create `
   '$failureEscapeBitsName' *>&1 | Out-Null
@@ -3447,7 +3540,7 @@ if (`$LASTEXITCODE -ne 0) {
 }
 [IO.File]::WriteAllText(
   '$($failureEscapeReady.Replace("'", "''"))',
-  'scheduled-action-running-and-bits-created',
+  'scheduler-run-attempted-and-bits-created',
   [Text.UTF8Encoding]::new(`$false)
 )
 exit 23
@@ -3475,25 +3568,18 @@ exit 23
     if (-not $failureEscapeJob.IsQuarantineComplete) {
       throw 'Nonzero producer terminal quarantine did not complete.'
     }
-    foreach ($marker in @(
-      $failureEscapeReady,
-      $failureEscapeStarted,
-      $failureEscapePid,
-      $failureEscapeSid
-    )) {
-      if (-not [IO.File]::Exists($marker)) {
-        throw 'Nonzero producer scheduled action did not actually run.'
-      }
-    }
     if (
-      [IO.File]::ReadAllText($failureEscapeSid).Trim() -cne
-        $failureEscapeContext.User.Sid
+      -not [IO.File]::Exists($failureEscapeReady) -or
+      [IO.File]::ReadAllText($failureEscapeReady).Trim() -cne
+        'scheduler-run-attempted-and-bits-created'
     ) {
-      throw 'Nonzero producer scheduled action SID was not exact.'
+      throw 'Nonzero producer scheduler/BITS setup was not completed.'
     }
-    Assert-ProcessExited -ProcessId (
-      [int][IO.File]::ReadAllText($failureEscapePid)
-    )
+    Assert-OptionalScheduledActionDrained `
+      -Marker $failureEscapeStarted `
+      -PidMarker $failureEscapePid `
+      -SidMarker $failureEscapeSid `
+      -ExpectedSid $failureEscapeContext.User.Sid
     Assert-ScheduledTaskAbsent `
       -TaskPath "$failureEscapeFolderPath\$failureEscapeTaskName" `
       -Failure 'Nonzero producer Task Scheduler escape survived quarantine.'

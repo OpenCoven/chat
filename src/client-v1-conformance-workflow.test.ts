@@ -1536,12 +1536,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'CreateServiceW was not denied with ERROR_ACCESS_DENIED.',
       'Denied native service creation left a registered service.',
       'Permanent WMI subscription creation unexpectedly succeeded.',
-      'Task Scheduler action did not write its started marker.',
-      'Task Scheduler action did not expose a running instance.',
+      'Task Scheduler action markers were only partially present after quarantine.',
       'Task Scheduler action process did not run as the exact isolated SID.',
       'Nonzero producer result changed during terminal quarantine.',
       'Nonzero producer artifact capture was not rejected.',
-      'A task started after account disablement was not exercised.',
+      'A task registration/run attempt after account disablement was not exercised.',
       'Ephemeral local user survived cleanup.',
       'Ephemeral Windows profile survived cleanup.',
       'Ephemeral bootstrap root survived cleanup.',
@@ -1574,15 +1573,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'OpenProcessToken',
       'GetTokenInformation',
       'GetExitCodeProcess',
-      'Primary scheduled action EnginePID',
-      'Primary scheduled action process PID',
-      'Post-disable scheduled action EnginePID',
-      'Post-disable scheduled action process PID',
-      'Nonzero producer scheduled action EnginePID',
-      'Nonzero producer scheduled action process PID',
+      'Deterministic service-equivalent exact-SID process',
     ]) {
       expect(runtimeTest).toContain(nativeTaskProbeToken);
     }
+    expect(runtimeTest).toContain('function Assert-OptionalScheduledActionDrained');
+    expect(runtimeTest).toContain('registered-after-disable-run-attempted');
+    expect(runtimeTest).toContain('scheduler-run-attempted-and-bits-created');
+    expect(runtimeTest).toContain('catch [Runtime.InteropServices.COMException]');
+    expect(runtimeTest).toContain('RunAttempted = $true');
+    expect(runtimeTest).toContain('RunErrorHResult = $runErrorHResult');
+    expect(runtimeTest).toContain(
+      'Task Scheduler run attempt failed without a fail-closed non-running state.',
+    );
+    expect(runtimeTest).not.toContain('Task Scheduler action did not write its started marker.');
+    expect(runtimeTest).not.toContain('Late task action did not expose a live running instance.');
+    expect(runtimeTest).not.toContain(
+      'Nonzero producer task never reached a running exact-SID action.',
+    );
+    expect(runtimeTest).not.toContain('Nonzero producer scheduled action did not actually run.');
     expect(runtimeTest).toContain(
       '    $taskActionTemplate = [IO.File]::ReadAllText($taskActionScript)',
     );
