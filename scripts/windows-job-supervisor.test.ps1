@@ -551,8 +551,11 @@ function Assert-ScheduledTaskAbsent {
 $scheduledActionIsolationProbeSource = @'
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Threading.Tasks;
 
 public static class ScheduledActionIsolationProbe
 {
@@ -563,6 +566,7 @@ public static class ScheduledActionIsolationProbe
     private const uint WTS_ANY_SESSION = 0xffffffff;
     private const int TokenUser = 1;
     private const int WTSTypeProcessInfoLevel1 = 1;
+    private const int MaximumBitsClientOutputCharacters = 65536;
 
     public static void AssertAliveOutsideJobWithPrimaryTokenSid(
         string label,
@@ -619,6 +623,92 @@ public static class ScheduledActionIsolationProbe
             new IntPtr(authoritativeJobHandle),
             processId,
             expectedSid);
+    }
+
+    public static void CreateBitsJob(
+        string bitsAdminPath,
+        string displayName)
+    {
+        if (String.IsNullOrWhiteSpace(bitsAdminPath) ||
+            !Path.IsPathRooted(bitsAdminPath) ||
+            !File.Exists(bitsAdminPath) ||
+            String.IsNullOrWhiteSpace(displayName) ||
+            displayName.Length > 128)
+        {
+            throw new ArgumentException(
+                "BITS client invocation input was invalid.");
+        }
+
+        ProcessStartInfo startInfo = new ProcessStartInfo();
+        startInfo.FileName = bitsAdminPath;
+        startInfo.WorkingDirectory =
+            Path.GetDirectoryName(bitsAdminPath);
+        startInfo.UseShellExecute = false;
+        startInfo.CreateNoWindow = true;
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+        startInfo.ArgumentList.Add("/create");
+        startInfo.ArgumentList.Add(displayName);
+
+        using (Process process = new Process())
+        {
+            process.StartInfo = startInfo;
+            if (!process.Start())
+            {
+                throw new InvalidOperationException(
+                    "BITS client process did not start.");
+            }
+            Task stdoutTask =
+                DrainBoundedOutputAsync(process.StandardOutput);
+            Task stderrTask =
+                DrainBoundedOutputAsync(process.StandardError);
+            if (!process.WaitForExit(10000))
+            {
+                process.Kill(true);
+                if (!process.WaitForExit(5000))
+                {
+                    throw new TimeoutException(
+                        "BITS client process could not be reaped.");
+                }
+                throw new TimeoutException(
+                    "BITS client process exceeded its timeout.");
+            }
+            if (!Task.WaitAll(
+                    new Task[] { stdoutTask, stderrTask },
+                    5000))
+            {
+                throw new TimeoutException(
+                    "BITS client output could not be drained.");
+            }
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    "BITS client returned a nonzero exit code.");
+            }
+        }
+    }
+
+    private static Task DrainBoundedOutputAsync(StreamReader reader)
+    {
+        return Task.Run(delegate
+        {
+            char[] buffer = new char[4096];
+            int total = 0;
+            while (true)
+            {
+                int read = reader.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    return;
+                }
+                total = checked(total + read);
+                if (total > MaximumBitsClientOutputCharacters)
+                {
+                    throw new InvalidOperationException(
+                        "BITS client output exceeded its bound.");
+                }
+            }
+        });
     }
 
     private static void AssertAliveOutsideJobWithPrimaryTokenSid(
@@ -3266,10 +3356,10 @@ foreach (`$exactSidRegistration in @(
     throw 'Task was not registered for the exact isolated SID.'
   }
 }
-`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
-  throw 'BITS service-mediated test job could not be created.'
-}
+[ScheduledActionIsolationProbe]::CreateBitsJob(
+  (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe'),
+  '$bitsName'
+)
 [IO.File]::WriteAllText(
   '$($serviceEscapeReady.Replace("'", "''"))',
   'task-run-attempted-bits-created',
@@ -3642,10 +3732,10 @@ if (
   EngineLabel = 'Nonzero producer scheduled action EnginePID'
 }
 Assert-ScheduledActionRunIsolation @nonzeroRunIsolationParameters
-`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$failureEscapeBitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
-  throw 'Nonzero producer BITS job could not be created.'
-}
+[ScheduledActionIsolationProbe]::CreateBitsJob(
+  (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe'),
+  '$failureEscapeBitsName'
+)
 [IO.File]::WriteAllText(
   '$($failureEscapeReady.Replace("'", "''"))',
   'scheduler-run-attempted-and-bits-created',
@@ -3899,10 +3989,10 @@ if (`$enginePid -ne 0) {
     '$($Context.User.Sid)'
   )
 }
-`$null = & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' 2>&1
-if (`$LASTEXITCODE -ne 0) {
-  throw 'Terminal failure BITS job could not be created.'
-}
+[ScheduledActionIsolationProbe]::CreateBitsJob(
+  (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe'),
+  '$bitsName'
+)
 [IO.File]::WriteAllText(
   '$($readyPath.Replace("'", "''"))',
   'exact-sid-task-run-attempt-process-and-bits-ready',

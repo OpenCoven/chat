@@ -1689,11 +1689,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(runtimeTest).toContain(scheduledActionIsolationCall);
     }
     expect(runtimeTest).not.toContain('Assert-ScheduledActionRunIsolation `\n');
-    expect(
-      runtimeTest.match(/`\$null = & \(Join-Path `\$env:SystemRoot 'System32\\bitsadmin\.exe'\)/g),
-    ).toHaveLength(3);
-    expect(runtimeTest).not.toContain("'$bitsName' *>&1 |");
-    expect(runtimeTest).not.toContain("'$failureEscapeBitsName' *>&1 |");
+    expect(runtimeTest.match(/\[ScheduledActionIsolationProbe\]::CreateBitsJob\(/g)).toHaveLength(
+      3,
+    );
+    for (const boundedBitsToken of [
+      'public static void CreateBitsJob(',
+      'ProcessStartInfo',
+      'RedirectStandardOutput = true',
+      'RedirectStandardError = true',
+      'DrainBoundedOutputAsync(',
+      'char[] buffer = new char[4096]',
+      'WaitForExit(10000)',
+      'Kill(true)',
+      'BITS client output exceeded its bound.',
+    ]) {
+      expect(runtimeTest).toContain(boundedBitsToken);
+    }
+    expect(runtimeTest).not.toContain(
+      "`$null = & (Join-Path `$env:SystemRoot 'System32\\bitsadmin.exe')",
+    );
     expect(runtimeTest).toContain(
       "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
     );
