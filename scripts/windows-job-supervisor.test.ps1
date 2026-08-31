@@ -4896,7 +4896,11 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     }
   }
   if ($cleanupErrors.Count -ne 0) {
-    throw [AggregateException]::new('Windows supervisor test cleanup failed.', $cleanupErrors)
+    $cleanupDetails = (
+      $cleanupErrors |
+        ForEach-Object { $_.ToString() }
+    ) -join "`n---`n"
+    throw "Windows supervisor test cleanup failed:`n$cleanupDetails"
   }
 }
 if ($null -ne (Get-LocalUser -Name $ephemeralUserName -ErrorAction SilentlyContinue)) {
