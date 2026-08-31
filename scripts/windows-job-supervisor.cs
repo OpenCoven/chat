@@ -816,12 +816,23 @@ namespace OpenCoven
 
         private static bool ReadTokenElevation(IntPtr token)
         {
-            IntPtr buffer = ReadTokenInformation(
-                token,
-                TokenElevation,
-                "Ephemeral token elevation");
+            uint size = checked((uint)Marshal.SizeOf(typeof(TOKEN_ELEVATION)));
+            IntPtr buffer = Marshal.AllocHGlobal(checked((int)size));
             try
             {
+                uint returned;
+                if (!GetTokenInformation(
+                        token,
+                        TokenElevation,
+                        buffer,
+                        size,
+                        out returned) ||
+                    returned != size)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Ephemeral token elevation could not be queried.");
+                }
                 TOKEN_ELEVATION elevation =
                     (TOKEN_ELEVATION)Marshal.PtrToStructure(
                         buffer,
@@ -836,12 +847,23 @@ namespace OpenCoven
 
         private static uint ReadTokenElevationType(IntPtr token)
         {
-            IntPtr buffer = ReadTokenInformation(
-                token,
-                TokenElevationType,
-                "Ephemeral token elevation type");
+            uint size = sizeof(uint);
+            IntPtr buffer = Marshal.AllocHGlobal(checked((int)size));
             try
             {
+                uint returned;
+                if (!GetTokenInformation(
+                        token,
+                        TokenElevationType,
+                        buffer,
+                        size,
+                        out returned) ||
+                    returned != size)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Ephemeral token elevation type could not be queried.");
+                }
                 return unchecked((uint)Marshal.ReadInt32(buffer));
             }
             finally
