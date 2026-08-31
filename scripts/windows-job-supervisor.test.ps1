@@ -2618,6 +2618,7 @@ function Register-PrincipalOnlyInteractiveTask {
     [string]$TaskNonce,
     [string]$FolderPath,
     [string]$TaskName = 'IdentityMatchOnly',
+    [switch]$Start,
     [Parameter(Mandatory)][string[]]$ForbiddenFragments
   )
 
@@ -2689,9 +2690,40 @@ function Register-PrincipalOnlyInteractiveTask {
     3,
     $null
   )
+  $runningTask = $null
+  $runAttempted = $false
+  $runErrorHResult = 0
+  if ($Start) {
+    $runAttempted = $true
+    try {
+      $runningTask = $registeredTask.Run($null)
+    } catch [Runtime.InteropServices.COMException] {
+      $runErrorHResult = $_.Exception.HResult
+    }
+  }
   return [pscustomobject]@{
     TaskPath = "$FolderPath\$TaskName"
     RegisteredTask = $registeredTask
+    RunningTask = $runningTask
+    RunAttempted = $runAttempted
+    RunErrorHResult = $runErrorHResult
+  }
+}
+
+function Assert-PrincipalOnlySchedulerRunAttemptResult {
+  param([Parameter(Mandatory)][pscustomobject]$Probe)
+
+  if (-not $Probe.RunAttempted) {
+    throw 'Principal-only Task Scheduler run was not attempted.'
+  }
+  if (
+    $null -eq $Probe.RunningTask -and
+    (
+      $Probe.RunErrorHResult -eq 0 -or
+      $Probe.RegisteredTask.GetInstances(0).Count -ne 0
+    )
+  ) {
+    throw 'Principal-only Task Scheduler run failed without a fail-closed non-running state.'
   }
 }
 '@,
@@ -3001,47 +3033,6 @@ function Resolve-RegisteredPrincipalSid {
   '$($serviceEscapeRecord.Replace("'", "''"))',
   [Convert]::FromBase64String('$serviceEscapeTrustedBase64')
 )
-`$forbiddenTaskFragments = @(
-  '$serviceEscapeJobName',
-  '$serviceEscapeNonce',
-  '$($serviceEscapeContext.User.UserName)',
-  '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
-  '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
-  '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
-)
-`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
-`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
-foreach (`$exactSidRegistration in @(
-  [pscustomobject]@{
-    Probe = `$principalOnlyTask
-    ExpectedPath = '$principalOnlyTaskPath'
-  },
-  [pscustomobject]@{
-    Probe = `$sharedChildTask
-    ExpectedPath = '$sharedChildTaskPath'
-  },
-  [pscustomobject]@{
-    Probe = `$preExistingFolderTask
-    ExpectedPath = '$preExistingFolderTaskPath'
-  }
-)) {
-  if (
-    `$exactSidRegistration.Probe.TaskPath -cne `$exactSidRegistration.ExpectedPath -or
-    `$exactSidRegistration.Probe.RegisteredTask.Path -cne
-      `$exactSidRegistration.ExpectedPath
-  ) {
-    throw 'Exact-SID task path changed.'
-  }
-  if (
-    (Resolve-RegisteredPrincipalSid -UserId (
-      [string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId
-    )) -cne
-      '$($serviceEscapeContext.User.Sid)'
-  ) {
-    throw 'Task was not registered for the exact isolated SID.'
-  }
-}
 `$taskParameters = @{
   FolderPath = '$taskFolderPath'
   TaskName = '$serviceEscapeName'
@@ -3117,6 +3108,47 @@ if (`$primaryEnginePid -ne 0) {
     `$primaryEnginePid,
     '$($serviceEscapeContext.User.Sid)'
   )
+}
+`$forbiddenTaskFragments = @(
+  '$serviceEscapeJobName',
+  '$serviceEscapeNonce',
+  '$($serviceEscapeContext.User.UserName)',
+  '$([Environment]::MachineName)\$($serviceEscapeContext.User.UserName)',
+  '$($serviceEscapeContext.User.RootPath.Replace("'", "''"))',
+  '$($serviceEscapeContext.User.WorkspacePath.Replace("'", "''"))'
+)
+`$principalOnlyTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -TaskNonce '$principalOnlyNonce' -ForbiddenFragments `$forbiddenTaskFragments
+`$sharedChildTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$runCreatedSharedChildPath' -TaskName '$sharedChildTaskName' -ForbiddenFragments `$forbiddenTaskFragments
+`$preExistingFolderTask = Register-PrincipalOnlyInteractiveTask -UserSid '$($serviceEscapeContext.User.Sid)' -FolderPath '$preExistingTaskFolderPath' -TaskName '$preExistingFolderTaskName' -ForbiddenFragments `$forbiddenTaskFragments
+foreach (`$exactSidRegistration in @(
+  [pscustomobject]@{
+    Probe = `$principalOnlyTask
+    ExpectedPath = '$principalOnlyTaskPath'
+  },
+  [pscustomobject]@{
+    Probe = `$sharedChildTask
+    ExpectedPath = '$sharedChildTaskPath'
+  },
+  [pscustomobject]@{
+    Probe = `$preExistingFolderTask
+    ExpectedPath = '$preExistingFolderTaskPath'
+  }
+)) {
+  if (
+    `$exactSidRegistration.Probe.TaskPath -cne `$exactSidRegistration.ExpectedPath -or
+    `$exactSidRegistration.Probe.RegisteredTask.Path -cne
+      `$exactSidRegistration.ExpectedPath
+  ) {
+    throw 'Exact-SID task path changed.'
+  }
+  if (
+    (Resolve-RegisteredPrincipalSid -UserId (
+      [string]`$exactSidRegistration.Probe.RegisteredTask.Definition.Principal.UserId
+    )) -cne
+      '$($serviceEscapeContext.User.Sid)'
+  ) {
+    throw 'Task was not registered for the exact isolated SID.'
+  }
 }
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') /create '$bitsName' *>&1 |
   Out-Null
@@ -3688,6 +3720,7 @@ Add-Type -TypeDefinition (
   [IO.File]::ReadAllText('$($probePath.Replace("'", "''"))')
 ) -Language CSharp
 `$task = Register-PrincipalOnlyInteractiveTask `
+  -Start `
   -UserSid '$($Context.User.Sid)' `
   -TaskNonce '$taskNonce' `
   -ForbiddenFragments @(
@@ -3700,27 +3733,28 @@ Add-Type -TypeDefinition (
 if (`$task.TaskPath -cne '$taskPath') {
   throw 'Terminal failure persistence task path changed.'
 }
-`$deadline = [DateTime]::UtcNow.AddSeconds(20)
-`$enginePid = 0
-`$running = `$false
-while (-not `$running -or `$enginePid -eq 0) {
-  `$running = `$task.RegisteredTask.GetInstances(0).Count -gt 0
+Assert-PrincipalOnlySchedulerRunAttemptResult -Probe `$task
+`$deadline = [DateTime]::UtcNow.AddSeconds(2)
+`$enginePid = [uint32]0
+do {
   try {
     `$enginePid = [uint32]`$task.RunningTask.EnginePID
   } catch {
-    `$enginePid = 0
+    `$enginePid = [uint32]0
   }
-  if ([DateTime]::UtcNow -ge `$deadline) {
-    throw 'Terminal failure persistence task did not expose a live EnginePID.'
+  if (`$enginePid -ne 0) {
+    break
   }
-  Start-Sleep -Milliseconds 10
+  Start-Sleep -Milliseconds 20
+} while ([DateTime]::UtcNow -lt `$deadline)
+if (`$enginePid -ne 0) {
+  [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+    'Terminal failure principal-only scheduled action EnginePID',
+    '$JobName',
+    `$enginePid,
+    '$($Context.User.Sid)'
+  )
 }
-[ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
-  'Terminal failure principal-only scheduled action EnginePID',
-  '$JobName',
-  `$enginePid,
-  '$($Context.User.Sid)'
-)
 & (Join-Path `$env:SystemRoot 'System32\bitsadmin.exe') `
   /create `
   '$bitsName' *>&1 | Out-Null
@@ -3729,9 +3763,10 @@ if (`$LASTEXITCODE -ne 0) {
 }
 [IO.File]::WriteAllText(
   '$($readyPath.Replace("'", "''"))',
-  'exact-sid-task-process-and-bits-ready',
+  'exact-sid-task-run-attempt-process-and-bits-ready',
   [Text.UTF8Encoding]::new(`$false)
 )
+Start-Sleep -Seconds 300
 "@,
       [Text.UTF8Encoding]::new($false)
     )
@@ -3764,20 +3799,18 @@ if (`$LASTEXITCODE -ne 0) {
       }
       Start-Sleep -Milliseconds 20
     }
-    try {
-      $setupProcess = [Diagnostics.Process]::GetProcessById($setupPid)
-      try {
-        if (-not $setupProcess.WaitForExit(10000)) {
-          throw 'Terminal failure persistence setup did not exit.'
-        }
-        if ($setupProcess.ExitCode -ne 0) {
-          throw 'Terminal failure persistence setup failed.'
-        }
-      } finally {
-        $setupProcess.Dispose()
-      }
-    } catch [ArgumentException] {
+    if (
+      [IO.File]::ReadAllText($readyPath).Trim() -cne
+        'exact-sid-task-run-attempt-process-and-bits-ready'
+    ) {
+      throw 'Terminal failure persistence readiness marker was invalid.'
     }
+    [ScheduledActionIsolationProbe]::AssertAliveOutsideJobWithPrimaryTokenSid(
+      'Terminal failure deterministic exact-SID process',
+      $JobName,
+      [uint32]$setupPid,
+      $Context.User.Sid
+    )
     if (
       (Get-ExactSidScheduledTaskCount -Sid $Context.User.Sid) -eq 0 -or
       (Get-ExactSidBitsJobCount -Sid $Context.User.Sid) -eq 0 -or
@@ -3790,6 +3823,7 @@ if (`$LASTEXITCODE -ne 0) {
     return [pscustomobject]@{
       TaskPath = $taskPath
       BitsName = $bitsName
+      SetupPid = $setupPid
     }
   }
 
@@ -3948,6 +3982,7 @@ Start-Sleep -Seconds 300
       if (-not $Job.IsQuarantineComplete) {
         throw 'Terminal failure quarantine did not complete.'
       }
+      Assert-ProcessExited -ProcessId $persistence.SetupPid
       Assert-NoExactSidPersistence -Sid $Context.User.Sid
       Assert-ScheduledTaskAbsent `
         -TaskPath $persistence.TaskPath `

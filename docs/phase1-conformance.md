@@ -603,12 +603,14 @@ attempts a scheduler action and creates a BITS job; action execution remains
 conditional, while terminal quarantine and complete account/profile/root
 cleanup are mandatory and artifact capture remains forbidden.
 
-Four additional native cases stage an exact-SID principal-only running task,
-process, and BITS job, then invoke
+Four additional native cases stage an exact-SID principal-only task
+registration and run attempt, a deterministic out-of-Job exact-SID process,
+and a BITS job, then invoke
 `RunProducerAsUserAndQuarantine` through stdout overflow, stderr overflow,
 directory-quota failure, and a `CreateProcessWithLogonW` launch exception.
-Each requires verified account disablement, completed quarantine, external
-zero counts for exact-SID processes/tasks/BITS, rejected artifact capture, and
+Scheduler action execution is conditional in these cases as well. Each
+requires verified account disablement, completed quarantine, external zero
+counts for exact-SID processes/tasks/BITS, rejected artifact capture, and
 successful identity/profile/root deletion. Each invokes
 `QuarantineIsolatedIdentity` again after completion and requires an unchanged
 successful state. A timeout producer verifies the same terminal quarantine
@@ -977,7 +979,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
-| `scripts/windows-job-supervisor.test.ps1` | 155,906 | `b2fef7d88610ee5769d159850c929b1dae37f456375f6576bfcab6353dbb4479` |
+| `scripts/windows-job-supervisor.test.ps1` | 156,844 | `528c2aa892c625dddf5d621c01dc994aa02101ff6a70832aa34a524b4d5176a3` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
