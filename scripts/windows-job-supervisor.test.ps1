@@ -3211,6 +3211,19 @@ public static class UnsupervisedLogonProcess
     )
     $serviceEscapePassword =
       [string]$passwordProperty.GetValue($serviceEscapeContext.User)
+    $preExistingScheduler = New-Object -ComObject 'Schedule.Service'
+    $preExistingScheduler.Connect()
+    $preExistingFolder = $preExistingScheduler.GetFolder('\')
+    $preExistingCurrentPath = ''
+    foreach ($segment in $preExistingTaskFolderPath.Trim('\').Split('\')) {
+      $preExistingCurrentPath = "$preExistingCurrentPath\$segment"
+      try {
+        $preExistingFolder =
+          $preExistingScheduler.GetFolder($preExistingCurrentPath)
+      } catch {
+        $preExistingFolder = $preExistingFolder.CreateFolder($segment, $null)
+      }
+    }
     $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(
       $serviceEscapeJobName,
       $serviceEscapeContext.User
@@ -3369,19 +3382,6 @@ exit 0
 "@,
       [Text.UTF8Encoding]::new($false)
     )
-    $preExistingScheduler = New-Object -ComObject 'Schedule.Service'
-    $preExistingScheduler.Connect()
-    $preExistingFolder = $preExistingScheduler.GetFolder('\')
-    $preExistingCurrentPath = ''
-    foreach ($segment in $preExistingTaskFolderPath.Trim('\').Split('\')) {
-      $preExistingCurrentPath = "$preExistingCurrentPath\$segment"
-      try {
-        $preExistingFolder =
-          $preExistingScheduler.GetFolder($preExistingCurrentPath)
-      } catch {
-        $preExistingFolder = $preExistingFolder.CreateFolder($segment, $null)
-      }
-    }
     $serviceEscapeResult =
       $serviceEscapeJob.RunProducerAsUserAndQuarantine(
       $serviceEscapeContext.User,

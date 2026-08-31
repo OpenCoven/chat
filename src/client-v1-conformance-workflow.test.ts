@@ -1712,6 +1712,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
       "`$taskProbe.TaskPath -cne '$taskFolderPath\\$serviceEscapeName'",
     );
     expect(runtimeTest).not.toContain('$serviceEscapeTaskPath');
+    const preExistingSchedulerSetup = runtimeTest.indexOf(
+      '    $preExistingScheduler = New-Object -ComObject',
+    );
+    const serviceEscapeJobCreation = runtimeTest.indexOf(
+      '    $serviceEscapeJob = [OpenCoven.WindowsJobSupervisor]::Create(',
+    );
+    expect(preExistingSchedulerSetup).toBeGreaterThan(-1);
+    expect(serviceEscapeJobCreation).toBeGreaterThan(preExistingSchedulerSetup);
     for (const schedulerStartEvidence of [
       'function Assert-ScheduledActionRunIsolation {',
       '$hasStartedMarker = [IO.File]::Exists($StartedMarker)',
