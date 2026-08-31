@@ -474,6 +474,20 @@ describe('Phase 1 conformance lock', () => {
     });
   });
 
+  test('keeps the Windows supervisor source reachable from the frozen harness checkout', () => {
+    expect(() =>
+      runGit(
+        [
+          'merge-base',
+          '--is-ancestor',
+          expectedEntries.tools.windowsSupervisor.source.revision,
+          expectedEntries.harness.revision,
+        ],
+        projectRoot,
+      ),
+    ).not.toThrow();
+  });
+
   test('rejects an unexpected repository', () => {
     const lockPath = writeLock({
       version: 5,
