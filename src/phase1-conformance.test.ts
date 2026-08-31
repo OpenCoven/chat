@@ -701,7 +701,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain("'merge-base', '--is-ancestor'");
     expect(source).toContain('lock.chatAuthority.tree');
     expect(source).toContain("'src-tauri/src/coven.rs'");
-    expect(source).toContain("'src-tauri/src/bin/phase1-native-rpc.rs'");
+    expect(source).toContain('assertPhase1ProducerAuthority(lock, harnessRoot)');
     expect(source).toContain("resolve(roots.chatHarnessRoot, 'src-tauri', 'Cargo.toml')");
     expect(source).not.toContain("resolve(projectRoot, 'src-tauri', 'Cargo.toml')");
   });
