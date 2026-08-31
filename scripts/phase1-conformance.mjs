@@ -2028,7 +2028,19 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     );
   }
   for (const [group, args] of [
-    ['health', ['test', '--locked', '--package', 'coven-client', '--test', 'health']],
+    [
+      'health',
+      [
+        'test',
+        '--locked',
+        '--package',
+        'coven-client',
+        '--test',
+        'health',
+        '--',
+        '--test-threads=1',
+      ],
+    ],
     ['doc', ['test', '--locked', '--package', 'coven-client', '--doc']],
   ]) {
     covenTestResults.push(
