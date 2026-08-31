@@ -72,7 +72,6 @@ import {
   wrapInfrastructureFailure,
 } from '../scripts/phase1-conformance.mjs';
 import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
-import { readSchemaV2ProducerIdentity } from '../scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -253,7 +252,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain('chatRoot: roots.producerRoot');
   });
 
-  test('binds schema-v2 producer identity to the supplied workflow checkout', () => {
+  test('binds schema-v2 producer identity to the supplied workflow checkout', async () => {
+    const producerModulePath = '../scripts/phase1-schema-v2-producer.mjs';
+    const { readSchemaV2ProducerIdentity } = await import(producerModulePath);
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectRoot,
       encoding: 'utf8',
