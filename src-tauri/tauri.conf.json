@@ -33,7 +33,7 @@
     "createUpdaterArtifacts": false,
     "publisher": "OpenCoven",
     "copyright": "Copyright (c) 2026 OpenCoven",
-    "category": "SocialNetworking",
+    "category": "public.app-category.social-networking",
     "shortDescription": "Desktop chat client for OpenCoven familiars.",
     "longDescription": "OpenCoven Chat is a standalone desktop chat client. It stores conversations locally and can optionally pair with Coven Cave to browse canonical chat data.",
     "icon": [
