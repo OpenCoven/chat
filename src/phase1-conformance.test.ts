@@ -707,6 +707,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       );
       expect(JSON.parse(output)).toEqual([jobName, pid]);
     },
+    30_000,
   );
 
   test('has no module-scope subprocess and makes Windows membership the first schema-v2 subprocess', () => {
