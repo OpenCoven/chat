@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-test('renders the production browser connection gate when Tauri is unavailable', async ({
+test('mounts the chat shell immediately, with Cave offered rather than required', async ({
   page,
 }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'OpenCoven Chat' })).toBeVisible();
-  await expect(page.getByRole('status', { name: 'Connection state' })).toContainText(
-    'Cave connection requires the desktop app.',
+  await expect(page.getByRole('complementary')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'This device' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
   );
-  await expect(page.getByText('Open in the OpenCoven app to connect.')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Connection state' })).toHaveCount(0);
 });

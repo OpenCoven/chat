@@ -5,8 +5,10 @@ import type {
   CaveProject,
 } from '@opencoven/cave-client/managed';
 import type { Page } from '@opencoven/sdk-core/browser';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { ChatComposer } from './chat-composer';
+import type { ChatWriter } from './lib/local/chat-writer';
 import { createManualPageWalk, type ManualPageWalk } from './lib/sdk/manual-page-walk';
 import type { QueryAdapter, QueryResult } from './lib/sdk/query-adapter';
 
@@ -40,6 +42,19 @@ type ChatShellProps = Readonly<{
   queryAdapter: QueryAdapter;
   onReconcile?: () => void;
   onForgetCredential?: () => void;
+  /**
+   * Bumped by the owner after a successful write. Appended to the fetch effect
+   * dependency arrays so a sent message appears immediately instead of waiting
+   * for a cache TTL to lapse.
+   */
+  revision?: number;
+  /**
+   * Absent or null for a read-only source. When present and writable, the
+   * thread renders a composer.
+   */
+  writer?: ChatWriter | null;
+  onCreateConversation?: () => void;
+  isDurable?: boolean;
 }>;
 
 type StatusAction = Readonly<{
@@ -227,7 +242,15 @@ function permitsLoadMore(state: LoadMoreState): boolean {
   return state.status !== 'error' || state.code !== INVALID_PAGINATION_CODE;
 }
 
-export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: ChatShellProps) {
+export function ChatShell({
+  queryAdapter,
+  onReconcile,
+  onForgetCredential,
+  revision = 0,
+  writer = null,
+  onCreateConversation,
+  isDurable = true,
+}: ChatShellProps) {
   const [familiarsState, setFamiliarsState] = useState<ListResourceState<CaveCanonicalFamiliar>>({
     status: 'idle',
   });
@@ -251,6 +274,11 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
   const [messagesLoadMore, setMessagesLoadMore] = useState<LoadMoreState>({ status: 'idle' });
   const [selectedFamiliarId, setSelectedFamiliarId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [writeRevision, setWriteRevision] = useState(0);
+  const onWritten = useCallback(() => {
+    setWriteRevision((current) => current + 1);
+  }, []);
+  const canWrite = writer?.canWrite() === true;
   const threadHeadingRef = useRef<HTMLHeadingElement>(null);
   const shellRequestRef = useRef(0);
   const threadRequestRef = useRef(0);
@@ -291,6 +319,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
           onReconcile();
         };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision and writeRevision are refetch triggers, not values this effect reads.
   useEffect(() => {
     let active = true;
     shellRequestRef.current += 1;
@@ -331,7 +360,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     return () => {
       active = false;
     };
-  }, [pageWalks, queryAdapter]);
+  }, [pageWalks, queryAdapter, revision, writeRevision]);
 
   function loadMoreFamiliars() {
     if (familiarsState.status !== 'ready' || !familiarsState.hasMore) {
@@ -569,6 +598,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     );
   }, [filteredConversations]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision and writeRevision are refetch triggers, not values this effect reads.
   useEffect(() => {
     let active = true;
     threadRequestRef.current += 1;
@@ -612,7 +642,7 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
     return () => {
       active = false;
     };
-  }, [pageWalks, queryAdapter, selectedConversationId]);
+  }, [pageWalks, queryAdapter, revision, selectedConversationId, writeRevision]);
 
   useEffect(() => {
     if (selectedConversationId === null || conversationState.status !== 'ready') {
@@ -940,6 +970,15 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
         <section className="chat-shell__rail-section">
           <div className="chat-shell__section-heading">
             <h2>Conversations</h2>
+            {canWrite && onCreateConversation !== undefined ? (
+              <button
+                className="chat-shell__new-conversation"
+                type="button"
+                onClick={onCreateConversation}
+              >
+                New
+              </button>
+            ) : null}
             <span className="chat-shell__section-count">{filteredConversations.length}</span>
           </div>
           {renderConversationList()}
@@ -962,9 +1001,19 @@ export function ChatShell({ queryAdapter, onReconcile, onForgetCredential }: Cha
               {threadTitle}
             </h1>
           </div>
-          <span className="chat-shell__read-only">Read-only chat</span>
+          <span className="chat-shell__read-only">
+            {canWrite ? 'Local chat' : 'Read-only chat'}
+          </span>
         </header>
         <div className="chat-shell__thread-body">{renderThreadBody()}</div>
+        {canWrite ? (
+          <ChatComposer
+            conversationId={selectedConversationId}
+            isDurable={isDurable}
+            onWritten={onWritten}
+            writer={writer}
+          />
+        ) : null}
       </main>
     </div>
   );
