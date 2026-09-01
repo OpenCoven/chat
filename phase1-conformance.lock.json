@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "f75f2937759088166a6df6869ff72e7ab365e719"
+    "revision": "f24d3b731e922c9a5d38094a997bedd26a2defc2"
   },
   "harnessAuthority": {
-    "revision": "f75f2937759088166a6df6869ff72e7ab365e719",
-    "tree": "1c9e18b74d4703551ed845cd5bfa31ac28a322a8",
+    "revision": "f24d3b731e922c9a5d38094a997bedd26a2defc2",
+    "tree": "982f52000014837ca6e98087747b96f4e8c6e3ea",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "42caccdd286e80dd4ec5dee728cda9f74e51d9d2",
-        "sha256": "32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987"
+        "blob": "820496ab622f73471e9d4284d2d1a1992c9cd59e",
+        "sha256": "83ad3e96d199f04eb83937fd431413baab04120fb2470883c7e67b2d0cd1c5d8"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "32e8902c9412170b6ecfa487fa73b96f0e2f6071",
-        "sha256": "8521d524ba411cad236f2394b96c9b12983437e3fee089c9c1b2035e11614d5f"
+        "blob": "f735d840ca7d16efeb456caddc2937933348f058",
+        "sha256": "1dac5fa8d605188d6a973edbf80a320930a445dbc02f503823e1bd42b5ae407d"
       }
     ],
     "productionDeltas": [
