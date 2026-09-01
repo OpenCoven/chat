@@ -1325,8 +1325,10 @@ function runCommand(
             supervisorPath,
             '--timeout-ms',
             String(timeoutMs),
-            '--',
+            '--invocation-path',
             invocation.executable,
+            '--',
+            invocation.resolvedCommand,
             ...invocation.args,
           ],
       {
@@ -2541,8 +2543,10 @@ function spawnOwnedProcess(command, args, { cwd, env, stdio }) {
           supervisorPath,
           '--timeout-ms',
           String(commandTimeoutMs),
-          '--',
+          '--invocation-path',
           invocation.executable,
+          '--',
+          invocation.resolvedCommand,
           ...invocation.args,
         ],
     {

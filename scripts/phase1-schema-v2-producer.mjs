@@ -3588,7 +3588,7 @@ export async function runSchemaV2Conformance(options) {
       operatorIsolationValid ? 'phase1.assertion.passed' : 'phase1.assertion.failed',
     );
   } catch (error) {
-    infrastructureFailure =
+    infrastructureFailure ??=
       schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
         ? new Error(activeStage, { cause: error })
         : error;
