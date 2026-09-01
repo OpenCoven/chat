@@ -1,7 +1,7 @@
 import { accessSync, constants, lstatSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, resolve, win32 } from 'node:path';
 
-const unixSystemToolDirectories = Object.freeze(['/usr/bin', '/bin', '/usr/sbin', '/sbin']);
+const unixFixedToolDirectories = Object.freeze(['/usr/bin', '/bin', '/usr/sbin', '/sbin']);
 const windowsExecutableExtensions = new Set(['.exe', '.cmd', '.bat', '.com']);
 const defaultWindowsPathExt = ['.com', '.exe', '.bat', '.cmd'];
 const unsafeWindowsBatchToken = /[&|<>()^%!"\r\n\0]/u;
@@ -226,9 +226,8 @@ export function resolveExecutableInvocation(
 // entry is the directory of one exactly resolved required executable (found
 // through the caller's own ambient PATH), never the ambient PATH itself, so
 // unrelated or unsafe ambient entries can never reach the isolated process.
-// The four fixed system directories are always appended. Throws (fails
-// closed) if any required command cannot be resolved to a safe absolute
-// executable.
+// The four fixed OS directories are always appended. Throws (fails closed)
+// if any required command cannot be resolved to a safe absolute executable.
 export function resolveUnixToolPath(
   commands,
   environment = process.env,
@@ -244,7 +243,7 @@ export function resolveUnixToolPath(
     const invocation = resolveExecutableInvocation(command, environment, platform, []);
     return dirname(invocation.executable);
   });
-  directories.push(...unixSystemToolDirectories);
+  directories.push(...unixFixedToolDirectories);
 
   const seen = new Set();
   const reviewed = [];

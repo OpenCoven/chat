@@ -972,9 +972,9 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 445,413 | `08c9cfb3f62b8be3839e811b3e2fa3eede939bd614711368ac4dda945b007955` |
+| `.github/workflows/client-v1-conformance.yml` | 445,413 | `244343b76309705c3e6f5681c66a83232421a00844ccb72d9ca5e481e57fe4b9` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
-| `scripts/executable-resolution.mjs` | 9,163 | `57cda24394fc31c3ade328b8d4cdbbfda57867170a18dbd1d7b33f4e386b314f` |
+| `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
