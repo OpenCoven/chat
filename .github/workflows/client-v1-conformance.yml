@@ -116,7 +116,11 @@ jobs:
               if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
                 throw "$Label contains a reparse component."
               }
-              $item = $item.Parent
+              if ($item -is [IO.FileInfo]) {
+                $item = $item.Directory
+              } else {
+                $item = $item.Parent
+              }
             }
           }
 
@@ -9082,7 +9086,7 @@ jobs:
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const command = ''rustup''; const invocation = resolveExecutableInvocation(command, process.env, process.platform, [''toolchain'', ''install'', ''1.95.0'', ''--profile'', ''minimal'']); execFileSync(invocation.executable, invocation.args, { argv0: command, stdio: ''inherit'' });"'
       - name: Require frozen toolchain
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const run = (command, args) => { const invocation = resolveExecutableInvocation(command, process.env, process.platform, args); return execFileSync(invocation.executable, invocation.args, { encoding: ''utf8'' }).trim(); }; if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
+        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const run = (command, args) => { const invocation = resolveExecutableInvocation(command, process.env, process.platform, args); return execFileSync(invocation.executable, invocation.args, { encoding: ''utf8'' }).trim(); }; if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '')) throw new Error(''Frozen toolchain does not match'');"'
       - name: Prepare trusted Unix supervisor
         if: matrix.platform != 'win32-x64'
         shell: bash

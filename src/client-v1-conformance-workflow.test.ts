@@ -2173,6 +2173,22 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('defers the Unix Tauri CLI check until after the frozen dependency install', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
+    const command = readFileSync(unixProducerCommandPath, 'utf8');
+    const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
+    const tauriIndex = command.indexOf(
+      "pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
+    );
+
+    expect(earlyToolchainCheck).not.toContain(
+      "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
+    );
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(tauriIndex).toBeGreaterThan(installIndex);
+  });
+
   test('pins and verifies the complete supervised Windows bootstrap and evidence tree', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
@@ -2244,6 +2260,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(bootstrap).not.toMatch(/\b(?:curl|wget|Invoke-WebRequest)\b/u);
     expect(bootstrap).not.toContain('http://');
     expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
+  });
+
+  test('walks Windows file ancestors without dereferencing FileInfo.Parent', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const runBody = workflowRunBody(bootstrap);
+
+    expect(runBody).toContain('if ($item -is [IO.FileInfo])');
+    expect(runBody).toContain('$item = $item.Directory');
+    expect(runBody).toContain('$item = $item.Parent');
   });
 
   test('requires the exact reviewed Windows VS2026 image and v143 tool paths', () => {
