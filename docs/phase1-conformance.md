@@ -379,24 +379,24 @@ must not claim, the privileged UID/cgroup runtime results.
 The `win32-x64` matrix expansion does not begin with checkout or a setup
 action. Its first step is inline `pwsh` reviewed as part of the workflow
 itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025` x64 image at exact image version `20260824.239.3`,
+GitHub `windows-2025-vs2026` x64 image at exact image version
+`20260824.214.3`,
 Windows build `26100.33296`, `kernel32.dll` file version
 `10.0.26100.33296`, PowerShell `7.6.5` at
 `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
-`10.0.11`, Visual Studio Enterprise 2022 `17.14.37614.0` at
-`C:\Program Files\Microsoft Visual Studio\2022\Enterprise`, and its
-`Microsoft.VisualStudio.Component.VC.Tools.x86.x64` component version
-`17.14.36510.44`. The inventory's debug runtime version `14.44.35211` is not
-the compiler directory version: the v143 compiler toolset directory version is
+`10.0.11`, Visual Studio Enterprise 2026 `18.9.12112.369` at
+`C:\Program Files\Microsoft Visual Studio\18\Enterprise`, and its legacy v143
+`Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version
+`18.9.12009.81`. The v143 compiler toolset directory version remains
 `14.44.35207` at
-`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207`.
+`C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207`.
 The compiler and linker are pinned respectively to that toolset's
 `bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
 `10.0.26100.0` provides `rc.exe` at
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
 These values come from the authoritative `actions/runner-images` inventory for
-release tag `win25/20260824.239` at commit
-`420ee0b3db1d89cc8745d939f2a72ff7bc426b97`.
+release tag `win25-vs2026/20260824.214` at commit
+`8c3c8c0bf0068534d87e970a58b590522f1dc1a5`.
 The workflow also requires valid Microsoft Authenticode signatures for the
 trusted PowerShell, kernel, command processor, Visual Studio executable,
 compiler, linker, and resource compiler, plus non-reparse runner temporary and
@@ -972,7 +972,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 442,306 | `3eefe281345c1d411d0a0dc4d100d74d58295c6d005f1156c6fc9632e42a6c4c` |
+| `.github/workflows/client-v1-conformance.yml` | 442,871 | `31fa6702c8f1fcc4fe4b936fc7558f6d7ba115abc8c94040bccc239050336ae6` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |

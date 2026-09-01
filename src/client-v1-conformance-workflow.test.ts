@@ -42,22 +42,22 @@ const downloadArtifactAction = 'actions/download-artifact@3e5f45b2cfb9172054b408
 const attestBuildProvenanceAction =
   'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8';
 const reviewedWindowsPins = {
-  OPENCOVEN_WINDOWS_IMAGE_OS: 'win25',
-  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.239.3',
+  OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026',
+  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.214.3',
   OPENCOVEN_WINDOWS_BUILD: '26100.33296',
   OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296',
   OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
   OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
-  OPENCOVEN_WINDOWS_VS_VERSION: '17.14.37614.0',
-  OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
+  OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12112.369',
+  OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise',
   OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207',
+    'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207',
   OPENCOVEN_WINDOWS_CL_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe',
   OPENCOVEN_WINDOWS_LINK_PATH:
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe',
   OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0',
   OPENCOVEN_WINDOWS_RC_PATH:
     'C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe',
@@ -385,6 +385,10 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(workflow).toContain("      GIT_CONFIG_COUNT: '1'");
     expect(workflow).toContain('      GIT_CONFIG_KEY_0: core.autocrlf');
     expect(workflow).toContain("      GIT_CONFIG_VALUE_0: 'false'");
+    expect(workflow).toContain('argv0: command');
+    expect(workflow).toContain(
+      "[''toolchain'', ''install'', ''1.95.0'', ''--profile'', ''minimal'']",
+    );
     expect(workflow).toContain("run(''rustup'', [''run'', ''1.95.0'', ''rustc'', ''--version''])");
     expect(workflow).not.toContain("run(''rustc'', [''--version''])");
     expect(workflow).toContain('      - id: phase1-revisions');
@@ -2227,7 +2231,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
   });
 
-  test('requires the exact reviewed Windows image, Visual Studio, and v143 tool paths', () => {
+  test('requires the exact reviewed Windows VS2026 image and v143 tool paths', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
     const environment = workflowStepEnvironment(bootstrap);
@@ -2236,6 +2240,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     for (const rejectedMsvcPathVersion of ['14.50.35717', '14.44.35211']) {
       expect(workflow).not.toContain(`VC\\Tools\\MSVC\\${rejectedMsvcPathVersion}`);
     }
+    expect(workflow).not.toContain('Microsoft Visual Studio\\2022\\Enterprise');
     for (const [name, value] of Object.entries(reviewedWindowsPins)) {
       expect(environment).toContain(`${name}: '${value}'`);
       expect(runBody).toContain(`$env:${name}`);
