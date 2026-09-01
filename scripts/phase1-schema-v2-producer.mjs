@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { devNull, homedir } from 'node:os';
-import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
@@ -30,10 +30,11 @@ import {
   assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
+  assertPhase1ProducerAuthority,
   createGitCheckoutEnvironment,
   createGitEnvironment,
   readPhase1CheckoutIdentity,
-  readPhase1ConformanceLock,
+  requirePhase1HarnessAuthorityVerification,
 } from './phase1-conformance-lock.mjs';
 import {
   buildIsolationEvidence,
@@ -55,15 +56,6 @@ import {
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const gitCommonDirectory = resolve(
-  projectRoot,
-  execFileSync('git', ['rev-parse', '--git-common-dir'], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-  }).trim(),
-);
-const chatRepositoryRoot = dirname(gitCommonDirectory);
-const repositoriesParent = dirname(chatRepositoryRoot);
 const defaultRetainedReport = resolve(
   projectRoot,
   'test-results',
@@ -110,6 +102,422 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
   return environment;
 }
 
+export function windowsJobBindingEnvironment(
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform !== 'win32') {
+    return {};
+  }
+  const required = environment.OPENCOVEN_WINDOWS_JOB_REQUIRED;
+  const nonce = environment.OPENCOVEN_WINDOWS_JOB_NONCE;
+  const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
+  const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
+  const bootstrapRoot = environment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT;
+  const workspace = environment.OPENCOVEN_WINDOWS_WORKSPACE;
+  const artifactDirectory = environment.OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY;
+  const sourceRecord = environment.OPENCOVEN_WINDOWS_SOURCE_RECORD;
+  const systemRoot = environment.SYSTEMROOT;
+  const windowsDirectory = environment.WINDIR;
+  const commandProcessor = environment.COMSPEC;
+  const temporaryDirectory = environment.TEMP;
+  const secondaryTemporaryDirectory = environment.TMP;
+  const executablePath = environment.PATH;
+  const pathExtensions = environment.PATHEXT;
+  const compilerLibraryPath = environment.LIB;
+  const compilerIncludePath = environment.INCLUDE;
+  if (required !== '1') {
+    throw new Error('Windows schema-v2 evidence Job Object supervision is required.');
+  }
+  if (
+    typeof nonce !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(nonce) ||
+    name !== `Local\\OpenCoven.Chat.Conformance.${nonce}`
+  ) {
+    throw new Error('Windows Job Object supervision is not nonce-bound.');
+  }
+  if (
+    typeof systemPwsh !== 'string' ||
+    systemPwsh.toLowerCase() !== 'c:\\program files\\powershell\\7\\pwsh.exe'
+  ) {
+    throw new Error('Windows Job Object membership requires trusted system PowerShell.');
+  }
+  for (const [label, value] of [
+    ['library', compilerLibraryPath],
+    ['include', compilerIncludePath],
+  ]) {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.includes('\n') ||
+      value.includes('\r') ||
+      value.split(';').some((path) => {
+        const lower = path.toLowerCase();
+        return (
+          !/^[a-z]:\\/u.test(lower) ||
+          lower.includes('\\..\\') ||
+          (!lower.startsWith(
+            'c:\\program files\\microsoft visual studio\\2022\\enterprise\\vc\\tools\\msvc\\14.',
+          ) &&
+            !lower.startsWith('c:\\program files (x86)\\windows kits\\10\\'))
+        );
+      })
+    ) {
+      throw new Error(`Windows Job Object ${label} path is outside trusted toolchain roots.`);
+    }
+  }
+  const requireCanonicalWindowsPath = (value, label) => {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.includes('\0') ||
+      value.includes('\n') ||
+      value.includes('\r') ||
+      !windowsPath.isAbsolute(value) ||
+      windowsPath.normalize(value) !== value
+    ) {
+      throw new Error(`Windows Job Object ${label} path is invalid.`);
+    }
+    return value;
+  };
+  const requireDescendant = (root, candidate, label) => {
+    const relativePath = windowsPath.relative(root, candidate);
+    if (
+      relativePath.length === 0 ||
+      relativePath === '..' ||
+      relativePath.startsWith(`..${windowsPath.sep}`) ||
+      windowsPath.isAbsolute(relativePath)
+    ) {
+      throw new Error(`Windows Job Object ${label} path is outside the bootstrap root.`);
+    }
+  };
+  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot, 'bootstrap root');
+  const canonicalWorkspace = requireCanonicalWindowsPath(workspace, 'workspace');
+  const canonicalArtifactDirectory = requireCanonicalWindowsPath(
+    artifactDirectory,
+    'artifact directory',
+  );
+  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord, 'artifact record');
+  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory, 'temporary');
+  const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
+    secondaryTemporaryDirectory,
+    'secondary temporary',
+  );
+  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace, 'workspace');
+  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory, 'temporary');
+  if (
+    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    canonicalWorkspace.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'workspace').toLowerCase() ||
+    canonicalTemporaryDirectory.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'temp').toLowerCase() ||
+    canonicalSecondaryTemporaryDirectory.toLowerCase() !==
+      canonicalTemporaryDirectory.toLowerCase() ||
+    canonicalArtifactDirectory.toLowerCase() !==
+      windowsPath.join(canonicalWorkspace, '.artifacts').toLowerCase() ||
+    canonicalSourceRecord.toLowerCase() !==
+      windowsPath
+        .join(canonicalArtifactDirectory, 'client-v1-conformance-win32-x64.json')
+        .toLowerCase() ||
+    existsSync(canonicalSourceRecord)
+  ) {
+    throw new Error('Windows Job Object artifact or temporary binding is invalid.');
+  }
+  if (
+    typeof systemRoot !== 'string' ||
+    typeof windowsDirectory !== 'string' ||
+    systemRoot.toLowerCase() !== 'c:\\windows' ||
+    windowsDirectory.toLowerCase() !== 'c:\\windows' ||
+    typeof commandProcessor !== 'string' ||
+    commandProcessor.toLowerCase() !== 'c:\\windows\\system32\\cmd.exe'
+  ) {
+    throw new Error('Windows Job Object base system environment is invalid.');
+  }
+  if (
+    typeof executablePath !== 'string' ||
+    executablePath.length === 0 ||
+    executablePath.includes('\0') ||
+    executablePath.includes('\n') ||
+    executablePath.includes('\r') ||
+    pathExtensions !== '.COM;.EXE;.BAT;.CMD'
+  ) {
+    throw new Error('Windows Job Object executable environment is invalid.');
+  }
+  return {
+    OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
+    OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
+    OPENCOVEN_WINDOWS_JOB_NAME: name,
+    OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
+    OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: canonicalBootstrapRoot,
+    OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
+    OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
+    OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
+    SYSTEMROOT: systemRoot,
+    WINDIR: windowsDirectory,
+    COMSPEC: commandProcessor,
+    TEMP: canonicalTemporaryDirectory,
+    TMP: canonicalSecondaryTemporaryDirectory,
+    PATH: executablePath,
+    PATHEXT: pathExtensions,
+    LIB: compilerLibraryPath,
+    INCLUDE: compilerIncludePath,
+  };
+}
+
+export function unixProducerBindingEnvironment(
+  environment = process.env,
+  platform = process.platform,
+  architecture = process.arch,
+  currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+  cgroupMembership = platform === 'linux' ? readFileSync('/proc/self/cgroup', 'utf8') : '',
+) {
+  if (platform === 'win32') {
+    return {};
+  }
+  const fail = () => {
+    throw new Error('Unix schema-v2 evidence requires trusted distinct-UID containment.');
+  };
+  if ((platform !== 'linux' && platform !== 'darwin') || currentUid === undefined) {
+    fail();
+  }
+  const required = environment.OPENCOVEN_UNIX_PRODUCER_REQUIRED;
+  const evidencePlatform = environment.OPENCOVEN_UNIX_PRODUCER_PLATFORM;
+  const producerUidText = environment.OPENCOVEN_UNIX_PRODUCER_UID;
+  const producerName = environment.OPENCOVEN_UNIX_PRODUCER_NAME;
+  const brokerUidText = environment.OPENCOVEN_UNIX_BROKER_UID;
+  const containment = environment.OPENCOVEN_UNIX_CONTAINMENT;
+  const cgroupPath = environment.OPENCOVEN_UNIX_CGROUP_PATH;
+  const workspace = environment.OPENCOVEN_UNIX_WORKSPACE;
+  const artifactDirectory = environment.OPENCOVEN_UNIX_ARTIFACT_DIRECTORY;
+  const sourceRecord = environment.OPENCOVEN_UNIX_SOURCE_RECORD;
+  const canonicalUid = /^(?:0|[1-9][0-9]{0,9})$/u;
+  if (
+    required !== '1' ||
+    typeof producerUidText !== 'string' ||
+    typeof brokerUidText !== 'string' ||
+    !canonicalUid.test(producerUidText) ||
+    !canonicalUid.test(brokerUidText) ||
+    Number(producerUidText) !== currentUid ||
+    producerUidText === brokerUidText ||
+    Number(producerUidText) === 0 ||
+    Number(brokerUidText) === 0 ||
+    evidencePlatform !== `${platform}-${architecture}` ||
+    typeof producerName !== 'string' ||
+    !/^ocv[0-9a-f]{16}$/u.test(producerName)
+  ) {
+    fail();
+  }
+  const requireCanonicalDirectory = (path) => {
+    if (
+      typeof path !== 'string' ||
+      path.length === 0 ||
+      path.includes('\0') ||
+      path.includes('\n') ||
+      path.includes('\r') ||
+      !isAbsolute(path) ||
+      resolve(path) !== path
+    ) {
+      fail();
+    }
+    let stats;
+    try {
+      stats = lstatSync(path);
+      if (stats.isSymbolicLink() || !stats.isDirectory() || realpathSync(path) !== path) {
+        fail();
+      }
+    } catch {
+      fail();
+    }
+    return stats;
+  };
+  requireCanonicalDirectory(workspace);
+  const artifactStats = requireCanonicalDirectory(artifactDirectory);
+  const expectedArtifactDirectory = resolve(
+    dirname(workspace),
+    'producer',
+    'workspace',
+    '.artifacts',
+  );
+  const expectedSourceRecord = resolve(
+    artifactDirectory,
+    `client-v1-conformance-${evidencePlatform}.json`,
+  );
+  if (
+    artifactDirectory !== expectedArtifactDirectory ||
+    sourceRecord !== expectedSourceRecord ||
+    existsSync(sourceRecord) ||
+    artifactStats.uid !== currentUid ||
+    (artifactStats.mode & 0o077) !== 0
+  ) {
+    fail();
+  }
+  const binding = {
+    OPENCOVEN_UNIX_PRODUCER_REQUIRED: required,
+    OPENCOVEN_UNIX_PRODUCER_PLATFORM: evidencePlatform,
+    OPENCOVEN_UNIX_PRODUCER_UID: producerUidText,
+    OPENCOVEN_UNIX_PRODUCER_NAME: producerName,
+    OPENCOVEN_UNIX_BROKER_UID: brokerUidText,
+    OPENCOVEN_UNIX_CONTAINMENT: containment,
+    OPENCOVEN_UNIX_WORKSPACE: workspace,
+    OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: artifactDirectory,
+    OPENCOVEN_UNIX_SOURCE_RECORD: sourceRecord,
+  };
+  if (platform === 'linux') {
+    const producerNonce = producerName.slice(3);
+    if (
+      containment !== 'linux-cgroup-v2' ||
+      typeof cgroupPath !== 'string' ||
+      !/^\/(?:[A-Za-z0-9_.-]+\/)*opencoven-chat-[0-9a-f]{16}$/u.test(cgroupPath) ||
+      !cgroupPath.endsWith(`/opencoven-chat-${producerNonce}`) ||
+      !cgroupMembership.split(/\r?\n/u).includes(`0::${cgroupPath}`)
+    ) {
+      fail();
+    }
+    return {
+      ...binding,
+      OPENCOVEN_UNIX_CGROUP_PATH: cgroupPath,
+    };
+  }
+  if (containment !== 'macos-uid' || cgroupPath !== undefined) {
+    fail();
+  }
+  return binding;
+}
+
+export function schemaV2SupervisorEnvironment(
+  environment = process.env,
+  platform = process.platform,
+  architecture = process.arch,
+  currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+  cgroupMembership = platform === 'linux' ? readFileSync('/proc/self/cgroup', 'utf8') : '',
+) {
+  return platform === 'win32'
+    ? windowsJobBindingEnvironment(environment, platform)
+    : unixProducerBindingEnvironment(
+        environment,
+        platform,
+        architecture,
+        currentUid,
+        cgroupMembership,
+      );
+}
+
+export function supervisorArtifactOutputPath(binding, platform = process.platform) {
+  const path =
+    platform === 'win32'
+      ? binding.OPENCOVEN_WINDOWS_SOURCE_RECORD
+      : binding.OPENCOVEN_UNIX_SOURCE_RECORD;
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new Error('Schema-v2 evidence supervisor artifact path is unavailable.');
+  }
+  return path;
+}
+
+export function runPowerShellCommandWithArgs(
+  executable,
+  script,
+  args,
+  { cwd = projectRoot, env = {}, timeout = 15_000 } = {},
+) {
+  if (
+    typeof executable !== 'string' ||
+    executable.length === 0 ||
+    typeof script !== 'string' ||
+    script.length === 0 ||
+    !Array.isArray(args) ||
+    args.some((argument) => typeof argument !== 'string' || argument.includes('\0')) ||
+    !Number.isSafeInteger(timeout) ||
+    timeout <= 0
+  ) {
+    throw new Error('PowerShell command-with-arguments invocation is invalid.');
+  }
+  return execFileSync(
+    executable,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-CommandWithArgs', script, ...args],
+    {
+      cwd,
+      encoding: 'utf8',
+      env,
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout,
+      windowsHide: true,
+    },
+  );
+}
+
+function assertWindowsJobMembership(binding) {
+  if (Object.keys(binding).length === 0) {
+    return;
+  }
+  const script = `
+$ErrorActionPreference = 'Stop'
+$source = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class OpenCovenExpectedJobMembership {
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsProcessInJob(
+        IntPtr process,
+        IntPtr job,
+        [MarshalAs(UnmanagedType.Bool)] out bool result);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+    public static void Require(string name, uint processId) {
+        IntPtr job = OpenJobObjectW(JOB_OBJECT_QUERY, false, name);
+        if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+        if (process == IntPtr.Zero) {
+            CloseHandle(job);
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try {
+            bool member;
+            if (!IsProcessInJob(process, job, out member) || !member) {
+                throw new InvalidOperationException("Harness process is outside the expected Job Object.");
+            }
+        } finally {
+            CloseHandle(process);
+            CloseHandle(job);
+        }
+    }
+}
+'@
+Add-Type -TypeDefinition $source -Language CSharp
+[OpenCovenExpectedJobMembership]::Require($args[0], [uint32]$args[1])
+`;
+  const output = runPowerShellCommandWithArgs(
+    binding.OPENCOVEN_WINDOWS_SYSTEM_PWSH,
+    script,
+    [binding.OPENCOVEN_WINDOWS_JOB_NAME, String(process.pid)],
+    {
+      cwd: projectRoot,
+      env: {
+        SYSTEMROOT: binding.SYSTEMROOT,
+        WINDIR: binding.WINDIR,
+        COMSPEC: binding.COMSPEC,
+        PATH: binding.PATH,
+        PATHEXT: binding.PATHEXT,
+        TEMP: binding.TEMP,
+        TMP: binding.TMP,
+      },
+      timeout: 15_000,
+    },
+  );
+  if (output.trim() !== '') {
+    throw new Error('Windows Job Object membership probe returned unexpected output.');
+  }
+}
+
 function killUntrackedOwnedChild(child) {
   if (ownedProcessGroupsSupported && child.exitCode === null && child.signalCode === null) {
     try {
@@ -122,12 +530,46 @@ function killUntrackedOwnedChild(child) {
   child.kill('SIGKILL');
 }
 
-function defaultSourceRoot(environmentName, repositoryName) {
+function configuredSourceRoot(environmentName) {
   if (process.env[environmentName] !== undefined) {
     return resolve(process.env[environmentName]);
   }
-  const candidate = resolve(repositoriesParent, repositoryName);
-  return existsSync(candidate) ? candidate : undefined;
+  return undefined;
+}
+
+function resolveRepositoryLayout() {
+  const gitCommonDirectory = resolve(
+    projectRoot,
+    execFileSync('git', ['-c', `safe.directory=${projectRoot}`, 'rev-parse', '--git-common-dir'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    }).trim(),
+  );
+  const chatRepositoryRoot = dirname(gitCommonDirectory);
+  return {
+    chatRepositoryRoot,
+    repositoriesParent: dirname(chatRepositoryRoot),
+  };
+}
+
+function resolveDefaultSourceRoots(options, repositoryLayout) {
+  const source = { ...options };
+  for (const [optionName, repositoryName] of [
+    ['sdkSourceRoot', 'sdk'],
+    ['sdkValidatorSourceRoot', 'sdk'],
+    ['caveSourceRoot', 'coven-cave'],
+    ['covenSourceRoot', 'coven'],
+  ]) {
+    if (source[optionName] === undefined) {
+      const candidate = resolve(repositoryLayout.repositoriesParent, repositoryName);
+      source[optionName] = existsSync(candidate) ? candidate : undefined;
+    }
+  }
+  return source;
 }
 
 export class CommandExecutionError extends Error {
@@ -164,7 +606,20 @@ function requireString(value, label) {
   return value;
 }
 
-export function parseArgs(argv) {
+export function parseArgs(argv, runtime = {}) {
+  const runtimeEnvironment = runtime.environment ?? process.env;
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
   const options = {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
@@ -173,10 +628,10 @@ export function parseArgs(argv) {
     outputPath: undefined,
     validatorRevision: undefined,
     chatSourceRoot: resolve(process.env.OPENCOVEN_CHAT_ROOT ?? projectRoot),
-    sdkSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_ROOT', 'sdk'),
-    sdkValidatorSourceRoot: defaultSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT', 'sdk'),
-    caveSourceRoot: defaultSourceRoot('OPENCOVEN_CAVE_ROOT', 'coven-cave'),
-    covenSourceRoot: defaultSourceRoot('OPENCOVEN_COVEN_ROOT', 'coven'),
+    sdkSourceRoot: configuredSourceRoot('OPENCOVEN_SDK_ROOT'),
+    sdkValidatorSourceRoot: configuredSourceRoot('OPENCOVEN_SDK_VALIDATOR_ROOT'),
+    caveSourceRoot: configuredSourceRoot('OPENCOVEN_CAVE_ROOT'),
+    covenSourceRoot: configuredSourceRoot('OPENCOVEN_COVEN_ROOT'),
   };
   let retainedReportWasSet = false;
   let validatorRevisionWasSet = false;
@@ -230,7 +685,9 @@ export function parseArgs(argv) {
       continue;
     }
     if (argument === '--output') {
-      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      const output = requireString(argv[index + 1], '--output');
+      options.outputPath =
+        runtimePlatform === 'win32' ? windowsPath.resolve(output) : resolve(output);
       index += 1;
       continue;
     }
@@ -258,13 +715,19 @@ export function parseArgs(argv) {
         'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
       );
     }
-    const expectedOutput = resolve(
-      projectRoot,
-      '.artifacts',
-      `client-v1-conformance-${options.platform}.json`,
+    if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
+      throw new Error('schema-v2 --platform must match the supervised native host.');
+    }
+    const supervisorEnvironment = schemaV2SupervisorEnvironment(
+      runtimeEnvironment,
+      runtimePlatform,
+      runtimeArchitecture,
+      runtimeCurrentUid,
+      runtimeCgroupMembership,
     );
+    const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the platform artifact path.');
+      throw new Error('schema-v2 --output must match the supervisor artifact path.');
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
@@ -751,11 +1214,15 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
     process.platform === 'win32'
       ? undefined
       : createProcessOwnedArtifactRoot({ prefix: 'p1ot', shortPath: true });
+  const observationEnvironment = {
+    ...environment,
+    CARGO_TARGET_DIR: resolve(artifactRoot.rootPath, 'build', 'observation-target'),
+  };
   const testEnvironment =
     shortRoot === undefined
-      ? environment
+      ? observationEnvironment
       : {
-          ...environment,
+          ...observationEnvironment,
           TMPDIR: shortRoot.rootPath,
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
@@ -986,6 +1453,8 @@ export async function cloneExactCheckout({
       [
         '-c',
         `core.hooksPath=${devNull}`,
+        '-c',
+        `safe.directory=${localSource}`,
         'clone',
         '--local',
         '--no-hardlinks',
@@ -1078,14 +1547,18 @@ export async function cloneExactCheckout({
 export function readSchemaV2ProducerIdentity(sourceRoot) {
   const environment = createGitEnvironment(process.env);
   const run = (value) =>
-    execFileSync('git', ['-C', sourceRoot, 'rev-parse', value], {
-      encoding: 'utf8',
-      env: environment,
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    }).trim();
+    execFileSync(
+      'git',
+      ['-c', `safe.directory=${sourceRoot}`, '-C', sourceRoot, 'rev-parse', value],
+      {
+        encoding: 'utf8',
+        env: environment,
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+      },
+    ).trim();
   return {
     revision: run('HEAD'),
     tree: run('HEAD^{tree}'),
@@ -1110,6 +1583,41 @@ async function cloneProducerCheckout(artifactRoot, sourceRoot, environment) {
     throw new Error('Chat evidence producer checkout identity changed during cloning.');
   }
   return { producerRoot, producerIdentity: cloned };
+}
+
+export function validateSchemaV2AuthorityCheckouts({
+  lock,
+  harnessRoot,
+  producerRoot,
+  producerIdentity,
+}) {
+  assertPhase1ProducerAuthority(lock, harnessRoot);
+  assertCleanPhase1Checkout(producerRoot, 'Chat evidence producer checkout');
+  const harness = readPhase1CheckoutIdentity(harnessRoot, 'Historical Chat harness checkout');
+  const producer = readPhase1CheckoutIdentity(producerRoot, 'Chat evidence producer checkout');
+  if (
+    producerIdentity === null ||
+    typeof producerIdentity !== 'object' ||
+    !/^[0-9a-f]{40}$/u.test(producerIdentity.revision ?? '') ||
+    !/^[0-9a-f]{40}$/u.test(producerIdentity.tree ?? '') ||
+    producer.revision !== producerIdentity.revision ||
+    producer.tree !== producerIdentity.tree
+  ) {
+    throw new Error('Chat evidence producer checkout identity changed after cloning.');
+  }
+  if (
+    realpathSync(harnessRoot) === realpathSync(producerRoot) ||
+    harness.revision !== lock.harnessAuthority.revision ||
+    harness.tree !== lock.harnessAuthority.tree ||
+    producer.revision === harness.revision ||
+    producer.tree === harness.tree
+  ) {
+    throw new Error('Schema-v2 producer and historical harness authorities are not distinct.');
+  }
+  return Object.freeze({
+    harness: Object.freeze(harness),
+    producer: Object.freeze(producer),
+  });
 }
 
 async function createExactCheckouts(artifactRoot, options, lock, environment) {
@@ -1972,6 +2480,7 @@ async function runNativeMissingKeychainTrustScenario(
       COVEN_CAVE_HOME: resolve(trustHome, 'coven', 'cave'),
       COVEN_CAVE_AUTH_TOKEN: canary,
       OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET: 'missing-keychain-trust',
+      OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE: `ai.opencoven.chat.phase1.${randomBytes(16).toString('hex')}`,
     },
     detached: ownedProcessGroupsSupported,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -2783,22 +3292,30 @@ async function runNativeScenarios({
       if (rpc !== undefined) {
         try {
           if (platformEnvironment !== undefined) {
-            if (typeof handle === 'string') {
-              const forgotten = await rpc.ok('cave_forget_credential', {
-                handle,
-                operation: rpc.operation(),
+            let grant;
+            try {
+              const cleanupInstanceIds = [...nativeInstanceIds].sort();
+              const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
+                instanceIds: cleanupInstanceIds,
               });
-              if (!['deleted', 'missing'].includes(forgotten.status)) {
-                throw new Error('Native custody forget did not reach a terminal state.');
+              if (
+                issued === null ||
+                typeof issued !== 'object' ||
+                typeof issued.grant !== 'string' ||
+                !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
+              ) {
+                throw new Error('Native custody cleanup grant was not canonical.');
               }
+              grant = issued.grant;
+              issued.grant = undefined;
+              nativeStateAfter = validateNativeCustodyProof(
+                await rpc.ok('conformance_cleanup_native_custody', { grant }),
+                platformEnvironment.nativeCustody,
+                'Native custody cleanup',
+              );
+            } finally {
+              grant = undefined;
             }
-            nativeStateAfter = validateNativeCustodyProof(
-              await rpc.ok('conformance_cleanup_native_custody', {
-                instanceIds: [],
-              }),
-              platformEnvironment.nativeCustody,
-              'Native custody cleanup',
-            );
           }
         } finally {
           await rpc.close();
@@ -3412,9 +3929,9 @@ function fillMissingAssertions(results, status, diagnosticId) {
   }
 }
 
-export async function runSchemaV2Conformance(options) {
+export async function runSchemaV2Conformance(options, lock, harnessAuthorityVerification) {
   scrubEvidenceAuthorizationEnvironment();
-  const lock = readPhase1ConformanceLock(options.lockPath);
+  requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot);
   const schemaV2 = options.platform !== undefined;
   if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
     throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
@@ -3424,6 +3941,17 @@ export async function runSchemaV2Conformance(options) {
       `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
     );
   }
+  const supervisorEnvironment = schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {};
+  if (
+    schemaV2 &&
+    options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
+  ) {
+    throw new Error('Schema-v2 evidence output changed after supervisor validation.');
+  }
+  const windowsJobBinding = schemaV2 && process.platform === 'win32' ? supervisorEnvironment : {};
+  const unixProducerBinding = schemaV2 && process.platform !== 'win32' ? supervisorEnvironment : {};
+  assertWindowsJobMembership(windowsJobBinding);
+  options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
   const startedAt = new Date().toISOString();
   const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
   const operatorBefore =
@@ -3437,7 +3965,12 @@ export async function runSchemaV2Conformance(options) {
       : {};
   const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
   const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
-  const environment = safeEnvironment(executionRoot.rootPath, linuxSessionEnvironment);
+  const environment = safeEnvironment(executionRoot.rootPath, {
+    ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
+    ...linuxSessionEnvironment,
+    ...unixProducerBinding,
+    ...windowsJobBinding,
+  });
   const results = new Map();
   let artifactDigests = {};
   let infrastructureFailure;
@@ -3457,6 +3990,12 @@ export async function runSchemaV2Conformance(options) {
   try {
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
+      validateSchemaV2AuthorityCheckouts({
+        lock,
+        harnessRoot: projectRoot,
+        producerRoot: roots.producerRoot,
+        producerIdentity: roots.producerIdentity,
+      });
       sdkContract = await loadSdkEvidenceContract({
         validatorRoot: roots.validatorRoot,
         validatorIdentity: {
@@ -3753,35 +4292,4 @@ export async function runSchemaV2Conformance(options) {
     throw wrapInfrastructureFailure(infrastructureFailure, report);
   }
   return report;
-}
-
-async function main(argv = process.argv.slice(2)) {
-  const options = parseArgs(argv);
-  const report = await runSchemaV2Conformance(options);
-  if (report.schemaVersion === 2) {
-    process.stdout.write(
-      `phase1-conformance: passed (${report.platform}, ${report.sdkAssertions.length} SDK assertions, ${report.chatAssertions.length} Chat assertions)\n`,
-    );
-    return;
-  }
-  process.stdout.write(
-    `phase1-conformance: ${report.status} (${report.summary.passed} passed, ${report.summary.failed} failed, ${report.summary.blocked} blocked)\n`,
-  );
-  for (const assertion of report.assertions) {
-    if (assertion.status !== 'passed') {
-      process.stdout.write(
-        `${assertion.status.toUpperCase()} ${assertion.id} ${assertion.diagnosticIds.join(',')}\n`,
-      );
-    }
-  }
-  process.exitCode = report.status === 'passed' ? 0 : 1;
-}
-
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    const message =
-      error instanceof CommandExecutionError ? error.message : 'Phase 1 conformance failed.';
-    process.stderr.write(`phase1-conformance: ${message}\n`);
-    process.exitCode = 1;
-  });
 }

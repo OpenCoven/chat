@@ -1,4 +1,6 @@
 mod cave;
+#[cfg(feature = "phase1-conformance")]
+mod cleanup_grant;
 mod commands;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;

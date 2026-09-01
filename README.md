@@ -176,10 +176,32 @@ verifies that the checked-out HEADs match the tracked lock.
 candidate and evidence authority, Cave, Coven, and the canonical package
 metadata for the real-authority gate. The protected
 `.github/workflows/client-v1-conformance.yml` schema-v2 producer takes its
-separate immutable SDK validator revision as a required dispatch input, avoiding
-a circular pin while retaining both the strict schema-v1 gate and canonical
-schema-v2 platform records. Neither replaces or loosens the Phase 0 canary
-lock.
+separate immutable SDK validator revision as a required dispatch input and
+requires it to equal the protected environment's nonsecret
+`CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable, avoiding a circular pin
+while retaining both the strict schema-v1 gate and canonical schema-v2
+platform records. Producer and validator jobs have no OIDC or attestation
+authority. A fresh validator job revalidates the immutable uploaded artifacts
+and hands only their SHA-256 digests to a separate OIDC job, which downloads
+the same artifacts again, compares the digests, and attests without executing
+repository or artifact content. Neither replaces or loosens the Phase 0
+canary lock.
+
+Before the Windows producer downloads or checks out anything, its trusted
+outer supervisor creates a random local non-admin identity with an isolated,
+protected profile, temporary directory, and workspace. It protects the
+supervisor process and authoritative Job handle from that identity, launches
+the complete producer tree suspended with `CreateProcessWithLogonW`, and
+assigns it to the query-only nonce-bound Job before resuming it. Every exit
+terminates the Job and verifies removal of the ephemeral account, Windows
+profile, and bootstrap root.
+The macOS and Linux lanes likewise place dependency installation, builds,
+candidate/validator/authority execution, and evidence production under a fresh
+non-admin UID with isolated home/workspace/temp/tool caches. Linux uses a
+trusted cgroup-v2 supervisor and `cgroup.kill`; macOS disables the ephemeral
+account and drains every process with its exact UID. Only after a native
+zero-process proof does the original runner perform the no-follow,
+descriptor-based, create-new artifact handoff.
 
 ## CI coverage
 
@@ -195,6 +217,12 @@ lock.
 - the macOS packaged real-authority matrix with exact counterpart checkouts
   pinned by `phase1-conformance.lock.json`, an isolated keychain, and a
   secret-scanned SDK platform record
+- Windows runtime coverage for the cross-user Job supervisor boundary,
+  descendant teardown, quotas, membership, and fail-closed account/profile
+  cleanup
+- native Ubuntu 24.04 and macOS 14 runtime coverage for `setsid`/double-fork
+  escape cleanup plus symlink, hardlink, parent-swap, and in-place artifact
+  races in the Unix producer supervisor
 - Rust `fmt`, `check`, `clippy`, and `test`
 
 The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is

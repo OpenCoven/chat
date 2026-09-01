@@ -110,10 +110,12 @@
   `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
 - Run the persisted Windows GNU cross-target compile gate with
   `pnpm cargo:check:windows-gnu`.
-- The Phase 1 harness creates mode-`0700` process-owned roots under the real OS
-  temporary directory, reaps only tracked child processes, scans the completed
-  SDK platform record for secrets and private content, and retains only
-  `test-results/phase1-conformance/report.json`. See
+- The legacy Phase 1 harness creates mode-`0700` process-owned roots under the
+  real OS temporary directory. Protected schema-v2 macOS/Linux lanes add a
+  distinct ephemeral non-admin UID, isolated home/workspace/tool caches,
+  cgroup-v2 teardown on Linux or exact-UID account/process teardown on macOS,
+  and a no-follow descriptor handoff into one broker-owned mode-`0600`
+  artifact. The completed record is rescanned after handoff. See
   [`phase1-conformance.md`](phase1-conformance.md).
 - Coven conformance starts the real locked daemon and invokes Chat
   `phase1-native-rpc` command `coven_health`; it never uses `coven daemon

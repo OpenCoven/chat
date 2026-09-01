@@ -295,8 +295,18 @@ struct WindowsFileMetadata {
     is_reparse_point: bool,
     owner_matches_current_user: bool,
     len: u64,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    links: u64,
     volume_serial: u64,
     file_index: u64,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowsPrivatePathMetadata {
+    pub(crate) links: u64,
+    pub(crate) volume_serial: u64,
+    pub(crate) file_index: u64,
 }
 
 #[cfg(any(windows, test))]
@@ -616,7 +626,7 @@ mod windows_discovery {
         },
         Security::{
             AclSizeInformation,
-            Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
+            Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT},
             EqualSid, GetAce, GetAclInformation, GetLengthSid, GetTokenInformation, IsWellKnownSid,
             TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE,
             ACE_HEADER, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
@@ -625,10 +635,10 @@ mod windows_discovery {
         Storage::FileSystem::{
             CreateFileW, GetFileInformationByHandle, GetFileType, BY_HANDLE_FILE_INFORMATION,
             DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
-            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, OPEN_EXISTING, WRITE_DAC,
-            WRITE_OWNER,
+            FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_GENERIC_READ, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            FILE_TYPE_DISK, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, OPEN_EXISTING,
+            WRITE_DAC, WRITE_OWNER,
         },
         System::{
             SystemServices::ACCESS_ALLOWED_ACE_TYPE,
@@ -723,6 +733,7 @@ mod windows_discovery {
                 is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
                 owner_matches_current_user,
                 len: ((information.nFileSizeHigh as u64) << 32) | information.nFileSizeLow as u64,
+                links: information.nNumberOfLinks as u64,
                 volume_serial: information.dwVolumeSerialNumber as u64,
                 file_index: ((information.nFileIndexHigh as u64) << 32)
                     | information.nFileIndexLow as u64,
@@ -732,6 +743,64 @@ mod windows_discovery {
 
     pub(super) fn current_user_identity() -> Result<String, WindowsDiscoveryIoError> {
         NativeWindowsDiscovery::new().map(|discovery| discovery.identity)
+    }
+
+    pub(super) fn current_user_sid() -> Result<String, WindowsDiscoveryIoError> {
+        let token = open_current_token()?;
+        let sid = token_user_sid(token.0)?;
+        let mut string_sid: windows_sys::core::PWSTR = std::ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(sid.as_ptr().cast_mut().cast(), &raw mut string_sid) }
+            == 0
+            || string_sid.is_null()
+        {
+            return Err(last_file_error());
+        }
+        let mut length = 0;
+        while unsafe { *string_sid.add(length) } != 0 {
+            length += 1;
+        }
+        let result = String::from_utf16(unsafe { std::slice::from_raw_parts(string_sid, length) })
+            .map_err(|_| WindowsDiscoveryIoError::Unavailable);
+        unsafe {
+            LocalFree(string_sid.cast());
+        }
+        result
+    }
+
+    pub(super) fn private_path_metadata(
+        path: &Path,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let discovery = NativeWindowsDiscovery::new()?;
+        let handle = discovery.open(path, directory)?;
+        private_metadata(&discovery, handle.0, directory)
+    }
+
+    pub(super) fn private_handle_metadata(
+        handle: HANDLE,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let discovery = NativeWindowsDiscovery::new()?;
+        private_metadata(&discovery, handle, directory)
+    }
+
+    fn private_metadata(
+        discovery: &NativeWindowsDiscovery,
+        handle: HANDLE,
+        directory: bool,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let metadata = discovery.metadata(handle)?;
+        let validation = if directory {
+            super::validate_windows_directory(metadata)
+        } else {
+            super::validate_windows_file(metadata)
+        };
+        validation.map_err(|_| WindowsDiscoveryIoError::Unavailable)?;
+        Ok(super::WindowsPrivatePathMetadata {
+            links: metadata.links,
+            volume_serial: metadata.volume_serial,
+            file_index: metadata.file_index,
+        })
     }
 
     impl WindowsDiscoveryBackend for NativeWindowsDiscovery {
@@ -968,6 +1037,7 @@ mod windows_discovery {
             | FILE_APPEND_DATA
             | FILE_WRITE_EA
             | FILE_WRITE_ATTRIBUTES
+            | FILE_DELETE_CHILD
             | DELETE
             | WRITE_DAC
             | WRITE_OWNER
@@ -997,6 +1067,27 @@ fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
 #[cfg(windows)]
 pub(crate) fn current_windows_user_identity() -> Result<String, ()> {
     windows_discovery::current_user_identity().map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn current_windows_user_sid() -> Result<String, ()> {
+    windows_discovery::current_user_sid().map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_private_path(
+    path: &Path,
+    directory: bool,
+) -> Result<WindowsPrivatePathMetadata, ()> {
+    windows_discovery::private_path_metadata(path, directory).map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_private_handle(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    directory: bool,
+) -> Result<WindowsPrivatePathMetadata, ()> {
+    windows_discovery::private_handle_metadata(handle, directory).map_err(|_| ())
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -1657,6 +1748,7 @@ mod tests {
             is_reparse_point: false,
             owner_matches_current_user: true,
             len: 42,
+            links: 1,
             volume_serial,
             file_index,
         }
