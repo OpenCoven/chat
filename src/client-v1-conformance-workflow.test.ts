@@ -96,6 +96,14 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('pins the exact checked-in Phase 1 harness bytes', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const harness = readFileSync(harnessPath);
+
+    expect(workflow).toContain(`bytes.byteLength !== ${harness.byteLength}`);
+    expect(workflow).toContain(`digest(''hex'') !== ''${sha256(harness)}''`);
+  });
+
   test('checks out every reviewed source root and resolves tools safely on every platform', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
