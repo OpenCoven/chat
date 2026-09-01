@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "d9b688f7156600ca7eecad83c002785633d744f7"
+    "revision": "9a46142611b4579ebfec8396ee11a70b4958fdfe"
   },
   "harnessAuthority": {
-    "revision": "d9b688f7156600ca7eecad83c002785633d744f7",
-    "tree": "730c5a91d308defad32833618091ea22cd5b5e8d",
+    "revision": "9a46142611b4579ebfec8396ee11a70b4958fdfe",
+    "tree": "bd433d1e09b32a77390269a07d1065df1493e71c",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "7c50f244c4046bf632f0051be6750d3cfacc58fa",
-        "sha256": "805ba5861d7d322684bf8a887867b7a26abe15a4852cb04ee8a54b57e37c9b75"
+        "blob": "30fdc89ef0ef2f0f0df5bf93e36b6fd387cd4dcc",
+        "sha256": "cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -41,8 +41,8 @@
       },
       {
         "path": "scripts/phase1-process-supervisor.mjs",
-        "blob": "718813793e322d8fed78c864dcbb27607fee4a75",
-        "sha256": "bf34b2c3e00b4d0236891580abe0ca9a8c70386d017db928b2297dc5801264ea"
+        "blob": "be0d0ad84e9dd5a57deacb14e27944f617f20687",
+        "sha256": "16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c"
       },
       {
         "path": "scripts/executable-resolution.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "c5e67019e0b3ccc4f5e1addb4f551560c04c6a5a",
-        "sha256": "675d1e87d43dc6868fe3bfcb65d78add0d0e8c0603119ba33e111adacb2b7282"
+        "blob": "212f4f2abb045e990622f9eaf877ea45227125e0",
+        "sha256": "40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -126,8 +126,8 @@
       },
       {
         "path": "scripts/supervised-exec.mjs",
-        "blob": "16da6c76ce21e9bb5490ccd1cc4e822b671b8464",
-        "sha256": "149933cca97499a019dc4394d0117857c5d2353890260c48102db9bd42e3af3b"
+        "blob": "040082aee28beeb8fc355bd81b79976e79def897",
+        "sha256": "a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b"
       },
       {
         "path": "scripts/supervisor-status.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "3375656e61dee78acab9cbf87f277611041e29e7",
-        "sha256": "ac41b0b9e1d9dc962bf6459cbe3324b9da27cebf6595545ba8d126a110253402"
+        "blob": "dafa6e7ae6dffb9a4451563ed501556a82258bd2",
+        "sha256": "00160387a3c91e72bf417a471cf54cc27643e1df23a4e324c76039a07e0407c9"
       }
     ],
     "productionDeltas": [

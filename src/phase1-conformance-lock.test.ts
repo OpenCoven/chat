@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: 'd9b688f7156600ca7eecad83c002785633d744f7',
+    revision: '9a46142611b4579ebfec8396ee11a70b4958fdfe',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -470,7 +470,7 @@ describe('Phase 1 conformance lock', () => {
     });
     expect(committedHarnessAuthority).toMatchObject({
       revision: expectedEntries.harness.revision,
-      tree: '730c5a91d308defad32833618091ea22cd5b5e8d',
+      tree: 'bd433d1e09b32a77390269a07d1065df1493e71c',
     });
   });
 
