@@ -1568,21 +1568,23 @@ describe('Phase 1 real-authority conformance harness', () => {
         prefix: 'phase1-multicall-supervisor',
       });
       try {
-        const target = resolve(root.rootPath, 'multicall');
+        const target = realpathSync(process.execPath);
         const command = resolve(root.rootPath, 'rustc');
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: Shell parameter expansion is intentional.
-        writeFileSync(target, '#!/bin/sh\nprintf \'%s\\n\' "${0##*/}"\n');
-        chmodSync(target, 0o700);
         symlinkSync(target, command);
+        const args = [
+          '--input-type=module',
+          '--eval',
+          "import { basename } from 'node:path'; process.stdout.write(basename(process.argv0));",
+        ];
 
-        const result = await runSupervisedCommandForTest(root, command, [], {
+        const result = await runSupervisedCommandForTest(root, command, args, {
           cwd: root.rootPath,
           env: { ...process.env, PATH: root.rootPath },
           timeoutMs: 5_000,
           outputLimitBytes: 4_096,
         });
 
-        expect(result).toMatchObject({ stdout: 'rustc\n' });
+        expect(result).toMatchObject({ stdout: 'rustc' });
       } finally {
         await root.cleanup();
       }

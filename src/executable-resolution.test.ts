@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -12,17 +12,24 @@ test.skipIf(process.platform === 'win32')(
   () => {
     const root = mkdtempSync(resolve(tmpdir(), 'opencoven-executable-resolution-'));
     try {
-      const target = resolve(root, 'multicall');
+      const target = realpathSync(process.execPath);
       const command = resolve(root, 'rustc');
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: Shell parameter expansion is intentional.
-      writeFileSync(target, '#!/bin/sh\nprintf \'%s\\n\' "${0##*/}"\n');
-      chmodSync(target, 0o700);
       symlinkSync(target, command);
+      const args = [
+        '--input-type=module',
+        '--eval',
+        "import { basename } from 'node:path'; process.stdout.write(basename(process.argv0));",
+      ];
 
-      const invocation = resolveExecutableInvocation('rustc', { PATH: root });
+      const invocation = resolveExecutableInvocation(
+        'rustc',
+        { PATH: root },
+        process.platform,
+        args,
+      );
 
       expect(invocation.executable).toBe(command);
-      expect(invocation.resolvedCommand).toBe(realpathSync(target));
+      expect(invocation.resolvedCommand).toBe(target);
       expect(
         execFileSync(invocation.executable, invocation.args, { encoding: 'utf8' }).trim(),
       ).toBe('rustc');

@@ -28,15 +28,14 @@ function main(argv) {
   }
   const executable = resolve(argv[0]);
   const stats = lstatSync(executable);
-  if (
-    (!stats.isFile() && !stats.isSymbolicLink()) ||
-    !lstatSync(realpathSync(executable)).isFile()
-  ) {
+  const resolvedExecutable = realpathSync(executable);
+  if ((!stats.isFile() && !stats.isSymbolicLink()) || !lstatSync(resolvedExecutable).isFile()) {
     fail();
     return;
   }
-  accessSync(executable, constants.X_OK);
-  const child = spawn(executable, argv.slice(1), {
+  accessSync(resolvedExecutable, constants.X_OK);
+  const child = spawn(resolvedExecutable, argv.slice(1), {
+    argv0: executable,
     env: Object.fromEntries(
       Object.entries(process.env).filter(
         ([name]) => ![legacyStatusPathEnvironment, groupKillFailureEnvironment].includes(name),
