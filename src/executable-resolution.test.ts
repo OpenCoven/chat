@@ -1,11 +1,27 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { delimiter, resolve } from 'node:path';
 
 import { expect, test } from 'vitest';
 
-import { resolveExecutableInvocation } from '../scripts/executable-resolution.mjs';
+import {
+  resolveExecutableInvocation,
+  resolveUnixToolPath,
+} from '../scripts/executable-resolution.mjs';
+
+function writeExecutableScript(path: string) {
+  writeFileSync(path, '#!/bin/sh\nexit 0\n');
+  chmodSync(path, 0o755);
+}
 
 test.skipIf(process.platform === 'win32')(
   'preserves POSIX multicall symlink invocation while verifying its target',
@@ -39,3 +55,73 @@ test.skipIf(process.platform === 'win32')(
   },
   30_000,
 );
+
+test.skipIf(process.platform === 'win32')(
+  'builds a minimal reviewed Unix tool path from resolved executables and excludes ambient PATH pollution',
+  () => {
+    const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'opencoven-unix-tool-path-')));
+    try {
+      const nodeDirectory = resolve(root, 'node-bin');
+      const pnpmDirectory = resolve(root, 'pnpm-bin');
+      const rustupDirectory = resolve(root, 'rustup-bin');
+      const pollutedDirectory = resolve(root, 'polluted-bin');
+      const nonexistentDirectory = resolve(root, 'does-not-exist');
+      mkdirSync(nodeDirectory);
+      mkdirSync(pnpmDirectory);
+      mkdirSync(rustupDirectory);
+      mkdirSync(pollutedDirectory);
+      writeExecutableScript(resolve(nodeDirectory, 'node'));
+      writeExecutableScript(resolve(pnpmDirectory, 'pnpm'));
+      writeExecutableScript(resolve(rustupDirectory, 'rustup'));
+      writeExecutableScript(resolve(pollutedDirectory, 'unrelated-tool'));
+
+      const environment = {
+        PATH: [
+          nonexistentDirectory,
+          pollutedDirectory,
+          nodeDirectory,
+          pnpmDirectory,
+          rustupDirectory,
+          nodeDirectory,
+        ].join(delimiter),
+      };
+
+      const toolPath = resolveUnixToolPath(['node', 'pnpm', 'rustup'], environment);
+
+      expect(toolPath.split(':')).toEqual([
+        nodeDirectory,
+        pnpmDirectory,
+        rustupDirectory,
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+      ]);
+      expect(toolPath).not.toContain(pollutedDirectory);
+      expect(toolPath).not.toContain(nonexistentDirectory);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform === 'win32')(
+  'fails closed when a required Unix tool cannot be resolved from the environment',
+  () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'opencoven-unix-tool-path-missing-'));
+    try {
+      const nodeDirectory = resolve(root, 'node-bin');
+      mkdirSync(nodeDirectory);
+      writeExecutableScript(resolve(nodeDirectory, 'node'));
+      const environment = { PATH: nodeDirectory };
+
+      expect(() => resolveUnixToolPath(['node', 'pnpm', 'rustup'], environment)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('refuses to build a Windows reviewed Unix tool path', () => {
+  expect(() => resolveUnixToolPath(['node'], { PATH: '' }, 'win32')).toThrow();
+});

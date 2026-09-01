@@ -1,6 +1,7 @@
 import { accessSync, constants, lstatSync, realpathSync } from 'node:fs';
-import { delimiter, isAbsolute, resolve, win32 } from 'node:path';
+import { delimiter, dirname, isAbsolute, resolve, win32 } from 'node:path';
 
+const unixSystemToolDirectories = Object.freeze(['/usr/bin', '/bin', '/usr/sbin', '/sbin']);
 const windowsExecutableExtensions = new Set(['.exe', '.cmd', '.bat', '.com']);
 const defaultWindowsPathExt = ['.com', '.exe', '.bat', '.cmd'];
 const unsafeWindowsBatchToken = /[&|<>()^%!"\r\n\0]/u;
@@ -219,4 +220,42 @@ export function resolveExecutableInvocation(
     args: Object.freeze(['/d', '/s', '/c', resolved.path, ...args]),
     resolvedCommand: resolved.path,
   });
+}
+
+// Builds a minimal Unix PATH for a supervised, isolated child process. Each
+// entry is the directory of one exactly resolved required executable (found
+// through the caller's own ambient PATH), never the ambient PATH itself, so
+// unrelated or unsafe ambient entries can never reach the isolated process.
+// The four fixed system directories are always appended. Throws (fails
+// closed) if any required command cannot be resolved to a safe absolute
+// executable.
+export function resolveUnixToolPath(
+  commands,
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform === 'win32') {
+    throw new Error('Reviewed Unix tool path resolution requires a non-Windows platform.');
+  }
+  if (!Array.isArray(commands) || commands.length === 0) {
+    throw new Error('Reviewed Unix tool path resolution requires at least one command.');
+  }
+  const directories = commands.map((command) => {
+    const invocation = resolveExecutableInvocation(command, environment, platform, []);
+    return dirname(invocation.resolvedCommand);
+  });
+  directories.push(...unixSystemToolDirectories);
+
+  const seen = new Set();
+  const reviewed = [];
+  for (const directory of directories) {
+    if (typeof directory !== 'string' || directory.length === 0 || !isAbsolute(directory)) {
+      throw new Error('Resolved Unix tool directory is unsafe.');
+    }
+    if (!seen.has(directory)) {
+      seen.add(directory);
+      reviewed.push(directory);
+    }
+  }
+  return reviewed.join(':');
 }

@@ -96,6 +96,37 @@ function embeddedWindowsSupervisorSource(workflow: string): string {
     .join('\n')}\n`;
 }
 
+function embeddedWindowsChildBootstrapSource(workflow: string): string {
+  const startMarker = "            $childBootstrap = @'\n";
+  const endMarker = "\n          '@\n";
+  const start = workflow.indexOf(startMarker);
+  if (start < 0) {
+    throw new Error('missing inline Windows restricted child bootstrap source');
+  }
+  const end = workflow.indexOf(endMarker, start + startMarker.length);
+  if (end < 0) {
+    throw new Error('unterminated inline Windows restricted child bootstrap source');
+  }
+  return `${workflow
+    .slice(start + startMarker.length, end)
+    .split('\n')
+    .map((line) => line.replace(/^ {10}/u, ''))
+    .join('\n')}\n`;
+}
+
+function extractPowerShellFunction(source: string, name: string): string {
+  const startMarker = `function ${name} {`;
+  const start = source.indexOf(startMarker);
+  if (start < 0) {
+    throw new Error(`missing PowerShell function: ${name}`);
+  }
+  const end = source.indexOf('\n}\n', start);
+  if (end < 0) {
+    throw new Error(`unterminated PowerShell function: ${name}`);
+  }
+  return source.slice(start, end + '\n}\n'.length);
+}
+
 function workflowRunBody(step: string): string {
   const marker = '        run: |\n';
   const start = step.indexOf(marker);
@@ -2047,6 +2078,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const producer = workflowJob(workflow, 'platform-conformance');
     const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
+    const toolPathStep = workflowStep(workflow, 'Compute reviewed Unix tool path');
     const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
     const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
     const supervisor = readFileSync(
@@ -2074,6 +2106,17 @@ describe('Chat-local protected Windows conformance workflow', () => {
       '--handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff"',
     );
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
+    expect(unixStep).not.toContain('--tool-path "$PATH"');
+    expect(unixStep).toContain(
+      '--tool-path "$' + "{{ steps['unix-tool-path'].outputs.tool_path }}\"",
+    );
+    expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
+    expect(toolPathStep).toContain('resolveUnixToolPath');
+    expect(toolPathStep).toContain("[''node'', ''pnpm'', ''rustup'']");
+    expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
+      workflow.indexOf('name: Run supervised Unix production and handoff'),
+    );
     expect(trustedSetup).toContain('cc -std=c11');
     expect(trustedSetup).toContain('unix-artifact-handoff.c');
     expect(trustedSetup).toContain('createHash');
@@ -2262,6 +2305,73 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(bootstrap).not.toContain('http://');
     expect(bootstrap).toMatch(/[0-9a-f]{64}/u);
   });
+
+  test('captures the generated child bootstrap Invoke-Checked exit code without relying on $LASTEXITCODE', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+
+    expect(childBootstrap).toContain('Set-StrictMode -Version Latest');
+    expect(invokeChecked).not.toContain('$LASTEXITCODE');
+    expect(invokeChecked).not.toContain('& $FilePath @ArgumentList');
+    expect(invokeChecked).toContain('[Diagnostics.ProcessStartInfo]::new($FilePath)');
+    expect(invokeChecked).toContain('[Diagnostics.Process]::new()');
+    expect(invokeChecked).toContain('$startInfo.UseShellExecute = $false');
+    expect(invokeChecked).toContain('$startInfo.ArgumentList.Add($argument)');
+    expect(invokeChecked).toContain('$process.WaitForExit()');
+    expect(invokeChecked).toContain('$process.ExitCode');
+    expect(invokeChecked).toContain('$process.Dispose()');
+    expect(invokeChecked).toMatch(/if \(-not \$process\.Start\(\)\) \{\s*throw/u);
+    expect(invokeChecked.indexOf('$process.Start()')).toBeLessThan(
+      invokeChecked.indexOf('$process.WaitForExit()'),
+    );
+  });
+
+  test('the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+${invokeChecked}
+$LASTEXITCODE = 0
+try {
+  Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 7') -Label 'Nonzero test'
+  [Console]::Out.Write('did-not-throw')
+} catch {
+  [Console]::Out.Write($_.Exception.Message)
+}
+`;
+
+    expect(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    ).toBe('Nonzero test failed with exit code 7.');
+  }, 30_000);
+
+  test('the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+${invokeChecked}
+$LASTEXITCODE = 99
+Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero test'
+[Console]::Out.Write('succeeded')
+`;
+
+    expect(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    ).toBe('succeeded');
+  }, 30_000);
 
   test('walks Windows file ancestors without dereferencing FileInfo.Parent', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
