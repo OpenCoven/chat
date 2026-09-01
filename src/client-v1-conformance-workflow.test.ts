@@ -2327,7 +2327,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
-  test('the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code', () => {
+test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+  'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
+  () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
