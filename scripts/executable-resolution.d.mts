@@ -10,3 +10,8 @@ export function resolveExecutableInvocation(
 }>;
 export function quoteWindowsBatchCommand(batchPath: string, args: readonly string[]): string;
 export function normalizeWindowsRealPathForProcess(path: string): string;
+export function resolveUnixToolPath(
+  commands: readonly string[],
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+): string;

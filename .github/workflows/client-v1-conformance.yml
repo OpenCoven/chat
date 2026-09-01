@@ -8043,9 +8043,37 @@ jobs:
               [Parameter(Mandatory)][string[]]$ArgumentList,
               [Parameter(Mandatory)][string]$Label
             )
-            & $FilePath @ArgumentList
-            if ($LASTEXITCODE -ne 0) {
-              throw "$Label failed with exit code $LASTEXITCODE."
+            $startInfo = [Diagnostics.ProcessStartInfo]::new($FilePath)
+            $startInfo.UseShellExecute = $false
+            foreach ($argument in $ArgumentList) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            try {
+              if (-not $process.Start()) {
+                throw "$Label failed to start."
+              }
+              $process.WaitForExit()
+              if ($process.ExitCode -ne 0) {
+                throw "$Label failed with exit code $($process.ExitCode)."
+              }
+            } finally {
+              $process.Dispose()
+            }
+          }
+
+          function Assert-RegularFile {
+            param(
+              [Parameter(Mandatory)][string]$Path,
+              [Parameter(Mandatory)][string]$Label
+            )
+            $item = Get-Item -LiteralPath $Path -Force
+            if (
+              $item.PSIsContainer -or
+              (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+            ) {
+              throw "$Label is not a regular file."
             }
           }
 
@@ -8287,11 +8315,11 @@ jobs:
           [IO.Compression.ZipFile]::ExtractToDirectory($nodeArchive, $nodeParent)
           $nodeRoot = Join-Path $nodeParent 'node-v24.18.1-win-x64'
           $node = Join-Path $nodeRoot 'node.exe'
-          $npm = Join-Path $nodeRoot 'npm.cmd'
+          $npmCli = Join-Path $nodeRoot 'node_modules\npm\bin\npm-cli.js'
+          Assert-RegularFile -Path $npmCli -Label 'Pinned npm CLI entrypoint'
 
           $pnpmRoot = Join-Path $tools 'pnpm'
           $npmCache = Join-Path $root 'npm-cache'
-          $pnpm = Join-Path $pnpmRoot 'pnpm.cmd'
           [IO.Directory]::CreateDirectory($npmCache) | Out-Null
 
           $env:RUSTUP_HOME = Join-Path $root 'rustup'
@@ -8445,7 +8473,7 @@ jobs:
 
           $trustedHarnessModules = @(
             @('scripts\contract-canary.mjs', 38191, '4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5'),
-            @('scripts\executable-resolution.mjs', 7575, 'c6f70a41e899ad3b7f21be2308e893c506a5a035ba5e95179086e1fcb72d9323'),
+            @('scripts\executable-resolution.mjs', 9154, '31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430'),
             @('scripts\owned-temp-directory.mjs', 6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095'),
             @('scripts\phase1-artifact-secret-scan.mjs', 21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a'),
             @('scripts\phase1-conformance-lock.mjs', 47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789'),
@@ -8571,8 +8599,9 @@ jobs:
             throw 'Pinned Node version changed.'
           }
           Invoke-Checked `
-            -FilePath $npm `
+            -FilePath $node `
             -ArgumentList @(
+              $npmCli,
               'install',
               '--global',
               '--prefix',
@@ -8585,15 +8614,18 @@ jobs:
               $pnpmArchive
             ) `
             -Label 'Pinned pnpm installation'
-          if ((& $pnpm --version).Trim() -ne '10.34.0') {
+          $pnpmCli = Join-Path $pnpmRoot 'node_modules\pnpm\bin\pnpm.cjs'
+          Assert-RegularFile -Path $pnpmCli -Label 'Pinned pnpm CLI entrypoint'
+          if ((& $node $pnpmCli --version).Trim() -ne '10.34.0') {
             throw 'Pinned pnpm version changed.'
           }
 
           Push-Location $workspace
           try {
             Invoke-Checked `
-              -FilePath $pnpm `
+              -FilePath $node `
               -ArgumentList @(
+                $pnpmCli,
                 'install',
                 '--frozen-lockfile',
                 '--ignore-scripts',
@@ -8603,12 +8635,12 @@ jobs:
 
             if (
               (& $node --version).Trim() -ne 'v24.18.1' -or
-              "pnpm@$((& $pnpm --version).Trim())" -ne 'pnpm@10.34.0' -or
+              "pnpm@$((& $node $pnpmCli --version).Trim())" -ne 'pnpm@10.34.0' -or
               -not (& $rustc --version).StartsWith('rustc 1.95.0 ')
             ) {
               throw 'Frozen Windows toolchain does not match.'
             }
-            $tauriVersion = (& $pnpm exec tauri --version).Trim()
+            $tauriVersion = (& $node $pnpmCli exec tauri --version).Trim()
             if ($tauriVersion -ne 'tauri-cli 2.11.4') {
               throw 'Frozen Tauri CLI version changed.'
             }
@@ -9115,7 +9147,7 @@ jobs:
           import { lstatSync, readFileSync } from 'node:fs';
           const expected = new Map([
             ['scripts/contract-canary.mjs', [38191, '4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5']],
-            ['scripts/executable-resolution.mjs', [7575, 'c6f70a41e899ad3b7f21be2308e893c506a5a035ba5e95179086e1fcb72d9323']],
+            ['scripts/executable-resolution.mjs', [9154, '31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430']],
             ['scripts/owned-temp-directory.mjs', [6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095']],
             ['scripts/phase1-artifact-secret-scan.mjs', [21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a']],
             ['scripts/phase1-conformance-lock.mjs', [47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789']],
@@ -9156,6 +9188,10 @@ jobs:
             scripts/unix-artifact-handoff.c \
             -o "$broker_root/unix-artifact-handoff"
           chmod 500 "$broker_root/unix-artifact-handoff"
+      - name: Compute reviewed Unix tool path
+        id: unix-tool-path
+        if: matrix.platform != 'win32-x64'
+        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''node'', ''pnpm'', ''rustup'']); appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\n'');"'
       - name: Run supervised Unix production and handoff
         if: matrix.platform != 'win32-x64'
         shell: bash
@@ -9180,7 +9216,7 @@ jobs:
             --temp-root "$broker_root" \
             --handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff" \
             --command scripts/unix-producer-command.sh \
-            --tool-path "$PATH" \
+            --tool-path "${{ steps['unix-tool-path'].outputs.tool_path }}" \
             --validator-revision "$OPENCOVEN_VALIDATOR_REVISION"
       - name: Validate broker-owned Unix platform record
         if: matrix.platform != 'win32-x64'

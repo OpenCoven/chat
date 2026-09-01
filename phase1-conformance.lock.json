@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "77ba6ae502749a24f7dbdb524eb0075280175aa7"
+    "revision": "9c0e833428999db04a8a0dc0116e90088073f5cc"
   },
   "harnessAuthority": {
-    "revision": "77ba6ae502749a24f7dbdb524eb0075280175aa7",
-    "tree": "0b06b03e0ab1f5383dad1d042573a4961400e773",
+    "revision": "9c0e833428999db04a8a0dc0116e90088073f5cc",
+    "tree": "eab38becf66c8867ae21177308e613ee9a82ea53",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -46,8 +46,8 @@
       },
       {
         "path": "scripts/executable-resolution.mjs",
-        "blob": "af0234f6ec7974f0dc7f763d503d599ef4210957",
-        "sha256": "c6f70a41e899ad3b7f21be2308e893c506a5a035ba5e95179086e1fcb72d9323"
+        "blob": "988342843f1d2ee4b2462342f37f931ab4feba7b",
+        "sha256": "31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430"
       },
       {
         "path": "scripts/process-owned-artifact-root.mjs",
@@ -146,20 +146,20 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "af7f95349d9dd3fd3fd4c620c49799ffd376bc1b",
-        "sha256": "d4e4029cf667026463b63eed2a2965f1e9f8c0c34b4b2d796afbbacfc00d2042"
+        "blob": "f6101bb92b69e5e11ffcfee6425b2138ee06e644",
+        "sha256": "244343b76309705c3e6f5681c66a83232421a00844ccb72d9ca5e481e57fe4b9"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "c22953300c55fb0bab640865ebc5806877c15402",
-        "sha256": "0777e4f050d691fc335dc041941b06629c9276c673cd33a513764cd6fa2bc313"
+        "blob": "7c668d36be4bb981b0658bd17ae153a359fe8a4d",
+        "sha256": "649985eed6b18f4f732a03246178d93991b3f311728c7569e970cfda3499df60"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "8fe3a6ffbf488e775f85bb2df231399e620fe80f",
-        "sha256": "17109b0bbe5306b83fe0bb6ba70bbbfd5f236972bc4f016db95bbdab1202dfac"
+        "blob": "359ef1ac955b0f28b397802e5f3c0d6f022058e9",
+        "sha256": "e3d360b5d0ec7d0f4278e798b3e91fd4ce65e86ef6949bd8f030e51b78b2909e"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
