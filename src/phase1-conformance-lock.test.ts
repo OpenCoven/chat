@@ -77,6 +77,22 @@ const fileSymlinksSupported = supportsFileSymlinks();
 const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
+const expectedBehaviorAuthority = {
+  revision: '0187abf818f7065428d233e7e0743d12cebe8717',
+  tree: 'e41ae67e688d98a3c6d9623d49b58e9e454356fc',
+  files: [
+    {
+      path: 'scripts/phase1-schema-v2-evidence.mjs',
+      blob: '2eaa045e5a380b734e7762f985a5251b083d5ba3',
+      sha256: 'cb68cb31002d0c84c4f8305de541352dca2f0acf8865125b9d11f55a62710547',
+    },
+    {
+      path: '.github/workflows/client-v1-conformance.yml',
+      blob: 'd68a19f3657f2d065dbaa9c084227f410196d58c',
+      sha256: '7ace7337b6bee2ecf57e0362f6696d4c6c37f624c54f81255417e38e8a80f2e7',
+    },
+  ],
+} as const;
 
 const expectedEntries = {
   chat: {
@@ -97,7 +113,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: '19f6c6793556d768e3e523ea34dafbd945a7f266',
+    revision: expectedBehaviorAuthority.revision,
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -471,8 +487,18 @@ describe('Phase 1 conformance lock', () => {
     });
     expect(committedHarnessAuthority).toMatchObject({
       revision: expectedEntries.harness.revision,
-      tree: 'b1dd12214a06291761d7e512fc988a044912eb15',
+      tree: expectedBehaviorAuthority.tree,
     });
+  });
+
+  test('pins the behavior commit and each changed governed Git object', () => {
+    for (const expected of expectedBehaviorAuthority.files) {
+      expect(
+        committedHarnessAuthority.files.find(
+          (file: { path: string }) => file.path === expected.path,
+        ),
+      ).toEqual(expected);
+    }
   });
 
   gitTest('binds the production Chat authority to the pinned Git objects', () => {
