@@ -153,13 +153,13 @@
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "c22953300c55fb0bab640865ebc5806877c15402",
-        "sha256": "0777e4f050d691fc335dc041941b06629c9276c673cd33a513764cd6fa2bc313"
+        "blob": "7c668d36be4bb981b0658bd17ae153a359fe8a4d",
+        "sha256": "649985eed6b18f4f732a03246178d93991b3f311728c7569e970cfda3499df60"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "8fe3a6ffbf488e775f85bb2df231399e620fe80f",
-        "sha256": "17109b0bbe5306b83fe0bb6ba70bbbfd5f236972bc4f016db95bbdab1202dfac"
+        "blob": "359ef1ac955b0f28b397802e5f3c0d6f022058e9",
+        "sha256": "e3d360b5d0ec7d0f4278e798b3e91fd4ce65e86ef6949bd8f030e51b78b2909e"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
