@@ -101,6 +101,11 @@ describe('client-v1 conformance workflow bootstrap', () => {
 
     expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(2);
     expect(workflow).toContain('resolveExecutableInvocation');
+    expect(workflow).toContain("      GIT_CONFIG_COUNT: '1'");
+    expect(workflow).toContain('      GIT_CONFIG_KEY_0: core.autocrlf');
+    expect(workflow).toContain("      GIT_CONFIG_VALUE_0: 'false'");
+    expect(workflow).toContain("run(''rustup'', [''run'', ''1.95.0'', ''rustc'', ''--version''])");
+    expect(workflow).not.toContain("run(''rustc'', [''--version''])");
     expect(workflow).toContain('      - id: phase1-revisions');
     expect(workflow).toContain('          path: .phase1-counterparts/sdk');
     expect(workflow).toContain('          path: .phase1-counterparts/sdk-evidence');

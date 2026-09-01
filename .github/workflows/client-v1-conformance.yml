@@ -55,6 +55,10 @@ jobs:
       attestations: write
       contents: read
       id-token: write
+    env:
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -108,7 +112,7 @@ jobs:
         if: matrix.platform == 'linux-x64'
         run: node scripts/phase1-linux-secret-service.mjs --install
       - name: Require frozen toolchain
-        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const run = (command, args) => { const invocation = resolveExecutableInvocation(command, process.env, process.platform, args); return execFileSync(invocation.executable, invocation.args, { encoding: ''utf8'' }).trim(); }; if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
+        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const run = (command, args) => { const invocation = resolveExecutableInvocation(command, process.env, process.platform, args); return execFileSync(invocation.executable, invocation.args, { encoding: ''utf8'' }).trim(); }; if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustup'', [''run'', ''1.95.0'', ''rustc'', ''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
       - name: Verify frozen harness bytes
         run: 'node --input-type=module --eval "import { createHash } from ''node:crypto''; import { lstatSync, readFileSync } from ''node:fs''; const path = ''scripts/phase1-conformance.mjs''; const stats = lstatSync(path); const bytes = readFileSync(path); if (!stats.isFile() || stats.isSymbolicLink() || bytes.byteLength !== 187000 || createHash(''sha256'').update(bytes).digest(''hex'') !== ''af5f24fd08866a5ed7e904050b9c0916e034e8b7ff47c523cad0366b54240086'') throw new Error(''Frozen harness bytes do not match'');"'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
