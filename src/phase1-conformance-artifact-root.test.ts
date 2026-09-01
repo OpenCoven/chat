@@ -97,10 +97,14 @@ async function spawnSupervisor(workerPath: string, stderr: 'ignore' | 'pipe' = '
     'scripts',
     'phase1-process-supervisor.mjs',
   );
-  const supervisor = spawn(process.execPath, [supervisorPath, workerPath], {
-    detached: true,
-    stdio: ['ignore', 'ignore', stderr, 'pipe'],
-  });
+  const supervisor = spawn(
+    process.execPath,
+    [supervisorPath, '--invocation-path', workerPath, '--', realpathSync(workerPath)],
+    {
+      detached: true,
+      stdio: ['ignore', 'ignore', stderr, 'pipe'],
+    },
+  );
   const status = supervisor.stdio[3];
   if (status !== undefined && status !== null && 'resume' in status) status.resume();
   activeChildren.add(supervisor);
