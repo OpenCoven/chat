@@ -24,6 +24,16 @@ function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const database = request.result;
+      const transaction = request.transaction;
+      if (transaction === null) {
+        return;
+      }
+
+      const metaStore = database.objectStoreNames.contains('meta')
+        ? transaction.objectStore('meta')
+        : database.createObjectStore('meta', { keyPath: 'key' });
+      metaStore.put({ key: 'schemaVersion', value: CHAT_SCHEMA_VERSION });
+
       if (!database.objectStoreNames.contains(CONVERSATION_STORE)) {
         const store = database.createObjectStore(CONVERSATION_STORE, { keyPath: 'id' });
         store.createIndex('by_updated', ['updatedAt', 'id']);
