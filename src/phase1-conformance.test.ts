@@ -1562,6 +1562,35 @@ describe('Phase 1 real-authority conformance harness', () => {
   );
 
   test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+    'supervises a validated POSIX multicall symlink through its invocation path',
+    async () => {
+      const root = createProcessOwnedArtifactRoot({
+        prefix: 'phase1-multicall-supervisor',
+      });
+      try {
+        const target = resolve(root.rootPath, 'multicall');
+        const command = resolve(root.rootPath, 'rustc');
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: Shell parameter expansion is intentional.
+        writeFileSync(target, '#!/bin/sh\nprintf \'%s\\n\' "${0##*/}"\n');
+        chmodSync(target, 0o700);
+        symlinkSync(target, command);
+
+        const result = await runSupervisedCommandForTest(root, command, [], {
+          cwd: root.rootPath,
+          env: { ...process.env, PATH: root.rootPath },
+          timeoutMs: 5_000,
+          outputLimitBytes: 4_096,
+        });
+
+        expect(result).toMatchObject({ stdout: 'rustc\n' });
+      } finally {
+        await root.cleanup();
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
     'supervisor status cannot be forged through the legacy environment or target fd3 (requires POSIX /bin/sh)',
     async () => {
       const root = createProcessOwnedArtifactRoot({

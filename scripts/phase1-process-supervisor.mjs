@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, lstatSync, writeSync } from 'node:fs';
+import { accessSync, closeSync, constants, lstatSync, realpathSync, writeSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,10 +28,14 @@ function main(argv) {
   }
   const executable = resolve(argv[0]);
   const stats = lstatSync(executable);
-  if (stats.isSymbolicLink() || !stats.isFile()) {
+  if (
+    (!stats.isFile() && !stats.isSymbolicLink()) ||
+    !lstatSync(realpathSync(executable)).isFile()
+  ) {
     fail();
     return;
   }
+  accessSync(executable, constants.X_OK);
   const child = spawn(executable, argv.slice(1), {
     env: Object.fromEntries(
       Object.entries(process.env).filter(

@@ -14,7 +14,8 @@ test.skipIf(process.platform === 'win32')(
     try {
       const target = resolve(root, 'multicall');
       const command = resolve(root, 'rustc');
-      writeFileSync(target, '#!/bin/sh\nbasename "$0"\n');
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Shell parameter expansion is intentional.
+      writeFileSync(target, '#!/bin/sh\nprintf \'%s\\n\' "${0##*/}"\n');
       chmodSync(target, 0o700);
       symlinkSync(target, command);
 
@@ -29,4 +30,5 @@ test.skipIf(process.platform === 'win32')(
       rmSync(root, { recursive: true, force: true });
     }
   },
+  30_000,
 );
