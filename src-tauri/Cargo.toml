@@ -28,6 +28,7 @@ base64 = "=0.22.1"
 coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b84026c042e431b0882dcd14fdb29ac07d" }
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
+hmac = "=0.12.1"
 hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
 keyring-core = "=1.0.0"
 libc = "=0.2.189"

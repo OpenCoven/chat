@@ -61,6 +61,20 @@ function readJson<T>(relativePath: string) {
   return JSON.parse(readText(relativePath)) as T;
 }
 
+function workflowJobs(workflow: string) {
+  const jobsBlock = workflow.slice(workflow.indexOf('\njobs:'));
+  const headers = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)];
+
+  return new Map(
+    headers.map((header, index) => {
+      const start = header.index ?? 0;
+      const end = headers[index + 1]?.index ?? jobsBlock.length;
+
+      return [header[1], jobsBlock.slice(start, end)];
+    }),
+  );
+}
+
 function listRuntimeSourceFiles(relativePath: string): string[] {
   const absolutePath = resolve(projectRoot, relativePath);
   const entries = readdirSync(absolutePath);
@@ -232,7 +246,13 @@ describe('Phase 1 specification guards', () => {
     const library = readText('src-tauri/src/lib.rs');
     const commands = readText('src-tauri/src/commands.rs');
     const capability = readText('src-tauri/capabilities/default.json');
-    const controls = ['conformance_reset_native_state', 'conformance_shutdown'];
+    const controls = [
+      'conformance_native_custody_state',
+      'conformance_issue_native_custody_cleanup',
+      'conformance_cleanup_native_custody',
+      'conformance_reset_native_state',
+      'conformance_shutdown',
+    ];
 
     expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
     const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
@@ -248,6 +268,21 @@ describe('Phase 1 specification guards', () => {
       expect(capability).not.toContain(control);
       expect(readText('src-tauri/build.rs')).not.toContain(control);
     }
+
+    const conformance = readText('src-tauri/src/conformance.rs');
+    const producer = readText('scripts/phase1-schema-v2-producer.mjs');
+    expect(conformance).toContain('"conformance_issue_native_custody_cleanup"');
+    expect(conformance).toMatch(
+      /"conformance_cleanup_native_custody"[\s\S]*?expect_exact_args\(object, &\["grant"\]\)/,
+    );
+    expect(producer).toContain("rpc.ok('conformance_issue_native_custody_cleanup'");
+    expect(producer).toContain("rpc.ok('conformance_cleanup_native_custody', { grant })");
+    expect(producer).toContain('const cleanupInstanceIds = [...nativeInstanceIds].sort();');
+    expect(producer).toContain('issued.grant = undefined;');
+    expect(producer).toContain('grant = undefined;');
+    expect(producer).not.toContain(
+      "rpc.ok('conformance_cleanup_native_custody', {\n                instanceIds:",
+    );
   });
 
   it('pins Coven health to an isolated producer-client self probe without fallback trust', () => {
@@ -409,6 +444,46 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('binds every executable security helper and conformance-only Rust delta', () => {
+    const lock = readJson<{
+      harnessAuthority: {
+        files: Array<{ path: string; sha256: string }>;
+        productionDeltas: Array<{ path: string; sha256: string }>;
+      };
+    }>('phase1-conformance.lock.json');
+    const harnessFiles = new Map(lock.harnessAuthority.files.map((entry) => [entry.path, entry]));
+    const productionDeltas = new Map(
+      lock.harnessAuthority.productionDeltas.map((entry) => [entry.path, entry]),
+    );
+
+    for (const path of [
+      'scripts/unix-artifact-handoff.c',
+      'scripts/unix-producer-command.sh',
+      'scripts/unix-producer-supervisor.sh',
+      'scripts/windows-job-supervisor.cs',
+    ]) {
+      const authority = harnessFiles.get(path);
+      expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
+      expect(
+        createHash('sha256')
+          .update(readFileSync(resolve(projectRoot, path)))
+          .digest('hex'),
+      ).toBe(authority?.sha256);
+    }
+
+    for (const path of [
+      'src-tauri/Cargo.lock',
+      'src-tauri/src/cave.rs',
+      'src-tauri/src/cleanup_grant.rs',
+      'src-tauri/src/lib.rs',
+    ]) {
+      expect(
+        productionDeltas.get(path),
+        `${path} must be an explicit conformance production delta.`,
+      ).toBeDefined();
+    }
+  });
+
   it('keeps the frozen Windows supervisor in an isolated bin-only Cargo graph', () => {
     const crateRoot = resolve(projectRoot, 'tools/phase1-process-supervisor');
     const manifest = readText('tools/phase1-process-supervisor/Cargo.toml');
@@ -446,7 +521,7 @@ describe('Phase 1 specification guards', () => {
     }
   }, 60_000);
 
-  it('runs the frozen supervisor behavioral gate on windows-latest', () => {
+  it('runs the frozen supervisor behavioral gate on windows-2025', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const testSource = readText('src/phase1-windows-supervisor.test.ts');
     const harnessSource = readText('scripts/phase1-conformance.mjs');
@@ -454,7 +529,7 @@ describe('Phase 1 specification guards', () => {
       /\n {2}windows-supervisor-behavior:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
     )?.groups?.job;
 
-    expect(job).toContain('runs-on: windows-latest');
+    expect(job).toContain('runs-on: windows-2025');
     expect(job).toContain('needs: [changes, rust]');
     expect(job).toContain('actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093');
     expect(job).toContain('dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c');
@@ -917,6 +992,48 @@ describe('Phase 1 specification guards', () => {
     expect(phase1Job).toContain('timeout-minutes: 120');
   });
 
+  it('executes the phase1 native cleanup grant integration suite on Windows', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const windowsRust = workflow.slice(workflow.indexOf('  windows-supervisor-behavior:'));
+
+    expect(windowsRust).toContain(
+      'cargo check --manifest-path src-tauri/Cargo.toml --all-targets --all-features',
+    );
+    expect(windowsRust).toContain('corepack pnpm test:native-e2e');
+  });
+
+  it('treats FILE_DELETE_CHILD as an unsafe Windows directory mutation right', () => {
+    const cave = readText('src-tauri/src/cave.rs');
+    const rights = cave.slice(
+      cave.indexOf('    fn writable_file_rights() -> u32 {'),
+      cave.indexOf(
+        '\n    fn trusted_writer(',
+        cave.indexOf('    fn writable_file_rights() -> u32 {'),
+      ),
+    );
+
+    expect(rights).toContain('| FILE_DELETE_CHILD');
+  });
+
+  it('creates Windows cleanup objects with exact-user ownership before publication', () => {
+    const cleanupGrant = readText('src-tauri/src/cleanup_grant.rs');
+    const nativeRpcTest = readText('src-tauri/tests/phase1_native_rpc.rs');
+
+    for (const required of [
+      'ConvertStringSecurityDescriptorToSecurityDescriptorW',
+      'O:{sid}D:P(A;OICI;FA;;;{sid})',
+      'O:{sid}D:P(A;;FA;;;{sid})',
+      'CreateDirectoryW(',
+      'CreateFileW(',
+      'create_windows_private_test_directory',
+      'write_windows_private_test_file',
+    ]) {
+      expect(cleanupGrant).toContain(required);
+    }
+    expect(nativeRpcTest).toContain('create_windows_private_test_directory(&path)');
+    expect(nativeRpcTest).toContain('write_windows_private_test_file(');
+  });
+
   it('skips the expensive jobs for a branch that changed only prose', () => {
     // A documentation branch spent two twenty-minute E2E timeouts proving
     // nothing about documentation.
@@ -925,12 +1042,11 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toMatch(/^ {2}changes:$/m);
     expect(workflow).toContain('docs_only: $' + '{{ steps.classify.outputs.docs_only }}');
 
-    const gated = workflow.match(/if: needs\.changes\.outputs\.docs_only != 'true'/g) ?? [];
+    const gatedJobs = [...workflowJobs(workflow)]
+      .filter(([, job]) => /^ {4}if: needs\.changes\.outputs\.docs_only != 'true'$/m.test(job))
+      .map(([name]) => name);
 
-    expect(
-      gated,
-      'E2E, Desktop build, Rust, and Phase 1 conformance are the jobs worth skipping',
-    ).toHaveLength(4);
+    expect(gatedJobs).toEqual(['e2e', 'phase1-conformance', 'desktop', 'rust', 'unix-supervisor']);
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.
@@ -1244,7 +1360,6 @@ describe('Phase 1 specification guards', () => {
     const defaultConfig = readText('vitest.config.ts');
     const heavyConfig = readText('vitest.heavy.config.ts');
     const workflow = readText('.github/workflows/ci.yml');
-
     expect(packageManifest.scripts?.test).toBe(
       'corepack pnpm@10.34.0 --ignore-workspace test:unit',
     );
@@ -1286,6 +1401,12 @@ describe('Phase 1 specification guards', () => {
     expect(guide).toContain('secret scan');
     expect(guide).toContain('darwin-arm64');
     expect(guide).toContain('win32-x64');
+    expect(guide).toContain('completed');
+    expect(guide).toMatch(/VC\.Tools\.x86\.x64` component version\s+`17\.14\.36510\.44/u);
+    expect(guide).toContain('debug runtime version `14.44.35211');
+    expect(guide).toMatch(/compiler toolset directory version is\s+`14\.44\.35207/u);
+    expect(guide).not.toContain('VC\\Tools\\MSVC\\14.50.35717');
+    expect(guide).not.toContain('VC\\Tools\\MSVC\\14.44.35211');
     expect(tracker).not.toContain(
       '/Users/buns/Documents/GitHub/OpenCoven/coven-cave/.worktrees/opencoven-chat-v1-tracking',
     );

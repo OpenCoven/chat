@@ -10,6 +10,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     cave::{
@@ -41,6 +42,14 @@ pub const CONFORMANCE_NODE_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_NODE_P
 pub const CONFORMANCE_CAVE_SERVER_PATH_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH";
 pub const CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV: &str =
     "OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET";
+#[cfg(windows)]
+const WINDOWS_SCHEMA_V2_EVIDENCE_ENV: &str = "OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE";
+#[cfg(windows)]
+const WINDOWS_JOB_REQUIRED_ENV: &str = "OPENCOVEN_WINDOWS_JOB_REQUIRED";
+#[cfg(windows)]
+const WINDOWS_JOB_NONCE_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NONCE";
+#[cfg(windows)]
+const WINDOWS_JOB_NAME_ENV: &str = "OPENCOVEN_WINDOWS_JOB_NAME";
 const CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST: &str = "missing-keychain-trust";
 const CONFORMANCE_NATIVE_PROVIDER_PRODUCTION_KEYRING: &str = "production-keyring";
 const CONFORMANCE_NATIVE_PROVIDER_SYSTEM: &str = "system-native";
@@ -81,6 +90,88 @@ fn adoption_fault_barrier(phase: &str) -> Result<(), NativeDiagnostic> {
     std::fs::File::open(gate)
         .map(|_| ())
         .map_err(|_| NativeDiagnostic::new("keychain_failure", false))
+}
+
+#[cfg(any(windows, test))]
+fn validate_windows_job_binding_environment_values(
+    evidence_mode: Option<&str>,
+    required: Option<&str>,
+    nonce: Option<&str>,
+    name: Option<&str>,
+) -> NativeResult<()> {
+    match evidence_mode {
+        None => return Ok(()),
+        Some("1") => {}
+        Some(_) => return Err(NativeDiagnostic::new("invalid_native_input", false)),
+    }
+    let (Some(required), Some(nonce), Some(name)) = (required, nonce, name) else {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    };
+    let valid_nonce = nonce.len() == 32
+        && nonce
+            .bytes()
+            .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value));
+    if required != "1"
+        || !valid_nonce
+        || name != format!(r"Local\OpenCoven.Chat.Conformance.{nonce}")
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn require_windows_job_supervision_from_environment() -> NativeResult<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{
+            JobObjects::{IsProcessInJob, OpenJobObjectW},
+            Threading::GetCurrentProcess,
+        },
+    };
+
+    let evidence_mode = match env::var(WINDOWS_SCHEMA_V2_EVIDENCE_ENV) {
+        Ok(value) => Some(value),
+        Err(env::VarError::NotPresent) => return Ok(()),
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(NativeDiagnostic::new("invalid_native_input", false));
+        }
+    };
+    let required = env::var(WINDOWS_JOB_REQUIRED_ENV).ok();
+    let nonce = env::var(WINDOWS_JOB_NONCE_ENV).ok();
+    let name = env::var(WINDOWS_JOB_NAME_ENV).ok();
+    validate_windows_job_binding_environment_values(
+        evidence_mode.as_deref(),
+        required.as_deref(),
+        nonce.as_deref(),
+        name.as_deref(),
+    )?;
+    let name = name.expect("validated Windows Job name must be present");
+
+    const JOB_OBJECT_QUERY: u32 = 0x0004;
+    let wide_name = std::ffi::OsStr::new(&name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide_name.as_ptr()) };
+    if job.is_null() {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    let mut member = 0;
+    let inspected = unsafe { IsProcessInJob(GetCurrentProcess(), job, &mut member) };
+    unsafe {
+        CloseHandle(job);
+    }
+    if inspected == 0 || member == 0 {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn require_windows_job_supervision_from_environment() -> NativeResult<()> {
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -167,8 +258,15 @@ enum RpcCommand {
         capability: String,
         owner_token: String,
     },
-    ConformanceNativeCustodyState,
-    ConformanceCleanupNativeCustody,
+    ConformanceNativeCustodyState {
+        instance_ids: Vec<String>,
+    },
+    ConformanceIssueNativeCustodyCleanup {
+        instance_ids: Vec<String>,
+    },
+    ConformanceCleanupNativeCustody {
+        grant: Zeroizing<String>,
+    },
     CaveListFamiliars {
         handle: String,
         page: NativePage,
@@ -226,8 +324,9 @@ impl RpcCommand {
                 | Self::CaveResetPairing { .. }
                 | Self::ConformancePrepareNativeCleanup { .. }
                 | Self::ConformanceDeleteNativeCredential { .. }
-                | Self::ConformanceNativeCustodyState
-                | Self::ConformanceCleanupNativeCustody
+                | Self::ConformanceNativeCustodyState { .. }
+                | Self::ConformanceIssueNativeCustodyCleanup { .. }
+                | Self::ConformanceCleanupNativeCustody { .. }
                 | Self::ResetNativeState
                 | Self::Shutdown
         )
@@ -676,8 +775,9 @@ impl Clone for RpcRuntime {
 }
 
 trait ConformanceCredentialCleanup: Send + Sync {
-    fn state(&self) -> Result<(&'static str, bool, String), KeyringError>;
-    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError>;
+    fn state(&self, instance_ids: &[String]) -> Result<(&'static str, bool, String), KeyringError>;
+    fn issue_cleanup_grant(&self, instance_ids: &[String]) -> Result<String, KeyringError>;
+    fn cleanup_state(&self, grant: &str) -> Result<(&'static str, bool, String), KeyringError>;
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError>;
     fn begin_adopt(
         &self,
@@ -710,12 +810,16 @@ trait ConformanceCredentialCleanup: Send + Sync {
 }
 
 impl ConformanceCredentialCleanup for NativeKeyring {
-    fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
-        self.conformance_state(&[])
+    fn state(&self, instance_ids: &[String]) -> Result<(&'static str, bool, String), KeyringError> {
+        self.conformance_state(instance_ids)
     }
 
-    fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
-        self.cleanup_conformance_entries(&[])
+    fn issue_cleanup_grant(&self, instance_ids: &[String]) -> Result<String, KeyringError> {
+        self.issue_conformance_cleanup_grant(instance_ids)
+    }
+
+    fn cleanup_state(&self, grant: &str) -> Result<(&'static str, bool, String), KeyringError> {
+        self.redeem_conformance_cleanup_grant(grant)
     }
 
     fn prepare(&self, instance_id: &str) -> Result<ConformanceCleanupReservation, KeyringError> {
@@ -792,6 +896,7 @@ impl RpcRuntime {
     }
 
     fn from_environment() -> Result<Self, NativeDiagnostic> {
+        require_windows_job_supervision_from_environment()?;
         match env::var(CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV) {
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_MISSING_KEYCHAIN_TRUST => {
                 Ok(Self::with_custody(
@@ -809,7 +914,10 @@ impl RpcRuntime {
                 ))
             }
             Ok(value) if value == CONFORMANCE_NATIVE_PROVIDER_SYSTEM => {
-                let keyring = Arc::new(NativeKeyring::for_schema_v2());
+                let keyring = Arc::new(
+                    NativeKeyring::for_schema_v2()
+                        .map_err(|_| NativeDiagnostic::new("invalid_native_input", false))?,
+                );
                 Ok(Self::with_custody(
                     keyring.clone(),
                     Some(keyring as Arc<dyn ConformanceCredentialCleanup>),
@@ -1093,13 +1201,14 @@ impl RpcRuntime {
                 }
                 json!({ "status": "missing" })
             }
-            RpcCommand::ConformanceNativeCustodyState => {
+            RpcCommand::ConformanceNativeCustodyState { instance_ids } => {
                 let cleanup = self
                     .emergency_cleanup
                     .as_ref()
                     .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
-                let (backend, empty, state_sha256) =
-                    cleanup.state().map_err(|error| error.diagnostic())?;
+                let (backend, empty, state_sha256) = cleanup
+                    .state(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
                 json!({
                     "backend": backend,
                     "available": true,
@@ -1107,13 +1216,23 @@ impl RpcRuntime {
                     "stateSha256": state_sha256,
                 })
             }
-            RpcCommand::ConformanceCleanupNativeCustody => {
+            RpcCommand::ConformanceIssueNativeCustodyCleanup { instance_ids } => {
+                let cleanup = self
+                    .emergency_cleanup
+                    .as_ref()
+                    .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
+                let grant = cleanup
+                    .issue_cleanup_grant(&instance_ids)
+                    .map_err(|error| error.diagnostic())?;
+                json!({ "grant": grant })
+            }
+            RpcCommand::ConformanceCleanupNativeCustody { grant } => {
                 let cleanup = self
                     .emergency_cleanup
                     .as_ref()
                     .ok_or_else(|| NativeDiagnostic::new("invalid_native_input", false))?;
                 let (backend, empty, state_sha256) = cleanup
-                    .cleanup_state()
+                    .cleanup_state(&grant)
                     .map_err(|error| error.diagnostic())?;
                 json!({
                     "backend": backend,
@@ -1491,25 +1610,21 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
         }
         "conformance_native_custody_state" => {
             expect_exact_args(object, &["instanceIds"])?;
-            let instance_ids = object
-                .get("instanceIds")
-                .and_then(Value::as_array)
-                .ok_or(("invalid_native_input", false))?;
-            if !instance_ids.is_empty() {
-                return invalid();
-            }
-            Ok(RpcCommand::ConformanceNativeCustodyState)
+            Ok(RpcCommand::ConformanceNativeCustodyState {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
+        }
+        "conformance_issue_native_custody_cleanup" => {
+            expect_exact_args(object, &["instanceIds"])?;
+            Ok(RpcCommand::ConformanceIssueNativeCustodyCleanup {
+                instance_ids: required_instance_ids(object, "instanceIds")?,
+            })
         }
         "conformance_cleanup_native_custody" => {
-            expect_exact_args(object, &["instanceIds"])?;
-            let instance_ids = object
-                .get("instanceIds")
-                .and_then(Value::as_array)
-                .ok_or(("invalid_native_input", false))?;
-            if !instance_ids.is_empty() {
-                return invalid();
-            }
-            Ok(RpcCommand::ConformanceCleanupNativeCustody)
+            expect_exact_args(object, &["grant"])?;
+            Ok(RpcCommand::ConformanceCleanupNativeCustody {
+                grant: required_cleanup_grant(object, "grant")?,
+            })
         }
         "cave_list_familiars" => {
             expect_exact_args(object, &["handle", "operation", "page"])?;
@@ -1594,6 +1709,44 @@ fn required_attempt_id(
     NativeOperationInput::new(attempt_id.clone(), 1)
         .map_err(|_| ("invalid_native_input", false))?;
     Ok(attempt_id)
+}
+
+fn required_instance_ids(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, (&'static str, bool)> {
+    let values = object
+        .get(key)
+        .and_then(Value::as_array)
+        .filter(|values| values.len() <= 8)
+        .ok_or(("invalid_native_input", false))?;
+    let mut instance_ids = Vec::with_capacity(values.len());
+    for value in values {
+        let instance_id = value
+            .as_str()
+            .filter(|value| validate_installation_id(value).is_ok())
+            .ok_or(("invalid_native_input", false))?
+            .to_owned();
+        instance_ids.push(instance_id);
+    }
+    Ok(instance_ids)
+}
+
+fn required_cleanup_grant(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Zeroizing<String>, (&'static str, bool)> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| {
+            value.len() == 43
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
+        .map(|value| Zeroizing::new(value.to_owned()))
+        .ok_or(("invalid_native_input", false))
 }
 
 fn required_operation(
@@ -1763,6 +1916,16 @@ fn read_bounded_line(reader: &mut impl BufRead) -> io::Result<Option<BoundedLine
     }
 }
 
+#[cfg(windows)]
+pub fn create_windows_private_test_directory(path: &std::path::Path) -> io::Result<()> {
+    crate::cleanup_grant::create_windows_private_test_directory(path)
+}
+
+#[cfg(windows)]
+pub fn write_windows_private_test_file(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    crate::cleanup_grant::write_windows_private_test_file(path, bytes)
+}
+
 pub fn run_stdio() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
@@ -1781,13 +1944,17 @@ pub fn run_stdio() -> io::Result<()> {
     while let Some(line) = read_bounded_line(&mut stdin)? {
         reap_rpc_workers(&mut workers)?;
         let request = match line {
-            BoundedLine::Line(line) => match parse_request_line(&line) {
-                Ok(request) => request,
-                Err(response) => {
-                    write_rpc_response(&stdout, &response)?;
-                    continue;
+            BoundedLine::Line(mut line) => {
+                let request = parse_request_line(&line);
+                line.zeroize();
+                match request {
+                    Ok(request) => request,
+                    Err(response) => {
+                        write_rpc_response(&stdout, &response)?;
+                        continue;
+                    }
                 }
-            },
+            }
             BoundedLine::Oversized => {
                 write_rpc_response(
                     &stdout,
@@ -2110,7 +2277,8 @@ mod tests {
     };
 
     use super::{
-        parse_command, parse_request_line, read_bounded_line, BoundedLine, ConformanceCaveLauncher,
+        parse_command, parse_request_line, read_bounded_line,
+        validate_windows_job_binding_environment_values, BoundedLine, ConformanceCaveLauncher,
         ConformanceCredentialCleanup, RpcCommand, RpcRuntime, SharedMemoryCredentialCustody,
         CONFORMANCE_INSTALLATION_ID, CONFORMANCE_NATIVE_PROVIDER_PRESET_ENV,
         CONFORMANCE_NODE_PATH_ENV, INVALID_REQUEST_ID, MAX_LINE_BYTES,
@@ -2132,6 +2300,54 @@ mod tests {
     const OWNER_TOKEN: &str = "00000000-0000-4000-8000-000000000004";
     static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+    #[test]
+    fn windows_job_binding_requires_the_exact_nonce_bound_job_name() {
+        let nonce = "0123456789abcdef0123456789abcdef";
+        let name = format!(r"Local\OpenCoven.Chat.Conformance.{nonce}");
+
+        assert!(validate_windows_job_binding_environment_values(
+            Some("1"),
+            Some("1"),
+            Some(nonce),
+            Some(&name)
+        )
+        .is_ok());
+        for binding in [
+            (Some("invalid"), Some("1"), Some(nonce), Some(name.as_str())),
+            (Some("1"), None, Some(nonce), Some(name.as_str())),
+            (Some("1"), Some("0"), Some(nonce), Some(name.as_str())),
+            (Some("1"), Some("1"), None, Some(name.as_str())),
+            (Some("1"), Some("1"), Some("short"), Some(name.as_str())),
+            (Some("1"), Some("1"), Some(nonce), None),
+            (
+                Some("1"),
+                Some("1"),
+                Some(nonce),
+                Some(r"Local\OpenCoven.Chat.Conformance.other"),
+            ),
+        ] {
+            assert!(validate_windows_job_binding_environment_values(
+                binding.0, binding.1, binding.2, binding.3
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn windows_job_binding_is_not_required_outside_evidence_mode() {
+        assert!(validate_windows_job_binding_environment_values(None, None, None, None).is_ok());
+        assert!(
+            validate_windows_job_binding_environment_values(
+                None,
+                Some("invalid"),
+                Some("invalid"),
+                Some("invalid")
+            )
+            .is_ok(),
+            "ordinary non-evidence native execution must ignore Job binding variables"
+        );
+    }
+
     struct RecordingEmergencyCleanup {
         cleanup_inputs: Mutex<Vec<(String, String)>>,
         present: Mutex<bool>,
@@ -2141,11 +2357,21 @@ mod tests {
     }
 
     impl ConformanceCredentialCleanup for RecordingEmergencyCleanup {
-        fn state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        fn state(
+            &self,
+            _instance_ids: &[String],
+        ) -> Result<(&'static str, bool, String), KeyringError> {
             Err(KeyringError::Failure)
         }
 
-        fn cleanup_state(&self) -> Result<(&'static str, bool, String), KeyringError> {
+        fn issue_cleanup_grant(&self, _instance_ids: &[String]) -> Result<String, KeyringError> {
+            Err(KeyringError::Failure)
+        }
+
+        fn cleanup_state(
+            &self,
+            _grant: &str,
+        ) -> Result<(&'static str, bool, String), KeyringError> {
             Err(KeyringError::Failure)
         }
 
@@ -2246,6 +2472,70 @@ mod tests {
         .expect("coven health should be registered");
 
         assert!(matches!(command, RpcCommand::CovenHealth { .. }));
+    }
+
+    #[test]
+    fn parses_only_bounded_native_custody_proof_commands() {
+        const INSTANCE_ID: &str = "00000000-0000-4000-8000-000000000001";
+        let state = parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [INSTANCE_ID]})),
+        )
+        .expect("native custody state should be registered");
+        let issue = parse_command(
+            "conformance_issue_native_custody_cleanup",
+            Some(json!({"instanceIds": [INSTANCE_ID, INSTANCE_ID]})),
+        )
+        .expect("native custody cleanup issuance should be registered");
+        let cleanup = parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({"grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})),
+        )
+        .expect("native custody cleanup should be registered");
+
+        assert!(matches!(
+            state,
+            RpcCommand::ConformanceNativeCustodyState { .. }
+        ));
+        assert!(matches!(
+            issue,
+            RpcCommand::ConformanceIssueNativeCustodyCleanup { .. }
+        ));
+        assert!(matches!(
+            cleanup,
+            RpcCommand::ConformanceCleanupNativeCustody { .. }
+        ));
+        assert!(parse_command(
+            "conformance_native_custody_state",
+            Some(json!({"instanceIds": [
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+                INSTANCE_ID,
+            ]})),
+        )
+        .is_err());
+        assert!(parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({
+                "grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "instanceIds": [INSTANCE_ID],
+            })),
+        )
+        .is_err());
+        assert!(parse_command(
+            "conformance_cleanup_native_custody",
+            Some(json!({
+                "grant": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "service": "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef",
+            })),
+        )
+        .is_err());
     }
 
     #[test]

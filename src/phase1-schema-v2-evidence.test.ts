@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -103,6 +104,106 @@ function reverseObjectKeys(value: unknown): unknown {
       .reverse()
       .map(([key, nested]) => [key, reverseObjectKeys(nested)]),
   );
+}
+
+function validatorModuleFixture() {
+  const scratchParent = resolve(projectRoot, '.artifacts');
+  mkdirSync(scratchParent, { recursive: true });
+  const root = mkdtempSync(resolve(scratchParent, 'schema-v2-validator-modules-'));
+  const producerRoot = resolve(root, 'producer');
+  const contractPath = resolve(root, 'scripts', 'conformance-contract.mjs');
+  const githubContractPath = resolve(root, 'scripts', 'github-conformance-evidence.mjs');
+  const contractBytes = Buffer.from(`
+export const marker = 'committed-contract';
+export function parseFrozenConformanceLock(text) {
+  return JSON.parse(text);
+}
+export function validateFrozenConformanceBindings(lock, schemaText, registryText) {
+  return {
+    lock,
+    schema: JSON.parse(schemaText),
+    registry: JSON.parse(registryText),
+  };
+}
+export function assertEvidenceProducerCompatibility(lock) {
+  return lock.evidenceProducer;
+}
+`);
+  const githubContractBytes = Buffer.from(`
+import { marker } from './github-conformance-helper.mjs';
+export function verifyProtectedWorkflow() {
+  if (marker !== 'committed-helper') {
+    throw new Error('mutable GitHub contract dependency executed');
+  }
+}
+`);
+  const packageBytes = Buffer.from('{"name":"validator-module-fixture"}\n');
+  const harnessBytes = Buffer.from('export {};\n');
+  const workflowBytes = Buffer.from('name: validator module fixture\n');
+  const producer = {
+    status: 'compatible',
+    repository: 'OpenCoven/chat',
+    commit: 'a'.repeat(40),
+    tree: 'b'.repeat(40),
+    packageManifest: metadata('package.json', packageBytes),
+    harness: {
+      ...metadata('scripts/phase1-conformance.mjs', harnessBytes),
+      version: '2.0.0',
+    },
+    workflow: metadata('.github/workflows/client-v1-conformance.yml', workflowBytes),
+  };
+  const files = new Map<string, string | Buffer>([
+    ['scripts/conformance-contract.mjs', contractBytes],
+    ['scripts/github-conformance-evidence.mjs', githubContractBytes],
+    ['scripts/github-conformance-helper.mjs', "export const marker = 'committed-helper';\n"],
+    [
+      'conformance/client-v1-cross-repository-lock.json',
+      `${JSON.stringify({ evidenceProducer: producer, toolchain: {} })}\n`,
+    ],
+    ['conformance/client-v1-cross-repository-evidence.schema.json', '{}\n'],
+    ['conformance/client-v1-cross-repository-assertions.json', '{}\n'],
+    ['producer/package.json', packageBytes],
+    ['producer/scripts/phase1-conformance.mjs', harnessBytes],
+    ['producer/.github/workflows/client-v1-conformance.yml', workflowBytes],
+  ]);
+  for (const [relativePath, bytes] of files) {
+    const path = resolve(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, bytes);
+  }
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=OpenCoven Tests',
+      '-c',
+      'user.email=tests@opencoven.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'validator module fixture',
+    ],
+    { cwd: root },
+  );
+
+  return {
+    root,
+    producerRoot,
+    producer,
+    contractPath,
+    githubContractPath,
+    contractBytes,
+    commit: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim(),
+    tree: execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim(),
+  };
 }
 
 async function fixture() {
@@ -555,31 +656,252 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
   });
 
   test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
-    const loaded = await loadSdkEvidenceContract({
-      validatorRoot,
-      validatorIdentity: {
-        repository: 'OpenCoven/sdk',
-        commit: validatorCommit,
-        tree: validatorTree,
-      },
-    });
+    const loaded = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+            const {
+              loadSdkEvidenceContract,
+            } = await import(process.argv[1]);
+            const loaded = await loadSdkEvidenceContract({
+              validatorRoot: process.argv[2],
+              validatorIdentity: {
+                repository: 'OpenCoven/sdk',
+                commit: process.argv[3],
+                tree: process.argv[4],
+              },
+            });
+            process.stdout.write(JSON.stringify({
+              validator: loaded.validator,
+              frozenLockSchemaVersion: loaded.frozenLock.schemaVersion,
+              registrySchemaVersion: loaded.registry.schemaVersion,
+              schemaId: loaded.schema.$id,
+              producer: loaded.contract.assertEvidenceProducerCompatibility(
+                loaded.frozenLock,
+              ),
+            }));
+          `,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          validatorRoot,
+          validatorCommit,
+          validatorTree,
+        ],
+        { encoding: 'utf8' },
+      ),
+    ) as {
+      validator: JsonRecord;
+      frozenLockSchemaVersion: number;
+      registrySchemaVersion: number;
+      schemaId: string;
+      producer: JsonRecord;
+    };
 
     expect(loaded.validator.commit).toBe(validatorCommit);
-    expect(loaded.frozenLock.schemaVersion).toBe(2);
-    expect(loaded.registry.schemaVersion).toBe(2);
-    expect(loaded.schema.$id).toBe(
+    expect(loaded.frozenLockSchemaVersion).toBe(2);
+    expect(loaded.registrySchemaVersion).toBe(2);
+    expect(loaded.schemaId).toBe(
       'urn:opencoven:schema:client-v1-cross-repository-platform-evidence:2',
     );
-    expect(loaded.validator.contract.path).toBe('scripts/conformance-contract.mjs');
-    expect(
-      loaded.contract.assertEvidenceProducerCompatibility(loaded.frozenLock as never),
-    ).toMatchObject({
+    expect((loaded.validator.contract as JsonRecord).path).toBe('scripts/conformance-contract.mjs');
+    expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
       workflow: {
         environmentId: '20863036831',
       },
     });
+  }, 30_000);
+
+  test('executes the committed contract bytes after its checkout path mutates', async () => {
+    const validator = validatorModuleFixture();
+    try {
+      const result = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              import { writeFileSync } from 'node:fs';
+              const {
+                createVerifiedValidatorModuleSnapshot,
+              } = await import(process.argv[1]);
+              const snapshot = createVerifiedValidatorModuleSnapshot({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              writeFileSync(
+                process.argv[5],
+                "export const marker = 'mutated-contract';\\n",
+              );
+              const contract = await snapshot.importModule(
+                'scripts/conformance-contract.mjs',
+              );
+              process.stdout.write(JSON.stringify({
+                marker: contract.marker,
+                metadata: snapshot.metadata(
+                  'scripts/conformance-contract.mjs',
+                ),
+              }));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+            validator.contractPath,
+          ],
+          { encoding: 'utf8' },
+        ),
+      ) as JsonRecord;
+
+      expect(result.marker).toBe('committed-contract');
+      expect(result.metadata).toEqual(
+        metadata('scripts/conformance-contract.mjs', validator.contractBytes),
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('executes the snapshotted GitHub contract after its checkout path mutates', async () => {
+    const validator = validatorModuleFixture();
+    try {
+      const result = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              import { writeFileSync } from 'node:fs';
+              const {
+                loadSdkEvidenceContract,
+                verifySchemaV2ProducerCheckout,
+              } = await import(process.argv[1]);
+              const sdkContract = await loadSdkEvidenceContract({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              writeFileSync(
+                process.argv[5],
+                [
+                  'export function verifyProtectedWorkflow() {',
+                  "  throw new Error('mutable GitHub contract executed');",
+                  '}',
+                  '',
+                ].join('\\n'),
+              );
+              const result = await verifySchemaV2ProducerCheckout({
+                producerRoot: process.argv[6],
+                producerIdentity: JSON.parse(process.argv[7]),
+                sdkContract,
+              });
+              process.stdout.write(JSON.stringify(result));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+            validator.githubContractPath,
+            validator.producerRoot,
+            JSON.stringify({
+              revision: validator.producer.commit,
+              tree: validator.producer.tree,
+            }),
+          ],
+          { encoding: 'utf8' },
+        ),
+      ) as JsonRecord;
+
+      expect(result).toMatchObject({
+        identity: {
+          repository: 'OpenCoven/chat',
+          commit: validator.producer.commit,
+          tree: validator.producer.tree,
+        },
+      });
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('rejects a file that mutates during its evidence snapshot', async () => {
+    const module = await import('../scripts/phase1-schema-v2-evidence.mjs');
+    const readSnapshot = Reflect.get(module, 'readConsistentEvidenceFile');
+    expect(readSnapshot).toBeTypeOf('function');
+    if (typeof readSnapshot !== 'function') {
+      return;
+    }
+
+    const scratchParent = resolve(projectRoot, '.artifacts');
+    mkdirSync(scratchParent, { recursive: true });
+    const scratchRoot = mkdtempSync(resolve(scratchParent, 'schema-v2-snapshot-'));
+    const mutatingPath = resolve(scratchRoot, 'mutating.bin');
+    writeFileSync(mutatingPath, Buffer.alloc(16 * 1024 * 1024, 0x61));
+
+    const worker = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+          import { closeSync, ftruncateSync, openSync } from 'node:fs';
+          const descriptor = openSync(process.argv[1], 'r+');
+          process.stdout.write('ready\\n');
+          let large = false;
+          try {
+            while (true) {
+              ftruncateSync(descriptor, large ? 16 * 1024 * 1024 : 4 * 1024 * 1024);
+              large = !large;
+            }
+          } finally {
+            closeSync(descriptor);
+          }
+        `,
+        mutatingPath,
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    try {
+      const ready = Promise.race([
+        once(worker.stdout, 'data').then(([chunk]) => String(chunk)),
+        once(worker, 'exit').then(([code, signal]) => {
+          throw new Error(`Snapshot mutation worker exited early: ${code ?? signal}.`);
+        }),
+      ]);
+      await expect(ready).resolves.toContain('ready');
+
+      let rejectedRace = false;
+      for (let attempt = 0; attempt < 50 && !rejectedRace; attempt += 1) {
+        try {
+          readSnapshot(scratchRoot, 'mutating.bin', 'Mutating evidence file');
+        } catch (error) {
+          rejectedRace =
+            error instanceof Error && /changed while it was being read/u.test(error.message);
+        }
+      }
+      expect(rejectedRace).toBe(true);
+    } finally {
+      if (worker.exitCode === null && worker.signalCode === null) {
+        worker.kill('SIGKILL');
+        await once(worker, 'exit');
+      }
+      rmSync(scratchRoot, { recursive: true, force: true });
+    }
   });
 
   test('rejects a validator checkout at the wrong commit or tree', async () => {
@@ -631,6 +953,59 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       ),
     ).toBe(true);
     expect(bytes.endsWith('\n')).toBe(true);
+  });
+
+  test('normalizes the verified Cave run into the frozen SDK registry order', async () => {
+    const { input, registry } = await fixture();
+    const caveRecord = structuredClone(input.caveRecord);
+    const ttl = caveRecord.assertions.filter(({ id }) => id.startsWith('pairing.ttl-'));
+    caveRecord.assertions = caveRecord.assertions.filter(
+      ({ id }) => !id.startsWith('pairing.ttl-'),
+    );
+    caveRecord.assertions.splice(43, 0, ...ttl);
+
+    const evidence = buildSchemaV2PlatformEvidence({
+      ...input,
+      caveRecord,
+    });
+
+    expect(evidence.caveRecord.assertions.map(({ id }: { id: string }) => id)).toEqual(
+      (registry.assertions as { cave: string[] }).cave,
+    );
+  });
+
+  test('removes private Cave pass details from the retained record', async () => {
+    const { contract, input } = await fixture();
+    const caveRecord = structuredClone(input.caveRecord);
+    const assertion = caveRecord.assertions.find(({ id }) => id === 'ingress.forwarded.public');
+    const coverage = caveRecord.assertions.find(({ id }) => id === 'harness.assertion-coverage');
+    if (assertion === undefined || coverage === undefined) {
+      throw new Error('Cave assertion fixture is incomplete');
+    }
+    assertion.detail = 'observed https://operator.example.invalid/private';
+    coverage.detail = 'all frozen assertions were observed';
+
+    const evidence = buildSchemaV2PlatformEvidence({
+      ...input,
+      caveRecord,
+    });
+
+    expect(
+      evidence.caveRecord.assertions.find(
+        ({ id }: { id: string }) => id === 'ingress.forwarded.public',
+      )?.detail,
+    ).toBe('');
+    expect(
+      evidence.caveRecord.assertions.find(
+        ({ id }: { id: string }) => id === 'harness.assertion-coverage',
+      )?.detail,
+    ).toBe('complete');
+    expect(() =>
+      serializeValidatedSchemaV2PlatformEvidence(evidence, {
+        contract,
+        schema: input.sdkContract.schema,
+      }),
+    ).not.toThrow();
   });
 
   test.each(['missing', 'duplicate', 'unexpected', 'skip', 'fail'])(

@@ -96,7 +96,7 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: '6adffbd88169964e1e2a70eba56b1a816bf31f39',
+    revision: 'db7cab55ad6a75d0fb1a68a478563984621bd717',
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
@@ -462,10 +462,15 @@ function createCheckoutFixture() {
 
 describe('Phase 1 conformance lock', () => {
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
-    expect(readPhase1ConformanceLock()).toEqual({
+    const lock = readPhase1ConformanceLock();
+    expect(lock).toEqual({
       path: resolve(projectRoot, 'phase1-conformance.lock.json'),
       version: 5,
       ...expectedEntries,
+    });
+    expect(committedHarnessAuthority).toMatchObject({
+      revision: expectedEntries.harness.revision,
+      tree: '753c9e815e27351d5b81cb32d3659f9872ded022',
     });
   });
 
@@ -627,6 +632,14 @@ describe('Phase 1 conformance lock', () => {
 });
 
 describe('Phase 1 checkout verification', () => {
+  test('budgets large frozen checkout verification without removing the deadline', () => {
+    expect(phase1ConformanceTestOnly.verificationLimits).toEqual({
+      repositoryDeadlineMs: 30_000,
+      trackedEntryLimit: 100_000,
+      trackedPathByteLimit: 16 * 1024 * 1024,
+    });
+  });
+
   gitTest('verifies the pinned Chat harness checkout with the hardened paths', () => {
     const fixture = createCheckoutFixture();
     const harnessRoot = resolve(createScratchRoot('harness-checkout'), 'chat');
@@ -794,7 +807,7 @@ import { writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid));
 process.on('SIGTERM', () => {});
 process.stderr.write(${JSON.stringify(secretDiagnostic)});
-setTimeout(() => process.exit(86), 30_000);
+setTimeout(() => process.exit(86), 60_000);
 setInterval(() => {}, 1_000);
 `,
       );
@@ -817,7 +830,7 @@ setInterval(() => {}, 1_000);
       );
 
       const childPid = Number.parseInt(readFileSync(childPidPath, 'utf8'), 10);
-      expect(Date.now() - startedAt).toBeLessThan(25_000);
+      expect(Date.now() - startedAt).toBeLessThan(40_000);
       expect(Number.isSafeInteger(childPid)).toBe(true);
       let survivingCommand = '';
       try {
@@ -833,7 +846,7 @@ setInterval(() => {}, 1_000);
       expect(message).not.toContain(fakeGitPath);
       expect(message).not.toContain(fixture.roots.chatRoot);
     },
-    40_000,
+    50_000,
   );
 
   gitTest('isolates fixture commits from inherited signing and hooks', () => {

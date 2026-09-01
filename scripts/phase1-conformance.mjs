@@ -22,7 +22,9 @@ import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
   assertCleanPhase1Checkouts,
+  assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
+  assertPhase1ProducerAuthority,
   createGitEnvironment,
   readPhase1ConformanceLock,
 } from './phase1-conformance-lock.mjs';
@@ -38,11 +40,23 @@ import {
   CANONICAL_PLATFORM_ENVIRONMENTS,
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
-import { runSchemaV2Conformance } from './phase1-schema-v2-producer.mjs';
+import {
+  runSchemaV2Conformance,
+  schemaV2SupervisorEnvironment,
+  supervisorArtifactOutputPath,
+} from './phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
+export {
+  runPowerShellCommandWithArgs,
+  schemaV2SupervisorEnvironment,
+  supervisorArtifactOutputPath,
+  unixProducerBindingEnvironment,
+  validateSchemaV2AuthorityCheckouts,
+  windowsJobBindingEnvironment,
+} from './phase1-schema-v2-producer.mjs';
 export { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -706,7 +720,20 @@ function requireString(value, label) {
   return value;
 }
 
-export function parseArgs(argv) {
+export function parseArgs(argv, runtime = {}) {
+  const runtimeEnvironment = runtime.environment ?? process.env;
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
   const options = {
     lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
     scenario: 'all',
@@ -779,7 +806,9 @@ export function parseArgs(argv) {
       continue;
     }
     if (argument === '--output') {
-      options.outputPath = resolve(requireString(argv[index + 1], '--output'));
+      const output = requireString(argv[index + 1], '--output');
+      options.outputPath =
+        runtimePlatform === 'win32' ? windowsPath.resolve(output) : resolve(output);
       index += 1;
       continue;
     }
@@ -807,13 +836,19 @@ export function parseArgs(argv) {
         'schema-v2 --platform/--output cannot combine with --retain-sanitized-report.',
       );
     }
-    const expectedOutput = resolve(
-      options.chatSourceRoot,
-      '.artifacts',
-      `client-v1-conformance-${options.platform}.json`,
+    if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
+      throw new Error('schema-v2 --platform must match the supervised native host.');
+    }
+    const supervisorEnvironment = schemaV2SupervisorEnvironment(
+      runtimeEnvironment,
+      runtimePlatform,
+      runtimeArchitecture,
+      runtimeCurrentUid,
+      runtimeCgroupMembership,
     );
+    const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the platform artifact path.');
+      throw new Error('schema-v2 --output must match the supervisor artifact path.');
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
@@ -1107,53 +1142,80 @@ function compactEnvironment(environment) {
   );
 }
 
+export function createVerifiedRunnerEnvironment(
+  options,
+  harnessRoot,
+  environment = process.env,
+  runtime = {},
+) {
+  const runtimePlatform = runtime.platform ?? process.platform;
+  const runtimeArchitecture = runtime.architecture ?? process.arch;
+  const runtimeCurrentUid = Object.hasOwn(runtime, 'currentUid')
+    ? runtime.currentUid
+    : typeof process.getuid === 'function'
+      ? process.getuid()
+      : undefined;
+  const runtimeCgroupMembership = Object.hasOwn(runtime, 'cgroupMembership')
+    ? runtime.cgroupMembership
+    : runtimePlatform === 'linux'
+      ? readFileSync('/proc/self/cgroup', 'utf8')
+      : '';
+  const supervisionEnvironment =
+    options.platform === undefined
+      ? {}
+      : schemaV2SupervisorEnvironment(
+          environment,
+          runtimePlatform,
+          runtimeArchitecture,
+          runtimeCurrentUid,
+          runtimeCgroupMembership,
+        );
+  if (
+    options.platform !== undefined &&
+    options.outputPath !== supervisorArtifactOutputPath(supervisionEnvironment, runtimePlatform)
+  ) {
+    throw new Error('Schema-v2 verified runner output does not match its supervisor binding.');
+  }
+  return compactEnvironment({
+    PATH: environment.PATH,
+    HOME: environment.HOME,
+    TMPDIR: environment.TMPDIR,
+    LANG: environment.LANG,
+    LC_ALL: environment.LC_ALL,
+    CI: environment.CI,
+    RUSTUP_HOME: environment.RUSTUP_HOME,
+    CARGO_HOME: environment.CARGO_HOME,
+    OPENCOVEN_CHAT_ROOT: options.chatSourceRoot,
+    OPENCOVEN_SDK_ROOT: options.sdkSourceRoot,
+    OPENCOVEN_SDK_EVIDENCE_ROOT: options.sdkEvidenceSourceRoot,
+    OPENCOVEN_SDK_VALIDATOR_ROOT: options.sdkValidatorSourceRoot,
+    OPENCOVEN_CAVE_ROOT: options.caveSourceRoot,
+    OPENCOVEN_COVEN_ROOT: options.covenSourceRoot,
+    OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: options.windowsSupervisorPath,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT: environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:
+      environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY,
+    OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:
+      environment.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP,
+    OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED: environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED,
+    PHASE1_TEST_KEYCHAIN: environment.PHASE1_TEST_KEYCHAIN,
+    DBUS_SESSION_BUS_ADDRESS: environment.DBUS_SESSION_BUS_ADDRESS,
+    GNOME_KEYRING_CONTROL: environment.GNOME_KEYRING_CONTROL,
+    XDG_RUNTIME_DIR: environment.XDG_RUNTIME_DIR,
+    XDG_DATA_HOME: environment.XDG_DATA_HOME,
+    XDG_CONFIG_HOME: environment.XDG_CONFIG_HOME,
+    ...supervisionEnvironment,
+    [verifiedRunnerEnvironment]: '1',
+    [verifiedRunnerRootEnvironment]: harnessRoot,
+  });
+}
+
 export function assertExecutingHarnessAuthority(
   lock,
   executingRoot = projectRoot,
   environment = process.env,
 ) {
-  const configuredRoot = environment[verifiedRunnerRootEnvironment];
-  if (
-    environment[verifiedRunnerEnvironment] !== '1' ||
-    typeof configuredRoot !== 'string' ||
-    realpathSync(configuredRoot) !== realpathSync(executingRoot)
-  ) {
-    throw new Error('Phase 1 runner is not executing from its verified harness checkout.');
-  }
-  const authority = lock.harnessAuthority;
-  if (
-    authority === undefined ||
-    authority.revision !== lock.harness.revision ||
-    runSupervisedSync('git', ['rev-parse', 'HEAD'], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim() !== authority.revision ||
-    runSupervisedSync('git', ['rev-parse', 'HEAD^{tree}'], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim() !== authority.tree
-  ) {
-    throw new Error('Executing Phase 1 harness revision does not match its immutable authority.');
-  }
-  for (const file of authority.files) {
-    const path = resolve(executingRoot, file.path);
-    const stats = lstatSync(path);
-    const blob = runSupervisedSync('git', ['rev-parse', `HEAD:${file.path}`], {
-      cwd: executingRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim();
-    if (
-      stats.isSymbolicLink() ||
-      !stats.isFile() ||
-      blob !== file.blob ||
-      sha256File(path) !== file.sha256
-    ) {
-      throw new Error('Executing Phase 1 harness module does not match its immutable authority.');
-    }
-  }
+  return assertExecutingPhase1HarnessAuthority(lock, executingRoot, environment);
 }
 
 async function bootstrapVerifiedRunner(options) {
@@ -1233,39 +1295,7 @@ async function bootstrapVerifiedRunner(options) {
             [runner, ...verifiedArgs],
             {
               cwd: harnessRoot,
-              env: compactEnvironment({
-                PATH: process.env.PATH,
-                HOME: process.env.HOME,
-                TMPDIR: process.env.TMPDIR,
-                LANG: process.env.LANG,
-                LC_ALL: process.env.LC_ALL,
-                CI: process.env.CI,
-                RUSTUP_HOME: process.env.RUSTUP_HOME,
-                CARGO_HOME: process.env.CARGO_HOME,
-                OPENCOVEN_CHAT_ROOT: options.chatSourceRoot,
-                OPENCOVEN_SDK_ROOT: options.sdkSourceRoot,
-                OPENCOVEN_SDK_EVIDENCE_ROOT: options.sdkEvidenceSourceRoot,
-                OPENCOVEN_SDK_VALIDATOR_ROOT: options.sdkValidatorSourceRoot,
-                OPENCOVEN_CAVE_ROOT: options.caveSourceRoot,
-                OPENCOVEN_COVEN_ROOT: options.covenSourceRoot,
-                OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: options.windowsSupervisorPath,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_IDENTITY,
-                OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP:
-                  process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT_STAMP,
-                OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED:
-                  process.env.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED,
-                PHASE1_TEST_KEYCHAIN: process.env.PHASE1_TEST_KEYCHAIN,
-                DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
-                GNOME_KEYRING_CONTROL: process.env.GNOME_KEYRING_CONTROL,
-                XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-                XDG_DATA_HOME: process.env.XDG_DATA_HOME,
-                XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-                [verifiedRunnerEnvironment]: '1',
-                [verifiedRunnerRootEnvironment]: harnessRoot,
-              }),
+              env: createVerifiedRunnerEnvironment(options, harnessRoot),
               timeoutMs: cargoBuildTimeoutMs * 3,
             },
           );
@@ -1683,52 +1713,7 @@ export function nativeAdapterTestEnvironment(
 }
 
 export function assertProductionAdapterAtRevision(harnessRoot, lock) {
-  const productionPaths = [
-    'src-tauri/Cargo.toml',
-    'src-tauri/Cargo.lock',
-    'src-tauri/src/bin/phase1-native-rpc.rs',
-    'src-tauri/src/conformance.rs',
-    'src-tauri/src/connection.rs',
-    'src-tauri/src/coven.rs',
-    'src-tauri/src/keyring.rs',
-  ];
-  const expectedDeltas = lock.harnessAuthority.productionDeltas;
-  const changed = runSupervisedSync(
-    'git',
-    ['diff', '--name-only', lock.chat.revision, 'HEAD', '--', ...productionPaths],
-    {
-      cwd: harnessRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    },
-  )
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .sort();
-  if (
-    !Array.isArray(expectedDeltas) ||
-    JSON.stringify(changed) !== JSON.stringify(expectedDeltas.map(({ path }) => path).sort())
-  ) {
-    throw new Error('Chat conformance native delta set is not exactly allowlisted.');
-  }
-  for (const delta of expectedDeltas) {
-    const path = resolve(harnessRoot, delta.path);
-    const stats = lstatSync(path);
-    const blob = runSupervisedSync('git', ['rev-parse', `HEAD:${delta.path}`], {
-      cwd: harnessRoot,
-      encoding: 'utf8',
-      env: createGitEnvironment(),
-    }).trim();
-    if (
-      stats.isSymbolicLink() ||
-      !stats.isFile() ||
-      blob !== delta.blob ||
-      sha256File(path) !== delta.sha256
-    ) {
-      throw new Error('Chat conformance native delta does not match its immutable allowlist.');
-    }
-  }
+  assertPhase1ProducerAuthority(lock, harnessRoot);
   const covenPath = 'src-tauri/src/coven.rs';
   const releaseSource = runSupervisedSync('git', ['show', `${lock.chat.revision}:${covenPath}`], {
     cwd: harnessRoot,
@@ -2021,7 +2006,19 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     );
   }
   for (const [group, args] of [
-    ['health', ['test', '--locked', '--package', 'coven-client', '--test', 'health']],
+    [
+      'health',
+      [
+        'test',
+        '--locked',
+        '--package',
+        'coven-client',
+        '--test',
+        'health',
+        '--',
+        '--test-threads=1',
+      ],
+    ],
     ['doc', ['test', '--locked', '--package', 'coven-client', '--doc']],
   ]) {
     covenTestResults.push(
@@ -5151,15 +5148,16 @@ export function buildObservedSchemaV2Assertions({
 
 export async function runPhase1Conformance(options = parseArgs([])) {
   assertNoNodeRuntimeInjection();
-  if (options.platform !== undefined) {
-    return runSchemaV2Conformance(options);
-  }
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );
-  runPublicPhase1Stage('phase1.stage.harness-authority.failed', () =>
-    assertExecutingHarnessAuthority(lock),
+  const harnessAuthorityVerification = runPublicPhase1Stage(
+    'phase1.stage.harness-authority.failed',
+    () => assertExecutingHarnessAuthority(lock),
   );
+  if (options.platform !== undefined) {
+    return runSchemaV2Conformance(options, lock, harnessAuthorityVerification);
+  }
   runPublicPhase1Stage('phase1.stage.native-provider.failed', () =>
     assertNativeCredentialProviderIsolated(),
   );

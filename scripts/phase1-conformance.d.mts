@@ -1,5 +1,47 @@
 export const cargoBuildTimeoutMs: number;
-export function parseArgs(argv: string[]): {
+export function windowsJobBindingEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+): Record<string, string>;
+export function unixProducerBindingEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+  architecture?: string,
+  currentUid?: number,
+  cgroupMembership?: string,
+): Record<string, string>;
+export function schemaV2SupervisorEnvironment(
+  environment?: NodeJS.ProcessEnv,
+  platform?: NodeJS.Platform,
+  architecture?: string,
+  currentUid?: number,
+  cgroupMembership?: string,
+): Record<string, string>;
+export function supervisorArtifactOutputPath(
+  binding: Record<string, string>,
+  platform?: NodeJS.Platform,
+): string;
+export function runPowerShellCommandWithArgs(
+  executable: string,
+  script: string,
+  args: string[],
+  options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeout?: number;
+  },
+): string;
+export type Phase1RuntimeContext = {
+  environment?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  architecture?: string;
+  currentUid?: number;
+  cgroupMembership?: string;
+};
+export function parseArgs(
+  argv: string[],
+  runtime?: Phase1RuntimeContext,
+): {
   lockPath: string;
   scenario: 'all';
   retainSanitizedReport: string;
@@ -13,6 +55,21 @@ export function parseArgs(argv: string[]): {
   caveSourceRoot: string;
   covenSourceRoot: string;
   windowsSupervisorPath?: string;
+};
+export function createVerifiedRunnerEnvironment(
+  options: ReturnType<typeof parseArgs>,
+  harnessRoot: string,
+  environment?: NodeJS.ProcessEnv,
+  runtime?: Phase1RuntimeContext,
+): NodeJS.ProcessEnv;
+export function validateSchemaV2AuthorityCheckouts(options: {
+  lock: ReturnType<typeof import('./phase1-conformance-lock.mjs').readPhase1ConformanceLock>;
+  harnessRoot: string;
+  producerRoot: string;
+  producerIdentity: { revision: string; tree: string };
+}): {
+  harness: { revision: string; tree: string };
+  producer: { revision: string; tree: string };
 };
 export function observeReleaseToolVersions(): {
   nodeVersion: 'v24.18.1';
