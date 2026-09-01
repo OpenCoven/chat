@@ -67,7 +67,9 @@ export function encodeCursor(key: SortKey): string {
 }
 
 export function decodeCursor(cursor: string): SortKey {
-  const padded = cursor.replaceAll('-', '+').replaceAll('_', '/');
+  const base64 = cursor.replaceAll('-', '+').replaceAll('_', '/');
+  const padding = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4));
+  const padded = base64 + padding;
   let parsed: unknown;
   try {
     parsed = JSON.parse(atob(padded));
