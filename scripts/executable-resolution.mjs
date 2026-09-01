@@ -158,20 +158,27 @@ export function resolveExecutableInvocation(
     throw new Error('Supervised executable must be a non-empty string.');
   }
   if (platform !== 'win32') {
-    const executable = isAbsolute(command)
-      ? regularExecutable(command, false)
+    const candidates = isAbsolute(command)
+      ? [command]
       : (environment.PATH ?? '')
           .split(delimiter)
           .filter(Boolean)
-          .map((entry) => regularExecutable(resolve(entry, command), false))
-          .find((candidate) => candidate !== undefined);
-    if (executable === undefined) {
+          .map((entry) => resolve(entry, command));
+    const invocation = candidates
+      .map((candidate) => {
+        const resolvedCommand = regularExecutable(candidate, false);
+        return resolvedCommand === undefined
+          ? undefined
+          : { executable: candidate, resolvedCommand };
+      })
+      .find((candidate) => candidate !== undefined);
+    if (invocation === undefined) {
       throw new Error('Supervised executable is unavailable.');
     }
     return Object.freeze({
-      executable,
+      executable: invocation.executable,
       args: Object.freeze([...args]),
-      resolvedCommand: executable,
+      resolvedCommand: invocation.resolvedCommand,
     });
   }
 

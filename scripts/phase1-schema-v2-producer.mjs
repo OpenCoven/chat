@@ -70,6 +70,19 @@ const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const ownedProcessGroupsSupported = process.platform !== 'win32';
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
+const publicFailureDiagnosticSet = new Set([
+  ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
+  'phase1.stage.checkouts.failed',
+  'phase1.stage.evidence-authority.failed',
+  'phase1.stage.toolchain.failed',
+  'phase1.stage.packaging.failed',
+  'phase1.stage.runtime-assertions.failed',
+  'phase1.stage.cave-authority.failed',
+  'phase1.stage.native-scenarios.failed',
+  'phase1.stage.coven-identity.failed',
+  'phase1.stage.isolation.failed',
+  'phase1.stage.execution-root-cleanup.failed',
+]);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
   'compile-failed',
@@ -3905,6 +3918,17 @@ export function recordCaveMatrixFailure(results, error) {
 }
 
 export function wrapInfrastructureFailure(error, report) {
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    publicFailureDiagnosticSet.has(error.message)
+  ) {
+    const wrapped = new Error(error.message, { cause: error });
+    wrapped.result = { report };
+    return wrapped;
+  }
   if (error instanceof CommandExecutionError) {
     const reason = approvedCommandFailureReasons.has(error.result?.reason)
       ? error.result.reason
@@ -3986,10 +4010,12 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
   let covenProof;
   let packageObservations;
   let macosKeychainSession;
+  let activeStage = 'phase1.stage.checkouts.failed';
 
   try {
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
+      activeStage = 'phase1.stage.evidence-authority.failed';
       validateSchemaV2AuthorityCheckouts({
         lock,
         harnessRoot: projectRoot,
@@ -4018,18 +4044,21 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
         chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
       };
+      activeStage = 'phase1.stage.toolchain.failed';
       toolchain = await collectToolchainMetadata(
         executionRoot,
         environment,
         sdkContract.frozenLock.toolchain,
       );
     }
+    activeStage = 'phase1.stage.packaging.failed';
     const packaged = await packageLockedArtifacts(executionRoot, roots, environment, {
       schemaV2,
     });
     artifactDigests = packaged.artifactDigests;
     packageObservations = packaged.packedConsumerObservations;
     if (schemaV2) {
+      activeStage = 'phase1.stage.runtime-assertions.failed';
       observationTests = await runSchemaV2ObservationSuites(
         executionRoot,
         roots,
@@ -4039,6 +4068,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     }
 
     try {
+      activeStage = 'phase1.stage.cave-authority.failed';
       const caveAuthority = await runCaveAuthorityMatrix(
         executionRoot,
         roots.caveRoot,
@@ -4047,9 +4077,14 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       caveRecord = caveAuthority.caveRecord;
       recordCaveBackedAssertions(results, caveAuthority.assertions);
     } catch (error) {
-      infrastructureFailure ??= recordCaveMatrixFailure(results, error);
+      const failure =
+        schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
+          ? new Error(activeStage, { cause: error })
+          : error;
+      infrastructureFailure ??= recordCaveMatrixFailure(results, failure);
     }
 
+    activeStage = 'phase1.stage.runtime-assertions.failed';
     await runCompatibilityScenarios({
       artifactRoot: executionRoot,
       roots,
@@ -4057,8 +4092,10 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       results,
     });
     if (schemaV2 && process.platform === 'darwin') {
+      activeStage = 'phase1.stage.native-scenarios.failed';
       macosKeychainSession = prepareMacosKeychainSession({ home: environment.HOME });
     }
+    activeStage = 'phase1.stage.native-scenarios.failed';
     nativeProof = await runNativeScenarios({
       artifactRoot: executionRoot,
       roots,
@@ -4068,6 +4105,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       platform: options.platform,
       compatibilityPassed: results.get('phase1.compat.api-major-min-client')?.status === 'passed',
     });
+    activeStage = 'phase1.stage.coven-identity.failed';
     covenProof = await runCovenIdentityScenario(
       executionRoot,
       packaged.covenBinaryPath,
@@ -4075,6 +4113,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       environment,
       results,
     );
+    activeStage = 'phase1.stage.isolation.failed';
     const operatorIsolationValid =
       environment.HOME !== process.env.HOME &&
       environment.XDG_CONFIG_HOME.startsWith(executionRoot.rootPath) &&
@@ -4088,7 +4127,10 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       operatorIsolationValid ? 'phase1.assertion.passed' : 'phase1.assertion.failed',
     );
   } catch (error) {
-    infrastructureFailure = error;
+    infrastructureFailure ??=
+      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
+        ? new Error(activeStage, { cause: error })
+        : error;
     fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');
   }
 
@@ -4096,7 +4138,10 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     try {
       macosKeychainSession.close();
     } catch (error) {
-      infrastructureFailure ??= error;
+      infrastructureFailure ??=
+        schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
+          ? new Error('phase1.stage.native-scenarios.failed', { cause: error })
+          : error;
       for (const [id, assertion] of results) {
         if (assertion.status === 'passed') {
           results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
@@ -4126,7 +4171,10 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
   try {
     await executionRoot.cleanup();
   } catch (error) {
-    infrastructureFailure ??= error;
+    infrastructureFailure ??=
+      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
+        ? new Error('phase1.stage.execution-root-cleanup.failed', { cause: error })
+        : error;
     for (const [id, assertion] of results) {
       if (assertion.status === 'passed') {
         results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));

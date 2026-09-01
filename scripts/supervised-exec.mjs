@@ -37,8 +37,10 @@ export function runSupervisedSync(command, args, options = {}) {
             nodeSupervisor,
             '--timeout-ms',
             String(options.timeout ?? 30_000),
-            '--',
+            '--invocation-path',
             invocation.executable,
+            '--',
+            invocation.resolvedCommand,
             ...invocation.args,
           ],
       {

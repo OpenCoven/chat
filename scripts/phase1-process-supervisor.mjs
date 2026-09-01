@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, lstatSync, writeSync } from 'node:fs';
+import { accessSync, closeSync, constants, lstatSync, realpathSync, writeSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,23 +16,41 @@ function main(argv) {
   let timeoutMs;
   if (argv[0] === '--timeout-ms') {
     timeoutMs = Number(argv[1]);
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || argv[2] !== '--') {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
       fail();
       return;
     }
-    argv = argv.slice(3);
+    argv = argv.slice(2);
   }
-  if (process.platform === 'win32' || argv.length < 1 || !isAbsolute(argv[0])) {
+  if (
+    process.platform === 'win32' ||
+    argv.length < 4 ||
+    argv[0] !== '--invocation-path' ||
+    !isAbsolute(argv[1]) ||
+    argv[2] !== '--' ||
+    !isAbsolute(argv[3])
+  ) {
     fail();
     return;
   }
+  const invocationPath = resolve(argv[1]);
+  argv = argv.slice(3);
   const executable = resolve(argv[0]);
   const stats = lstatSync(executable);
-  if (stats.isSymbolicLink() || !stats.isFile()) {
+  const invocationStats = lstatSync(invocationPath);
+  const resolvedExecutable = realpathSync(executable);
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isFile() ||
+    resolvedExecutable !== executable ||
+    (!invocationStats.isFile() && !invocationStats.isSymbolicLink())
+  ) {
     fail();
     return;
   }
-  const child = spawn(executable, argv.slice(1), {
+  accessSync(resolvedExecutable, constants.X_OK);
+  const child = spawn(resolvedExecutable, argv.slice(1), {
+    argv0: invocationPath,
     env: Object.fromEntries(
       Object.entries(process.env).filter(
         ([name]) => ![legacyStatusPathEnvironment, groupKillFailureEnvironment].includes(name),

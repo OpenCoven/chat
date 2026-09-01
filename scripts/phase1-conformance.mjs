@@ -1355,8 +1355,10 @@ function runCommand(
             supervisorPath,
             '--timeout-ms',
             String(timeoutMs),
-            '--',
+            '--invocation-path',
             invocation.executable,
+            '--',
+            invocation.resolvedCommand,
             ...invocation.args,
           ],
       {
@@ -2538,8 +2540,10 @@ function spawnOwnedProcess(command, args, { cwd, env, stdio }) {
           supervisorPath,
           '--timeout-ms',
           String(commandTimeoutMs),
-          '--',
+          '--invocation-path',
           invocation.executable,
+          '--',
+          invocation.resolvedCommand,
           ...invocation.args,
         ],
     {
@@ -4083,6 +4087,17 @@ export function recordCaveMatrixFailure(results, error) {
 }
 
 export function wrapInfrastructureFailure(error, report) {
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    publicPhase1DiagnosticIds.has(error.message)
+  ) {
+    const wrapped = new Error(error.message, { cause: error });
+    wrapped.result = { report };
+    return wrapped;
+  }
   if (error instanceof CommandExecutionError) {
     const reason = approvedCommandFailureReasons.has(error.result?.reason)
       ? error.result.reason

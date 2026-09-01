@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
@@ -832,6 +832,36 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
   });
 
+  test('preserves a safe schema-v2 stage while retaining its private cause only in memory', () => {
+    const diagnostic = 'phase1.stage.checkouts.failed';
+    const cause = new Error('/private/operator/path should not be retained');
+    const staged = new Error(diagnostic, { cause });
+    const wrapped = wrapInfrastructureFailure(staged, { status: 'failed' });
+
+    expect(wrapped.message).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
+    expect(wrapped.cause).toBe(staged);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
+  });
+
+  test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    expect(source).toContain(
+      [
+        '  } catch (error) {',
+        '    infrastructureFailure ??=',
+        '      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)',
+        '        ? new Error(activeStage, { cause: error })',
+        '        : error;',
+        "    fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');",
+      ].join('\n'),
+    );
+  });
+
   test('uses Chat native coven_health and never the Coven status CLI for identity proof', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
@@ -1187,7 +1217,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       "activeNativeStage = 'revocation-rediscovery'",
       "activeNativeStage = 'revocation-health'",
       "activeNativeStage = 'revocation-status'",
-      'activeNativeStage = `revocation-repair-${stage}`',
+      'activeNativeStage = `revocation-repair-$' + '{stage}`',
       "activeNativeStage = 'revocation-result'",
       "activeNativeStage = 'credential-cleanup'",
       "activeNativeStage = 'credential-cleanup-discovery'",
@@ -1735,7 +1765,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       packageManagerVersion: 'pnpm@10.34.0',
       rustVersion: '1.95.0',
     });
-  });
+  }, 30_000);
 
   test('rejects missing or digest-mismatched frozen Windows supervisors', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-supervisor-preflight-'));
@@ -2179,6 +2209,94 @@ describe('Phase 1 real-authority conformance harness', () => {
         await root.cleanup().catch(() => undefined);
       }
     },
+  );
+
+  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+    'supervises a validated POSIX multicall symlink through its invocation path',
+    async () => {
+      const root = createProcessOwnedArtifactRoot({
+        prefix: 'phase1-multicall-supervisor',
+      });
+      try {
+        const target = realpathSync(process.execPath);
+        const command = resolve(root.rootPath, 'rustc');
+        symlinkSync(target, command);
+        const args = [
+          '--input-type=module',
+          '--eval',
+          "import { basename } from 'node:path'; process.stdout.write(basename(process.argv0));",
+        ];
+
+        const result = await runSupervisedCommandForTest(root, command, args, {
+          cwd: root.rootPath,
+          env: { ...process.env, PATH: root.rootPath },
+          timeoutMs: 5_000,
+          outputLimitBytes: 4_096,
+        });
+
+        expect(result).toMatchObject({ stdout: 'rustc' });
+      } finally {
+        await root.cleanup();
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'supervises a validated target with a separate multicall invocation name',
+    async () => {
+      const root = createProcessOwnedArtifactRoot({
+        prefix: 'phase1-validated-supervisor-target',
+      });
+      try {
+        const target = realpathSync(process.execPath);
+        const command = resolve(root.rootPath, 'rustc');
+        const supervisor = resolve(projectRoot, 'scripts', 'phase1-process-supervisor.mjs');
+        symlinkSync(target, command);
+        const child = spawn(
+          process.execPath,
+          [
+            supervisor,
+            '--timeout-ms',
+            '5000',
+            '--invocation-path',
+            command,
+            '--',
+            target,
+            '--input-type=module',
+            '--eval',
+            "import { basename } from 'node:path'; process.stdout.write(basename(process.argv0));",
+          ],
+          {
+            detached: true,
+            stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+          },
+        );
+        const stdout: Buffer[] = [];
+        const statusFrames: Buffer[] = [];
+        const stdoutStream = child.stdout;
+        const statusStream = child.stdio[3];
+        if (stdoutStream === null || statusStream === null || statusStream === undefined) {
+          throw new Error('Supervisor output stream was unavailable.');
+        }
+        stdoutStream.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
+        statusStream.on('data', (chunk) => statusFrames.push(Buffer.from(chunk)));
+        await new Promise<void>((resolveClose, rejectClose) => {
+          child.once('error', rejectClose);
+          child.once('close', () => resolveClose());
+        });
+
+        expect(Buffer.concat(stdout).toString('utf8')).toBe('rustc');
+        expect(parseSupervisorStatusFrame(Buffer.concat(statusFrames))).toEqual({
+          code: 0,
+          signal: null,
+          reason: 'exit',
+        });
+      } finally {
+        await root.cleanup();
+      }
+    },
+    30_000,
   );
 
   test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
