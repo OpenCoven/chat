@@ -219,11 +219,15 @@ jobs:
 
       - name: Open or update the bump pull request
         env:
-          # Same fallback the contract canary uses. With a token that can
-          # trigger workflows the pull request runs CI on itself; without one
-          # it still opens, carrying the verify job as its evidence. The
-          # fallback is what lets this land before the secret exists.
-          GH_TOKEN: ${{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN is used for all git-data write operations (creating the
+          # branch and committing the file).  A separate CI_IMAGE_BUMP_TOKEN --
+          # a PAT that can trigger workflows -- is used only for `gh pr create`
+          # so the resulting pull request runs CI on itself.  Without that
+          # secret the PR still opens; the verify job above is its evidence.
+          # Keeping the tokens separate avoids a 403 when CI_IMAGE_BUMP_TOKEN is
+          # a fine-grained PAT whose contents scope is read-only.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TOKEN: ${{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}
           DIGEST: ${{ needs.build.outputs.digest }}
           REASON: ${{ needs.build.outputs.reason }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -294,7 +298,7 @@ jobs:
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           BODY
 
-          gh pr create \
+          GH_TOKEN="${PR_TOKEN}" gh pr create \
             --base main \
             --head "${branch}" \
             --title "ci: adopt rebuilt CI image ${short:0:12}" \
