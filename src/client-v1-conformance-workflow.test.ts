@@ -2327,13 +2327,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
-test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
-  'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
-  () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
-    const harness = `
+  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+    'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
+    () => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+      const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 ${invokeChecked}
@@ -2346,13 +2346,15 @@ try {
 }
 `;
 
-    expect(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    ).toBe('Nonzero test failed with exit code 7.');
-  }, 30_000);
+      expect(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      ).toBe('Nonzero test failed with exit code 7.');
+    },
+    30_000,
+  );
 
   test('the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
