@@ -1015,6 +1015,25 @@ describe('Phase 1 specification guards', () => {
     expect(rights).toContain('| FILE_DELETE_CHILD');
   });
 
+  it('creates Windows cleanup objects with exact-user ownership before publication', () => {
+    const cleanupGrant = readText('src-tauri/src/cleanup_grant.rs');
+    const nativeRpcTest = readText('src-tauri/tests/phase1_native_rpc.rs');
+
+    for (const required of [
+      'ConvertStringSecurityDescriptorToSecurityDescriptorW',
+      'O:{sid}D:P(A;OICI;FA;;;{sid})',
+      'O:{sid}D:P(A;;FA;;;{sid})',
+      'CreateDirectoryW(',
+      'CreateFileW(',
+      'create_windows_private_test_directory',
+      'write_windows_private_test_file',
+    ]) {
+      expect(cleanupGrant).toContain(required);
+    }
+    expect(nativeRpcTest).toContain('create_windows_private_test_directory(&path)');
+    expect(nativeRpcTest).toContain('write_windows_private_test_file(');
+  });
+
   it('skips the expensive jobs for a branch that changed only prose', () => {
     // A documentation branch spent two twenty-minute E2E timeouts proving
     // nothing about documentation.

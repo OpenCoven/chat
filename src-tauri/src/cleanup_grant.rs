@@ -10,6 +10,19 @@ use crate::keyring::{
     validate_conformance_cleanup_accounts, KeyringError, CONFORMANCE_SERVICE_PREFIX,
 };
 
+#[cfg(windows)]
+pub(crate) fn create_windows_private_test_directory(path: &std::path::Path) -> std::io::Result<()> {
+    marker_io::create_private_directory(path)
+}
+
+#[cfg(windows)]
+pub(crate) fn write_windows_private_test_file(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    marker_io::write_private_test_file(path, bytes)
+}
+
 const GRANT_BYTES: usize = 32;
 const GRANT_DOMAIN: &str = "opencoven-chat-phase1-keyring-cleanup";
 const GRANT_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-id-v1\0";
@@ -607,19 +620,32 @@ mod marker_io {
     use std::{
         env,
         fs::{self, File, OpenOptions},
-        io::{Read, Write},
-        os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
+        io::{self, Read, Write},
+        os::windows::{
+            ffi::OsStrExt,
+            fs::OpenOptionsExt,
+            io::{AsRawHandle, FromRawHandle},
+        },
         path::{Component, Path, PathBuf},
         thread,
         time::{Duration, Instant},
     };
 
     use windows_sys::Win32::{
-        Foundation::{GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS},
+        Foundation::{
+            GetLastError, LocalFree, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, GENERIC_READ,
+            GENERIC_WRITE, INVALID_HANDLE_VALUE,
+        },
+        Security::{
+            Authorization::{
+                ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+            },
+            PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
+        },
         Storage::FileSystem::{
-            MoveFileExW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_FLAG_WRITE_THROUGH, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-            MOVEFILE_WRITE_THROUGH,
+            CreateDirectoryW, CreateFileW, MoveFileExW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, MOVEFILE_WRITE_THROUGH,
         },
     };
 
@@ -637,6 +663,18 @@ mod marker_io {
 
     pub(super) enum HoldError {
         Rejected,
+    }
+
+    struct LocalSecurityDescriptor(PSECURITY_DESCRIPTOR);
+
+    impl Drop for LocalSecurityDescriptor {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0.cast());
+                }
+            }
+        }
     }
 
     struct PinnedDirectory {
@@ -711,7 +749,7 @@ mod marker_io {
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
-                match fs::create_dir(&current) {
+                match create_private_directory(&current) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err(()),
@@ -871,14 +909,86 @@ mod marker_io {
         Ok(format!("{prefix}{}", super::hex(&bytes)))
     }
 
+    fn with_private_security_attributes<T>(
+        directory: bool,
+        operation: impl FnOnce(*const SECURITY_ATTRIBUTES) -> io::Result<T>,
+    ) -> io::Result<T> {
+        let sid = crate::cave::current_windows_user_sid()
+            .map_err(|()| io::Error::other("current Windows user SID is unavailable"))?;
+        let sddl = if directory {
+            format!("O:{sid}D:P(A;OICI;FA;;;{sid})")
+        } else {
+            format!("O:{sid}D:P(A;;FA;;;{sid})")
+        };
+        let mut wide = std::ffi::OsStr::new(&sddl)
+            .encode_wide()
+            .collect::<Vec<_>>();
+        wide.push(0);
+        let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        if unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                wide.as_ptr(),
+                SDDL_REVISION_1,
+                &raw mut descriptor,
+                std::ptr::null_mut(),
+            )
+        } == 0
+            || descriptor.is_null()
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let descriptor = LocalSecurityDescriptor(descriptor);
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: 0,
+        };
+        operation(&raw const attributes)
+    }
+
+    pub(super) fn create_private_directory(path: &Path) -> io::Result<()> {
+        let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        wide.push(0);
+        with_private_security_attributes(true, |attributes| {
+            if unsafe { CreateDirectoryW(wide.as_ptr(), attributes) } == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn create_private_file(path: &Path) -> io::Result<File> {
+        let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        wide.push(0);
+        with_private_security_attributes(false, |attributes| {
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    attributes,
+                    CREATE_NEW,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(unsafe { File::from_raw_handle(handle.cast()) })
+            }
+        })
+    }
+
+    pub(super) fn write_private_test_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut file = create_private_file(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
     fn open_new(path: &Path) -> Result<File, ()> {
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH)
-            .open(path)
-            .map_err(|_| ())
+        create_private_file(path).map_err(|_| ())
     }
 
     fn open_existing(path: &Path) -> Result<File, ()> {

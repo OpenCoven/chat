@@ -1075,7 +1075,8 @@ mod windows_cleanup {
         let profile =
             PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE must be set"));
         let path = profile.join(format!("opencoven-phase1-cleanup-{:032x}", nonce()));
-        fs::create_dir(&path).expect("isolated Windows home must be created");
+        opencoven_chat_lib::conformance::create_windows_private_test_directory(&path)
+            .expect("isolated Windows home must be created");
         (path.clone(), HomeCleanup { profile, path })
     }
 
@@ -1268,8 +1269,11 @@ mod windows_cleanup {
     }
 
     fn release_hook(directory: &Path, name: &str) {
-        fs::write(directory.join(format!("{name}.release")), b"release")
-            .expect("cleanup hook must be released");
+        opencoven_chat_lib::conformance::write_windows_private_test_file(
+            &directory.join(format!("{name}.release")),
+            b"release",
+        )
+        .expect("cleanup hook must be released");
     }
 
     #[test]
@@ -1430,7 +1434,8 @@ mod windows_cleanup {
         let (home, _home_cleanup) = isolated_home();
         let service = service_name();
         let hook_directory = home.join("cleanup-hooks");
-        fs::create_dir(&hook_directory).expect("cleanup hook directory must be created");
+        opencoven_chat_lib::conformance::create_windows_private_test_directory(&hook_directory)
+            .expect("cleanup hook directory must be created");
         let mut rpc = RpcProcess::spawn(
             &home,
             &service,
@@ -1468,7 +1473,8 @@ mod windows_cleanup {
             let (home, _home_cleanup) = isolated_home();
             let service = service_name();
             let hook_directory = home.join("cleanup-hooks");
-            fs::create_dir(&hook_directory).expect("cleanup hook directory must be created");
+            opencoven_chat_lib::conformance::create_windows_private_test_directory(&hook_directory)
+                .expect("cleanup hook directory must be created");
             let mut rpc = RpcProcess::spawn(&home, &service, Some((hook, &hook_directory)));
             let grant = if operation == "cleanup" {
                 Some(rpc.issue(&[TARGET_A]))

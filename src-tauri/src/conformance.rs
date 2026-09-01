@@ -1916,6 +1916,16 @@ fn read_bounded_line(reader: &mut impl BufRead) -> io::Result<Option<BoundedLine
     }
 }
 
+#[cfg(windows)]
+pub fn create_windows_private_test_directory(path: &std::path::Path) -> io::Result<()> {
+    crate::cleanup_grant::create_windows_private_test_directory(path)
+}
+
+#[cfg(windows)]
+pub fn write_windows_private_test_file(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    crate::cleanup_grant::write_windows_private_test_file(path, bytes)
+}
+
 pub fn run_stdio() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdin = stdin.lock();

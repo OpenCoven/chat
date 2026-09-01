@@ -626,7 +626,7 @@ mod windows_discovery {
         },
         Security::{
             AclSizeInformation,
-            Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
+            Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT},
             EqualSid, GetAce, GetAclInformation, GetLengthSid, GetTokenInformation, IsWellKnownSid,
             TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid, ACCESS_ALLOWED_ACE,
             ACE_HEADER, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
@@ -743,6 +743,28 @@ mod windows_discovery {
 
     pub(super) fn current_user_identity() -> Result<String, WindowsDiscoveryIoError> {
         NativeWindowsDiscovery::new().map(|discovery| discovery.identity)
+    }
+
+    pub(super) fn current_user_sid() -> Result<String, WindowsDiscoveryIoError> {
+        let token = open_current_token()?;
+        let sid = token_user_sid(token.0)?;
+        let mut string_sid: windows_sys::core::PWSTR = std::ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(sid.as_ptr().cast_mut().cast(), &raw mut string_sid) }
+            == 0
+            || string_sid.is_null()
+        {
+            return Err(last_file_error());
+        }
+        let mut length = 0;
+        while unsafe { *string_sid.add(length) } != 0 {
+            length += 1;
+        }
+        let result = String::from_utf16(unsafe { std::slice::from_raw_parts(string_sid, length) })
+            .map_err(|_| WindowsDiscoveryIoError::Unavailable);
+        unsafe {
+            LocalFree(string_sid.cast());
+        }
+        result
     }
 
     pub(super) fn private_path_metadata(
@@ -1045,6 +1067,11 @@ fn read_owner_discovery_record() -> NativeResult<OwnerDiscoveryRecord> {
 #[cfg(windows)]
 pub(crate) fn current_windows_user_identity() -> Result<String, ()> {
     windows_discovery::current_user_identity().map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn current_windows_user_sid() -> Result<String, ()> {
+    windows_discovery::current_user_sid().map_err(|_| ())
 }
 
 #[cfg(windows)]

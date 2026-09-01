@@ -219,7 +219,10 @@ private owner-checked directories, no-follow directory-relative operations,
 exact `0700`/`0600` modes, regular-file identity and link-count checks, and
 file plus directory synchronization. On Windows, every private component from
 the isolated home through the marker directory is identity-checked and pinned
-with a non-delete-sharing handle while path-based operations run. The
+with a non-delete-sharing handle while path-based operations run. New
+directories and files are created with Win32 security attributes that set the
+exact current TokenUser SID as owner and a protected user-only DACL before the
+object becomes visible, including under an elevated administrator token. The
 implementation revalidates the complete chain around publication, marker
 holding, and final consumption, rejects reparse points and foreign or
 writable-untrusted ACLs (including `FILE_DELETE_CHILD`), verifies file identity
