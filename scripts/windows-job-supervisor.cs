@@ -1516,6 +1516,7 @@ namespace OpenCoven
         private const int ERROR_NOT_FOUND = 1168;
         private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
+        private const int SCHED_E_TASK_NOT_RUNNING = unchecked((int)0x8004130b);
         private const int SupervisorFailureExitCode = unchecked((int)0xe0434f4d);
         private const int MaximumQuotaEntries = 500000;
         private const int MinimumStableIsolationRounds = 3;
@@ -3656,6 +3657,10 @@ namespace OpenCoven
                             InvokeComMethod(runningTask, "Stop");
                         }
                     }
+                    catch (Exception error) when (IsTaskNotRunningException(error))
+                    {
+                        continue;
+                    }
                     finally
                     {
                         ReleaseComObject(runningTask);
@@ -3674,6 +3679,19 @@ namespace OpenCoven
                 ReleaseComObject(runningTasks);
                 ReleaseComObject(service);
             }
+        }
+
+        private static bool IsTaskNotRunningException(Exception error)
+        {
+            while (error != null)
+            {
+                if (error.HResult == SCHED_E_TASK_NOT_RUNNING)
+                {
+                    return true;
+                }
+                error = error.InnerException;
+            }
+            return false;
         }
 
         private static object InvokeComMethod(
