@@ -69,22 +69,36 @@ const demo = new URLSearchParams(window.location.search).get('demo') ?? defaultD
 
 function surfaceFor(name: string | null) {
   if (name === 'chat') {
-    return <FamiliarsShell />;
+    return (
+      <Suspense fallback={null}>
+        <FamiliarsShell />
+      </Suspense>
+    );
   }
 
   if (name === 'messages') {
-    return <DemoShell />;
+    return (
+      <Suspense fallback={null}>
+        <DemoShell />
+      </Suspense>
+    );
   }
 
   if (name === 'familiars-reads') {
-    return <FamiliarsReadsShell />;
+    return (
+      <Suspense fallback={null}>
+        <FamiliarsReadsShell />
+      </Suspense>
+    );
   }
 
-  return name === 'minimal' ? <MinimalMacOS /> : <App />;
+  return name === 'minimal' ? (
+    <Suspense fallback={null}>
+      <MinimalMacOS />
+    </Suspense>
+  ) : (
+    <App />
+  );
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <Suspense fallback={null}>{surfaceFor(demo)}</Suspense>
-  </StrictMode>,
-);
+createRoot(rootElement).render(<StrictMode>{surfaceFor(demo)}</StrictMode>);
