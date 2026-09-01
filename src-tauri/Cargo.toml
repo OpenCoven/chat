@@ -1,6 +1,6 @@
 [package]
 name = "opencoven-chat"
-version = "0.1.0"
+version = "0.0.1"
 description = "OpenCoven Chat desktop scaffold"
 edition = "2021"
 rust-version = "1.95.0"

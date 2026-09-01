@@ -2,7 +2,7 @@ export const APP_CONNECTION_STATE = 'Read-only production';
 export const APP_DISPLAY_NAME = 'OpenCoven Chat';
 export const APP_IDENTIFIER = 'ai.opencoven.chat';
 export const APP_PHASE = 'phase-1-read-only-production';
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.0.1';
 
 /**
  * Lowercase form of the connection state, used as a styling hook.
