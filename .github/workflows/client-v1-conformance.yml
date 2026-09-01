@@ -8063,6 +8063,20 @@ jobs:
             }
           }
 
+          function Assert-RegularFile {
+            param(
+              [Parameter(Mandatory)][string]$Path,
+              [Parameter(Mandatory)][string]$Label
+            )
+            $item = Get-Item -LiteralPath $Path -Force
+            if (
+              $item.PSIsContainer -or
+              (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+            ) {
+              throw "$Label is not a regular file."
+            }
+          }
+
           function Download-PinnedAsset {
             param(
               [Parameter(Mandatory)][uri]$Uri,
@@ -8301,11 +8315,11 @@ jobs:
           [IO.Compression.ZipFile]::ExtractToDirectory($nodeArchive, $nodeParent)
           $nodeRoot = Join-Path $nodeParent 'node-v24.18.1-win-x64'
           $node = Join-Path $nodeRoot 'node.exe'
-          $npm = Join-Path $nodeRoot 'npm.cmd'
+          $npmCli = Join-Path $nodeRoot 'node_modules\npm\bin\npm-cli.js'
+          Assert-RegularFile -Path $npmCli -Label 'Pinned npm CLI entrypoint'
 
           $pnpmRoot = Join-Path $tools 'pnpm'
           $npmCache = Join-Path $root 'npm-cache'
-          $pnpm = Join-Path $pnpmRoot 'pnpm.cmd'
           [IO.Directory]::CreateDirectory($npmCache) | Out-Null
 
           $env:RUSTUP_HOME = Join-Path $root 'rustup'
@@ -8585,8 +8599,9 @@ jobs:
             throw 'Pinned Node version changed.'
           }
           Invoke-Checked `
-            -FilePath $npm `
+            -FilePath $node `
             -ArgumentList @(
+              $npmCli,
               'install',
               '--global',
               '--prefix',
@@ -8599,15 +8614,18 @@ jobs:
               $pnpmArchive
             ) `
             -Label 'Pinned pnpm installation'
-          if ((& $pnpm --version).Trim() -ne '10.34.0') {
+          $pnpmCli = Join-Path $pnpmRoot 'node_modules\pnpm\bin\pnpm.cjs'
+          Assert-RegularFile -Path $pnpmCli -Label 'Pinned pnpm CLI entrypoint'
+          if ((& $node $pnpmCli --version).Trim() -ne '10.34.0') {
             throw 'Pinned pnpm version changed.'
           }
 
           Push-Location $workspace
           try {
             Invoke-Checked `
-              -FilePath $pnpm `
+              -FilePath $node `
               -ArgumentList @(
+                $pnpmCli,
                 'install',
                 '--frozen-lockfile',
                 '--ignore-scripts',
@@ -8617,12 +8635,12 @@ jobs:
 
             if (
               (& $node --version).Trim() -ne 'v24.18.1' -or
-              "pnpm@$((& $pnpm --version).Trim())" -ne 'pnpm@10.34.0' -or
+              "pnpm@$((& $node $pnpmCli --version).Trim())" -ne 'pnpm@10.34.0' -or
               -not (& $rustc --version).StartsWith('rustc 1.95.0 ')
             ) {
               throw 'Frozen Windows toolchain does not match.'
             }
-            $tauriVersion = (& $pnpm exec tauri --version).Trim()
+            $tauriVersion = (& $node $pnpmCli exec tauri --version).Trim()
             if ($tauriVersion -ne 'tauri-cli 2.11.4') {
               throw 'Frozen Tauri CLI version changed.'
             }

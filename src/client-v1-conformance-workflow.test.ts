@@ -2373,6 +2373,43 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     ).toBe('succeeded');
   }, 30_000);
 
+  test('routes pinned npm and pnpm installs through Node directly instead of Windows .cmd shims', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+
+    // Win32 CreateProcess cannot directly launch a `.cmd`/`.bat` shim when
+    // Invoke-Checked sets UseShellExecute = $false, so no Invoke-Checked
+    // -FilePath target may ever resolve to one.
+    expect(childBootstrap).not.toMatch(/'[^']*\.(?:cmd|bat)'/iu);
+
+    const invokeCheckedTargets = [
+      ...childBootstrap.matchAll(/-FilePath\s+(\$[A-Za-z0-9_]+)\s*`?\r?\n/gu),
+    ].map((match) => match[1]);
+    expect(invokeCheckedTargets.length).toBeGreaterThan(0);
+    for (const target of invokeCheckedTargets) {
+      expect(target).not.toBe('$npm');
+      expect(target).not.toBe('$pnpm');
+    }
+
+    expect(childBootstrap).toContain(
+      "$npmCli = Join-Path $nodeRoot 'node_modules\\npm\\bin\\npm-cli.js'",
+    );
+    expect(childBootstrap).toContain(
+      "$pnpmCli = Join-Path $pnpmRoot 'node_modules\\pnpm\\bin\\pnpm.cjs'",
+    );
+    expect(childBootstrap).not.toContain('$npm =');
+    expect(childBootstrap).not.toContain('$pnpm =');
+
+    expect(childBootstrap).toMatch(
+      /-FilePath \$node `\s*-ArgumentList @\(\s*\$npmCli,\s*'install',/u,
+    );
+    expect(childBootstrap).toMatch(
+      /-FilePath \$node `\s*-ArgumentList @\(\s*\$pnpmCli,\s*'install',/u,
+    );
+    expect(childBootstrap).toContain('(& $node $pnpmCli --version).Trim()');
+    expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
+  });
+
   test('walks Windows file ancestors without dereferencing FileInfo.Parent', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
