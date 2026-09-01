@@ -12,7 +12,9 @@ import {
   validatePhase1SanitizedReport,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
 import { buildObservedSchemaV2Assertions } from '../scripts/phase1-conformance.mjs';
+import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
 import {
+  assertSdkContractMatchesPhase1Lock,
   buildSchemaV2PlatformEvidence,
   createObservedAssertionRecorder,
   loadSdkEvidenceContract,
@@ -20,6 +22,15 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const sdk933FixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-933a9523');
+const sdk933LockFixturePath = resolve(
+  sdk933FixtureRoot,
+  'client-v1-cross-repository-lock.json.fixture',
+);
+const sdk933LockProvenancePath = resolve(
+  sdk933FixtureRoot,
+  'client-v1-cross-repository-lock.provenance.json',
+);
 const validatorRoot =
   process.env.OPENCOVEN_SDK_VALIDATOR_ROOT ??
   resolve(projectRoot, '..', 'build-conformance-contract');
@@ -144,6 +155,8 @@ export function verifyProtectedWorkflow() {
   const packageBytes = Buffer.from('{"name":"validator-module-fixture"}\n');
   const harnessBytes = Buffer.from('export {};\n');
   const workflowBytes = Buffer.from('name: validator module fixture\n');
+  const schemaBytes = Buffer.from('{"sourceMarker":"committed-schema"}\n');
+  const registryBytes = Buffer.from('{"sourceMarker":"committed-registry"}\n');
   const producer = {
     status: 'compatible',
     repository: 'OpenCoven/chat',
@@ -156,16 +169,20 @@ export function verifyProtectedWorkflow() {
     },
     workflow: metadata('.github/workflows/client-v1-conformance.yml', workflowBytes),
   };
+  const frozenLockBytes = Buffer.from(
+    `${JSON.stringify({
+      sourceMarker: 'committed-lock',
+      evidenceProducer: producer,
+      toolchain: {},
+    })}\n`,
+  );
   const files = new Map<string, string | Buffer>([
     ['scripts/conformance-contract.mjs', contractBytes],
     ['scripts/github-conformance-evidence.mjs', githubContractBytes],
     ['scripts/github-conformance-helper.mjs', "export const marker = 'committed-helper';\n"],
-    [
-      'conformance/client-v1-cross-repository-lock.json',
-      `${JSON.stringify({ evidenceProducer: producer, toolchain: {} })}\n`,
-    ],
-    ['conformance/client-v1-cross-repository-evidence.schema.json', '{}\n'],
-    ['conformance/client-v1-cross-repository-assertions.json', '{}\n'],
+    ['conformance/client-v1-cross-repository-lock.json', frozenLockBytes],
+    ['conformance/client-v1-cross-repository-evidence.schema.json', schemaBytes],
+    ['conformance/client-v1-cross-repository-assertions.json', registryBytes],
     ['producer/package.json', packageBytes],
     ['producer/scripts/phase1-conformance.mjs', harnessBytes],
     ['producer/.github/workflows/client-v1-conformance.yml', workflowBytes],
@@ -199,6 +216,9 @@ export function verifyProtectedWorkflow() {
     contractPath,
     githubContractPath,
     contractBytes,
+    frozenLockBytes,
+    schemaBytes,
+    registryBytes,
     commit: execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
@@ -518,6 +538,155 @@ async function fixture() {
   return { contract, input, registry };
 }
 
+describe('Phase 1 SDK source contract authority', () => {
+  test.each(['unstaged', 'staged', 'untracked', 'hidden'] as const)(
+    'loads committed schema, registry, and lock bytes despite a %s checkout substitute',
+    (substitution) => {
+      const validator = validatorModuleFixture();
+      const relativePaths = [
+        'conformance/client-v1-cross-repository-lock.json',
+        'conformance/client-v1-cross-repository-evidence.schema.json',
+        'conformance/client-v1-cross-repository-assertions.json',
+      ] as const;
+      try {
+        if (substitution === 'untracked') {
+          execFileSync('git', ['rm', '--cached', '--quiet', '--force', '--', ...relativePaths], {
+            cwd: validator.root,
+          });
+        } else if (substitution === 'hidden') {
+          execFileSync('git', ['update-index', '--skip-worktree', '--', ...relativePaths], {
+            cwd: validator.root,
+          });
+        }
+
+        writeFileSync(
+          resolve(validator.root, relativePaths[0]),
+          '{"sourceMarker":"substituted-lock","evidenceProducer":{},"toolchain":{}}\n',
+        );
+        writeFileSync(
+          resolve(validator.root, relativePaths[1]),
+          '{"sourceMarker":"substituted-schema"}\n',
+        );
+        writeFileSync(
+          resolve(validator.root, relativePaths[2]),
+          '{"sourceMarker":"substituted-registry"}\n',
+        );
+        if (substitution === 'staged') {
+          execFileSync('git', ['add', '--', ...relativePaths], { cwd: validator.root });
+        }
+
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.commit);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.tree);
+
+        const loaded = JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              '--input-type=module',
+              '--eval',
+              `
+                const { loadSdkEvidenceContract } = await import(process.argv[1]);
+                const loaded = await loadSdkEvidenceContract({
+                  validatorRoot: process.argv[2],
+                  validatorIdentity: {
+                    repository: 'OpenCoven/sdk',
+                    commit: process.argv[3],
+                    tree: process.argv[4],
+                  },
+                });
+                process.stdout.write(JSON.stringify({
+                  frozenLock: loaded.frozenLock,
+                  schema: loaded.schema,
+                  registry: loaded.registry,
+                  frozenLockText: loaded.frozenLockText,
+                  schemaText: loaded.schemaText,
+                  registryText: loaded.registryText,
+                  validator: loaded.validator,
+                }));
+              `,
+              pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+              validator.root,
+              validator.commit,
+              validator.tree,
+            ],
+            { encoding: 'utf8' },
+          ),
+        ) as JsonRecord;
+
+        expect((loaded.frozenLock as JsonRecord).sourceMarker).toBe('committed-lock');
+        expect((loaded.schema as JsonRecord).sourceMarker).toBe('committed-schema');
+        expect((loaded.registry as JsonRecord).sourceMarker).toBe('committed-registry');
+        expect(loaded.frozenLockText).toBe(validator.frozenLockBytes.toString('utf8'));
+        expect(loaded.schemaText).toBe(validator.schemaBytes.toString('utf8'));
+        expect(loaded.registryText).toBe(validator.registryBytes.toString('utf8'));
+        expect((loaded.validator as JsonRecord).schema).toEqual(
+          metadata(
+            'conformance/client-v1-cross-repository-evidence.schema.json',
+            validator.schemaBytes,
+          ),
+        );
+      } finally {
+        rmSync(validator.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('matches the immutable SDK 933 source contract while retaining its pre-rebind producer', () => {
+    const provenance = JSON.parse(readFileSync(sdk933LockProvenancePath, 'utf8')) as JsonRecord;
+    expect(provenance).toEqual({
+      repository: 'OpenCoven/sdk',
+      revision: phase1CompatibilityValidator.commit,
+      tree: phase1CompatibilityValidator.tree,
+      path: 'conformance/client-v1-cross-repository-lock.json',
+      blob: '30cc0e68af7e01657b7d3ee096641a1dd05e4ab2',
+      size: 10641,
+      sha256: '94e8c7e312ecabc377531f58e01675046a1db9902ad74d9fa64098ebb3987fa1',
+    });
+
+    const frozenLockBytes = readFileSync(sdk933LockFixturePath);
+    expect(frozenLockBytes.byteLength).toBe(provenance.size);
+    expect(sha256(frozenLockBytes)).toBe(provenance.sha256);
+    const frozenLock = JSON.parse(frozenLockBytes.toString('utf8')) as JsonRecord;
+    const phase1Lock = readPhase1ConformanceLock();
+
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).not.toThrow();
+    expect(frozenLock.sources).toMatchObject({
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+        commit: phase1Lock.cave.revision,
+      },
+      coven: {
+        repository: 'OpenCoven/coven',
+        commit: phase1Lock.coven.revision,
+      },
+      chat: {
+        repository: 'OpenCoven/chat',
+        commit: phase1Lock.chat.revision,
+      },
+    });
+    expect(frozenLock.candidate).toMatchObject({
+      repository: 'OpenCoven/sdk',
+      commit: phase1Lock.sdk.revision,
+    });
+    expect(frozenLock.evidenceProducer).toMatchObject({
+      status: 'compatible',
+      repository: 'OpenCoven/chat',
+      commit: '4dc8f64bb71634a01ee647542dcdafdd0888b4f9',
+      tree: '915232e3595196de447521d9fca59866aeade956',
+    });
+  });
+});
+
 describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', () => {
   test('records each observed assertion exactly once without filling omissions', () => {
     const recorder = createObservedAssertionRecorder(['sdk.one', 'sdk.two'], 'SDK');
@@ -659,7 +828,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(() => buildObservedSchemaV2Assertions(options)).toThrow(/missing/u);
   });
 
-  test('loads the canonical validator contract and accepts the committed Phase 1 source pins', () => {
+  test('accepts the canonical source pins without treating this Chat head as the SDK producer', () => {
     const loaded = JSON.parse(
       execFileSync(
         process.execPath,
@@ -744,6 +913,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
+      commit: '4dc8f64bb71634a01ee647542dcdafdd0888b4f9',
+      tree: '915232e3595196de447521d9fca59866aeade956',
       workflow: {
         environmentId: '20863036831',
       },

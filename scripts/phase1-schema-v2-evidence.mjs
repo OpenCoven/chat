@@ -194,19 +194,74 @@ export function readConsistentEvidenceFile(root, relativePath, label) {
   }
 }
 
-function readCommittedValidatorModules(validatorRoot, identity) {
-  const treeEntries = execFileSync(
-    'git',
-    ['-C', validatorRoot, 'ls-tree', '-r', '-z', '-l', identity.commit, '--', 'scripts'],
-    {
+function runVerifiedValidatorGit(validatorRoot, args, label, maxBuffer, encoding) {
+  try {
+    return execFileSync('git', ['--no-replace-objects', '-C', validatorRoot, ...args], {
+      encoding,
       env: createGitEnvironment(process.env),
-      maxBuffer: MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+      maxBuffer,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 15_000,
       killSignal: 'SIGKILL',
+    });
+  } catch (error) {
+    if (error?.code === 'ENOBUFS') {
+      throw new Error(`${label} exceeds the evidence size limit.`);
+    }
+    if (error?.code === 'ETIMEDOUT') {
+      throw new Error(`${label} Git read timed out.`);
+    }
+    throw new Error(`${label} is unavailable at the verified SDK revision.`);
+  }
+}
+
+function readCommittedValidatorFile(validatorRoot, identity, relativePath, label) {
+  const treeOutput = runVerifiedValidatorGit(
+    validatorRoot,
+    ['ls-tree', '-z', '-l', identity.commit, '--', relativePath],
+    label,
+    MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+    'utf8',
+  );
+  const entries = treeOutput.split('\0').filter((entry) => entry.length > 0);
+  if (entries.length !== 1) {
+    throw new Error(`${label} is unavailable at the verified SDK revision.`);
+  }
+  const match = /^(100644|100755) blob ([0-9a-f]{40}) +([0-9]+)\t(.+)$/u.exec(entries[0]);
+  if (match === null || match[4] !== relativePath) {
+    throw new Error(`${label} is unavailable at the verified SDK revision.`);
+  }
+  const size = Number(match[3]);
+  if (!Number.isSafeInteger(size) || size < 1 || size > MAXIMUM_EVIDENCE_FILE_BYTES) {
+    throw new Error(`${label} exceeds the evidence file size limit.`);
+  }
+  const bytes = runVerifiedValidatorGit(
+    validatorRoot,
+    ['cat-file', 'blob', match[2]],
+    label,
+    size + 1,
+  );
+  if (!Buffer.isBuffer(bytes) || bytes.byteLength !== size) {
+    throw new Error(`${label} changed while it was being read.`);
+  }
+  return {
+    bytes: Buffer.from(bytes),
+    metadata: {
+      path: relativePath,
+      size,
+      sha256: sha256(bytes),
     },
+  };
+}
+
+function readCommittedValidatorModules(validatorRoot, identity) {
+  const treeEntries = runVerifiedValidatorGit(
+    validatorRoot,
+    ['ls-tree', '-r', '-z', '-l', identity.commit, '--', 'scripts'],
+    'SDK validator module graph',
+    MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+    'utf8',
   )
-    .toString('utf8')
     .split('\0')
     .filter((entry) => entry.length > 0);
   const modules = new Map();
@@ -233,14 +288,13 @@ function readCommittedValidatorModules(validatorRoot, identity) {
     ) {
       throw new Error('SDK validator module graph exceeds the evidence size limit.');
     }
-    const bytes = execFileSync('git', ['-C', validatorRoot, 'cat-file', 'blob', objectId], {
-      env: createGitEnvironment(process.env),
-      maxBuffer: size + 1,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    });
-    if (bytes.byteLength !== size) {
+    const bytes = runVerifiedValidatorGit(
+      validatorRoot,
+      ['cat-file', 'blob', objectId],
+      `Committed SDK validator module ${path}`,
+      size + 1,
+    );
+    if (!Buffer.isBuffer(bytes) || bytes.byteLength !== size) {
       throw new Error(`Committed SDK validator module ${path} changed while it was read.`);
     }
     totalSize += size;
@@ -646,18 +700,21 @@ export async function loadSdkEvidenceContract(optionsValue) {
     validatorRoot,
     validatorIdentity: actual,
   });
-  const schemaFile = readConsistentEvidenceFile(
+  const schemaFile = readCommittedValidatorFile(
     validatorRoot,
+    actual,
     'conformance/client-v1-cross-repository-evidence.schema.json',
     'SDK evidence schema',
   );
-  const registryFile = readConsistentEvidenceFile(
+  const registryFile = readCommittedValidatorFile(
     validatorRoot,
+    actual,
     'conformance/client-v1-cross-repository-assertions.json',
     'SDK assertion registry',
   );
-  const lockFile = readConsistentEvidenceFile(
+  const lockFile = readCommittedValidatorFile(
     validatorRoot,
+    actual,
     'conformance/client-v1-cross-repository-lock.json',
     'SDK frozen conformance lock',
   );
