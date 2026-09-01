@@ -242,7 +242,7 @@ export function resolveUnixToolPath(
   }
   const directories = commands.map((command) => {
     const invocation = resolveExecutableInvocation(command, environment, platform, []);
-    return dirname(invocation.resolvedCommand);
+    return dirname(invocation.executable);
   });
   directories.push(...unixSystemToolDirectories);
 

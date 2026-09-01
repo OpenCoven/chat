@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -125,3 +126,32 @@ test.skipIf(process.platform === 'win32')(
 test('refuses to build a Windows reviewed Unix tool path', () => {
   expect(() => resolveUnixToolPath(['node'], { PATH: '' }, 'win32')).toThrow();
 });
+
+test.skipIf(process.platform === 'win32')(
+  'resolves the logical shim directory for a pnpm/action-setup-style symlinked entry, not its realpath target directory',
+  () => {
+    const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'opencoven-unix-tool-path-shim-')));
+    try {
+      const binDirectory = resolve(root, '.bin');
+      const targetDirectory = resolve(root, 'pnpm', 'bin');
+      mkdirSync(binDirectory, { recursive: true });
+      mkdirSync(targetDirectory, { recursive: true });
+      const target = resolve(targetDirectory, 'pnpm.mjs');
+      writeExecutableScript(target);
+      const shim = resolve(binDirectory, 'pnpm');
+      symlinkSync(target, shim);
+
+      const environment = { PATH: binDirectory };
+
+      const toolPath = resolveUnixToolPath(['pnpm'], environment);
+
+      expect(toolPath.split(':')).toEqual([binDirectory, '/usr/bin', '/bin', '/usr/sbin', '/sbin']);
+      // A bare `pnpm` entry (the shim itself) must remain discoverable in the
+      // resolved directory; the realpath target directory only contains
+      // `pnpm.mjs`, which a bare `pnpm` invocation would not find.
+      expect(existsSync(resolve(binDirectory, 'pnpm'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
