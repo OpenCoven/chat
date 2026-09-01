@@ -1286,6 +1286,26 @@ describe('Chat-local protected Windows conformance workflow', () => {
         userDispose.indexOf('quarantineIsolatedIdentity();'),
       );
       expect(userDispose).toContain('new AggregateException(');
+
+      const deleteProfileStart = source.indexOf(
+        'internal static void DeleteOperatingSystemProfile(',
+      );
+      const deleteProfileEnd = source.indexOf(
+        'internal static void DeleteDirectoryTree(',
+        deleteProfileStart,
+      );
+      const deleteProfile = source.slice(deleteProfileStart, deleteProfileEnd);
+      const boundedRetry = deleteProfile.indexOf(
+        'while (\n                !deleteRequested &&\n                deleteTimer.Elapsed < TimeSpan.FromSeconds(10))',
+      );
+      expect(source).toContain('private const int ERROR_SHARING_VIOLATION = 32;');
+      expect(boundedRetry).toBeGreaterThan(-1);
+      expect(deleteProfile.indexOf('DeleteProfileW(', boundedRetry)).toBeGreaterThan(boundedRetry);
+      expect(deleteProfile).toContain('error != ERROR_SHARING_VIOLATION');
+      expect(deleteProfile).toContain('deleteRequested = true;');
+      expect(
+        deleteProfile.indexOf('Ephemeral Windows profile deletion remained blocked.'),
+      ).toBeGreaterThan(deleteProfile.indexOf('while (timer.Elapsed < TimeSpan.FromSeconds(10))'));
     }
 
     const runBody = workflowRunBody(

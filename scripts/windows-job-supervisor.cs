@@ -1511,6 +1511,7 @@ namespace OpenCoven
         private const int ERROR_ACCESS_DENIED = 5;
         private const int ERROR_FILE_NOT_FOUND = 2;
         private const int ERROR_PATH_NOT_FOUND = 3;
+        private const int ERROR_SHARING_VIOLATION = 32;
         private const int ERROR_INVALID_PARAMETER = 87;
         private const int ERROR_NOT_FOUND = 1168;
         private const int JobObjectBasicAccountingInformation = 1;
@@ -2503,19 +2504,35 @@ namespace OpenCoven
                 Directory.Exists(expectedProfilePath) ||
                 (!String.IsNullOrWhiteSpace(actualProfilePath) &&
                     Directory.Exists(actualProfilePath));
-            if (profileExists && !DeleteProfileW(sid, null, null))
+            bool deleteRequested = !profileExists;
+            int lastDeleteError = 0;
+            Stopwatch deleteTimer = Stopwatch.StartNew();
+            while (
+                !deleteRequested &&
+                deleteTimer.Elapsed < TimeSpan.FromSeconds(10))
             {
+                if (DeleteProfileW(sid, null, null))
+                {
+                    deleteRequested = true;
+                    break;
+                }
                 int error = Marshal.GetLastWin32Error();
-                if (error != ERROR_FILE_NOT_FOUND &&
-                    error != ERROR_PATH_NOT_FOUND &&
-                    error != ERROR_NOT_FOUND)
+                if (error == ERROR_FILE_NOT_FOUND ||
+                    error == ERROR_PATH_NOT_FOUND ||
+                    error == ERROR_NOT_FOUND)
+                {
+                    deleteRequested = true;
+                    break;
+                }
+                if (error != ERROR_SHARING_VIOLATION)
                 {
                     throw new Win32Exception(
                         error,
                         "Ephemeral Windows profile deletion failed.");
                 }
+                lastDeleteError = error;
+                Thread.Sleep(100);
             }
-
             Stopwatch timer = Stopwatch.StartNew();
             while (timer.Elapsed < TimeSpan.FromSeconds(10))
             {
@@ -2532,6 +2549,12 @@ namespace OpenCoven
                     return;
                 }
                 Thread.Sleep(100);
+            }
+            if (!deleteRequested)
+            {
+                throw new Win32Exception(
+                    lastDeleteError,
+                    "Ephemeral Windows profile deletion remained blocked.");
             }
             throw new InvalidOperationException(
                 "Ephemeral Windows profile survived cleanup.");

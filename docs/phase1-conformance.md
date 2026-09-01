@@ -500,7 +500,10 @@ After the root exits, the trusted outer process terminates and reaps the Job,
 closes every pinned handle, removes any Windows profile with `DeleteProfileW`,
 safely deletes the non-reparse bootstrap tree, calls `NetUserDel`, and verifies
 that the account, profile registry entry/directory, and bootstrap root are
-gone. Cleanup attempts are aggregated so one failure cannot skip later
+gone. A profile deletion blocked by Windows error 32 is retried for at most 10
+seconds to allow the terminated logon profile to unload; every other deletion
+error fails immediately, and the existing bounded disappearance proof remains
+mandatory. Cleanup attempts are aggregated so one failure cannot skip later
 cleanup, and any account/profile/root cleanup failure fails the workflow.
 
 The supervisor continuously measures reviewed roots and terminates the entire
@@ -966,7 +969,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 440,259 | `8521d524ba411cad236f2394b96c9b12983437e3fee089c9c1b2035e11614d5f` |
+| `.github/workflows/client-v1-conformance.yml` | 441,368 | `1dac5fa8d605188d6a973edbf80a320930a445dbc02f503823e1bd42b5ae407d` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 7,326 | `65a04e1c79f1452925c2781811bf48e190da765ba35b955ac0aeba093c19340d` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -991,7 +994,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 7,434 | `04b9fc8fb84ea4c535da78e2a0caf9ddd280a894f0094328269363f5e8590341` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 278,765 | `32cf79cbbfd30ff27b52c167e4edb48b398457d47b129dbf31ecbd882c8f7987` |
+| `scripts/windows-job-supervisor.cs` | 279,634 | `83ad3e96d199f04eb83937fd431413baab04120fb2470883c7e67b2d0cd1c5d8` |
 | `scripts/windows-job-supervisor.test.ps1` | 166,680 | `3e4c02f82d7f4528ab87105208cc3f3188f4736cdb97a094c2eb191b8d315731` |
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
