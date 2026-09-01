@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenCoven Chat",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "identifier": "ai.opencoven.chat",
   "build": {
     "beforeDevCommand": "corepack pnpm dev -- --host 127.0.0.1 --port 4173 --strictPort",
@@ -28,12 +28,28 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis", "appimage", "deb"],
+    "createUpdaterArtifacts": false,
+    "publisher": "OpenCoven",
+    "copyright": "Copyright (c) 2026 OpenCoven",
+    "category": "SocialNetworking",
+    "shortDescription": "Desktop chat client for OpenCoven familiars.",
+    "longDescription": "OpenCoven Chat is a standalone desktop chat client. It stores conversations locally and can optionally pair with Coven Cave to browse canonical chat data.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.png"
-    ]
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
   }
 }
