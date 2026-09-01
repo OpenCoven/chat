@@ -8,7 +8,7 @@ test('local chat is usable in the browser without Cave', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect to Cave' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Coven Cave' })).toBeDisabled();
-  await expect(page.getByText('Local chat')).toBeVisible();
+  await expect(page.getByText('Local chat', { exact: true })).toBeVisible();
 });
 
 test('a locally composed message is kept without a fabricated reply', async ({ page }) => {
