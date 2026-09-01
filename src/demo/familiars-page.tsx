@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 
+import './familiars-settings.css';
+
 import {
   backfillNote,
   CAVE_ANALYTICS_WINDOWS,

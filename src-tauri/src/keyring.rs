@@ -1747,22 +1747,25 @@ impl NativeKeyring {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
 const fn native_keyring_backend() -> &'static str {
     "macos-keychain"
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "phase1-conformance", target_os = "linux"))]
 const fn native_keyring_backend() -> &'static str {
     "linux-keyring"
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "phase1-conformance", target_os = "windows"))]
 const fn native_keyring_backend() -> &'static str {
     "windows-credential-manager"
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+#[cfg(all(
+    feature = "phase1-conformance",
+    not(any(target_os = "macos", target_os = "linux", target_os = "windows"))
+))]
 const fn native_keyring_backend() -> &'static str {
     "unsupported"
 }

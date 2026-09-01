@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import './familiars-settings.css';
+
 import { MOCK_FAMILIARS } from './mock-familiars';
 
 /**

@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { type CompletionCommand, Composer, type ComposerAttachment } from '../ui';
+import './familiars-shell.css';
 import {
   clockLabel,
   FAM_COMMANDS,

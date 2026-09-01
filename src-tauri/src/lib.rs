@@ -146,14 +146,17 @@ impl NativeConnectionState {
         self.operations.cancel(attempt_id, reason)
     }
 
+    #[cfg(feature = "phase1-conformance")]
     fn cancel_all_operations(&self, reason: NativeCancelReason) {
         self.operations.cancel_all(reason);
     }
 
+    #[cfg(feature = "phase1-conformance")]
     fn operation_registry(&self) -> Arc<NativeOperationRegistry> {
         Arc::clone(&self.operations)
     }
 
+    #[cfg(feature = "phase1-conformance")]
     fn mutation_queue(&self) -> Arc<NativeMutationQueue> {
         Arc::clone(&self.mutations)
     }

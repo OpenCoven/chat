@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { ChatInspector } from './chat-inspector';
+import './chat-demo.css';
 import { DocumentReader, type ReaderDocument } from './document-reader';
 import { Icon } from './minimal-icons';
 import {

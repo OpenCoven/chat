@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { availabilityFor, type ControlName } from './capabilities';
+import './reads-shell.css';
 import type {
   Capability,
   ConversationSummary,

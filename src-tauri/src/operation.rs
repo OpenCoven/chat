@@ -38,6 +38,7 @@ pub struct NativeOperationInput {
 }
 
 impl NativeOperationInput {
+    #[cfg(any(test, feature = "phase1-conformance"))]
     pub(crate) fn new(attempt_id: String, timeout_ms: u32) -> NativeResult<Self> {
         let input = Self {
             attempt_id,
@@ -608,6 +609,7 @@ impl NativeOperationRegistry {
         Ok(NativeCancelResult::queued())
     }
 
+    #[cfg(feature = "phase1-conformance")]
     pub(crate) fn cancel_all(&self, reason: NativeCancelReason) {
         if let Ok(state) = self.state.lock() {
             for active in state.active.values() {
