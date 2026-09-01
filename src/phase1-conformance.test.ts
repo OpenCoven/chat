@@ -283,6 +283,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
   });
 
+  test('preserves a safe schema-v2 stage while retaining its private cause only in memory', () => {
+    const diagnostic = 'phase1.stage.checkouts.failed';
+    const cause = new Error('/private/operator/path should not be retained');
+    const staged = new Error(diagnostic, { cause });
+    const wrapped = wrapInfrastructureFailure(staged, { status: 'failed' });
+
+    expect(wrapped.message).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
+    expect(wrapped.cause).toBe(staged);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
+  });
+
   test('uses Chat native coven_health and never the Coven status CLI for identity proof', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
