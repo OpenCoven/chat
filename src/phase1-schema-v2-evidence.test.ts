@@ -1,9 +1,18 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 import { describe, expect, test } from 'vitest';
 
@@ -121,7 +130,7 @@ function reverseObjectKeys(value: unknown): unknown {
   );
 }
 
-function validatorModuleFixture() {
+function validatorModuleFixture(objectFormat: 'sha1' | 'sha256' = 'sha1') {
   const scratchParent = resolve(projectRoot, '.artifacts');
   mkdirSync(scratchParent, { recursive: true });
   const root = mkdtempSync(resolve(scratchParent, 'schema-v2-validator-modules-'));
@@ -192,7 +201,7 @@ export function verifyProtectedWorkflow() {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
   }
-  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['init', '--quiet', `--object-format=${objectFormat}`], { cwd: root });
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync(
     'git',
@@ -219,6 +228,7 @@ export function verifyProtectedWorkflow() {
     frozenLockBytes,
     schemaBytes,
     registryBytes,
+    objectFormat,
     commit: execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
@@ -226,6 +236,54 @@ export function verifyProtectedWorkflow() {
     tree: execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
       cwd: root,
       encoding: 'utf8',
+    }).trim(),
+  };
+}
+
+function corruptLooseValidatorBlob(
+  validator: ReturnType<typeof validatorModuleFixture>,
+  relativePath: string,
+  committedBytes: Buffer,
+) {
+  const objectId = execFileSync('git', ['rev-parse', `${validator.commit}:${relativePath}`], {
+    cwd: validator.root,
+    encoding: 'utf8',
+  }).trim();
+  const corruptedBytes = Buffer.from(
+    committedBytes.toString('utf8').replace('committed-', 'corrupted-'),
+    'utf8',
+  );
+  if (
+    corruptedBytes.equals(committedBytes) ||
+    corruptedBytes.byteLength !== committedBytes.byteLength
+  ) {
+    throw new Error('Corrupt validator fixture must replace equal-length committed bytes.');
+  }
+
+  const looseObjectPath = resolve(
+    validator.root,
+    execFileSync(
+      'git',
+      ['rev-parse', '--git-path', `objects/${objectId.slice(0, 2)}/${objectId.slice(2)}`],
+      {
+        cwd: validator.root,
+        encoding: 'utf8',
+      },
+    ).trim(),
+  );
+  const looseObjectBytes = deflateSync(
+    Buffer.concat([Buffer.from(`blob ${corruptedBytes.byteLength}\0`, 'utf8'), corruptedBytes]),
+  );
+  chmodSync(looseObjectPath, 0o600);
+  writeFileSync(looseObjectPath, looseObjectBytes);
+
+  return {
+    objectId,
+    corruptedBytes,
+    actualObjectId: execFileSync('git', ['hash-object', '--stdin'], {
+      cwd: validator.root,
+      encoding: 'utf8',
+      input: corruptedBytes,
     }).trim(),
   };
 }
@@ -640,6 +698,176 @@ describe('Phase 1 SDK source contract authority', () => {
       }
     },
   );
+
+  test.each([
+    {
+      label: 'frozen lock',
+      path: 'conformance/client-v1-cross-repository-lock.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.frozenLockBytes,
+    },
+    {
+      label: 'evidence schema',
+      path: 'conformance/client-v1-cross-repository-evidence.schema.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.schemaBytes,
+    },
+    {
+      label: 'assertion registry',
+      path: 'conformance/client-v1-cross-repository-assertions.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.registryBytes,
+    },
+    {
+      label: 'executable contract module',
+      path: 'scripts/conformance-contract.mjs',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.contractBytes,
+    },
+  ])(
+    'rejects a corrupt loose $label object even when the verified tree reports its expected OID',
+    ({ path, bytes }) => {
+      const validator = validatorModuleFixture();
+      try {
+        const corruption = corruptLooseValidatorBlob(validator, path, bytes(validator));
+        const treeEntry = execFileSync(
+          'git',
+          ['ls-tree', '-z', '-l', validator.commit, '--', path],
+          {
+            cwd: validator.root,
+            encoding: 'utf8',
+          },
+        )
+          .split('\0')
+          .filter((entry) => entry.length > 0);
+        const [entryMetadata, entryPath] = treeEntry[0]?.split('\t') ?? [];
+
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.commit);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.tree);
+        expect(treeEntry).toHaveLength(1);
+        expect(entryMetadata?.split(/\s+/u)).toEqual([
+          '100644',
+          'blob',
+          corruption.objectId,
+          String(corruption.corruptedBytes.byteLength),
+        ]);
+        expect(entryPath).toBe(path);
+        expect(
+          execFileSync('git', ['cat-file', 'blob', corruption.objectId], {
+            cwd: validator.root,
+          }),
+        ).toEqual(corruption.corruptedBytes);
+        expect(corruption.actualObjectId).not.toBe(corruption.objectId);
+        expect(() =>
+          execFileSync('git', ['fsck', '--no-progress'], {
+            cwd: validator.root,
+            stdio: ['ignore', 'ignore', 'ignore'],
+          }),
+        ).toThrow();
+
+        const result = spawnSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              const { loadSdkEvidenceContract } = await import(process.argv[1]);
+              const loaded = await loadSdkEvidenceContract({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              process.stdout.write(JSON.stringify({
+                contract: loaded.contract.marker,
+                lock: loaded.frozenLock.sourceMarker,
+                schema: loaded.schema.sourceMarker,
+                registry: loaded.registry.sourceMarker,
+              }));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+          ],
+          {
+            encoding: 'utf8',
+          },
+        );
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Error: SDK committed blob failed object ID verification.');
+        expect(result.stderr).not.toContain(path);
+      } finally {
+        rmSync(validator.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('loads committed authority from a SHA-256 validator repository', () => {
+    const validator = validatorModuleFixture('sha256');
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+            const { loadSdkEvidenceContract } = await import(process.argv[1]);
+            const loaded = await loadSdkEvidenceContract({
+              validatorRoot: process.argv[2],
+              validatorIdentity: {
+                repository: 'OpenCoven/sdk',
+                commit: process.argv[3],
+                tree: process.argv[4],
+              },
+            });
+            process.stdout.write(JSON.stringify({
+              validator: loaded.validator,
+              contract: loaded.contract.marker,
+              lock: loaded.frozenLock.sourceMarker,
+              schema: loaded.schema.sourceMarker,
+              registry: loaded.registry.sourceMarker,
+            }));
+          `,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          validator.root,
+          validator.commit,
+          validator.tree,
+        ],
+        {
+          encoding: 'utf8',
+        },
+      );
+      const loaded = JSON.parse(result.stdout) as JsonRecord;
+
+      expect(validator.commit).toMatch(/^[0-9a-f]{64}$/u);
+      expect(validator.tree).toMatch(/^[0-9a-f]{64}$/u);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(loaded.validator).toMatchObject({
+        repository: 'OpenCoven/sdk',
+        commit: validator.commit,
+        tree: validator.tree,
+      });
+      expect(loaded.contract).toBe('committed-contract');
+      expect(loaded.lock).toBe('committed-lock');
+      expect(loaded.schema).toBe('committed-schema');
+      expect(loaded.registry).toBe('committed-registry');
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
 
   test('matches the immutable SDK 933 source contract while retaining its pre-rebind producer', () => {
     const provenance = JSON.parse(readFileSync(sdk933LockProvenancePath, 'utf8')) as JsonRecord;

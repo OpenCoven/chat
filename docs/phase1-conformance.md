@@ -985,7 +985,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 445,413 | `7ace7337b6bee2ecf57e0362f6696d4c6c37f624c54f81255417e38e8a80f2e7` |
+| `.github/workflows/client-v1-conformance.yml` | 445,413 | `902ccbbf393aa41dc9ce6773d6c1fe4a9c99a9f6cd187bfb2f1d3d573815da05` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -997,7 +997,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
-| `scripts/phase1-schema-v2-evidence.mjs` | 42,765 | `cb68cb31002d0c84c4f8305de541352dca2f0acf8865125b9d11f55a62710547` |
+| `scripts/phase1-schema-v2-evidence.mjs` | 45,074 | `9b528da6c68058462ee9a807b628b63e910f644d882dd952f730bc0d3f088cf5` |
 | `scripts/phase1-schema-v2-producer.mjs` | 141,680 | `40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
@@ -1012,6 +1012,14 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 280,235 | `12650946c6ecc0c5d5297c72d2a465465f3593e4d01b8f8a9c414f5190d8df0d` |
 | `scripts/windows-job-supervisor.test.ps1` | 166,680 | `3e4c02f82d7f4528ab87105208cc3f3188f4736cdb97a094c2eb191b8d315731` |
+
+Before parsing or executing SDK authority, the harness queries the verified
+checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
+`sha256`, and independently recomputes each committed blob ID over the exact
+`blob <byte-length>\0<raw-bytes>` Git object representation. This covers the
+complete executable `.mjs` snapshot, evidence schema, assertion registry, and
+frozen lock. Any mismatch fails with a fixed diagnostic before substituted
+bytes are parsed or executed.
 
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and

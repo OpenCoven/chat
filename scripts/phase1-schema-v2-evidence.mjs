@@ -54,6 +54,16 @@ const OPERATOR_STATE_IDS = Object.freeze([
 ]);
 const gitOidPattern = /^[0-9a-f]{40}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
+const sha1GitObjectFormat = Object.freeze({
+  name: 'sha1',
+  hashAlgorithm: 'sha1',
+  oidPattern: gitOidPattern,
+});
+const sha256GitObjectFormat = Object.freeze({
+  name: 'sha256',
+  hashAlgorithm: 'sha256',
+  oidPattern: sha256Pattern,
+});
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const MAXIMUM_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024;
@@ -215,7 +225,37 @@ function runVerifiedValidatorGit(validatorRoot, args, label, maxBuffer, encoding
   }
 }
 
-function readCommittedValidatorFile(validatorRoot, identity, relativePath, label) {
+function readValidatorGitObjectFormat(validatorRoot) {
+  const format = runVerifiedValidatorGit(
+    validatorRoot,
+    ['rev-parse', '--show-object-format'],
+    'SDK validator object format',
+    1024,
+    'utf8',
+  ).trim();
+  if (format === sha1GitObjectFormat.name) {
+    return sha1GitObjectFormat;
+  }
+  if (format === sha256GitObjectFormat.name) {
+    return sha256GitObjectFormat;
+  }
+  throw new Error('SDK validator Git object format is unsupported.');
+}
+
+function verifyCommittedGitBlob(bytes, expectedObjectId, objectFormat) {
+  if (!objectFormat.oidPattern.test(expectedObjectId)) {
+    throw new Error('SDK committed blob object ID is invalid.');
+  }
+  const actualObjectId = createHash(objectFormat.hashAlgorithm)
+    .update(Buffer.from(`blob ${bytes.byteLength}\0`, 'utf8'))
+    .update(bytes)
+    .digest('hex');
+  if (actualObjectId !== expectedObjectId) {
+    throw new Error('SDK committed blob failed object ID verification.');
+  }
+}
+
+function readCommittedValidatorFile(validatorRoot, identity, objectFormat, relativePath, label) {
   const treeOutput = runVerifiedValidatorGit(
     validatorRoot,
     ['ls-tree', '-z', '-l', identity.commit, '--', relativePath],
@@ -227,8 +267,8 @@ function readCommittedValidatorFile(validatorRoot, identity, relativePath, label
   if (entries.length !== 1) {
     throw new Error(`${label} is unavailable at the verified SDK revision.`);
   }
-  const match = /^(100644|100755) blob ([0-9a-f]{40}) +([0-9]+)\t(.+)$/u.exec(entries[0]);
-  if (match === null || match[4] !== relativePath) {
+  const match = /^(100644|100755) blob ([0-9a-f]+) +([0-9]+)\t(.+)$/u.exec(entries[0]);
+  if (match === null || !objectFormat.oidPattern.test(match[2]) || match[4] !== relativePath) {
     throw new Error(`${label} is unavailable at the verified SDK revision.`);
   }
   const size = Number(match[3]);
@@ -244,8 +284,10 @@ function readCommittedValidatorFile(validatorRoot, identity, relativePath, label
   if (!Buffer.isBuffer(bytes) || bytes.byteLength !== size) {
     throw new Error(`${label} changed while it was being read.`);
   }
+  const committedBytes = Buffer.from(bytes);
+  verifyCommittedGitBlob(committedBytes, match[2], objectFormat);
   return {
-    bytes: Buffer.from(bytes),
+    bytes: committedBytes,
     metadata: {
       path: relativePath,
       size,
@@ -254,7 +296,7 @@ function readCommittedValidatorFile(validatorRoot, identity, relativePath, label
   };
 }
 
-function readCommittedValidatorModules(validatorRoot, identity) {
+function readCommittedValidatorModules(validatorRoot, identity, objectFormat) {
   const treeEntries = runVerifiedValidatorGit(
     validatorRoot,
     ['ls-tree', '-r', '-z', '-l', identity.commit, '--', 'scripts'],
@@ -268,11 +310,14 @@ function readCommittedValidatorModules(validatorRoot, identity) {
   let totalSize = 0;
 
   for (const treeEntry of treeEntries) {
-    const match = /^(100644|100755) blob ([0-9a-f]{40}) +([0-9]+)\t(.+)$/u.exec(treeEntry);
+    const match = /^(100644|100755) blob ([0-9a-f]+) +([0-9]+)\t(.+)$/u.exec(treeEntry);
     if (match === null) {
       continue;
     }
     const [, , objectId, sizeText, path] = match;
+    if (!objectFormat.oidPattern.test(objectId)) {
+      throw new Error('SDK committed blob object ID is invalid.');
+    }
     if (!path.endsWith('.mjs')) {
       continue;
     }
@@ -297,9 +342,11 @@ function readCommittedValidatorModules(validatorRoot, identity) {
     if (!Buffer.isBuffer(bytes) || bytes.byteLength !== size) {
       throw new Error(`Committed SDK validator module ${path} changed while it was read.`);
     }
+    const committedBytes = Buffer.from(bytes);
+    verifyCommittedGitBlob(committedBytes, objectId, objectFormat);
     totalSize += size;
     modules.set(path, {
-      bytes: Buffer.from(bytes),
+      bytes: committedBytes,
       metadata: Object.freeze({
         path,
         size,
@@ -320,35 +367,8 @@ function readCommittedValidatorModules(validatorRoot, identity) {
   return modules;
 }
 
-export function createVerifiedValidatorModuleSnapshot(optionsValue) {
-  const options = requireRecord(optionsValue, 'SDK validator module snapshot options');
-  if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
-    throw new Error('SDK validator root must be a non-empty path.');
-  }
-  const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
-  if (
-    expectedValue.repository !== 'OpenCoven/sdk' ||
-    !gitOidPattern.test(expectedValue.commit ?? '') ||
-    !gitOidPattern.test(expectedValue.tree ?? '')
-  ) {
-    throw new Error('Frozen SDK validator identity is invalid.');
-  }
-
-  const validatorRoot = realpathSync(resolve(options.validatorRoot));
-  const identity = Object.freeze({
-    repository: 'OpenCoven/sdk',
-    commit: expectedValue.commit,
-    tree: expectedValue.tree,
-  });
-  const actual = readGitIdentity(validatorRoot);
-  if (actual.commit !== identity.commit) {
-    throw new Error(`SDK validator commit ${actual.commit} does not match ${identity.commit}.`);
-  }
-  if (actual.tree !== identity.tree) {
-    throw new Error(`SDK validator tree ${actual.tree} does not match ${identity.tree}.`);
-  }
-
-  const modules = readCommittedValidatorModules(validatorRoot, identity);
+function createVerifiedValidatorModuleSnapshotForIdentity(validatorRoot, identity, objectFormat) {
+  const modules = readCommittedValidatorModules(validatorRoot, identity, objectFormat);
   const graphHash = createHash('sha256');
   for (const [path, module] of [...modules.entries()].sort(([left], [right]) =>
     left.localeCompare(right),
@@ -442,6 +462,38 @@ export function createVerifiedValidatorModuleSnapshot(optionsValue) {
       }
     },
   });
+}
+
+export function createVerifiedValidatorModuleSnapshot(optionsValue) {
+  const options = requireRecord(optionsValue, 'SDK validator module snapshot options');
+  if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
+    throw new Error('SDK validator root must be a non-empty path.');
+  }
+  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+  const objectFormat = readValidatorGitObjectFormat(validatorRoot);
+  const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
+  if (
+    expectedValue.repository !== 'OpenCoven/sdk' ||
+    !objectFormat.oidPattern.test(expectedValue.commit ?? '') ||
+    !objectFormat.oidPattern.test(expectedValue.tree ?? '')
+  ) {
+    throw new Error('Frozen SDK validator identity is invalid.');
+  }
+
+  const identity = Object.freeze({
+    repository: 'OpenCoven/sdk',
+    commit: expectedValue.commit,
+    tree: expectedValue.tree,
+  });
+  const actual = readGitIdentity(validatorRoot, objectFormat);
+  if (actual.commit !== identity.commit) {
+    throw new Error(`SDK validator commit ${actual.commit} does not match ${identity.commit}.`);
+  }
+  if (actual.tree !== identity.tree) {
+    throw new Error(`SDK validator tree ${actual.tree} does not match ${identity.tree}.`);
+  }
+
+  return createVerifiedValidatorModuleSnapshotForIdentity(validatorRoot, identity, objectFormat);
 }
 
 function metadataForExpectedFile(root, expected, label) {
@@ -652,7 +704,7 @@ export async function verifySchemaV2ProducerCheckout({
   };
 }
 
-function readGitIdentity(root) {
+function readGitIdentity(root, objectFormat) {
   const run = (revision) =>
     execFileSync('git', ['-C', root, 'rev-parse', revision], {
       encoding: 'utf8',
@@ -662,11 +714,18 @@ function readGitIdentity(root) {
       timeout: 15_000,
       killSignal: 'SIGKILL',
     }).trim();
-  return {
+  const identity = {
     repository: 'OpenCoven/sdk',
     commit: run('HEAD'),
     tree: run('HEAD^{tree}'),
   };
+  if (
+    !objectFormat.oidPattern.test(identity.commit) ||
+    !objectFormat.oidPattern.test(identity.tree)
+  ) {
+    throw new Error('SDK validator identity is invalid.');
+  }
+  return identity;
 }
 
 export async function loadSdkEvidenceContract(optionsValue) {
@@ -674,11 +733,13 @@ export async function loadSdkEvidenceContract(optionsValue) {
   if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
     throw new Error('SDK validator root must be a non-empty path.');
   }
+  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+  const objectFormat = readValidatorGitObjectFormat(validatorRoot);
   const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
   if (
     expectedValue.repository !== 'OpenCoven/sdk' ||
-    !gitOidPattern.test(expectedValue.commit ?? '') ||
-    (expectedValue.tree !== undefined && !gitOidPattern.test(expectedValue.tree))
+    !objectFormat.oidPattern.test(expectedValue.commit ?? '') ||
+    (expectedValue.tree !== undefined && !objectFormat.oidPattern.test(expectedValue.tree))
   ) {
     throw new Error('Frozen SDK validator identity is invalid.');
   }
@@ -687,8 +748,7 @@ export async function loadSdkEvidenceContract(optionsValue) {
     commit: expectedValue.commit,
     tree: expectedValue.tree,
   };
-  const validatorRoot = realpathSync(resolve(options.validatorRoot));
-  const actual = readGitIdentity(validatorRoot);
+  const actual = readGitIdentity(validatorRoot, objectFormat);
   if (actual.commit !== expected.commit) {
     throw new Error(`SDK validator commit ${actual.commit} does not match ${expected.commit}.`);
   }
@@ -696,25 +756,29 @@ export async function loadSdkEvidenceContract(optionsValue) {
     throw new Error(`SDK validator tree ${actual.tree} does not match ${expected.tree}.`);
   }
 
-  const validatorModules = createVerifiedValidatorModuleSnapshot({
+  const validatorModules = createVerifiedValidatorModuleSnapshotForIdentity(
     validatorRoot,
-    validatorIdentity: actual,
-  });
+    actual,
+    objectFormat,
+  );
   const schemaFile = readCommittedValidatorFile(
     validatorRoot,
     actual,
+    objectFormat,
     'conformance/client-v1-cross-repository-evidence.schema.json',
     'SDK evidence schema',
   );
   const registryFile = readCommittedValidatorFile(
     validatorRoot,
     actual,
+    objectFormat,
     'conformance/client-v1-cross-repository-assertions.json',
     'SDK assertion registry',
   );
   const lockFile = readCommittedValidatorFile(
     validatorRoot,
     actual,
+    objectFormat,
     'conformance/client-v1-cross-repository-lock.json',
     'SDK frozen conformance lock',
   );
