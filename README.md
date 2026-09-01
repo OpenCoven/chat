@@ -255,4 +255,4 @@ smoke-tests bundles for macOS (Apple silicon and Intel), Windows, and Debian
 Linux, publishes SHA-256 checksums, and creates the GitHub Release.
 
 The full process, the signing secrets, the dry-run rehearsal path, and the
-failure playbook are documented in [`docs/RELEASING.md`](docs/RELEASING.md).
+failure playbook are documented in [`docs/releasing.md`](docs/releasing.md).
