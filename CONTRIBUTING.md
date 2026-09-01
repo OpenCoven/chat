@@ -17,7 +17,7 @@ sections that apply to your change before you open a pull request.
 
 Requirements:
 
-- Node.js 22+ (24 recommended)
+- Node.js 24.18.0+ (24 recommended)
 - pnpm 10.34.0 via Corepack (`corepack enable`)
 - Rust stable toolchain (see [`rust-toolchain.toml`](rust-toolchain.toml))
 - Tauri desktop prerequisites for your platform
