@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "f24d3b731e922c9a5d38094a997bedd26a2defc2"
+    "revision": "e467ce3f5ad3cde737703ea5d09c634dfd675de2"
   },
   "harnessAuthority": {
-    "revision": "f24d3b731e922c9a5d38094a997bedd26a2defc2",
-    "tree": "982f52000014837ca6e98087747b96f4e8c6e3ea",
+    "revision": "e467ce3f5ad3cde737703ea5d09c634dfd675de2",
+    "tree": "f307e16bbecf500ce3aad6feba41c716b4cba922",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -168,18 +168,18 @@
       },
       {
         "path": "src-tauri/src/cave.rs",
-        "blob": "1ff9a528520d4e198f258e830c201e02f00d95da",
-        "sha256": "1ccbd99f9efee038d9e7e39d0442aeb1130cfe5d68c8ba99c34ea30c731d4255"
+        "blob": "e3b1867a9500764f1508c5f3e514c55933616fab",
+        "sha256": "78fab63ca59021803b5c84e99651fdb422e1ec310447cd4473c3c2341825b9c4"
       },
       {
         "path": "src-tauri/src/cleanup_grant.rs",
-        "blob": "16d686a5c0d31f0f063b19be5bd346193055c403",
-        "sha256": "1440b7571065c20f3518dc86e88eb32a58a05647e908c28c17470af39cffead3"
+        "blob": "58e53e96d4f0addb37891bc74bfb25eb9f9462aa",
+        "sha256": "de4bd519a557bb3c17703eaa15f02451e3d02a0029f3bf5ab10ce510b6b5575b"
       },
       {
         "path": "src-tauri/src/conformance.rs",
-        "blob": "0957051f3143fcbaac64d7b1813184a565c05e4b",
-        "sha256": "d9d25cc2c682f3f85b1c5f3b937b5161af10345bf808ee8a0d1d5ce944d2dc69"
+        "blob": "7cffd03c932a52286ee5329aee180e693e2afeed",
+        "sha256": "3f45ce93f960ef91d9b9d1f58fb8ac48b9b20e98aca092891675f15d45376919"
       },
       {
         "path": "src-tauri/src/connection.rs",
