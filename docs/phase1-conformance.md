@@ -17,10 +17,12 @@ the final bytes.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `20633346c444ded9e05ca5a3db45d74c28918d69`, the
-  expected missing-keychain trust-control successor to `dbbcf3a`;
+- Chat production `edd4728792321771496df58bfc0e6122908a96ec`, tree
+  `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
+  authority;
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `e74078a147c084bd761d929654f0990df66ef99f`;
+- Cave authority `6325fc4c1154c7d7398074a9760a2e2dc323b424`, tree
+  `9144939792d3dbdd91c208d7e2abc5ecc0eac089`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support at the exact `harness.revision` and
   `harnessAuthority.tree` generated from the preceding code/integration

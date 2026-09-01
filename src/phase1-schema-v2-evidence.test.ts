@@ -36,6 +36,10 @@ const validatorTree = validatorAvailable
       encoding: 'utf8',
     }).trim()
   : '';
+const phase1CompatibilityValidator = {
+  commit: '933a9523ccbee071417eca01b8a7a37e54d6cbc0',
+  tree: 'abce229089be13b990d498f343e1392e8f68a039',
+} as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -655,7 +659,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(() => buildObservedSchemaV2Assertions(options)).toThrow(/missing/u);
   });
 
-  test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
+  test('loads the canonical validator contract and accepts the committed Phase 1 source pins', () => {
     const loaded = JSON.parse(
       execFileSync(
         process.execPath,
@@ -664,16 +668,20 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
           '--eval',
           `
             const {
+              assertSdkContractMatchesPhase1Lock,
               loadSdkEvidenceContract,
             } = await import(process.argv[1]);
+            const { readPhase1ConformanceLock } = await import(process.argv[2]);
             const loaded = await loadSdkEvidenceContract({
-              validatorRoot: process.argv[2],
+              validatorRoot: process.argv[3],
               validatorIdentity: {
                 repository: 'OpenCoven/sdk',
-                commit: process.argv[3],
-                tree: process.argv[4],
+                commit: process.argv[4],
+                tree: process.argv[5],
               },
             });
+            const phase1Lock = readPhase1ConformanceLock();
+            assertSdkContractMatchesPhase1Lock(loaded, phase1Lock);
             process.stdout.write(JSON.stringify({
               validator: loaded.validator,
               frozenLockSchemaVersion: loaded.frozenLock.schemaVersion,
@@ -682,12 +690,37 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
               producer: loaded.contract.assertEvidenceProducerCompatibility(
                 loaded.frozenLock,
               ),
+              phase1Sources: {
+                sdk: phase1Lock.sdk,
+                cave: phase1Lock.cave,
+                coven: phase1Lock.coven,
+                chat: phase1Lock.chat,
+              },
+              frozenSources: {
+                sdk: {
+                  repository: loaded.frozenLock.candidate.repository,
+                  revision: loaded.frozenLock.candidate.commit,
+                },
+                cave: {
+                  repository: loaded.frozenLock.sources.cave.repository,
+                  revision: loaded.frozenLock.sources.cave.commit,
+                },
+                coven: {
+                  repository: loaded.frozenLock.sources.coven.repository,
+                  revision: loaded.frozenLock.sources.coven.commit,
+                },
+                chat: {
+                  repository: loaded.frozenLock.sources.chat.repository,
+                  revision: loaded.frozenLock.sources.chat.commit,
+                },
+              },
             }));
           `,
           pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-conformance-lock.mjs')).href,
           validatorRoot,
-          validatorCommit,
-          validatorTree,
+          phase1CompatibilityValidator.commit,
+          phase1CompatibilityValidator.tree,
         ],
         { encoding: 'utf8' },
       ),
@@ -697,9 +730,11 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       registrySchemaVersion: number;
       schemaId: string;
       producer: JsonRecord;
+      phase1Sources: JsonRecord;
+      frozenSources: JsonRecord;
     };
 
-    expect(loaded.validator.commit).toBe(validatorCommit);
+    expect(loaded.validator.commit).toBe(phase1CompatibilityValidator.commit);
     expect(loaded.frozenLockSchemaVersion).toBe(2);
     expect(loaded.registrySchemaVersion).toBe(2);
     expect(loaded.schemaId).toBe(
@@ -713,6 +748,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
         environmentId: '20863036831',
       },
     });
+    expect(loaded.phase1Sources).toEqual(loaded.frozenSources);
   }, 30_000);
 
   test('executes the committed contract bytes after its checkout path mutates', async () => {
