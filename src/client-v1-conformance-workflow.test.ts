@@ -1038,6 +1038,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(usersMembership).toContain('ERROR_MEMBER_IN_ALIAS');
       expect(usersMembership).not.toContain('"S-1-5-32-544"');
       expect(source).toMatch(/"GetRunningTasks",\s+TASK_ENUM_HIDDEN/u);
+      expect(source).toContain('private static bool IsTaskNotRunningException(Exception error)');
+      expect(source).toContain('catch (Exception error) when (IsTaskNotRunningException(error))');
+      expect(source).toContain('error.HResult == SCHED_E_TASK_NOT_RUNNING');
       expect(source).toContain('Ephemeral local user cleanup failed during creation.');
       for (const failure of [
         'Restricted identity unexpectedly belongs to Administrators.',
