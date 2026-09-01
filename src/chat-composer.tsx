@@ -36,32 +36,34 @@ export function ChatComposer({ writer, conversationId, isDurable, onWritten }: C
   const canSend =
     conversationId !== null && draft.trim().length > 0 && composerStatus.status !== 'sending';
 
-async function send() {
-  if (conversationId === null || draft.trim().length === 0) {
-    return;
-  }
-
-  setComposerStatus(SENDING);
-  try {
-    const result = await writer.sendMessage(conversationId, draft);
-
-    if (result.status === 'ok') {
-      setDraft('');
-      setComposerStatus(IDLE);
-      onWritten();
+  async function send() {
+    if (conversationId === null || draft.trim().length === 0) {
       return;
     }
 
-    setComposerStatus(
-      Object.freeze({
-        status: 'error',
-        message: result.status === 'unsupported' ? result.reason : messageForCode(result.code),
-      }),
-    );
-  } catch {
-    setComposerStatus(Object.freeze({ status: 'error', message: messageForCode('service_unavailable') }));
+    setComposerStatus(SENDING);
+    try {
+      const result = await writer.sendMessage(conversationId, draft);
+
+      if (result.status === 'ok') {
+        setDraft('');
+        setComposerStatus(IDLE);
+        onWritten();
+        return;
+      }
+
+      setComposerStatus(
+        Object.freeze({
+          status: 'error',
+          message: result.status === 'unsupported' ? result.reason : messageForCode(result.code),
+        }),
+      );
+    } catch {
+      setComposerStatus(
+        Object.freeze({ status: 'error', message: messageForCode('service_unavailable') }),
+      );
+    }
   }
-}
 
   return (
     <form
