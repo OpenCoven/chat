@@ -72,19 +72,19 @@ jobs:
           OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
           OPENCOVEN_CHAT_REPOSITORY: ${{ github.repository }}
           OPENCOVEN_CHAT_SHA: ${{ github.sha }}
-          OPENCOVEN_WINDOWS_IMAGE_OS: 'win25'
-          OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.239.3'
+          OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026'
+          OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.214.3'
           OPENCOVEN_WINDOWS_BUILD: '26100.33296'
           OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296'
           OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5'
           OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\Program Files\PowerShell\7\pwsh.exe'
           OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11'
-          OPENCOVEN_WINDOWS_VS_VERSION: '17.14.37614.0'
-          OPENCOVEN_WINDOWS_VS_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
+          OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12112.369'
+          OPENCOVEN_WINDOWS_VS_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise'
           OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207'
-          OPENCOVEN_WINDOWS_MSVC_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207'
-          OPENCOVEN_WINDOWS_CL_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe'
-          OPENCOVEN_WINDOWS_LINK_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe'
+          OPENCOVEN_WINDOWS_MSVC_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207'
+          OPENCOVEN_WINDOWS_CL_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe'
+          OPENCOVEN_WINDOWS_LINK_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe'
           OPENCOVEN_WINDOWS_SDK_VERSION: '10.0.26100.0'
           OPENCOVEN_WINDOWS_RC_PATH: 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe'
           OPENCOVEN_WINDOWS_SUPERVISOR_ARTIFACT_ID: ${{ needs['windows-supervisor'].outputs.artifact_id }}
@@ -362,18 +362,18 @@ jobs:
             -not [IO.Directory]::Exists($visualStudioRoot) -or
             -not [IO.File]::Exists($trustedVisualStudio)
           ) {
-            throw 'The exact reviewed Visual Studio 2022 installation is unavailable.'
+            throw 'The exact reviewed Visual Studio 2026 installation is unavailable.'
           }
           $visualStudioVersion = (
             [Diagnostics.FileVersionInfo]::GetVersionInfo($trustedVisualStudio).ProductVersion `
               -split ' '
           )[0]
           if ($visualStudioVersion -ne $env:OPENCOVEN_WINDOWS_VS_VERSION) {
-            throw 'The reviewed Visual Studio 2022 version changed.'
+            throw 'The reviewed Visual Studio 2026 version changed.'
           }
-          Assert-NoReparsePath -Path $visualStudioRoot -Label 'Visual Studio 2022 installation'
-          Assert-NoReparsePath -Path $trustedVisualStudio -Label 'Visual Studio 2022 executable'
-          Assert-MicrosoftSignature -Path $trustedVisualStudio -Label 'Visual Studio 2022 executable'
+          Assert-NoReparsePath -Path $visualStudioRoot -Label 'Visual Studio 2026 installation'
+          Assert-NoReparsePath -Path $trustedVisualStudio -Label 'Visual Studio 2026 executable'
+          Assert-MicrosoftSignature -Path $trustedVisualStudio -Label 'Visual Studio 2026 executable'
 
           $msvcRoot = $env:OPENCOVEN_WINDOWS_MSVC_PATH
           $expectedMsvcRoot = Join-Path `
@@ -387,7 +387,7 @@ jobs:
               [StringComparison]::OrdinalIgnoreCase
             )
           ) {
-            throw 'The exact reviewed Visual Studio 2022 MSVC facility is unavailable.'
+            throw 'The exact reviewed Visual Studio 2026 MSVC facility is unavailable.'
           }
           $msvcBin = Join-Path $msvcRoot 'bin\Hostx64\x64'
           $msvcLib = Join-Path $msvcRoot 'lib\x64'
@@ -9077,6 +9077,9 @@ jobs:
           [[ "$(dpkg-query -W -f='${Version}' dbus-daemon)" == "1.14.10-4ubuntu4.1" ]]
           [[ "$(dpkg-query -W -f='${Version}' gnome-keyring)" == "46.1-2ubuntu0.2" ]]
           [[ "$(dpkg-query -W -f='${Version}' libsecret-tools)" == "0.21.4-1build3" ]]
+      - name: Install frozen Unix Rust
+        if: matrix.platform != 'win32-x64'
+        run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const command = ''rustup''; const invocation = resolveExecutableInvocation(command, process.env, process.platform, [''toolchain'', ''install'', ''1.95.0'', ''--profile'', ''minimal'']); execFileSync(invocation.executable, invocation.args, { argv0: command, stdio: ''inherit'' });"'
       - name: Require frozen toolchain
         if: matrix.platform != 'win32-x64'
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const run = (command, args) => { const invocation = resolveExecutableInvocation(command, process.env, process.platform, args); return execFileSync(invocation.executable, invocation.args, { encoding: ''utf8'' }).trim(); }; if (process.version !== ''v24.18.1'' || ''pnpm@'' + run(''pnpm'', [''--version'']) !== ''pnpm@10.34.0'' || !run(''rustc'', [''--version'']).startsWith(''rustc 1.95.0 '') || run(''pnpm'', [''exec'', ''tauri'', ''--version'']) !== ''tauri-cli 2.11.4'') throw new Error(''Frozen toolchain does not match'');"'
