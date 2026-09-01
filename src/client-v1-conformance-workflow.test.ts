@@ -2178,9 +2178,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
     const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
-    const tauriIndex = command.indexOf(
-      "pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
-    );
+    const tauriIndex = command.indexOf("pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'");
 
     expect(earlyToolchainCheck).not.toContain(
       "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
