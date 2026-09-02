@@ -133,7 +133,8 @@ images, link unfurls, `/spec` and `/handoff` artifacts, and a composer.
 
 ### Demo build
 
-`VITE_DEFAULT_DEMO=chat pnpm app:build -- --config src-tauri/tauri.demo.conf.json`
+`VITE_DEFAULT_DEMO=chat pnpm app:build -- --config tauri.demo.conf.json`
+(the path is relative to `src-tauri/`, where Tauri resolves `--config`)
 packages **OpenCoven Chat Demo** (`ai.opencoven.chat.demo`), which opens on the
 familiars surface with no query flag and installs alongside the real app. The
 overlay changes only the name, identifier, blurb, and macOS signing identity;
