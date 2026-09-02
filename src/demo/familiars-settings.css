@@ -495,9 +495,11 @@
   font-size: 13px;
 }
 
-.fam-empty {
+.fam-detail-empty {
+  margin: 0;
   padding: 30px;
   color: var(--demo-muted);
+  font-size: 12.5px;
 }
 
 /* Settings ---------------------------------------------------------------- */
