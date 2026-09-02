@@ -7,7 +7,7 @@
     "longDescription": "OpenCoven Chat Demo opens straight into the Familiars Redesign: held actions, the ward at the centre of the chat, summoning familiars, @-mentions, and a familiar's screen. It connects to nothing and keeps nothing; every reply is local mock data.",
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "signingIdentity": "Developer ID Application: Soul Protocol LLC (9LR8Z8UQ9X)"
+      "signingIdentity": "EE732DF3F48D7535561AF54D3FFFC4B44DAF3E7F"
     }
   }
 }
