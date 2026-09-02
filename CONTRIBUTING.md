@@ -19,30 +19,42 @@ Requirements:
 
 - Node.js 24.18.1 (the package engine accepts `>=24.18.0 <25`)
 - pnpm 10.34.0 via Corepack (`corepack enable`)
-- Rust stable toolchain (see [`rust-toolchain.toml`](rust-toolchain.toml))
-- Tauri desktop prerequisites for your platform
+- Rust 1.95.0 with `clippy` and `rustfmt` (see
+  [`rust-toolchain.toml`](rust-toolchain.toml))
+- [Tauri desktop prerequisites](https://v2.tauri.app/start/prerequisites/) for
+  your platform
+
+The complete pin list is in
+[`docs/developer-toolchains.md`](docs/developer-toolchains.md).
 
 ```bash
-corepack pnpm install --frozen-lockfile
-corepack pnpm dev          # web layer only, in a browser
-corepack pnpm app:dev      # full Tauri desktop shell
+corepack enable
+pnpm install:clean
+pnpm dev          # browser fallback and explicit mock routes
+pnpm app:dev      # production Tauri desktop path
 ```
 
-The app runs standalone. A Coven Cave connection is optional and is opted into
-from the source bar inside the app.
+The browser build cannot connect to Cave. The production desktop path
+initializes native identity and manages the Cave connection used for canonical
+chat reads.
 
 ## Branching and pull requests
 
-`main` is the release branch. Use a short-lived branch and a pull request for
-every change:
+`main` is the integration branch; release tags are cut only from `main`. Base
+every change on current `origin/main`, use a short-lived branch, and open a
+pull request:
 
 ```bash
 git worktree add -b <type>/<short-name> .worktrees/<short-name> origin/main
 cd .worktrees/<short-name>
 ```
 
-Branch name prefixes: `feat/`, `fix/`, `chore/`, `docs/`, `ci/`, `refactor/`,
-`test/`.
+Use a descriptive prefix such as `feat/`, `fix/`, `chore/`, `docs/`, `ci/`,
+`refactor/`, or `test/`.
+
+Release preparation is maintainer-owned. Version changes land through a pull
+request; maintainers then create a signed, annotated `v*` tag from the merged
+commit on `main`. Do not create or move release tags from a topic branch.
 
 Pull request expectations:
 
@@ -54,27 +66,25 @@ Pull request expectations:
 
 ## Commits must be signed
 
-Every commit must be cryptographically signed and show as **Verified** on
-GitHub. Unsigned commits will be rejected.
-
-```bash
-git commit -S -m "feat: short imperative summary"
-```
+Project policy requires every commit to be cryptographically signed and to
+show as **Verified** on GitHub. Maintainers may ask you to replace unsigned
+commits before merging.
 
 Confirm your signing configuration before your first commit:
 
 ```bash
-git config --get user.signingkey   # must return a key
-git config --get gpg.format        # ssh, openpgp, or x509
-git log -1 --show-signature        # must report a good signature
+git config --get user.signingkey   # must identify your signing key
+git config --get gpg.format        # blank means the OpenPGP default
+git commit -S -m "feat: short imperative summary"
+git show --show-signature --no-patch HEAD
 ```
 
-Commit messages use a `type: summary` first line in the imperative mood, kept
-under 72 characters, with detail in the body.
+Prefer a `type: summary` first line in the imperative mood, kept under 72
+characters, with detail in the body.
 
 ## Verification
 
-Run these before pushing. Pull requests that fail them will not be merged.
+For code changes, run the baseline checks before pushing:
 
 ```bash
 corepack pnpm typecheck          # TypeScript, no emit
@@ -100,13 +110,23 @@ corepack pnpm test:e2e
 New behaviour needs a test. Bug fixes need a regression test that fails before
 the fix.
 
+Documentation-only changes do not require the broad code, test, and build
+suite. Run `git diff --check`, keep prose wrapped at 100 columns, and verify
+new or changed links. The current Biome configuration does not process these
+governance documents, so do not report `pnpm lint` as validation for them.
+
+```bash
+git diff --check
+```
+
 ## Code style
 
-Formatting and linting are enforced by [Biome](https://biomejs.dev) — two-space
-indentation, 100-column lines, single quotes in TypeScript, double quotes in
-JSX. Run `corepack pnpm format` rather than hand-formatting. Do not disable
-lint rules with blanket suppressions; a `biome-ignore` must be a single line
-directly above the diagnostic and must carry a reason.
+Source and configuration formatting and linting are enforced by
+[Biome](https://biomejs.dev) — two-space indentation, 100-column lines, single
+quotes in TypeScript, double quotes in JSX. Run `corepack pnpm format` rather
+than hand-formatting supported files. Do not disable lint rules with blanket
+suppressions; a `biome-ignore` must be a single line directly above the
+diagnostic and must carry a reason.
 
 Comment only what needs clarification. Prefer explicit types at module
 boundaries and narrow, well-named modules over large ones.
@@ -115,18 +135,20 @@ boundaries and narrow, well-named modules over large ones.
 
 `phase1-conformance.lock.json` cryptographically pins the Phase 1 authority
 graph: the Chat, SDK, Cave, Coven, and harness revisions; selected Chat host
-files; selected harness scripts and both workflow files
+files; selected harness scripts and the two governed workflow files
 (`.github/workflows/ci.yml` and `.github/workflows/client-v1-conformance.yml`);
 release and evidence metadata; and the Windows supervisor artifact. It does
 not pin every file under `src-tauri/` or `scripts/`. If your change touches a
-listed authority path, the conformance suite will fail until the lock is
-repinned, which is a two-commit process:
+listed authority path, coordinate with a maintainer before repinning.
 
-1. Commit the functional change on its own.
-2. Commit a second change updating the pinned revision, tree, and blob hashes
-   to that first commit, plus the byte-count and digest rows in
-   [`docs/phase1-conformance.md`](docs/phase1-conformance.md) and the
-   expectations in `src/phase1-conformance-lock.test.ts`.
+Authority changes normally land in two stages:
+
+1. Land the functional change without pointing the lock at an unreachable
+   topic-branch commit.
+2. After the canonical merge or squash commit is reachable, land a follow-up
+   pin that updates the relevant revisions, Git objects, digests, and lock-test
+   expectations. Documentation byte-count and digest rows change only when
+   their governed producer bytes change.
 
 If you are not sure whether your change is pinned, say so in the pull request
 and a maintainer will help. Do not repin speculatively.

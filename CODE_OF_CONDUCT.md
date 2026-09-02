@@ -42,12 +42,13 @@ representing the project in public spaces.
 
 ## Reporting
 
-Report unacceptable behaviour through one of these channels:
+Report unacceptable behaviour to the project maintainers through the
+[OpenCoven Discord](https://discord.gg/OpenCoven). Ask for a private channel
+with the maintainers and do not post incident details in a public channel.
 
-- Use GitHub's **Report content** control on the specific comment, issue, or
-  pull request for GitHub-hosted content; or
-- Contact the maintainers through the OpenCoven Discord
-  (https://discord.gg/opencoven) and ask for a private channel.
+For GitHub-hosted content, you may also use GitHub's **Report content** control
+to alert GitHub to a platform-policy violation. That report goes to GitHub and
+does not replace contacting the project maintainers.
 
 Security vulnerabilities are handled separately; follow
 [`SECURITY.md`](SECURITY.md).
@@ -56,10 +57,11 @@ Do not post details of an incident publicly before the maintainers have had a
 chance to respond.
 
 All reports are reviewed and investigated promptly and fairly. Maintainers are
-obligated to respect the privacy and security of the reporter. Maintainers who
-do not follow or enforce this Code of Conduct in good faith may face temporary
-or permanent repercussions as determined by other members of the project's
-leadership.
+obligated to respect the privacy and security of the reporter. A maintainer
+named in a report must recuse themselves; another member of the project's
+leadership will handle the report. Maintainers who do not follow or enforce
+this Code of Conduct in good faith may face temporary or permanent
+repercussions as determined by other members of the project's leadership.
 
 ## Enforcement
 
@@ -82,6 +84,7 @@ Consequences are proportionate to the impact of the behaviour:
 ## Attribution
 
 This Code of Conduct is adapted from the principles and enforcement structure
-of the [Contributor Covenant](https://www.contributor-covenant.org), version
-2.1, which is available under the Creative Commons Attribution 4.0
-International license.
+of the [Contributor Covenant, version
+2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/), which
+is available under the [Creative Commons Attribution 4.0 International
+license](https://creativecommons.org/licenses/by/4.0/).
