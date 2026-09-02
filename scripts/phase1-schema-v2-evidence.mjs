@@ -73,6 +73,11 @@ const EVIDENCE_READ_CHUNK_BYTES = 64 * 1024;
 const MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES = 64 * 1024 * 1024;
 const MAXIMUM_VALIDATOR_MODULE_LIST_BYTES = 4 * 1024 * 1024;
 const MAXIMUM_VALIDATOR_TREE_ENTRIES = 100_000;
+const MAXIMUM_VALIDATOR_TREE_OBJECTS = 4_096;
+const MAXIMUM_VALIDATOR_TREE_GRAPH_BYTES = 16 * 1024 * 1024;
+const MAXIMUM_VALIDATOR_TREE_DEPTH = 64;
+const MAXIMUM_VALIDATOR_TREE_TRAVERSAL_ENTRIES = 10_000;
+const MAXIMUM_VALIDATOR_PATH_BYTES = 4_096;
 const validatorModulePathPattern = /^scripts\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.mjs$/u;
 const validatorRelativePathPattern = /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
@@ -335,7 +340,11 @@ function parseVerifiedGitTree(treeBytes, objectFormat) {
     if (modeEnd <= offset || nameEnd <= modeEnd + 1 || objectIdEnd > treeBytes.byteLength) {
       throw new Error('SDK committed tree is malformed.');
     }
-    const mode = treeBytes.subarray(offset, modeEnd).toString('ascii');
+    const modeBytes = treeBytes.subarray(offset, modeEnd);
+    if ([...modeBytes].some((byte) => byte < 0x30 || byte > 0x39)) {
+      throw new Error('SDK committed tree entry mode is unsupported.');
+    }
+    const mode = modeBytes.toString('ascii');
     const nameBytes = treeBytes.subarray(modeEnd + 1, nameEnd);
     let name;
     try {
@@ -419,6 +428,7 @@ function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, obj
     tree: rootTree,
   });
   const treeCache = new Map();
+  let treeGraphBytes = 0;
 
   const readTree = (objectId, label) => {
     const cached = treeCache.get(objectId);
@@ -435,6 +445,9 @@ function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, obj
     if (type !== 'tree') {
       throw new Error('SDK committed tree entry type is invalid.');
     }
+    if (treeCache.size >= MAXIMUM_VALIDATOR_TREE_OBJECTS) {
+      throw new Error('SDK committed tree graph exceeds the evidence size limit.');
+    }
     const bytes = readVerifiedValidatorGitObject(
       validatorRoot,
       'tree',
@@ -443,6 +456,10 @@ function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, obj
       label,
       MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
     );
+    treeGraphBytes += bytes.byteLength;
+    if (treeGraphBytes > MAXIMUM_VALIDATOR_TREE_GRAPH_BYTES) {
+      throw new Error('SDK committed tree graph exceeds the evidence size limit.');
+    }
     const entries = parseVerifiedGitTree(bytes, objectFormat);
     treeCache.set(objectId, entries);
     return entries;
@@ -517,12 +534,23 @@ function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, obj
     readModules() {
       const modules = new Map();
       let totalSize = 0;
-      const walk = (treeObjectId, prefix) => {
+      let traversedEntries = 0;
+      const walk = (treeObjectId, prefix, depth) => {
+        if (depth > MAXIMUM_VALIDATOR_TREE_DEPTH) {
+          throw new Error('SDK validator module graph exceeds the traversal limit.');
+        }
         const entries = readTree(treeObjectId, 'SDK validator module graph');
         for (const entry of entries.values()) {
+          traversedEntries += 1;
+          if (traversedEntries > MAXIMUM_VALIDATOR_TREE_TRAVERSAL_ENTRIES) {
+            throw new Error('SDK validator module graph exceeds the traversal limit.');
+          }
           const path = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+          if (Buffer.byteLength(path, 'utf8') > MAXIMUM_VALIDATOR_PATH_BYTES) {
+            throw new Error('SDK validator module graph exceeds the traversal limit.');
+          }
           if (entry.mode === '40000') {
-            walk(entry.objectId, path);
+            walk(entry.objectId, path, depth + 1);
             continue;
           }
           if (entry.mode !== '100644' && entry.mode !== '100755') {
@@ -557,7 +585,7 @@ function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, obj
       if (scriptsEntry.mode !== '40000') {
         throw new Error('SDK committed tree entry type is invalid.');
       }
-      walk(scriptsEntry.objectId, 'scripts');
+      walk(scriptsEntry.objectId, 'scripts', 1);
       for (const path of [
         'scripts/conformance-contract.mjs',
         'scripts/github-conformance-evidence.mjs',

@@ -350,6 +350,24 @@ function writeGitObject(
   ).trim();
 }
 
+function writeFixtureTree(
+  validator: ValidatorModuleFixture,
+  entries: Array<{
+    mode: '100644' | '100755' | '40000';
+    name: string;
+    objectId: string;
+    type: 'blob' | 'tree';
+  }>,
+) {
+  return execFileSync('git', ['mktree'], {
+    cwd: validator.root,
+    encoding: 'utf8',
+    input: entries
+      .map((entry) => `${entry.mode} ${entry.type} ${entry.objectId}\t${entry.name}\n`)
+      .join(''),
+  }).trim();
+}
+
 function parseFixtureTreeEntries(validator: ValidatorModuleFixture, treeBytes: Buffer) {
   const objectIdByteLength = validatorObjectIdByteLength(validator);
   const entries: Array<{
@@ -386,7 +404,7 @@ function replaceFixtureTreeEntry(
   validator: ValidatorModuleFixture,
   treeBytes: Buffer,
   name: string,
-  replacement: { mode?: string; objectId?: string },
+  replacement: { mode?: string; modeBytes?: Buffer; objectId?: string },
 ) {
   const entries = parseFixtureTreeEntries(validator, treeBytes);
   const entry = entries.find((candidate) => candidate.name === name);
@@ -395,7 +413,7 @@ function replaceFixtureTreeEntry(
   }
   const objectId = replacement.objectId ?? entry.objectId;
   const replacementBytes = Buffer.concat([
-    Buffer.from(replacement.mode ?? entry.mode, 'ascii'),
+    replacement.modeBytes ?? Buffer.from(replacement.mode ?? entry.mode, 'ascii'),
     Buffer.from(' ', 'ascii'),
     entry.nameBytes,
     Buffer.from([0]),
@@ -526,6 +544,7 @@ function redirectedValidatorContract(validator: ValidatorModuleFixture) {
 function runFixtureContractLoader(
   validator: ValidatorModuleFixture,
   identity: { commit: string; tree: string } = validator,
+  timeout?: number,
 ) {
   return spawnSync(
     process.execPath,
@@ -556,6 +575,7 @@ function runFixtureContractLoader(
     ],
     {
       encoding: 'utf8',
+      timeout,
     },
   );
 }
@@ -1278,6 +1298,14 @@ describe('Phase 1 SDK source contract authority', () => {
           mode: '100664',
         }),
     },
+    {
+      label: 'high-bit mode bytes that ASCII-decode as a regular file',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          modeBytes: Buffer.from([0xb1, 0xb0, 0xb0, 0xb6, 0xb4, 0xb4]),
+        }),
+    },
   ])('rejects a verified tree object containing $label', ({ diagnostic, mutate }) => {
     const validator = validatorModuleFixture();
     try {
@@ -1336,6 +1364,92 @@ describe('Phase 1 SDK source contract authority', () => {
       expectFixtureLoaderFailure(
         runFixtureContractLoader(validator, identity),
         'SDK committed tree entry type is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('bounds shared-subtree traversal independently of unique tree objects and module bytes', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const leafBlob = writeGitObject(validator, 'blob', Buffer.from('leaf', 'utf8'));
+      let sharedTree = writeFixtureTree(validator, [
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: leafBlob,
+          name: 'leaf.txt',
+        },
+      ]);
+      for (let depth = 0; depth < 28; depth += 1) {
+        sharedTree = writeFixtureTree(validator, [
+          {
+            mode: '40000',
+            type: 'tree',
+            objectId: sharedTree,
+            name: 'left',
+          },
+          {
+            mode: '40000',
+            type: 'tree',
+            objectId: sharedTree,
+            name: 'right',
+          },
+        ]);
+      }
+
+      const contractBlob = execFileSync(
+        'git',
+        ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`],
+        {
+          cwd: validator.root,
+          encoding: 'utf8',
+        },
+      ).trim();
+      const githubBlob = execFileSync(
+        'git',
+        ['rev-parse', `${validator.commit}:scripts/github-conformance-evidence.mjs`],
+        {
+          cwd: validator.root,
+          encoding: 'utf8',
+        },
+      ).trim();
+      const scriptsTree = writeFixtureTree(validator, [
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: contractBlob,
+          name: 'conformance-contract.mjs',
+        },
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: githubBlob,
+          name: 'github-conformance-evidence.mjs',
+        },
+        {
+          mode: '40000',
+          type: 'tree',
+          objectId: sharedTree,
+          name: 'shared',
+        },
+      ]);
+      const rootTree = writeGitObject(
+        validator,
+        'tree',
+        replaceFixtureTreeEntry(
+          validator,
+          readRawGitObject(validator, 'tree', validator.tree),
+          'scripts',
+          { objectId: scriptsTree },
+        ),
+      );
+      const identity = createFixtureIdentity(validator, rootTree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity, 2_000),
+        'SDK validator module graph exceeds the traversal limit.',
       );
     } finally {
       rmSync(validator.root, { recursive: true, force: true });
