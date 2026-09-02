@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/opencoven-530c9c44-8b06-4dfc-9215-ed70af0a743a/_ds_bundle.css">
+<script src="_ds/opencoven-530c9c44-8b06-4dfc-9215-ed70af0a743a/_ds_bundle.js"></script>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0c0c0e}
+a{color:#a79bf5;text-decoration:none}a:hover{text-decoration:underline}
+textarea{font:inherit}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:8px}
+.fam-tabs [role="group"]{width:100%;display:flex;padding:3px;gap:2px;border:1px solid var(--border-hairline);border-radius:8px;background:var(--bg-sunken);box-shadow:inset 0 1px 2px rgba(0,0,0,0.5)}.fam-tabs [role="group"]>button{flex:1;justify-content:center;min-height:30px;border-radius:6px}.fam-tabs [role="group"]>button[aria-checked="true"],.fam-tabs [role="group"]>button[aria-pressed="true"],.fam-tabs [role="group"]>button[aria-selected="true"],.fam-tabs [role="group"]>button[data-active],.fam-tabs [role="group"]>button[data-state="on"]{background:linear-gradient(180deg,rgba(255,255,255,0.05),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.06)}
+.fam-tabs [role="group"]>button{color:var(--text-secondary) !important;font-weight:500}
+.fam-tabs [role="group"]>button[aria-checked="true"],.fam-tabs [role="group"]>button[aria-pressed="true"],.fam-tabs [role="group"]>button[aria-selected="true"],.fam-tabs [role="group"]>button[data-active],.fam-tabs [role="group"]>button[data-state="on"],.fam-tabs [role="group"]>button[class*="active"],.fam-tabs [role="group"]>button[class*="selected"]{color:var(--text-primary) !important;font-weight:600}
+.fam-user:hover .fam-time{opacity:1}
+@keyframes fam-fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes fam-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fam-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in oklch,var(--accent-presence) 45%,transparent)}70%{box-shadow:0 0 0 5px transparent}}
+@keyframes fam-shimmer{0%{background-position:0 0}100%{background-position:200% 0}}
+.fam-shell button,.fam-shell a,.fam-shell textarea{transition:background-color 160ms cubic-bezier(0.3,0,0,1),border-color 160ms,color 160ms,box-shadow 220ms cubic-bezier(0.3,0,0,1),transform 220ms cubic-bezier(0.3,0,0,1),opacity 160ms}
+.fam-shell button:active{transform:translateY(0.5px) scale(0.995)}
+.fam-card{transition:box-shadow 240ms cubic-bezier(0.3,0,0,1),transform 240ms cubic-bezier(0.3,0,0,1),border-color 240ms}
+.fam-card:hover{transform:translateY(-1px);box-shadow:0 10px 28px -14px rgba(0,0,0,0.85),0 1px 2px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.06)}
+.fam-shell .fam-card button:focus,.fam-shell .fam-card button:focus-visible{outline:none !important}
+.fam-msg{animation:fam-rise 420ms cubic-bezier(0.2,0.7,0.2,1) both}
+.fam-live{animation:fam-pulse 2.4s cubic-bezier(0.3,0,0,1) infinite}
+.fam-grain{position:absolute;inset:0;pointer-events:none;z-index:60;opacity:0.05;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.fam-composer:focus-within{border-color:color-mix(in oklch,var(--accent-presence) 45%,var(--border-strong)) !important;box-shadow:0 0 0 3px color-mix(in oklch,var(--accent-presence) 12%,transparent),0 16px 40px -16px rgba(0,0,0,0.9),inset 0 1px 0 rgba(255,255,255,0.05) !important}
+.fam-send:hover:not(:disabled){transform:scale(1.06);box-shadow:0 4px 14px -4px color-mix(in oklch,var(--accent-presence) 70%,transparent)}
+.fam-shell .ui-btn--primary{background:linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.03)),color-mix(in oklch,var(--accent-presence) 22%,var(--bg-elevated)) !important;border:1px solid color-mix(in oklch,var(--accent-presence) 45%,rgba(255,255,255,0.12)) !important;color:var(--text-primary) !important;box-shadow:0 1px 2px rgba(0,0,0,0.5),0 8px 20px -12px color-mix(in oklch,var(--accent-presence) 60%,transparent),inset 0 1px 0 rgba(255,255,255,0.18),inset 0 -1px 0 rgba(0,0,0,0.25);backdrop-filter:blur(10px) saturate(140%);-webkit-backdrop-filter:blur(10px) saturate(140%)}
+.fam-shell .ui-btn--primary:hover{background:linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.04)),color-mix(in oklch,var(--accent-presence) 30%,var(--bg-elevated)) !important;border-color:color-mix(in oklch,var(--accent-presence) 60%,rgba(255,255,255,0.16)) !important}
+.fam-shell .ui-btn--secondary,.fam-shell .ui-btn--ghost{backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.fam-shell .ui-btn--secondary{background:linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.01)),var(--bg-raised) !important;border-color:rgba(255,255,255,0.12) !important;box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.08)}
+@media (prefers-reduced-motion:reduce){.fam-msg,.fam-live{animation:none}.fam-card:hover{transform:none}}
+</style>
+</helmet>
+<div class="fam-shell" data-screen-label="Familiars shell" style="--background:#0c0c0e;--bg-base:#0c0c0e;--bg-panel:#141416;--card:#1c1c1f;--bg-raised:#1c1c1f;--popover:#1c1c1f;--bg-elevated:#232327;--bg-hover:#26262b;--bg-sunken:#101012;--muted:#232327;--secondary:#232327;--foreground:#f0eff4;--text-primary:#f0eff4;--muted-foreground:#a2a1ab;--text-secondary:#a2a1ab;--text-muted:#6f6e78;--border:rgba(255,255,255,0.08);--border-hairline:rgba(255,255,255,0.08);--border-strong:rgba(255,255,255,0.16);--input:rgba(255,255,255,0.12);--accent-presence:#a79bf5;--accent-presence-foreground:#0c0c0e;--primary:#a79bf5;--primary-foreground:#0c0c0e;--ring-focus:#a79bf5;--color-warning:oklch(0.76 0.08 78);--color-danger:oklch(0.66 0.11 24);--color-success:#a2a1ab;--danger-bg:transparent;--danger-border:var(--border-hairline);--danger-text:var(--text-primary);position:relative;display:grid;letter-spacing:-0.004em;grid-template-columns:{{ cols }};grid-template-rows:minmax(0,1fr);height:{{ rootH }};min-width:{{ rootMinW }};background:var(--bg-base);color:var(--text-primary);font-family:var(--font-inter);font-size:13px;line-height:1.45;transition:grid-template-columns 200ms cubic-bezier(0.3,0,0,1);overflow:hidden">
+
+  <div class="fam-grain" aria-hidden="true"></div>
+  <!-- ============ SIDEBAR ============ -->
+  <sc-if value="{{ showSidebar }}" hint-placeholder-val="{{ true }}">
+  <aside data-screen-label="Conversations sidebar" style="position:relative;overflow:hidden;min-height:0;height:100%;background:linear-gradient(180deg,rgba(255,255,255,0.015),transparent 30%),var(--bg-panel);border-right:1px solid var(--border-hairline);box-shadow:inset -1px 0 0 rgba(255,255,255,0.02);min-width:0">
+    <div style="width:300px;height:100%;display:flex;flex-direction:column;overflow:hidden">
+      <button onClick="{{ toggleSidebar }}" aria-label="Hide conversations" title="Hide conversations  [" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;height:44px;padding:0 12px 0 14px;flex:none;border:0;border-bottom:1px solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:inherit;cursor:pointer;text-align:left" style-hover="color:var(--text-primary)">
+        <span style="font-family:var(--font-inter);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none">Conversations</span>
+        <span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:sidebar-simple" width="15" height="15" hint-size="15px,15px"></x-import></span>
+      </button>
+      <div style="padding:0 10px;position:relative;flex:none">
+        <button onClick="{{ toggleSwitcher }}" aria-haspopup="listbox" aria-expanded="{{ switcherOpen }}" style="display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;padding:7px 10px;border:1px solid var(--border-hairline);border-radius:8px;background:var(--bg-raised);color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-hover);border-color:var(--border-strong)" style-focus="outline:2px solid var(--ring-focus);outline-offset:2px">
+          <span style="position:relative;width:28px;height:28px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:12px;background:var(--bg-elevated);color:var(--text-primary);box-shadow:0 0 0 1.5px var(--accent-presence)">{{ f.initial }}<span class="{{ f.liveClass }}" style="position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:999px;background:{{ f.presence }};border:2px solid var(--bg-panel)"></span></span>
+          <span style="min-width:0;display:grid;gap:1px"><span style="font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.01em">{{ f.name }}</span><span style="font-size:12px;color:var(--text-secondary);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.role }}</span></span>
+          <span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-up-down" width="14" height="14" hint-size="14px,14px"></x-import></span>
+        </button>
+        <sc-if value="{{ switcherOpen }}" hint-placeholder-val="{{ false }}">
+          <div role="listbox" data-screen-label="Familiar switcher" style="position:absolute;left:10px;right:10px;top:calc(100% + 4px);z-index:40;padding:4px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-elevated);box-shadow:0 16px 40px rgba(0,0,0,0.5);animation:fam-fade 140ms cubic-bezier(0,0,0.2,1)">
+            <sc-for list="{{ familiars }}" as="fm" hint-placeholder-count="3">
+              <button onClick="{{ fm.select }}" role="option" aria-selected="{{ fm.isActive }}" style="display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;padding:7px 8px;border:0;border-radius:6px;background:{{ fm.rowBg }};color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-hover)">
+                <span style="position:relative;width:24px;height:24px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:11px;background:var(--bg-hover);color:var(--text-primary);box-shadow:{{ fm.ring }}">{{ fm.initial }}<span style="position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:999px;background:{{ fm.presence }};border:2px solid var(--bg-panel)"></span></span>
+                <span style="min-width:0;display:grid;gap:1px"><span style="font-weight:600;line-height:1.2">{{ fm.name }}</span><span style="font-size:12px;color:var(--text-secondary);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fm.role }}</span></span>
+                <span style="font-size:12px;color:{{ fm.metaColor }};white-space:nowrap">{{ fm.meta }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:8px 10px 4px;flex:none">
+        <x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="md" leading-icon="plus" full-width="{{ true }}" hint-size="100%,32px">New chat</x-import>
+        <button onClick="{{ openSearch }}" aria-label="Search conversations (⌘K)" title="Search  ⌘K" class="ui-btn ui-btn--secondary" style="width:32px;height:32px;padding:0;display:grid;place-items:center;color:var(--text-secondary)" style-hover="color:var(--text-primary)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:magnifying-glass" width="15" height="15" hint-size="15px,15px"></x-import></button>
+      </div>
+      <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 10px 10px">
+        <sc-if value="{{ hasNeedsYou }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:6px;padding:2px 4px 4px;border:1px solid color-mix(in oklch,var(--color-warning) 35%,transparent);border-radius:8px;background:transparent">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px;font-family:var(--font-inter);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--text-muted)"><span style="display:inline-flex;align-items:center;gap:7px"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning)"></span>Needs you</span><span style="color:var(--text-secondary)">{{ needsYouCount }}</span></div>
+          <div style="display:grid;gap:1px">
+            <sc-for list="{{ needsYou }}" as="c" hint-placeholder-count="2">
+              <button onClick="{{ c.select }}" aria-current="{{ c.isActive }}" style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;align-items:start;width:100%;min-width:0;padding:7px 8px;border:0;border-radius:6px;background:{{ c.rowBg }};color:inherit;text-align:left;cursor:pointer;font:inherit;overflow:hidden" style-hover="background:var(--bg-hover)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px">
+                <span style="width:24px;height:24px;margin-top:1px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:11px;background:var(--bg-elevated);color:var(--text-primary)">{{ c.initial }}</span>
+                <span style="min-width:0;display:grid;gap:2px">
+                  <span style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;min-width:0"><span style="font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ c.title }}</span><span style="font-size:11px;color:var(--text-muted);flex:none;font-variant-numeric:tabular-nums;text-align:right">{{ c.time }}</span></span>
+                  <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);line-height:1.3;min-width:0"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning);flex:none"></span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ c.familiarName }} · {{ c.preview }}</span></span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          </div>
+        </sc-if>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 8px 6px;font-family:var(--font-inter);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--text-muted)"><span>Recent <span style="color:var(--text-muted);opacity:0.7">{{ recentCount }}</span></span><button onClick="{{ toggleRecentAll }}" title="Filter recent conversations" style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border:1px solid var(--border-hairline);border-radius:999px;background:transparent;color:var(--text-secondary);font:inherit;font-size:11px;cursor:pointer" style-hover="background:var(--bg-raised);color:var(--text-primary)">{{ recentFilterLabel }}<span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-up-down" width="11" height="11" hint-size="11px,11px"></x-import></span></button></div>
+        <sc-if value="{{ recentEmpty }}" hint-placeholder-val="{{ false }}"><div style="padding:22px 12px;display:grid;gap:8px;justify-items:center;text-align:center"><span style="width:32px;height:32px;border-radius:999px;display:grid;place-items:center;background:var(--bg-raised);color:var(--text-secondary)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:chats-circle" width="16" height="16" hint-size="16px,16px"></x-import></span><span style="font-size:12px;color:var(--text-secondary)">No conversations with {{ f.name }} yet.</span><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="sm" leading-icon="plus" hint-size="auto,26px">New chat</x-import></div></sc-if>
+        <div style="display:grid;gap:1px">
+          <sc-for list="{{ recent }}" as="c" hint-placeholder-count="5">
+            <button onClick="{{ c.select }}" aria-current="{{ c.isActive }}" style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;align-items:start;width:100%;min-width:0;padding:7px 8px;border:0;border-radius:6px;background:{{ c.rowBg }};color:inherit;text-align:left;cursor:pointer;font:inherit;overflow:hidden" style-hover="background:var(--bg-hover)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px">
+              <span style="width:24px;height:24px;margin-top:1px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:11px;background:var(--bg-elevated);color:var(--text-primary)">{{ c.initial }}</span>
+              <span style="min-width:0;display:grid;gap:2px">
+                <span style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;min-width:0"><span style="font-weight:{{ c.titleWeight }};line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ c.title }}</span><span style="font-size:11px;color:var(--text-muted);flex:none;font-variant-numeric:tabular-nums;text-align:right">{{ c.time }}</span></span>
+                <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);line-height:1.3;min-width:0"><sc-if value="{{ c.failed }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;color:var(--color-danger);flex:none"><x-import component-from-global-scope="CovenCave.Icon" name="ph:warning-circle-fill" width="11" height="11" hint-size="11px,11px"></x-import></span></sc-if><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ c.familiarName }} · {{ c.preview }}</span></span>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="flex:none;padding:8px 14px 10px;border-top:1px solid var(--border-hairline);font-size:12px;color:var(--text-muted)">Cave connected · v0.3.0</div>
+    </div>
+  </aside>
+  </sc-if>
+
+  <!-- ============ THREAD ============ -->
+  <sc-if value="{{ showThread }}" hint-placeholder-val="{{ true }}">
+  <main data-screen-label="Thread" style="display:grid;grid-template-rows:{{ threadRows }};transition:grid-template-rows 260ms cubic-bezier(0.2,0.8,0.2,1);min-width:0;min-height:0;height:100%;background:radial-gradient(70% 40% at 50% -10%,color-mix(in oklch,var(--accent-presence) 6%,transparent),transparent 70%),var(--bg-base)">
+    <sc-if value="{{ showTranscript }}" hint-placeholder-val="{{ true }}">
+    <sc-if value="{{ showHeader }}" hint-placeholder-val="{{ true }}">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px;border-bottom:1px solid var(--border-hairline);overflow:hidden;opacity:{{ headerOpacity }};transition:opacity 220ms cubic-bezier(0.3,0,0,1)">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <sc-if value="{{ sidebarClosed }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CovenCave.IconButton" icon="ph:sidebar-simple" size="sm" aria-label="Show conversations" title="Show conversations  [" on-click="{{ toggleSidebar }}" hint-size="24px,24px"></x-import></sc-if>
+        <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ conv.title }}</span>
+        <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap">{{ f.name }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <sc-if value="{{ convHeld }}" hint-placeholder-val="{{ false }}"><button onClick="{{ jumpToHold }}" style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 4px;border:0;font:inherit;font-size:12px;color:var(--color-warning);background:transparent;cursor:pointer" style-hover="color:var(--text-primary)"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning)"></span>1 held</button></sc-if>
+        <x-import component-from-global-scope="CovenCave.IconButton" icon="ph:dots-three" size="sm" aria-label="More" hint-size="24px,24px"></x-import>
+        <sc-if value="{{ inspectorClosed }}" hint-placeholder-val="{{ false }}"><button onClick="{{ toggleInspector }}" aria-label="Show inspector" title="Show inspector  ]" style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:var(--text-muted);cursor:pointer;transform:scaleX(-1)" style-hover="color:var(--text-primary);background:var(--bg-raised)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:sidebar-simple" width="15" height="15" hint-size="15px,15px"></x-import></button></sc-if>
+      </div>
+    </header>
+    </sc-if>
+
+    <div style="overflow-y:auto;min-height:0" id="fam-transcript" onScroll="{{ onScroll }}">
+      <div style="max-width:{{ columnMax }};margin:0 auto;padding:20px 24px 28px;display:flex;flex-direction:column;gap:14px;transition:max-width 260ms cubic-bezier(0.2,0.8,0.2,1)">
+        <sc-for list="{{ messages }}" as="m" hint-placeholder-count="6">
+          <sc-if value="{{ m.isDivider }}" hint-placeholder-val="{{ false }}"><div style="text-align:center;color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums">{{ m.text }}</div></sc-if>
+          <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}"><div class="fam-user fam-msg" style="display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;animation-delay:{{ m.delay }}"><span class="fam-time" style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;opacity:0;transition:opacity 80ms">{{ m.time }}</span><div style="max-width:72%;padding:9px 13px;border-radius:12px 12px 4px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 60%),color-mix(in oklch,var(--accent-presence) 12%,var(--bg-base));box-shadow:0 1px 2px rgba(0,0,0,0.4),inset 0 1px 0 color-mix(in oklch,var(--accent-presence) 18%,transparent);line-height:1.5;white-space:pre-wrap">{{ m.text }}</div></div></sc-if>
+          <sc-if value="{{ m.isFamiliar }}" hint-placeholder-val="{{ false }}"><div class="fam-msg" style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start;max-width:72%;animation-delay:{{ m.delay }}">
+            <button onClick="{{ openFamCard }}" aria-label="About {{ f.name }}" title="About {{ f.name }}" style="width:22px;height:22px;margin-top:2px;padding:0;border:0;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:10px;background:var(--bg-elevated);color:var(--text-primary);cursor:pointer;font-family:inherit" style-hover="box-shadow:0 0 0 1.5px var(--accent-presence)">{{ f.initial }}</button>
+            <div style="display:grid;gap:4px;min-width:0"><span style="display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-muted)"><span style="color:var(--text-secondary)">{{ f.name }}</span><span style="font-variant-numeric:tabular-nums">{{ m.time }}</span></span><div style="padding:9px 13px;border-radius:4px 12px 12px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);border:1px solid var(--border-hairline);box-shadow:0 1px 2px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.04);line-height:1.5;white-space:pre-wrap">{{ m.text }}</div></div>
+          </div></sc-if>
+          <sc-if value="{{ m.isReasoning }}" hint-placeholder-val="{{ false }}"><div class="fam-msg" style="animation-delay:{{ m.delay }}"><dc-import name="ReasoningCard v2" card="{{ m.raw }}" default-open="{{ true }}" hint-size="100%,72px"></dc-import></div></sc-if>
+          <sc-if value="{{ m.isImage }}" hint-placeholder-val="{{ false }}">
+            <figure class="fam-msg" style="margin:0;display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start;animation-delay:{{ m.delay }}">
+              <button onClick="{{ openFamCard }}" aria-label="About {{ f.name }}" title="About {{ f.name }}" style="width:22px;height:22px;margin-top:2px;padding:0;border:0;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:10px;background:var(--bg-elevated);color:var(--text-primary);cursor:pointer;font-family:inherit" style-hover="box-shadow:0 0 0 1.5px var(--accent-presence)">{{ f.initial }}</button>
+              <div style="display:grid;gap:6px;min-width:0"><span style="display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-muted)"><span style="color:var(--text-secondary)">{{ f.name }}</span><span style="font-variant-numeric:tabular-nums">{{ m.time }}</span></span>
+                <div class="fam-card" style="width:100%;border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden">
+                  <sc-if value="{{ m.plot }}" hint-placeholder-val="{{ false }}">
+                    <div role="button" tabIndex="0" aria-label="Open {{ m.alt }}" onClick="{{ m.openLightbox }}" onKeyDown="{{ m.openLightboxKey }}" style="position:relative;aspect-ratio:16/10;cursor:zoom-in;background:radial-gradient(80% 60% at 70% 30%,color-mix(in oklch,var(--accent-presence) 8%,transparent),transparent 70%),var(--bg-elevated);overflow:hidden" style-hover="background:radial-gradient(80% 60% at 70% 30%,color-mix(in oklch,var(--accent-presence) 12%,transparent),transparent 70%),var(--bg-hover)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px">
+                      <div style="position:absolute;inset:36px 20px 34px 20px;background-image:linear-gradient(to right,var(--border-hairline) 1px,transparent 1px),linear-gradient(to bottom,var(--border-hairline) 1px,transparent 1px);background-size:25% 33.4%;border-left:1px solid var(--border-strong);border-bottom:1px solid var(--border-strong)">
+                        <sc-for list="{{ m.plot }}" as="p" hint-placeholder-count="11">
+                          <div style="position:absolute;left:{{ p.x }};top:{{ p.y }};transform:translate(-50%,-50%);display:grid;justify-items:center;gap:3px">
+                            <span style="width:{{ p.size }};height:{{ p.size }};border-radius:999px;background:{{ p.fill }};border:1px solid {{ p.ring }};box-shadow:0 0 0 4px color-mix(in oklch,{{ p.ring }} 12%,transparent)"></span>
+                            <span style="font-family:var(--font-jetbrains-mono);font-size:9px;color:var(--text-secondary);white-space:nowrap">{{ p.label }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                      <span style="position:absolute;left:20px;top:12px;font-size:12px;font-weight:600;color:var(--text-primary)">Q3 pricing — evidence map</span>
+                      <span style="position:absolute;right:20px;top:13px;display:flex;gap:10px;font-size:10px;color:var(--text-secondary)"><span style="display:inline-flex;align-items:center;gap:4px"><span style="width:7px;height:7px;border-radius:999px;background:var(--accent-presence)"></span>verified</span><span style="display:inline-flex;align-items:center;gap:4px"><span style="width:7px;height:7px;border-radius:999px;background:var(--color-warning)"></span>flagged</span><span style="display:inline-flex;align-items:center;gap:4px"><span style="width:7px;height:7px;border-radius:999px;background:var(--text-muted)"></span>inferred</span></span>
+                      <span style="position:absolute;left:20px;right:20px;bottom:12px;display:flex;justify-content:space-between;font-family:var(--font-jetbrains-mono);font-size:9px;color:var(--text-muted)"><span>weaker evidence</span><span>stronger evidence →</span></span>
+                      <span style="position:absolute;left:6px;top:50%;transform:rotate(-90deg) translateX(-50%);transform-origin:left top;font-family:var(--font-jetbrains-mono);font-size:9px;color:var(--text-muted);white-space:nowrap">claim weight ↑</span>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ m.noPlot }}" hint-placeholder-val="{{ false }}"><div style="aspect-ratio:16/10;display:grid;place-items:center;background:var(--bg-elevated);color:var(--text-muted)"><span style="display:grid;gap:6px;justify-items:center;text-align:center"><x-import component-from-global-scope="CovenCave.Icon" name="ph:image" width="20" height="20" hint-size="20px,20px"></x-import><span style="font-size:12px;color:var(--text-secondary)">{{ m.alt }}</span></span></div></sc-if>
+                  <figcaption style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border-hairline);font-size:12px"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.file }}</code><span style="display:flex;gap:2px"><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="xs" on-click="{{ m.openLightbox }}" hint-size="auto,22px">Open</x-import><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="xs" hint-size="auto,22px">Save to notes/</x-import></span></figcaption>
+                </div>
+              </div>
+            </figure>
+          </sc-if>
+          <sc-if value="{{ m.isHold }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ m.pending }}" hint-placeholder-val="{{ true }}">
+              <section id="fam-hold" class="fam-msg" data-screen-label="Held action" role="group" aria-label="Held action" style="border:1px solid color-mix(in oklch,var(--color-warning) 45%,transparent);border-radius:8px;background:linear-gradient(180deg,color-mix(in oklch,var(--color-warning) 4%,transparent),transparent 50%),var(--bg-raised);box-shadow:0 12px 32px -20px color-mix(in oklch,var(--color-warning) 40%,transparent),0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);animation-delay:{{ m.delay }}">
+                <div style="display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:start;padding:12px 14px 4px">
+                  <span style="display:inline-flex;color:var(--color-warning);margin-top:3px"><x-import component-from-global-scope="CovenCave.Icon" name="ph:hand" width="15" height="15" hint-size="15px,15px"></x-import></span>
+                  <div style="display:grid;gap:3px;min-width:0">
+                    <span style="font-weight:600;font-size:14px;line-height:1.3;letter-spacing:-0.01em">{{ m.title }}</span>
+                    <span style="font-size:12px;color:var(--text-secondary);line-height:1.5">{{ m.detail }}</span>
+                    <span style="font-size:11px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px;margin-top:2px">Held by the ward<code style="font-family:var(--font-jetbrains-mono);font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-sunken);border:1px solid var(--border-hairline);color:var(--text-secondary)">ward.toml → human_review</code></span>
+                  </div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--color-warning);white-space:nowrap;margin-top:3px"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning)"></span>Waiting · {{ m.time }}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat({{ m.factCols }},minmax(0,1fr));margin:10px 14px 4px 40px;border:1px solid var(--border-hairline);border-radius:6px;background:var(--bg-sunken);overflow:hidden">
+                  <sc-for list="{{ m.facts }}" as="k" hint-placeholder-count="3"><div style="display:grid;gap:3px;padding:8px 10px;border-left:{{ k.border }};min-width:0"><span style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)">{{ k.label }}</span><span style="font-family:{{ k.font }};font-size:{{ k.size }};color:{{ k.color }};line-height:1.4;overflow-wrap:anywhere;font-weight:{{ k.weight }}">{{ k.value }}</span></div></sc-for>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 14px 12px 40px">
+                  <a href="#" style="font-size:12px;color:var(--text-secondary)">{{ m.openLabel }}</a>
+                  <span style="flex:1"></span>
+                  <x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="sm" on-click="{{ decline }}" title="Decline  ⌘⌫" hint-size="auto,28px">Decline <kbd style="font-family:var(--font-jetbrains-mono);font-size:10px;opacity:0.7;margin-left:4px">⌘⌫</kbd></x-import>
+                  <x-import component-from-global-scope="CovenCave.Button" variant="primary" size="sm" on-click="{{ approve }}" title="Approve  ⌘⏎" hint-size="auto,28px">Approve <kbd style="font-family:var(--font-jetbrains-mono);font-size:10px;opacity:0.75;margin-left:4px">⌘↵</kbd></x-import>
+                </div>
+              </section>
+            </sc-if>
+            <sc-if value="{{ m.approved }}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12px;color:var(--text-secondary);animation:fam-fade 180ms"><span style="display:inline-flex;color:var(--text-secondary)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:check" width="14" height="14" hint-size="14px,14px"></x-import></span><span style="color:var(--text-primary)">Approved</span><span>{{ m.title }} · you, {{ decidedAt }}</span></div>
+            </sc-if>
+            <sc-if value="{{ m.declined }}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12px;color:var(--text-secondary);animation:fam-fade 180ms"><span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:x" width="14" height="14" hint-size="14px,14px"></x-import></span><span style="color:var(--text-primary)">Declined</span><span>{{ m.title }} · you, {{ decidedAt }}</span></div>
+            </sc-if>
+            <sc-if value="{{ m.expired }}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;border:1px dashed var(--border-strong);font-size:12px;color:var(--text-secondary)"><span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:hourglass" width="14" height="14" hint-size="14px,14px"></x-import></span><span style="color:var(--text-primary)">Expired</span><span>{{ m.title }} · no decision in 24h · {{ f.name }} released the run</span><span style="flex:1"></span><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="xs" hint-size="auto,22px">Ask again</x-import></div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ m.isFailed }}" hint-placeholder-val="{{ false }}">
+            <div role="alert" style="display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:center;padding:4px 0;font-size:12px"><span style="display:inline-flex;color:var(--color-danger)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:warning-circle-fill" width="15" height="15" hint-size="15px,15px"></x-import></span><span style="display:grid;gap:2px"><span style="font-weight:600;color:var(--text-primary)">Run failed</span><span style="color:var(--text-secondary);line-height:1.5">{{ m.text }}</span></span><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="sm" hint-size="auto,26px">Retry run</x-import></div>
+          </sc-if>
+        </sc-for>
+        <sc-if value="{{ thinking }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:center"><span style="width:22px;height:22px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:10px;background:var(--bg-elevated);color:var(--text-primary)">{{ f.initial }}</span><x-import component-from-global-scope="CovenCave.ThinkingIndicator" label="{{ thinkingLabel }}" hint-size="auto,20px"></x-import></div></sc-if>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- composer -->
+    <sc-if value="{{ showComposer }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Composer" style="padding:{{ composerPad }};background:var(--bg-base);border-top:{{ composerTop }}">
+      <div style="width:100%;position:relative">
+        <sc-if value="{{ slashOpen }}" hint-placeholder-val="{{ false }}">
+          <div role="listbox" aria-label="Commands" style="position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:30;padding:4px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-elevated);box-shadow:0 16px 40px rgba(0,0,0,0.5);animation:fam-fade 140ms cubic-bezier(0,0,0.2,1)">
+            <sc-for list="{{ commands }}" as="cmd" hint-placeholder-count="4">
+              <button onClick="{{ cmd.pick }}" role="option" aria-selected="{{ cmd.hi }}" style="display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;padding:7px 10px;border:0;border-radius:6px;background:{{ cmd.bg }};color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-hover)">
+                <code style="font-family:var(--font-jetbrains-mono);font-size:12px">{{ cmd.name }}</code>
+                <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ cmd.hint }}</span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:{{ cmd.tierColor }}"><sc-if value="{{ cmd.mustAsk }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning)"></span></sc-if>{{ cmd.tier }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div class="fam-composer" style="border:1px solid {{ composerBorder }};border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 40%),var(--bg-raised);box-shadow:0 12px 32px -18px rgba(0,0,0,0.9),0 1px 2px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.05);overflow:hidden;transition:border-color 160ms,box-shadow 240ms">
+          <div style="display:flex;align-items:center;gap:2px;padding:4px 6px 0 6px">
+            <x-import component-from-global-scope="CovenCave.IconButton" icon="ph:paperclip" size="sm" aria-label="Attach file" title="Attach" hint-size="24px,24px"></x-import>
+            <x-import component-from-global-scope="CovenCave.IconButton" icon="ph:terminal-window" size="sm" aria-label="Commands" title="Commands  /" on-click="{{ openSlash }}" hint-size="24px,24px"></x-import>
+            <label for="fam-composer" style="margin-left:6px;font-size:12px;color:var(--text-secondary)">Message {{ f.name }}</label>
+            <span style="flex:1"></span>
+            <sc-if value="{{ holdWarn }}" hint-placeholder-val="{{ false }}"><a href="#" onClick="{{ goAccess }}" role="status" title="“{{ holdItem }}” is in {{ f.name }}’s must-ask tier" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--color-warning);text-decoration:none;animation:fam-fade 140ms"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning)"></span>Held for approval</a></sc-if>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;padding:2px 8px 8px 8px">
+            <textarea id="fam-composer" value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onComposerKey }}" rows="{{ rows }}" placeholder="{{ placeholder }}" aria-label="Message" style="display:block;width:100%;resize:none;border:0;outline:none;background:transparent;color:var(--text-primary);padding:10px 8px 8px;font-size:13px;line-height:1.5" ;min-height:40px;max-height:calc(1.5em="" *="" 8="" +="" 18px);overflow-y:auto;transition:height="" 160ms="" cubic-bezier(0.2,0.8,0.2,1)=""></textarea>
+            <button class="fam-send" onClick="{{ send }}" aria-label="Send" title="Send  ⏎ · newline  ⇧⏎" disabled="{{ sendDisabled }}" style="width:32px;height:32px;border-radius:8px;border:1px solid {{ sendBorder }};display:grid;place-items:center;cursor:pointer;background:{{ sendBg }};color:{{ sendFg }};box-shadow:inset 0 1px 0 rgba(255,255,255,0.12);transition:background 160ms,border-color 160ms" style-focus="outline:2px solid var(--ring-focus);outline-offset:2px"><x-import component-from-global-scope="CovenCave.Icon" name="ph:paper-plane-right" width="14" height="14" hint-size="14px,14px"></x-import></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+  </main>
+  </sc-if>
+
+  <!-- ============ INSPECTOR ============ -->
+  <sc-if value="{{ showInspector }}" hint-placeholder-val="{{ true }}">
+  <aside data-screen-label="Familiar inspector" style="display:grid;min-height:0;height:100%;grid-template-rows:44px auto minmax(0,1fr) auto;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.015),transparent 30%),var(--bg-panel);border-left:{{ inspectorBorder }};box-shadow:inset 1px 0 0 rgba(255,255,255,0.02);min-width:0">
+    <button onClick="{{ toggleInspector }}" aria-label="Hide inspector" title="Hide inspector  ]" style="display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;height:44px;padding:0 12px 0 14px;border:0;border-bottom:1px solid var(--border-hairline);background:transparent;color:var(--text-primary);font:inherit;cursor:pointer;text-align:left" style-hover="background:var(--bg-raised)">
+      <span style="position:relative;width:22px;height:22px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:10px;background:var(--bg-elevated);color:var(--text-primary);box-shadow:0 0 0 1.5px var(--accent-presence)">{{ f.initial }}<span class="{{ f.liveClass }}" style="position:absolute;right:-2px;bottom:-2px;width:8px;height:8px;border-radius:999px;background:{{ f.presence }};border:2px solid var(--bg-panel)"></span></span>
+      <span style="display:flex;gap:8px;align-items:baseline;min-width:0"><span style="font-weight:600;font-size:13px">{{ f.name }}</span><span style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.creature }} · {{ f.pronouns }}</span></span>
+      <span style="display:inline-flex;color:var(--text-muted);transform:scaleX(-1)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:sidebar-simple" width="15" height="15" hint-size="15px,15px"></x-import></span>
+    </button>
+    
+    <div class="fam-tabs" style="padding:8px 10px 0;display:grid">
+      <x-import component-from-global-scope="CovenCave.Segmented" style="width:100%;display:block" options="{{ tabOptions }}" value="{{ tab }}" on-change="{{ setTab }}" get-label="{{ tabLabel }}" dc-props="{{ segProps }}" equal-width="{{ true }}" hint-size="100%,30px"></x-import>
+    </div>
+    <div style="overflow-y:{{ panelOverflow }};min-height:0;padding:0 10px 10px;display:grid;align-content:{{ panelAlign }}">
+
+      <!-- OVERVIEW -->
+      <sc-if value="{{ emptyFamiliar }}" hint-placeholder-val="{{ false }}"><div style="padding:48px 16px;display:grid;gap:10px;justify-items:center;text-align:center"><span style="width:40px;height:40px;border-radius:999px;display:grid;place-items:center;background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border-hairline)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:cat" width="18" height="18" hint-size="18px,18px"></x-import></span><span style="font-weight:600">No familiar selected</span><span style="font-size:12px;color:var(--text-secondary);max-width:240px;line-height:1.5">Choose a conversation, or summon a familiar to see its ward here.</span><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="sm" leading-icon="sparkle" hint-size="auto,26px">Summon familiar</x-import></div></sc-if>
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid;gap:6px;padding-top:8px">
+          <div class="fam-card" style="padding:14px;display:grid;gap:4px;border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04)"><span style="font-size:12px;color:var(--text-secondary)">Purpose</span><span style="font-size:14px;font-weight:500;line-height:1.4;text-wrap:pretty">{{ f.purpose }}</span><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted)">SOUL.md</code></div>
+          <div class="fam-card" style="border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);padding:0 12px">
+          <sc-for list="{{ overviewRows }}" as="r" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-hairline)">
+              <span style="min-width:0;display:grid;gap:1px"><span style="font-weight:600">{{ r.label }}</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.hint }}</span></span>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:{{ r.valueColor }};white-space:nowrap;font-family:{{ r.font }}"><sc-if value="{{ r.dot }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ r.dot }}"></span></sc-if>{{ r.value }}</span>
+            </div>
+          </sc-for>
+          <button onClick="{{ goAccess }}" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;padding:10px 0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-raised)">
+            <span style="display:grid;gap:1px"><span style="font-weight:600">Ward</span><span style="font-size:12px;color:var(--text-secondary)">{{ f.autoCount }} may act · {{ f.reviewCount }} must ask · {{ f.pathCount }} paths</span></span>
+            <span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-right" width="14" height="14" hint-size="14px,14px"></x-import></span>
+          </button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ACCESS -->
+      <sc-if value="{{ isAccess }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid;gap:6px;padding-top:8px">
+          <div class="fam-card" data-screen-label="Access hero" style="padding:14px;display:grid;gap:6px;border:1px solid color-mix(in oklch,var(--accent-presence) 22%,var(--border-hairline));border-radius:8px;background:radial-gradient(120% 90% at 0% 0%,color-mix(in oklch,var(--accent-presence) 12%,transparent),transparent 60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),0 12px 32px -16px color-mix(in oklch,var(--accent-presence) 35%,transparent),inset 0 1px 0 rgba(255,255,255,0.06)">
+            <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)"><span style="display:inline-flex;color:var(--accent-presence)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:hand" width="13" height="13" hint-size="13px,13px"></x-import></span>Human in control</span>
+            <span style="font-size:16px;font-weight:600;line-height:1.3;letter-spacing:-0.012em;text-wrap:pretty">Clear boundaries, visible at a glance.</span>
+            <span style="font-size:12px;color:var(--text-secondary);line-height:1.5">{{ f.name }} handles routine work. Consequential actions stop for you.</span>
+            <span style="font-size:12px;color:var(--text-secondary);margin-top:2px"><span style="color:var(--accent-presence)">{{ f.autoCount }} may act</span> · <span style="color:var(--color-warning)">{{ f.reviewCount }} must ask</span> · {{ f.pathCount }} editable paths · <code style="font-family:var(--font-jetbrains-mono);font-size:11px">ward.toml {{ f.wardVersion }}</code></span>
+          </div>
+          <sc-for list="{{ accessGroups }}" as="g" hint-placeholder-count="4">
+            <div class="fam-card" style="border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);padding:0 12px">
+              <button onClick="{{ g.toggle }}" aria-expanded="{{ g.open }}" style="display:grid;grid-template-columns:16px minmax(0,1fr) 36px 14px;gap:10px;align-items:center;width:100%;padding:10px 0;border:0;outline:none;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:transparent;color:var(--text-primary)" style-focus="outline:none;background:transparent">
+                <span style="display:inline-flex;color:{{ g.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ g.icon }}" width="14" height="14" hint-size="14px,14px"></x-import></span>
+                <span style="min-width:0;display:grid;gap:1px"><span style="font-weight:600;color:var(--text-primary)">{{ g.label }}</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ g.summary }}</span></span>
+                <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);text-align:right">{{ g.count }}</span>
+                <span style="color:var(--text-muted);display:inline-flex;transform:{{ g.caret }};transition:transform 120ms"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-down" width="14" height="14" hint-size="14px,14px"></x-import></span>
+              </button>
+              <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}">
+                <sc-if value="{{ g.meter }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:3px;padding:0 0 8px 26px"><sc-for list="{{ g.meter }}" as="seg" hint-placeholder-count="5"><span style="flex:1;height:3px;border-radius:2px;background:{{ seg.bg }}"></span></sc-for></div></sc-if>
+                <ul style="list-style:none;margin:0;padding:0 0 10px 26px;display:grid;gap:6px">
+                  <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="3">
+                    <li style="display:grid"><button onClick="{{ it.open }}" title="Open {{ it.docTitle }}" style="display:grid;grid-template-columns:minmax(0,1fr) auto 12px;gap:8px;align-items:center;width:100%;padding:6px 6px 6px 0;margin:0 -6px 0 0;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;font-size:12px;line-height:1.4" style-hover="background:var(--bg-hover)">
+                      <span style="display:grid;gap:1px;min-width:0"><span style="display:flex;gap:6px;align-items:center;min-width:0"><sc-if value="{{ it.warn }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:999px;background:var(--color-warning);flex:none"></span></sc-if><sc-if value="{{ it.icon }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;color:var(--text-secondary);flex:none"><x-import component-from-global-scope="CovenCave.Icon" name="{{ it.icon }}" width="14" height="14" hint-size="14px,14px"></x-import></span></sc-if><span style="font-family:{{ it.font }};font-size:{{ it.size }};color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.text }}</span></span><sc-if value="{{ it.note }}" hint-placeholder-val="{{ false }}"><span style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.note }}</span></sc-if></span>
+                      <span style="display:inline-flex;gap:8px;align-items:center"><sc-if value="{{ it.badge }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--color-warning);white-space:nowrap">{{ it.badge }}</span></sc-if><sc-if value="{{ it.file }}" hint-placeholder-val="{{ false }}"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted)">{{ it.file }}</code></sc-if></span>
+                      <span style="display:inline-flex;color:var(--text-muted)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-right" width="12" height="12" hint-size="12px,12px"></x-import></span>
+                    </button></li>
+                  </sc-for>
+                </ul>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ACTIVITY -->
+      <sc-if value="{{ isActivity }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ emptyRuns }}" hint-placeholder-val="{{ false }}"><div style="padding:40px 16px;display:grid;gap:10px;justify-items:center;text-align:center"><span style="width:40px;height:40px;border-radius:999px;display:grid;place-items:center;background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border-hairline)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:clock-counter-clockwise" width="18" height="18" hint-size="18px,18px"></x-import></span><span style="font-weight:600">No runs yet</span><span style="font-size:12px;color:var(--text-secondary);max-width:240px;line-height:1.5">Activity appears after {{ f.name }} completes work in this project.</span><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="sm" hint-size="auto,26px">Start a task</x-import></div></sc-if>
+        <div data-screen-label="Activity" style="position:relative;height:100%;min-height:0;overflow:hidden;display:{{ activityDisplay }};grid-template-rows:auto 1fr">
+          <div style="display:flex;align-items:center;justify-content:space-between;height:28px;font-size:12px;color:var(--text-secondary)"><span>Last 7 days</span><span style="color:var(--text-muted)">updated {{ f.act.updated }}</span></div>
+          <div style="display:grid;align-content:start;gap:6px;padding-top:4px">
+            <sc-for list="{{ actSections }}" as="a" hint-placeholder-count="5">
+              <button onClick="{{ a.toggle }}" aria-pressed="{{ a.open }}" style="display:grid;grid-template-columns:16px minmax(0,1fr) auto 14px;gap:10px;align-items:center;height:48px;padding:0 12px;border:1px solid var(--border-hairline);border-radius:8px;background:{{ a.bg }};box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-raised)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px">
+                <span style="display:inline-flex;color:{{ a.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ a.icon }}" width="14" height="14" hint-size="14px,14px"></x-import></span>
+                <span style="min-width:0;display:grid;gap:2px"><span style="font-weight:600;color:var(--text-primary);line-height:1.2">{{ a.label }}</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2">{{ a.hint }}</span></span>
+                <span style="display:flex;align-items:center;gap:10px">
+                  <sc-if value="{{ a.bars }}" hint-placeholder-val="{{ false }}"><span style="display:flex;gap:2px;align-items:flex-end;height:18px"><sc-for list="{{ a.bars }}" as="bar" hint-placeholder-count="7"><span style="width:4px;height:{{ bar.h }};border-radius:1px;background:{{ bar.bg }}"></span></sc-for></span></sc-if>
+                  <span style="font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary);white-space:nowrap;font-family:{{ a.valueFont }}">{{ a.value }}</span>
+                </span>
+                <span style="color:var(--text-muted);display:inline-flex;transform:{{ a.caret }};transition:transform 320ms cubic-bezier(0.2,0.8,0.2,1)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-down" width="14" height="14" hint-size="14px,14px"></x-import></span>
+              </button>
+              <sc-if value="{{ a.open }}" hint-placeholder-val="{{ false }}">
+                <div style="margin:-6px 0 0;padding:14px 12px 12px;border:1px solid var(--border-hairline);border-top:0;border-radius:0 0 8px 8px;background:var(--bg-sunken);display:grid;gap:10px;animation:fam-fade 260ms cubic-bezier(0.2,0.8,0.2,1)">
+                  <sc-if value="{{ a.rows }}" hint-placeholder-val="{{ false }}"><div style="display:grid">
+                    <sc-if value="{{ a.isRuns }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:14px minmax(0,1fr) 48px 56px 52px;gap:8px;padding:0 0 6px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)"><span></span><span>Run</span><span style="text-align:right">Time</span><span style="text-align:right">Calls</span><span style="text-align:right">State</span></div></sc-if>
+                    <sc-for list="{{ a.rows }}" as="r" hint-placeholder-count="4"><div style="display:grid;grid-template-columns:14px minmax(0,1fr) 48px 56px 52px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--border-hairline);font-size:12px"><span style="display:inline-flex;color:{{ r.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ r.icon }}" width="13" height="13" hint-size="13px,13px"></x-import></span><span style="min-width:0;display:grid;gap:1px"><span style="color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span><sc-if value="{{ r.note }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.note }}</span></sc-if></span><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);text-align:right">{{ r.dur }}</span><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted);text-align:right">{{ r.calls }}</span><span style="font-size:11px;color:{{ r.tone }};text-align:right;font-weight:600">{{ r.status }}</span></div></sc-for>
+                  </div></sc-if>
+                  <sc-if value="{{ a.barsList }}" hint-placeholder-val="{{ false }}"><div style="display:grid;gap:9px"><sc-for list="{{ a.barsList }}" as="bl" hint-placeholder-count="4"><div style="display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:12px"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ bl.label }}</code><span style="height:5px;border-radius:3px;background:var(--bg-elevated);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ bl.w }};background:{{ bl.bg }};border-radius:3px"></span></span><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:{{ bl.color }};white-space:nowrap">{{ bl.value }}</span></div></sc-for></div></sc-if>
+                  <sc-if value="{{ a.note }}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11px;line-height:1.5;color:var(--text-muted)">{{ a.note }}</p></sc-if>
+                </div>
+              </sc-if>
+            </sc-for>
+            <div style="margin-top:6px;padding:12px;border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);display:grid;gap:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:600;color:var(--text-primary)">{{ figTitle }}</span><span style="font-size:11px;color:var(--text-muted)">{{ figHint }}</span></div>
+            <sc-if value="{{ figIsChart }}" hint-placeholder-val="{{ true }}"><div style="display:grid;gap:10px;animation:fam-fade 320ms cubic-bezier(0.2,0.8,0.2,1)">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)"><span style="white-space:nowrap"><span style="color:var(--text-primary);font-weight:600;font-size:14px">{{ chart.total }}</span> runs · <span style="color:var(--text-primary)">{{ chart.ok }}</span> completed · <span style="color:{{ chart.failColor }}">{{ chart.fail }}</span> failed</span><span style="display:flex;gap:12px;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:var(--accent-presence)"></span>completed</span><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:color-mix(in oklch,var(--color-danger) 55%,var(--bg-hover))"></span>failed</span></span></div>
+            <div style="position:relative;height:132px;padding-top:16px">
+              <div style="position:absolute;left:0;right:0;top:18px;bottom:0;display:grid;grid-template-rows:repeat(4,1fr)"><span style="border-top:1px solid var(--border-hairline)"></span><span style="border-top:1px solid var(--border-hairline)"></span><span style="border-top:1px solid var(--border-hairline)"></span><span style="border-top:1px solid var(--border-hairline);border-bottom:1px solid var(--border-strong)"></span></div>
+              <div style="position:relative;display:grid;grid-template-columns:repeat(7,1fr);gap:8px;align-items:end;height:100%;padding:0 6px">
+                <sc-for list="{{ days }}" as="d" hint-placeholder-count="7"><div style="display:grid;gap:3px;align-content:end;height:100%;justify-items:center"><span style="font-family:var(--font-jetbrains-mono);font-size:10px;color:{{ d.countColor }};line-height:1;margin-bottom:2px;min-height:10px">{{ d.count }}</span><span style="width:100%;max-width:22px;height:{{ d.failH }};border-radius:3px 3px 0 0;background:color-mix(in oklch,var(--color-danger) 55%,var(--bg-hover))"></span><span style="width:100%;max-width:22px;height:{{ d.okH }};border-radius:{{ d.okRadius }};background:{{ d.okBg }}"></span></div></sc-for>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:0 6px;font-size:11px;color:var(--text-muted);text-align:center;font-variant-numeric:tabular-nums"><sc-for list="{{ days }}" as="d" hint-placeholder-count="7"><span style="color:{{ d.labelColor }}">{{ d.label }}</span></sc-for></div>
+            </div></sc-if>
+            <sc-if value="{{ figRows }}" hint-placeholder-val="{{ false }}"><div style="display:grid;animation:fam-fade 320ms cubic-bezier(0.2,0.8,0.2,1)">
+              <sc-if value="{{ figIsRuns }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:14px minmax(0,1fr) 48px 56px 52px;gap:8px;padding:0 0 6px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)"><span></span><span>Run</span><span style="text-align:right">Time</span><span style="text-align:right">Calls</span><span style="text-align:right">State</span></div></sc-if>
+              <sc-for list="{{ figRows }}" as="r" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 48px 56px 52px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--border-hairline);font-size:12px">
+                  <span style="display:inline-flex;color:{{ r.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ r.icon }}" width="13" height="13" hint-size="13px,13px"></x-import></span>
+                  <span style="min-width:0;display:grid;gap:1px"><span style="color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span><sc-if value="{{ r.note }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.note }}</span></sc-if></span>
+                  <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);text-align:right;font-variant-numeric:tabular-nums">{{ r.dur }}</span>
+                  <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums">{{ r.calls }}</span>
+                  <span style="font-size:11px;color:{{ r.tone }};text-align:right;font-weight:600">{{ r.status }}</span>
+                </div>
+              </sc-for>
+            </div></sc-if>
+            <sc-if value="{{ figBars }}" hint-placeholder-val="{{ false }}"><div style="display:grid;gap:9px;animation:fam-fade 320ms cubic-bezier(0.2,0.8,0.2,1)">
+              <sc-for list="{{ figBars }}" as="bl" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:12px"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ bl.label }}</code><span style="height:5px;border-radius:3px;background:var(--bg-elevated);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ bl.w }};background:{{ bl.bg }};border-radius:3px;transition:width 520ms cubic-bezier(0.2,0.8,0.2,1)"></span></span><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:{{ bl.color }};font-variant-numeric:tabular-nums;white-space:nowrap">{{ bl.value }}</span></div>
+              </sc-for>
+            </div></sc-if>
+            <sc-if value="{{ figNote }}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:11px;line-height:1.5;color:var(--text-muted);border-top:1px dashed var(--border-hairline);padding-top:8px">{{ figNote }}</p></sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    <button style="display:flex;justify-content:space-between;align-items:center;height:36px;margin:0;padding:0 14px;border:0;border-top:1px solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:inherit;font-size:12px;cursor:pointer" style-hover="color:var(--text-primary);background:var(--bg-raised)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px"><span style="display:inline-flex;align-items:center;gap:8px"><x-import component-from-global-scope="CovenCave.Icon" name="ph:gear-six" width="14" height="14" hint-size="14px,14px"></x-import>App settings</span><kbd style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted)">⌘,</kbd></button>
+  </aside>
+  </sc-if>
+  <sc-if value="{{ showActOverlay }}" hint-placeholder-val="{{ false }}">
+    <sc-if value="{{ actOpen }}" hint-placeholder-val="{{ false }}">
+      <section role="dialog" aria-label="{{ actOpen.label }}" style="position:absolute;right:12px;top:104px;width:{{ actOpen.width }};max-height:calc(100% - 116px);z-index:50;display:grid;grid-template-rows:auto minmax(0,1fr);border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-panel);box-shadow:0 24px 64px rgba(0,0,0,0.6);overflow:hidden;animation:fam-fade 160ms cubic-bezier(0,0,0.2,1)">
+        <button onClick="{{ closeAct }}" aria-expanded="{{ true }}" style="display:grid;grid-template-columns:16px minmax(0,1fr) auto 14px;gap:10px;align-items:center;height:56px;padding:0 16px;border:0;border-bottom:1px solid var(--border-hairline);background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-raised)" style-focus="outline:2px solid var(--ring-focus);outline-offset:-2px">
+          <span style="display:inline-flex;color:{{ actOpen.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ actOpen.icon }}" width="14" height="14" hint-size="14px,14px"></x-import></span>
+          <span style="min-width:0;display:grid;gap:2px"><span style="font-weight:600;font-size:14px;color:var(--text-primary);line-height:1.2">{{ actOpen.label }} · last 7 days</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2">{{ actOpen.hint }}</span></span>
+          <span style="font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary);font-family:{{ actOpen.valueFont }}">{{ actOpen.value }}</span>
+          <span style="color:var(--text-muted);display:inline-flex"><x-import component-from-global-scope="CovenCave.Icon" name="ph:x" width="14" height="14" hint-size="14px,14px"></x-import></span>
+        </button>
+        <div style="overflow-y:auto;min-height:0;padding:16px;display:grid;gap:14px;align-content:start">
+          <sc-if value="{{ actOpen.rows }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid">
+              <sc-if value="{{ actOpen.isRuns }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:14px minmax(0,1fr) 52px 72px 60px;gap:10px;padding:0 0 6px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)"><span></span><span>Run</span><span style="text-align:right">Time</span><span style="text-align:right">Calls</span><span style="text-align:right">State</span></div></sc-if>
+              <sc-for list="{{ actOpen.rows }}" as="r" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 52px 72px 60px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border-hairline);font-size:12px">
+                  <span style="display:inline-flex;color:{{ r.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ r.icon }}" width="13" height="13" hint-size="13px,13px"></x-import></span>
+                  <span style="min-width:0;display:grid;gap:1px"><span style="color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span><sc-if value="{{ r.note }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.note }}</span></sc-if></span>
+                  <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);text-align:right;font-variant-numeric:tabular-nums">{{ r.dur }}</span>
+                  <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums">{{ r.calls }}</span>
+                  <span style="font-size:11px;color:{{ r.tone }};text-align:right;font-weight:600">{{ r.status }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ actOpen.barsList }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;gap:8px">
+              <sc-for list="{{ actOpen.barsList }}" as="bl" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:12px;align-items:center;font-size:12px"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ bl.label }}</code><span style="height:6px;border-radius:3px;background:var(--bg-elevated);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ bl.w }};background:{{ bl.bg }};border-radius:2px"></span></span><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:{{ bl.color }};font-variant-numeric:tabular-nums;white-space:nowrap">{{ bl.value }}</span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ actOpen.note }}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:12px;line-height:1.5;color:var(--text-muted)">{{ actOpen.note }}</p></sc-if>
+        </div>
+      </section>
+    </sc-if>
+  </sc-if>
+  <sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-label="Search conversations" style="position:absolute;inset:0;z-index:80;display:grid;align-items:start;justify-items:center;padding-top:12vh;background:rgba(6,6,8,0.6);backdrop-filter:blur(6px);animation:fam-fade 140ms">
+      <button onClick="{{ closeSearch }}" aria-hidden="true" tabIndex="-1" style="position:absolute;inset:0;border:0;background:transparent;cursor:default"></button>
+      <div style="position:relative;width:min(560px,92%);border:1px solid var(--border-strong);border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 40%),var(--bg-elevated);box-shadow:0 30px 80px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.06);overflow:hidden;animation:fam-rise 220ms cubic-bezier(0.2,0.8,0.2,1)">
+        <div style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;padding:0 14px;height:48px;border-bottom:1px solid var(--border-hairline);color:var(--text-muted)">
+          <x-import component-from-global-scope="CovenCave.Icon" name="ph:magnifying-glass" width="16" height="16" hint-size="16px,16px"></x-import>
+          <input id="fam-search" value="{{ searchQuery }}" onChange="{{ onSearch }}" onKeyDown="{{ onSearchKey }}" placeholder="Search conversations…" aria-label="Search conversations" autoFocus="{{ true }}" style="border:0;outline:none;background:transparent;color:var(--text-primary);font:inherit;font-size:14px;min-width:0">
+          <kbd style="font-family:var(--font-jetbrains-mono);font-size:10px;padding:2px 6px;border:1px solid var(--border-hairline);border-radius:5px;color:var(--text-muted)">esc</kbd>
+        </div>
+        <div style="padding:6px;display:grid;gap:1px;max-height:52vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;padding:6px 8px 4px;font-family:var(--font-inter);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--text-muted)"><span>Conversations</span><span>{{ searchCount }}</span></div>
+          <sc-for list="{{ searchResults }}" as="r" hint-placeholder-count="4">
+            <button onClick="{{ r.select }}" style="display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;padding:8px 8px;border:0;border-radius:6px;background:{{ r.bg }};color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-hover)">
+              <span style="width:24px;height:24px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:11px;background:var(--bg-hover);color:var(--text-primary)">{{ r.initial }}</span>
+              <span style="min-width:0;display:grid;gap:1px"><span style="display:flex;align-items:center;gap:6px;min-width:0"><sc-if value="{{ r.dot }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ r.dot }};flex:none"></span></sc-if><span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span></span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.familiarName }} · {{ r.preview }}</span></span>
+              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums">{{ r.time }}</span>
+            </button>
+          </sc-for>
+          <sc-if value="{{ searchEmpty }}" hint-placeholder-val="{{ false }}"><div style="padding:20px 12px 24px;text-align:center;font-size:12px;color:var(--text-muted)">No conversations match “{{ searchQuery }}”.</div></sc-if>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:12px;padding:8px 14px;border-top:1px solid var(--border-hairline);font-size:11px;color:var(--text-muted)"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ lightbox }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-label="{{ lightbox.alt }}" style="position:absolute;inset:0;z-index:90;display:grid;place-items:center;padding:40px;background:rgba(4,4,6,0.78);backdrop-filter:blur(10px);animation:fam-fade 180ms">
+      <button onClick="{{ closeLightbox }}" aria-hidden="true" tabIndex="-1" style="position:absolute;inset:0;border:0;background:transparent;cursor:zoom-out"></button>
+      <figure style="position:relative;margin:0;width:min(960px,100%);border:1px solid var(--border-strong);border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 40%),var(--bg-raised);box-shadow:0 40px 120px rgba(0,0,0,0.75),inset 0 1px 0 rgba(255,255,255,0.06);overflow:hidden;animation:fam-rise 260ms cubic-bezier(0.2,0.8,0.2,1)">
+        <div role="img" aria-label="{{ lightbox.alt }}" style="position:relative;aspect-ratio:16/10;background:radial-gradient(80% 60% at 70% 30%,color-mix(in oklch,var(--accent-presence) 8%,transparent),transparent 70%),var(--bg-elevated);overflow:hidden">
+          <div style="position:absolute;inset:56px 40px 52px 48px;background-image:linear-gradient(to right,var(--border-hairline) 1px,transparent 1px),linear-gradient(to bottom,var(--border-hairline) 1px,transparent 1px);background-size:25% 33.4%;border-left:1px solid var(--border-strong);border-bottom:1px solid var(--border-strong)">
+            <sc-for list="{{ lightbox.plot }}" as="p" hint-placeholder-count="11">
+              <div style="position:absolute;left:{{ p.x }};top:{{ p.y }};transform:translate(-50%,-50%);display:grid;justify-items:center;gap:6px">
+                <span style="width:{{ p.bigSize }};height:{{ p.bigSize }};border-radius:999px;background:{{ p.fill }};border:1px solid {{ p.ring }};box-shadow:0 0 0 7px color-mix(in oklch,{{ p.ring }} 12%,transparent)"></span>
+                <span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap">{{ p.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <span style="position:absolute;left:24px;top:18px;font-size:15px;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em">Q3 pricing — evidence map</span>
+          <span style="position:absolute;right:24px;top:21px;display:flex;gap:14px;font-size:12px;color:var(--text-secondary)"><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:999px;background:var(--accent-presence)"></span>verified</span><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:999px;background:var(--color-warning)"></span>flagged</span><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:999px;background:var(--text-muted)"></span>inferred</span></span>
+          <span style="position:absolute;left:48px;right:40px;bottom:18px;display:flex;justify-content:space-between;font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted)"><span>weaker evidence</span><span>stronger evidence →</span></span>
+          <span style="position:absolute;left:14px;top:50%;transform:rotate(-90deg) translateX(-50%);transform-origin:left top;font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted);white-space:nowrap">claim weight ↑</span>
+        </div>
+        <figcaption style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid var(--border-hairline);font-size:12px"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary)">{{ lightbox.file }}</code><span style="display:flex;gap:6px;align-items:center"><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="sm" hint-size="auto,26px">Save Note</x-import><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="sm" on-click="{{ closeLightbox }}" hint-size="auto,26px">Close</x-import><kbd style="font-family:var(--font-jetbrains-mono);font-size:10px;color:var(--text-muted)">esc</kbd></span></figcaption>
+      </figure>
+    </div>
+  </sc-if>
+  <sc-if value="{{ famCard }}" hint-placeholder-val="{{ false }}">
+    <button onClick="{{ closeFamCard }}" aria-hidden="true" tabIndex="-1" style="position:absolute;inset:0;z-index:70;border:0;background:transparent;cursor:default"></button>
+    <section role="dialog" aria-label="About {{ f.name }}" style="position:absolute;left:{{ famCard.x }};top:{{ famCard.y }};z-index:71;width:300px;padding:14px;border:1px solid var(--border-strong);border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 40%),var(--bg-elevated);box-shadow:0 24px 60px rgba(0,0,0,0.65),inset 0 1px 0 rgba(255,255,255,0.06);display:grid;gap:12px;animation:fam-rise 220ms cubic-bezier(0.2,0.8,0.2,1)">
+      <div style="display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;align-items:center">
+        <span style="position:relative;width:36px;height:36px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:14px;background:var(--bg-hover);color:var(--text-primary);box-shadow:0 0 0 1.5px var(--accent-presence)">{{ f.initial }}<span class="{{ f.liveClass }}" style="position:absolute;right:-2px;bottom:-2px;width:12px;height:12px;border-radius:999px;background:{{ f.presence }};border:2px solid var(--bg-elevated)"></span></span>
+        <span style="display:grid;gap:2px;min-width:0"><span style="font-weight:600;font-size:14px;letter-spacing:-0.01em">{{ f.name }}</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.role }} · {{ f.creature }} · {{ f.pronouns }}</span></span>
+      </div>
+      <p style="margin:0;font-size:12px;line-height:1.5;color:var(--text-secondary)">{{ f.purpose }}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;border:1px solid var(--border-hairline);border-radius:6px;background:var(--bg-sunken);overflow:hidden;font-size:12px">
+        <div style="padding:8px 10px;display:grid;gap:2px"><span style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)">May act</span><span style="color:var(--accent-presence);font-weight:600">{{ f.autoCount }}</span></div>
+        <div style="padding:8px 10px;display:grid;gap:2px;border-left:1px solid var(--border-hairline)"><span style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)">Must ask</span><span style="color:var(--color-warning);font-weight:600">{{ f.reviewCount }}</span></div>
+        <div style="padding:8px 10px;display:grid;gap:2px;border-left:1px solid var(--border-hairline)"><span style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)">Status</span><span style="font-weight:600;text-transform:capitalize">{{ f.statusLabel }}</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-muted)">ward.toml {{ f.wardVersion }}</code><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="xs" on-click="{{ famCardToAccess }}" hint-size="auto,22px">Open in inspector</x-import></div>
+    </section>
+  </sc-if>
+  <sc-if value="{{ doc }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-label="{{ doc.file }}" style="position:absolute;inset:0;z-index:85;display:grid;place-items:center;padding:40px;background:rgba(4,4,6,0.7);backdrop-filter:blur(8px);animation:fam-fade 160ms">
+      <button onClick="{{ closeDoc }}" aria-hidden="true" tabIndex="-1" style="position:absolute;inset:0;border:0;background:transparent;cursor:default"></button>
+      <article style="position:relative;width:min(680px,100%);max-height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;border:1px solid var(--border-strong);border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent 40%),var(--bg-raised);box-shadow:0 40px 120px rgba(0,0,0,0.75),inset 0 1px 0 rgba(255,255,255,0.06);overflow:hidden;animation:fam-rise 240ms cubic-bezier(0.2,0.8,0.2,1)">
+        <header style="display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border-hairline)">
+          <span style="display:inline-flex;color:var(--text-secondary)"><x-import component-from-global-scope="CovenCave.Icon" name="{{ doc.icon }}" width="15" height="15" hint-size="15px,15px"></x-import></span>
+          <span style="display:grid;gap:1px;min-width:0"><code style="font-family:var(--font-jetbrains-mono);font-size:13px;color:var(--text-primary)">{{ doc.file }}</code><span style="font-size:11px;color:var(--text-muted)">{{ doc.kind }} · {{ doc.context }}</span></span>
+          <kbd style="font-family:var(--font-jetbrains-mono);font-size:10px;padding:2px 6px;border:1px solid var(--border-hairline);border-radius:5px;color:var(--text-muted)">esc</kbd>
+        </header>
+        <div style="overflow-y:auto;padding:14px 16px;background:var(--bg-sunken)">
+          <sc-for list="{{ doc.lines }}" as="ln" hint-placeholder-count="8"><div style="display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;font-family:var(--font-jetbrains-mono);font-size:12px;line-height:1.7;background:{{ ln.bg }};border-radius:4px;margin:0 -6px;padding:0 6px"><span style="color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums;user-select:none">{{ ln.n }}</span><span style="color:{{ ln.color }};white-space:pre-wrap">{{ ln.text }}</span></div></sc-for>
+        </div>
+        <footer style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border-hairline);font-size:12px;color:var(--text-muted)"><span>{{ doc.foot }}</span><span style="display:flex;gap:6px"><x-import component-from-global-scope="CovenCave.Button" variant="secondary" size="sm" hint-size="auto,26px">Open in editor</x-import><x-import component-from-global-scope="CovenCave.Button" variant="ghost" size="sm" on-click="{{ closeDoc }}" hint-size="auto,26px">Close</x-import></span></footer>
+      </article>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;demoEmpty&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;none&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;conversations&quot;,&quot;runs&quot;,&quot;familiar&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;actOpen&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;inspectorOpen&quot;:{&quot;editor&quot;:null,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;holdState&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;searchOpen&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;frameHeight&quot;:{&quot;editor&quot;:null,&quot;default&quot;:&quot;100vh&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;accessGroups&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;default&quot;,&quot;options&quot;:[&quot;default&quot;,&quot;all&quot;],&quot;tsType&quot;:&quot;'default' | 'all'&quot;,&quot;section&quot;:&quot;Inspector&quot;},&quot;view&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;shell&quot;,&quot;options&quot;:[&quot;shell&quot;,&quot;sidebar&quot;,&quot;inspector&quot;,&quot;composer&quot;,&quot;hold&quot;],&quot;tsType&quot;:&quot;'shell' | 'sidebar' | 'inspector' | 'composer'&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;conversation&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;pricing&quot;,&quot;options&quot;:[&quot;pricing&quot;,&quot;ratelimit&quot;,&quot;flaky&quot;,&quot;vendor&quot;,&quot;inbox&quot;,&quot;sync&quot;,&quot;cat&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Content&quot;},&quot;draft&quot;:{&quot;editor&quot;:null,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;switcherOpen&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;slashOpen&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;sidebarOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;inspectorWidth&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;compact&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;,&quot;narrow&quot;],&quot;tsType&quot;:&quot;'comfortable' | 'compact'&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;inspectorTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;overview&quot;,&quot;options&quot;:[&quot;overview&quot;,&quot;access&quot;,&quot;activity&quot;],&quot;tsType&quot;:&quot;'overview' | 'access' | 'activity'&quot;,&quot;section&quot;:&quot;Inspector&quot;}}">
+const HUES = { astra: 293, cody: 200, echo: 70 };
+const FAMILIARS = [
+  { id:'astra', name:'Astra', role:'Research and synthesis', creature:'Cartographer', pronouns:'she/her', status:'available', person:'Val Alexander', project:'Quick chats',
+    purpose:'To map unfamiliar territory so a decision can be made on evidence.', memory:{entries:412,last:'2 hours ago'},
+    ward:{version:'0.3.1', auto:['read files','search the web','write to notes/'], review:['publish a finding','open a pull request'], paths:['TOOLS.md','HEARTBEAT.md','notes/']},
+    triggers:[[/publish/i,'publish a finding'],[/pull request|\/pr\b/i,'open a pull request']],
+    contract:[['Named identity','SOUL.md',true,'Declared as Astra, a cartographer.'],['Defined purpose','SOUL.md',true,'3 core work items, 2 explicit non-goals.'],['Bounded authority','ward.toml',true,'2 actions held for human review.'],['Persistent memory','MEMORY.md',true,'412 entries, last written 2 hours ago.'],['Human belonging','ward.toml',true,'Bound to Val Alexander as a protected invariant.']],
+    act:{ completion:'100%', runs:'12 of 12 runs', median:'1m 36s', calls:'148', failures:'2 reported failures', last:'2h ago', updated:'2h ago', outcomes:[['completed',12,'ok'],['held for you',1,'warn'],['failed',0,'bad']], spread:[['fastest','41s'],['p50','1m 36s'],['p90','2m 48s'],['slowest','3m 04s']], tools:[['files.read',58],['web.search',36],['web.fetch',22,2],['files.write',19],['image.render',13]], days:[[2,0],[1,0],[3,1],[0,0],[2,0],[3,1],[1,0]],
+      recent:[['Q3 pricing evidence map','1m 52s · 14 tool calls · 1 retry','held','warn'],['Vendor deck comparison','58s · 9 tool calls','done','ok'],['Benchmark fetch','2m 10s · 11 tool calls · 1 retry','done','ok'],['Source ledger rebuild','3m 04s · 22 tool calls','done','ok']] } },
+  { id:'cody', name:'Cody', role:'Implementation', creature:'Artificer', pronouns:'he/him', status:'working', person:'Val Alexander', project:'coven-chat',
+    purpose:'To turn a decided design into working, verified software.', memory:{entries:1284,last:'11 minutes ago'},
+    ward:{version:'0.4.0', auto:['run tests','read files','write to scratch/'], review:['push a branch','merge a pull request','change CI'], paths:['TOOLS.md','scratch/']},
+    triggers:[[/push/i,'push a branch'],[/merge/i,'merge a pull request'],[/\bci\b/i,'change CI']],
+    contract:[['Named identity','SOUL.md',true,'Declared as Cody, an artificer.'],['Defined purpose','SOUL.md',true,'3 core work items, 2 explicit non-goals.'],['Bounded authority','ward.toml',true,'3 actions held for human review.'],['Persistent memory','MEMORY.md',true,'1,284 entries, last written 11 minutes ago.'],['Human belonging','ward.toml',true,'Bound to Val Alexander as a protected invariant.']],
+    act:{ completion:'82%', runs:'9 of 11 runs', median:'4m 12s', calls:'312', failures:'5 reported failures', last:'11m ago', updated:'11m ago', outcomes:[['completed',9,'ok'],['held for you',1,'warn'],['failed',2,'bad']], spread:[['fastest','1m 02s'],['p50','4m 12s'],['p90','7m 40s'],['slowest','8m 12s']], tools:[['files.read',140],['pnpm test',48,4],['files.write',41],['git',38],['web.search',30,1],['scratch.exec',15]], days:[[1,0],[2,1],[2,0],[1,0],[3,0],[1,1],[1,0]],
+      recent:[['Open PR: rate limiter','6m 40s · 48 tool calls','held','warn'],['Flaky test in auth suite','2m 05s · pnpm test exited 1','failed','bad'],['Refactor token store','8m 12s · 61 tool calls','done','ok'],['Add retry to fetcher','3m 30s · 27 tool calls','done','ok']] } },
+  { id:'echo', name:'Echo', role:'Correspondence', creature:'Herald', pronouns:'they/them', status:'offline', person:'Val Alexander', project:'Inbox',
+    purpose:'To keep correspondence answered without answering as the person.', memory:null,
+    ward:{version:'0.2.0', auto:['read mail','draft a reply'], review:['send','archive'], paths:['TOOLS.md']},
+    triggers:[[/\bsend\b/i,'send'],[/archive/i,'archive']],
+    contract:[['Named identity','SOUL.md',true,'Declared as Echo, a herald.'],['Defined purpose','SOUL.md',true,'3 core work items, 2 explicit non-goals.'],['Bounded authority','ward.toml',true,'2 actions held for human review.'],['Persistent memory','MEMORY.md',false,'MEMORY.md is absent. Nothing persists between runs.'],['Human belonging','ward.toml',true,'Bound to Val Alexander as a protected invariant.']],
+    act:{ completion:'100%', runs:'6 of 6 runs', median:'22s', calls:'41', failures:'0 reported failures', last:'Mon', updated:'Mon', outcomes:[['completed',6,'ok'],['held for you',0,'warn'],['failed',0,'bad']], spread:[['fastest','9s'],['p50','22s'],['p90','38s'],['slowest','41s']], tools:[['mail.read',24],['mail.draft',12],['files.write',5]], days:[[0,0],[2,0],[0,0],[1,0],[2,0],[1,0],[0,0]],
+      recent:[['Inbox triage · Monday','41s · 12 tool calls','done','ok'],['Reschedule the board sync','18s · 3 tool calls','done','ok'],['Weekly digest draft','26s · 6 tool calls','done','ok']] } },
+];
+const CONVS = [
+  { id:'pricing', fam:'astra', title:'Q3 pricing evidence map', time:'10:52 PM', preview:'Publish a finding · waiting on you', held:true },
+  { id:'ratelimit', fam:'cody', title:'Open PR: rate limiter', time:'9:14 AM', preview:'Open a pull request · waiting on you', held:true },
+  { id:'flaky', fam:'cody', title:'Flaky test in auth suite', time:'8:40 AM', preview:'pnpm test exited 1 · stopped', failed:true },
+  { id:'vendor', fam:'astra', title:'Vendor deck comparison', time:'Yesterday', preview:'Source ledger has 14 entries' },
+  { id:'inbox', fam:'echo', title:'Inbox triage · Monday', time:'Mon', preview:'Drafted 6 replies for review' },
+  { id:'sync', fam:'echo', title:'Reschedule the board sync', time:'Mon', preview:'Draft ready for review' },
+  { id:'cat', fam:'astra', title:'Purple cat sketch', time:'Sun', preview:'/image cat purple' },
+];
+const STEP = (icon, title, text, opts={}) => Object.assign({ icon, title, text, status:'ok', dur:'' }, opts);
+const MESSAGES = {
+  pricing: [
+    { kind:'divider', text:'Yesterday 10:39 PM' },
+    { kind:'user', time:'10:39 PM', text:'Map the evidence for the Q3 pricing decision. Start from the two vendor decks in notes/pricing/.' },
+    { kind:'familiar', time:'10:39 PM', text:'On it. I’ll read both decks, pull the public benchmarks they cite, and keep a source ledger as I go — nothing leaves notes/ without you.' },
+    { kind:'reasoning', id:'r1', summary:'Read two decks, verified four cited benchmarks, built the evidence map.', duration:'1m 52s', toolCalls:14, footer:'Retried one fetch after a timeout; nothing was skipped.',
+      steps:[
+        STEP('ph:file-text','Read the vendor decks','Both decks in notes/pricing/ parsed; 11 pricing claims extracted with page references.',{tool:'files.read', dur:'6s'}),
+        STEP('ph:magnifying-glass','Trace cited benchmarks','Three of four claims cite public benchmarks. One cites an internal deck I can’t reach — flagged, not inferred.',{tool:'web.search', dur:'21s'}),
+        STEP('ph:globe','Fetch benchmark source','Request timed out after 15s.',{tool:'web.fetch', dur:'15s', status:'failed', badge:'timeout'}),
+        STEP('ph:arrow-clockwise','Retry fetch','Second attempt succeeded; the benchmark matches the deck within 3%.',{tool:'web.fetch', dur:'4s', badge:'retry'}),
+        STEP('ph:list-checks','Write the source ledger','14 entries appended to notes/ledger.md — each claim, its source, and how confident I am.',{tool:'files.write', dur:'3s'}),
+        STEP('ph:image','Compose the evidence map','Rendered claims by strength of evidence so the weak spots read at a glance.',{tool:'image.render', dur:'1m 03s'}),
+      ] },
+    { kind:'hold', id:'h1', time:'10:52 PM', title:'Publish a finding', detail:'Publish “Q3 pricing — evidence map” from notes/findings/pricing-q3.md to the shared findings board.',
+      facts:[['Source','notes/findings/pricing-q3.md'],['Destination','findings board · coven/research'],['Reversible','no — published findings are versioned, not deleted']], openLabel:'Open draft',
+      approvedText:'Published. The finding is live on the board and the ledger links back to it. Memory updated — 413 entries.', declinedText:'Understood. The draft stays in notes/findings/ until you say otherwise; I’ve noted the decision in the ledger.' },
+    { kind:'image', time:'10:41 PM', alt:'Evidence map — 11 claims plotted by source strength', file:'notes/findings/evidence-map.png · 1200×800', plot:[
+        ['C1 list price',88,22,'ok',14],['C2 volume tier',78,38,'ok',12],['C3 renewal uplift',64,30,'ok',11],['C4 support SLA',72,66,'ok',10],['C5 seat minimum',55,52,'ok',10],['C6 overage rate',46,44,'ok',9],['C7 discount floor',40,72,'warn',11],['C8 competitor A',30,26,'inf',9],['C9 competitor B',24,60,'inf',9],['C10 churn impact',15,80,'inf',8],['C11 internal deck',12,40,'warn',10],
+      ] },
+    { kind:'familiar', time:'10:52 PM', text:'Draft finding is ready in notes/findings/pricing-q3.md. Publishing it to the findings board is outside what I can do on my own.' },
+  ],
+  ratelimit: [
+    { kind:'divider', text:'Today 8:58 AM' },
+    { kind:'user', time:'8:58 AM', text:'Wire the rate limiter into the pairing endpoint and get it ready for review.' },
+    { kind:'familiar', time:'9:02 AM', text:'Implemented on scratch/rate-limiter and the suite passes locally (42/42). Opening the pull request is held for you.' },
+    { kind:'hold', id:'h2', time:'9:14 AM', title:'Open a pull request', detail:'Cody wants to open a pull request from scratch/rate-limiter into main. Opening PRs is in his must-ask tier.',
+      facts:[['Branch','scratch/rate-limiter → main'],['Changes','+412 −38 across 7 files'],['Checks','42 tests passing locally']], openLabel:'Open diff',
+      approvedText:'PR #214 is open. I’ll watch CI and report back — I won’t merge; that’s another ask.', declinedText:'Understood. The branch stays local; tell me what to change.' },
+  ],
+  flaky: [
+    { kind:'divider', text:'Today 8:31 AM' },
+    { kind:'user', time:'8:31 AM', text:'Why is the auth suite flaky?' },
+    { kind:'reasoning', id:'r2', summary:'Ran the suite three times; the token-expiry test fails under load.', duration:'2m 05s', toolCalls:9, footer:'Stopped rather than patch around a timing bug.',
+      steps:[
+        STEP('ph:file-text','Read the failing test','token-expiry.test.ts asserts expiry at exactly 300s.',{tool:'files.read', dur:'2s'}),
+        STEP('ph:terminal-window','Run the suite','41/42 passed. token-expiry failed by 8ms.',{tool:'pnpm test', dur:'38s', status:'failed', badge:'exit 1'}),
+        STEP('ph:arrow-clockwise','Run again, isolated','Passes alone. Fails when the pairing tests run first.',{tool:'pnpm test', dur:'44s', badge:'retry'}),
+        STEP('ph:terminal-window','Run with timing trace','Clock skew from a shared fake timer in setup.ts.',{tool:'pnpm test', dur:'41s', status:'failed', badge:'exit 1'}),
+      ] },
+    { kind:'failed', text:'pnpm test exited 1 on the final run. The fix touches src/test/setup.ts, which is outside scratch/ — Cody stopped instead of editing it.' },
+    { kind:'familiar', time:'8:40 AM', text:'The shared fake timer in setup.ts leaks between suites. Fixing it means editing a file outside my reach; if you widen the ward or fix it yourself, I’ll rerun.' },
+  ],
+  vendor: [ { kind:'divider', text:'Yesterday 3:10 PM' }, { kind:'user', time:'3:10 PM', text:'Compare the two vendor decks on pricing tiers.' }, { kind:'familiar', time:'3:12 PM', text:'Done — 14 ledger entries, three unresolved disagreements flagged in notes/pricing/compare.md.' } ],
+  inbox: [ { kind:'divider', text:'Monday 9:00 AM' }, { kind:'user', time:'9:00 AM', text:'Triage the inbox.' }, { kind:'familiar', time:'9:01 AM', text:'Six replies drafted and waiting in review. Nothing was sent.' } ],
+  sync: [ { kind:'divider', text:'Monday 4:20 PM' }, { kind:'user', time:'4:20 PM', text:'Draft a note moving the board sync to Thursday.' }, { kind:'familiar', time:'4:21 PM', text:'Draft is ready. Sending is held for you whenever you want it to go.' } ],
+  cat: [ { kind:'divider', text:'Sunday 10:39 PM' }, { kind:'user', time:'10:41 PM', text:'/image cat purple' }, { kind:'image', time:'10:41 PM', alt:'A purple cat in a glowing garden', file:'notes/images/cat-purple.png · 600×400' } ],
+};
+const COMMANDS = [
+  { name:'/image', hint:'Generate an image from a prompt', tier:'may act' },
+  { name:'/spec', hint:'Draft a specification document', tier:'may act' },
+  { name:'/handoff', hint:'Write a handoff for another session', tier:'may act' },
+  { name:'/publish', hint:'Publish a finding to the board', tier:'must ask' },
+  { name:'/pr', hint:'Open a pull request', tier:'must ask' },
+];
+const DOCS = {
+  'TOOLS.md': { kind:'Editable file', lines:['# Tools','','Astra may call the tools listed here and no others.','','- files.read — any path in the project','- web.search — public web, results logged to the ledger','- web.fetch — public pages only; 15s timeout, one retry','- files.write — notes/ only','- image.render — local, deterministic','','_Changes to this file are logged to the ward audit._'] },
+  'HEARTBEAT.md': { kind:'Editable file', lines:['# Heartbeat','','Last run: Q3 pricing evidence map — 1m 52s, 14 tool calls, 1 retry.','Memory: 412 entries · last written 2 hours ago.','Held: publish a finding (waiting on Val).','','Next: none scheduled.'] },
+  'notes/': { kind:'Editable directory', lines:['notes/','├── ledger.md            14 entries','├── pricing/','│   ├── vendor-a.md','│   ├── vendor-b.md','│   └── compare.md','├── findings/','│   ├── pricing-q3.md     draft · held','│   └── evidence-map.png','└── images/','    └── cat-purple.png'] },
+  'scratch/': { kind:'Editable directory', lines:['scratch/','├── rate-limiter/        branch, 42 tests passing','└── auth-suite-trace.log'] },
+  'ward.toml': { kind:'Ward contract', lines:['[meta]','version = "0.3.1"','familiar = "Astra"','person = "Val Alexander"','','[protected]','files = ["SOUL.md", "IDENTITY.md", "MEMORY.md", "ward.toml"]','invariants = ["familiar.name", "familiar.person", "soul.boundaries"]','','[editable]','paths = ["TOOLS.md", "HEARTBEAT.md", "notes/"]','','[approval_tiers]','auto = ["read files", "search the web", "write to notes/"]','human_review = ["publish a finding", "open a pull request"]'] },
+  'SOUL.md': { kind:'Protected file', lines:['# Astra','','**Purpose.** To map unfamiliar territory so a decision can be made on evidence.','','## Core work','- Gather sources and record where each claim came from','- Separate what is established from what is inferred','- Write findings that survive being read by a sceptic','','## What I am not','- Not a summariser that flattens disagreement','- Not a source of claims it has not checked','','## My boundaries','- Never presents an inference as a citation','- Never edits code outside a research worktree'] },
+  'MEMORY.md': { kind:'Protected file', lines:['# Memory','','412 entries · last written 2 hours ago','','- 2026-09-01 22:52  Held: publish a finding (pricing-q3)','- 2026-09-01 22:41  Ledger +14 · evidence map rendered','- 2026-09-01 22:39  Read vendor decks (11 claims)','- 2026-08-31 15:12  Vendor deck comparison complete','…'] },
+};
+const PRESENCE = { available:'var(--accent-presence)', working:'var(--color-warning)', offline:'var(--text-muted)' };
+const STATUS_LABEL = { available:'available', working:'working', offline:'offline' };
+function mark(id) { return {}; }
+class Component extends DCLogic {
+  state = { conv:'pricing', tab:null, sidebarOpen:null, switcherOpen:null, slashOpen:null, draft:null, holds:{}, actOpen:undefined, decidedAt:'', reasoningOpen:{ r1:true, r2:true }, groups:{ auto:true, review:true, paths:true }, thinking:false, extra:{} };
+  componentDidMount() {
+    this.onKey = (e) => {
+      const meta = e.metaKey || e.ctrlKey;
+      const conv = CONVS.find(c => c.id === this.convId());
+      const pending = conv && conv.held && !this.state.holds[conv.id];
+      if (meta && e.key === 'Enter' && pending) { e.preventDefault(); this.decide('approved'); }
+      else if (meta && e.key === 'Backspace' && pending) { e.preventDefault(); this.decide('declined'); }
+      else if (e.key === 'Escape') { this.setState({ switcherOpen:false, slashOpen:false, actOpen:null, searchOpen:false, lightbox:null, famCard:null, doc:null }); }
+      else if (e.key === '[' && !e.target.closest('textarea,input')) { this.setState(s => ({ sidebarOpen: !this.sidebarOpen() })); }
+      else if (e.key === ']' && !e.target.closest('textarea,input')) { this.setState(st => ({ inspectorOpen: !(st.inspectorOpen ?? true) })); }
+      else if (meta && e.key.toLowerCase() === 'k') { e.preventDefault(); this.openSearch(); }
+    };
+    window.addEventListener('keydown', this.onKey);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this.onKey); }
+  openSearch() { this.setState({ searchOpen:true, searchQuery:'', switcherOpen:false }); setTimeout(()=>{ const el=document.getElementById('fam-search'); el&&el.focus(); }, 30); }
+  sidebarOpen() { return this.state.sidebarOpen ?? (this.props.sidebarOpen ?? true); }
+  convId() { return this.props.conversation && !this.state.convTouched ? this.props.conversation : this.state.conv; }
+  tab() { return this.state.tab ?? (this.props.inspectorTab ?? 'access'); }
+  decide(v) {
+    const conv = this.convId(); const t = new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+    this.setState(s => ({ holds:{ ...s.holds, [conv]:v }, decidedAt:t, thinking:true }));
+    clearTimeout(this.tm); this.tm = setTimeout(() => this.setState(s => {
+      const hold = MESSAGES[conv].find(m => m.kind === 'hold');
+      const txt = v === 'approved' ? hold.approvedText : hold.declinedText;
+      return { thinking:false, extra:{ ...s.extra, [conv]:[...(s.extra[conv]||[]), { kind:'familiar', time:t, text:txt, decision:true }] } };
+    }), 1400);
+  }
+  undoDecision() {
+    const conv = this.convId(); clearTimeout(this.tm);
+    this.setState(s => { const holds = { ...s.holds }; delete holds[conv]; return { holds, thinking:false, extra:{ ...s.extra, [conv]:(s.extra[conv]||[]).filter(m=>!m.decision) } }; });
+  }
+  renderVals() {
+    const s = { ...this.state, switcherOpen: this.state.switcherOpen ?? !!this.props.switcherOpen, slashOpen: this.state.slashOpen ?? !!this.props.slashOpen, draft: this.state.draft ?? (this.props.draft || ''), conv: this.props.conversation && !this.state.convTouched ? this.props.conversation : this.state.conv }; const conv = CONVS.find(c => c.id === s.conv) || CONVS[0]; const fam = FAMILIARS.find(x => x.id === conv.fam);
+    const compact = this.props.inspectorWidth === 'compact';
+    const inspOpen = this.state.inspectorOpen ?? (this.props.inspectorOpen ?? true); const inspW = inspOpen ? (this.props.inspectorWidth==='narrow' ? 320 : compact ? 360 : 400) : 0; const sideOpen = this.sidebarOpen();
+    const famView = (x) => ({ ...mark(x.id), liveClass: x.status==='available' ? 'fam-live' : '', id:x.id, name:x.name, role:x.role, creature:x.creature, pronouns:x.pronouns, initial:x.name[0], presence:PRESENCE[x.status], statusLabel:STATUS_LABEL[x.status], purpose:x.purpose, wardVersion:x.ward.version, contractScore:`${x.contract.filter(c=>c[2]).length}/${x.contract.length}`, autoCount:x.ward.auto.length, reviewCount:x.ward.review.length, pathCount:x.ward.paths.length, act:x.act, isActive:x.id===fam.id, rowBg:x.id===fam.id?'var(--bg-hover)':'transparent', ring: x.id===fam.id ? '0 0 0 1.5px var(--accent-presence)' : 'none', meta: CONVS.filter(c=>c.fam===x.id&&c.held&&!s.holds[c.id]).length ? `${CONVS.filter(c=>c.fam===x.id&&c.held&&!s.holds[c.id]).length} held` : STATUS_LABEL[x.status], metaColor: CONVS.some(c=>c.fam===x.id&&c.held&&!s.holds[c.id]) ? 'var(--color-warning)' : 'var(--text-muted)', heldCount:CONVS.filter(c=>c.fam===x.id&&c.held&&!s.holds[c.id]).length, hasHeld:CONVS.some(c=>c.fam===x.id&&c.held&&!s.holds[c.id]), select:()=>{ const first = CONVS.find(c=>c.fam===x.id); this.setState({ conv:first.id, convTouched:true, switcherOpen:false }); } });
+    const f = famView(fam);
+    const convView = (c) => { const cf = FAMILIARS.find(x=>x.id===c.fam); const active = c.id===s.conv; return { ...mark(cf.id), id:c.id, title:c.title, time:c.time, preview:c.preview, familiarName:cf.name, initial:cf.name[0], presence:PRESENCE[cf.status], failed:!!c.failed, isActive:active, titleWeight:active?600:500, rowBg: active ? 'var(--bg-hover)' : 'transparent', rowBorder:'transparent', select:()=>this.setState({ conv:c.id, convTouched:true, switcherOpen:false, slashOpen:false }) }; };
+    const recentAll = !!this.state.recentAll;
+    const needsYou = CONVS.filter(c=>c.held&&!s.holds[c.id]).map(convView).map(v=>({ ...v, preview: v.preview.replace(/ · waiting on you$/,'') }));
+    const recent = CONVS.filter(c=>!(c.held&&!s.holds[c.id]) && (recentAll || c.fam===fam.id)).map(convView);
+    const hold = s.holds[conv.id];
+    const view = this.props.view || 'shell';
+    const messages = (view==='hold' ? MESSAGES[conv.id].filter(m=>m.kind==='hold') : [...MESSAGES[conv.id], ...(s.extra[conv.id]||[])]).map((m,i) => {
+      const v = { ...m, isDivider:m.kind==='divider', isUser:m.kind==='user', isFamiliar:m.kind==='familiar', isReasoning:m.kind==='reasoning', isImage:m.kind==='image', isHold:m.kind==='hold', isFailed:m.kind==='failed' };
+      if (v.isReasoning) { v.raw = m; }
+      if (v.isImage) { v.openLightbox = () => this.setState({ lightbox: i }); v.openLightboxKey = (e) => { if (e.key==='Enter' || e.key===' ') { e.preventDefault(); this.setState({ lightbox: i }); } }; v.noPlot = !m.plot; if (m.plot) v.plot = m.plot.map(([label,x,y,k,sz])=>({ label, x:`${x}%`, y:`${100-y}%`, size:`${sz}px`, fill: k==='ok' ? 'color-mix(in oklch, var(--accent-presence) 55%, var(--bg-elevated))' : k==='warn' ? 'color-mix(in oklch, var(--color-warning) 55%, var(--bg-elevated))' : 'var(--bg-hover)', ring: k==='ok' ? 'var(--accent-presence)' : k==='warn' ? 'var(--color-warning)' : 'var(--text-muted)' })); }
+      v.delay = `${Math.min(i, 8) * 45}ms`;
+      if (v.isHold) { const hs = this.props.holdState && view==='hold' ? this.props.holdState : hold; v.pending = !hs; v.approved = hs==='approved'; v.declined = hs==='declined'; v.expired = hs==='expired'; v.facts = m.facts.map(([label,value],i)=>{ const isNo = /^no\b/i.test(value); const short = isNo ? 'No' : value; return { label, value: short, border: i===0?'0':'1px solid var(--border-hairline)', font: isNo ? 'inherit' : 'var(--font-jetbrains-mono)', size: isNo ? '12px' : '11px', color: isNo ? 'var(--color-warning)' : 'var(--text-primary)', weight: isNo ? 600 : 400 }; }); v.factCols = m.facts.length; }
+      return v;
+    });
+    const draft = s.draft; const trig = fam.triggers.find(([re]) => re.test(draft));
+    const slashOpen = s.slashOpen || (/^\/\S*$/.test(draft) && draft.length>0);
+    const cmds = COMMANDS.filter(c => !draft.startsWith('/') || c.name.startsWith(draft.split(' ')[0]) || slashOpen && s.slashOpen);
+    const commands = cmds.map((c,i)=>({ ...c, hi:i===0, bg:i===0?'var(--bg-hover)':'transparent', mustAsk:c.tier==='must ask', tierColor:c.tier==='must ask'?'var(--color-warning)':'var(--text-muted)', pick:()=>{ this.setState({ draft:c.name+' ', slashOpen:false }); const el=document.getElementById('fam-composer'); el&&el.focus(); } }));
+    const tab = this.tab();
+    const g = s.groups;
+    const tone = { auto:'var(--text-secondary)', review:'var(--color-warning)', paths:'var(--text-secondary)', contract: fam.contract.every(c=>c[2])?'var(--text-secondary)':'var(--color-warning)' };
+    const contractOk = fam.contract.every(c=>c[2]); const allOpen = this.props.accessGroups === 'all'; const isOpen = (key) => allOpen || (g[key] ?? (key==='contract' ? !contractOk : false));
+    const mkGroup = (key, icon, label, summary, count, items, extra={}) => ({ key, icon, label, summary, count, items, tone:tone[key], open:isOpen(key), caret:isOpen(key)?'rotate(180deg)':'none', countColor: key==='contract'&&!fam.contract.every(c=>c[2]) ? 'var(--color-warning)' : 'var(--text-primary)', toggle:()=>this.setState(st=>({ groups:{ ...st.groups, [key]:!isOpen(key) } })), ...extra });
+    const heldTitles = CONVS.filter(c=>c.fam===fam.id&&c.held&&!s.holds[c.id]).map(c=>MESSAGES[c.id].find(m=>m.kind==='hold').title.toLowerCase());
+    const accessGroups = [
+      mkGroup('auto','ph:check','May act','Runs immediately, logged to the ledger', fam.ward.auto.length, fam.ward.auto.map(t=>({ text:t, font:'inherit', size:'12px', docTitle:'ward.toml', open:()=>this.setState({ doc:{ file:'ward.toml', title:t, hl:t } }) }))),
+      mkGroup('review','ph:hand','Must ask','Held until you approve or decline', fam.ward.review.length, fam.ward.review.map(t=>({ text:t, warn:true, font:'inherit', size:'12px', badge: heldTitles.includes(t)?'1 held now':null, docTitle:'ward.toml', open:()=>this.setState({ doc:{ file:'ward.toml', title:t, hl:t } }) }))),
+      mkGroup('paths','ph:folder-open','Workspace reach',`The only paths ${fam.name} may change`, fam.ward.paths.length, fam.ward.paths.map(t=>({ text:t, font:'var(--font-jetbrains-mono)', size:'11px', icon: t.endsWith('/') ? 'ph:folder-open' : 'ph:file-text', file: t.endsWith('/') ? 'directory' : 'file', docTitle:t, open:()=>this.setState({ doc:{ file:t, title:t } }) }))),
+      mkGroup('contract','ph:seal-check','Familiar contract',`ward.toml ${fam.ward.version} · ${fam.contract.filter(c=>c[2]).length} of ${fam.contract.length} properties met`, `${fam.contract.filter(c=>c[2]).length}/${fam.contract.length}`, fam.contract.map(([p,file,ok,note])=>({ text:p, note, file, warn:!ok, font:'inherit', size:'12px', docTitle:file, open:()=>this.setState({ doc:{ file, title:p } }) })), { meter: fam.contract.map(c=>({ bg: c[2]?'var(--accent-presence)':'var(--color-warning)' })) }),
+    ];
+    const overviewRows = [
+      { label:'Status', hint: fam.status==='available'?'Available for this chat':fam.status==='working'?'Running a task in another chat':'Offline until summoned', value:STATUS_LABEL[fam.status], dot:PRESENCE[fam.status], valueColor:'var(--text-primary)', font:'inherit' },
+      { label:'Project', hint:'Files and memory scope', value:fam.project, valueColor:'var(--text-secondary)', font:'inherit' },
+      { label:'Memory', hint: fam.memory?`${fam.memory.entries.toLocaleString()} entries · MEMORY.md`:'No MEMORY.md — nothing persists', value: fam.memory?fam.memory.last:'off', valueColor: fam.memory?'var(--text-secondary)':'var(--color-warning)', font:'inherit' },
+      { label:'Belongs to', hint:'Protected invariant in ward.toml', value:fam.person, valueColor:'var(--text-secondary)', font:'inherit' },
+    ];
+    const a = fam.act; const max = Math.max(1, ...a.days.map(d=>d[0]+d[1]));
+    const H = 96; const days = a.days.map((d,i)=>({ label:['Mo','Tu','We','Th','Fr','Sa','Su'][i], count: d[0]+d[1] ? String(d[0]+d[1]) : '', countColor: d[0]+d[1] ? 'var(--text-secondary)' : 'var(--text-muted)', okH:`${Math.max(2, Math.round(d[0]/max*H))}px`, failH:`${Math.round(d[1]/max*H)}px`, okRadius: d[1]>0 ? '0 0 0 0' : '3px 3px 0 0', okBg: i===6 ? 'var(--accent-presence)' : 'color-mix(in oklch, var(--accent-presence) 78%, var(--bg-hover))', labelColor: i===6 ? 'var(--text-primary)' : 'var(--text-muted)' }));
+    const chart = { total: a.days.reduce((n,d)=>n+d[0]+d[1],0), ok: a.days.reduce((n,d)=>n+d[0],0), fail: a.days.reduce((n,d)=>n+d[1],0), failColor: a.days.some(d=>d[1]) ? 'var(--color-danger)' : 'var(--text-primary)' };
+    const toneOf = (t)=> t==='ok'?'var(--text-muted)':t==='warn'?'var(--color-warning)':'var(--color-danger)';
+    const iconOf = (t)=> t==='ok'?'ph:check':t==='warn'?'ph:hand':'ph:warning-circle-fill';
+    const runs = a.recent.map(([title,meta,status,t],i)=>{ const parts = meta.split(' · '); const dur = parts.find(p=>/^\d/.test(p) && /[smh]/.test(p) && !/tool/.test(p)) || ''; const callsP = parts.find(p=>/tool calls/.test(p)); const calls = callsP ? callsP.replace(' tool calls',' calls') : ''; const note = parts.filter(p=>p!==dur && p!==callsP).join(' · '); return { title, meta, dur, calls, note, status, tone: toneOf(t), icon: iconOf(t), border: i===0?'0':'1px solid var(--border-hairline)' }; });
+    const failedRuns = a.recent.filter(r=>r[3]==='bad').length, heldRuns = a.recent.filter(r=>r[3]==='warn').length;
+    const toolMax = Math.max(...a.tools.map(t=>t[1]));
+    const totalFails = a.tools.reduce((n,t)=>n+(t[2]||0),0);
+    const sectionsRaw = [
+      { key:'completion', icon:'ph:check', tone:'var(--text-secondary)', label:'Completion', hint:a.runs, value:a.completion, valueFont:'inherit',
+        rows: a.outcomes.map(([t,n,k],i)=>({ title:t, status:String(n), tone: n>0?toneOf(k):'var(--text-muted)', icon: iconOf(k), border: i===0?'0':'1px solid var(--border-hairline)' })), note:'A held run counts as in progress, not failed. Completion is completed ÷ attempted over the window.' },
+      { key:'duration', icon:'ph:timer', tone:'var(--text-secondary)', label:'Median duration', hint:'Across completed runs', value:a.median, valueFont:'var(--font-jetbrains-mono)',
+        barsList: a.spread.map(([l,v],i)=>({ label:l, value:v, w:`${[28,52,84,100][i]}%`, bg: i===1?'var(--accent-presence)':'var(--bg-hover)', color:'var(--text-secondary)' })), note:'Wall-clock time from first tool call to result, excluding time spent waiting on you.' },
+      { key:'tools', icon:'ph:wrench', tone: totalFails>0?'var(--color-danger)':'var(--text-secondary)', label:'Tool calls', hint:a.failures, value:a.calls, valueFont:'inherit',
+        barsList: a.tools.map(([l,n,f])=>({ label:l, value: f?`${n} · ${f} failed`:String(n), w:`${Math.round(n/toolMax*100)}%`, bg: f?'color-mix(in oklch, var(--color-danger) 55%, var(--bg-hover))':'var(--accent-presence)', color: f?'var(--color-danger)':'var(--text-secondary)' })), note:'Every call ran inside the may-act tier; nothing outside the ward was attempted.' },
+      { key:'recent', isRuns:true, icon:'ph:clock-counter-clockwise', tone: failedRuns>0?'var(--color-danger)':heldRuns>0?'var(--color-warning)':'var(--text-secondary)', label:'Recent runs', hint: [heldRuns?`${heldRuns} held`:null, failedRuns?`${failedRuns} failed`:null].filter(Boolean).join(' · ') || 'All completed', value:String(a.recent.length), valueFont:'inherit', rows: runs },
+    ];
+    const actKey = s.actOpen === undefined ? (this.props.actOpen || null) : s.actOpen; const actSections = sectionsRaw.map((sec,i)=>({ ...sec, open: actKey===sec.key, bg: actKey===sec.key ? 'linear-gradient(180deg,rgba(255,255,255,0.06),transparent 60%),var(--bg-hover)' : 'linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised)', rows: sec.rows ? (sec.isRuns ? sec.rows : sec.rows.map(r=>({ ...r, dur:'', calls:'' }))) : null, caret: actKey===sec.key ? 'rotate(180deg)' : 'none', top:`${34 + i*54}px`, toggle:()=>this.setState(st=>({ actOpen: actKey===sec.key?null:sec.key })) }));
+    const actOpen0 = actSections.find(x=>x.open) || null; const actOpen = actOpen0 ? { ...actOpen0, width: `${Math.min(inspW + 180, 580)}px` } : null;
+    const q = (s.searchQuery||'').trim().toLowerCase();
+    const searchResults = CONVS.filter(c => { const cf = FAMILIARS.find(x=>x.id===c.fam); return !q || [c.title, c.preview, cf.name].join(' ').toLowerCase().includes(q); }).map((c,i)=>{ const cf = FAMILIARS.find(x=>x.id===c.fam); return { title:c.title, preview:c.preview, time:c.time, familiarName:cf.name, initial:cf.name[0], dot: (c.held && !s.holds[c.id]) ? 'var(--color-warning)' : c.failed ? 'var(--color-danger)' : null, bg: i===0?'var(--bg-hover)':'transparent', select:()=>this.setState({ conv:c.id, convTouched:true, searchOpen:false }) }; });
+    const pendingHere = conv.held && !hold;
+    const showSidebar = view==='shell' || view==='sidebar', showThread = view==='shell' || view==='composer' || view==='hold', showInspector = view==='shell' || view==='inspector', showTranscript = view==='shell' || view==='hold';
+    const cols = view==='shell' ? `${sideOpen?300:0}px minmax(0,1fr) ${inspW}px` : view==='sidebar' ? '300px' : view==='inspector' ? `${inspW}px` : 'minmax(0,1fr)';
+    return {
+      columnMax: '1040px',
+      cols, showSidebar, showThread, showInspector, showTranscript, inspectorClosed: !inspOpen, inspectorBorder: inspOpen ? '1px solid var(--border-hairline)' : '0', toggleInspector: ()=>this.setState({ inspectorOpen: !inspOpen }), rootH: view==='shell' ? (this.props.frameHeight || '100vh') : view==='composer' ? 'auto' : '100%', rootMinW: view==='shell' ? '1280px' : '0', threadRows: view==='hold' ? 'minmax(0,1fr)' : showTranscript ? `${s.headerHidden ? 0 : 44}px minmax(0,1fr) auto` : 'auto', headerOpacity: s.headerHidden ? 0 : 1, onScroll: (e)=>{ const t = e.currentTarget.scrollTop; const last = this._lastScroll || 0; const down = t > last + 6 && t > 48; const up = t < last - 6 || t < 24; this._lastScroll = t; if (down && !this.state.headerHidden) this.setState({ headerHidden:true }); else if (up && this.state.headerHidden) this.setState({ headerHidden:false }); }, showHeader: view!=='hold', showComposer: view!=='hold', composerPad: showTranscript ? '8px 12px 10px' : '8px', composerTop: showTranscript ? '1px solid var(--border-hairline)' : '0', sidebarClosed: !sideOpen, toggleSidebar: ()=>this.setState({ sidebarOpen: !sideOpen }),
+      f, familiars: FAMILIARS.map(famView), switcherOpen: s.switcherOpen, toggleSwitcher: ()=>this.setState(st=>({ switcherOpen:!st.switcherOpen })),
+      needsYou, hasNeedsYou: needsYou.length>0, needsYouCount: needsYou.length, recent, recentCount: recent.length, recentEmpty: recent.length===0 || this.props.demoEmpty==='conversations', recentFilterLabel: recentAll ? 'All familiars' : fam.name, toggleRecentAll: ()=>this.setState({ recentAll: !recentAll }),
+      conv: { title: conv.title }, convHeld: pendingHere, jumpToHold: ()=>{ const el=document.getElementById('fam-hold'); const sc=document.getElementById('fam-transcript'); if(el&&sc){ sc.scrollTo({ top: el.offsetTop-40, behavior:'smooth' }); } },
+      famCard: s.famCard ? { x: `${s.famCard.x}px`, y: `${s.famCard.y}px` } : null, openFamCard: (e)=>{ const root = e.currentTarget.closest('.fam-shell'); const rb = root.getBoundingClientRect(); const b = e.currentTarget.getBoundingClientRect(); const x = Math.min(b.left - rb.left, rb.width - 320); const y = Math.min(b.bottom - rb.top + 8, rb.height - 260); this.setState({ famCard:{ x, y } }); }, closeFamCard: ()=>this.setState({ famCard:null }), famCardToAccess: ()=>this.setState({ famCard:null, inspectorOpen:true, tab:'access' }),
+      doc: (()=>{ const d = s.doc; if (!d) return null; const src = DOCS[d.file] || { kind:'File', lines:['(no preview available)'] }; const editable = fam.ward.paths.includes(d.file); return { file:d.file, kind:src.kind, icon: d.file.endsWith('/') ? 'ph:folder-open' : d.file==='ward.toml' ? 'ph:hand' : 'ph:file-text', context: editable ? `${fam.name} may edit` : `read-only for ${fam.name}`, foot: d.hl ? `Rule “${d.hl}” highlighted` : `${src.lines.length} lines`, lines: src.lines.map((t,i)=>({ n:i+1, text:t||' ', bg: d.hl && t.includes(d.hl) ? 'color-mix(in oklch,var(--accent-presence) 14%,transparent)' : 'transparent', color: /^#/.test(t) ? 'var(--text-primary)' : /^\[/.test(t) ? 'var(--accent-presence)' : 'var(--text-secondary)' })) }; })(), closeDoc: ()=>this.setState({ doc:null }),
+      messages, approve: ()=>this.decide('approved'), decline: ()=>this.decide('declined'), undoDecision: ()=>this.undoDecision(), decidedAt: s.decidedAt || '10:54 PM', thinking: s.thinking, thinkingLabel: `${fam.name} is updating memory`,
+      draft, onDraft: (e)=>this.setState({ draft:e.target.value, slashOpen:false }), rows: Math.min(8, Math.max(2, draft.split('\n').length + (draft.length > 90 ? 1 : 0))), placeholder: 'Type a message, or / for commands.',
+      onComposerKey: (e)=>{ if (e.key==='Tab' && slashOpen && commands[0]) { e.preventDefault(); commands[0].pick(); } else if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); if (slashOpen && commands[0] && /^\/\S*$/.test(draft)) commands[0].pick(); else this.sendDraft(); } },
+      send: ()=>this.sendDraft(), sendDisabled: draft.trim().length===0, sendBg: draft.trim()? 'linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.03)),color-mix(in oklch,var(--accent-presence) 26%,var(--bg-elevated))':'var(--bg-elevated)', sendFg: draft.trim()?'var(--text-primary)':'var(--text-muted)', sendBorder: draft.trim()?'color-mix(in oklch,var(--accent-presence) 45%,rgba(255,255,255,0.12))':'var(--border-hairline)',
+      slashOpen, openSlash: ()=>{ this.setState({ slashOpen:true, draft:'/' }); const el=document.getElementById('fam-composer'); el&&el.focus(); }, commands,
+      holdWarn: !!trig, holdItem: trig?trig[1]:'', composerBorder: trig ? 'color-mix(in oklch, var(--color-warning) 50%, transparent)' : 'var(--border-strong)',
+      lightbox: (()=>{ const m = s.lightbox!=null ? messages[s.lightbox] : null; return m && m.plot ? { ...m, plot: m.plot.map(p=>({ ...p, bigSize: `${parseInt(p.size)*1.6}px` })) } : null; })(), closeLightbox: ()=>this.setState({ lightbox:null }),
+      searchOpen: !!(s.searchOpen ?? this.props.searchOpen), searchQuery: s.searchQuery||'', searchResults, searchCount: searchResults.length, searchEmpty: searchResults.length===0, openSearch: ()=>this.openSearch(), closeSearch: ()=>this.setState({ searchOpen:false }), onSearch: (e)=>this.setState({ searchQuery:e.target.value }), onSearchKey: (e)=>{ if (e.key==='Enter' && searchResults[0]) { e.preventDefault(); searchResults[0].select(); } },
+      emptyRuns: this.props.demoEmpty==='runs' && tab==='activity', activityDisplay: this.props.demoEmpty==='runs' ? 'none' : 'grid', emptyFamiliar: this.props.demoEmpty==='familiar',
+      tab, segProps:{ ariaLabel:'Familiar details' }, tabOptions:['overview','access','activity'], tabLabel:(o)=>o[0].toUpperCase()+o.slice(1), setTab:(v)=>this.setState({ tab:v }), isOverview: tab==='overview' && this.props.demoEmpty!=='familiar', isAccess: tab==='access' && this.props.demoEmpty!=='familiar', isActivity: tab==='activity' && this.props.demoEmpty!=='familiar', goAccess:(e)=>{ e&&e.preventDefault&&e.preventDefault(); this.setState({ tab:'access', groups:{ ...g, review:true } }); },
+      
+      overviewRows, accessGroups, days, chart, actSections, actOpen, showActOverlay: false, figTitle: 'Runs per day', figHint: 'last 7 days', figIsChart: true, figRows: null, figIsRuns: false, figBars: null, figNote: null, closeAct: ()=>this.setState({ actOpen:null }), panelOverflow: tab==='activity'?'hidden':'auto', panelAlign: tab==='activity'?'stretch':'start',
+    };
+  }
+  sendDraft() {
+    const text = (this.state.draft ?? this.props.draft ?? '').trim(); if (!text) return; const conv = this.convId(); const fam = FAMILIARS.find(x=>x.id===CONVS.find(c=>c.id===conv).fam);
+    const t = new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+    const trig = fam.triggers.find(([re]) => re.test(text));
+    this.setState(s => ({ draft:'', slashOpen:false, thinking:true, extra:{ ...s.extra, [conv]:[...(s.extra[conv]||[]), { kind:'user', time:t, text }] } }));
+    clearTimeout(this.tm); this.tm = setTimeout(() => this.setState(s => ({ thinking:false, extra:{ ...s.extra, [conv]:[...(s.extra[conv]||[]), trig ? { kind:'familiar', time:t, text:`I can prepare that, but “${trig[1]}” is in my must-ask tier — I’ll get it ready and hold at the boundary for you.` } : { kind:'familiar', time:t, text:'On it. I’ll keep everything inside notes/ and log each step to the ledger.' }] } })), 1200);
+    setTimeout(()=>{ const sc=document.getElementById('fam-transcript'); sc&&sc.scrollTo({ top: sc.scrollHeight, behavior:'smooth' }); }, 50);
+  }
+}
+</script>
+</body>
+</html>

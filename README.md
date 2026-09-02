@@ -112,7 +112,7 @@ The current application renders:
 - bounded cursor-driven load-more controls with short in-memory deduplication
   and caching; authenticated bodies are never written to browser storage
 - the familiar switcher at the top of the left rail
-- explicit `?demo=chat` and `?demo=minimal` local mock surfaces
+- explicit `?demo=chat`, `?demo=messages`, and `?demo=minimal` local mock surfaces
 
 Sending messages and other write operations remain deferred to later phases.
 
@@ -120,9 +120,16 @@ Sending messages and other write operations remain deferred to later phases.
 
 `pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
 serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
-<127.0.0.1:4173/?demo=chat>. The demo previews later write-oriented phases:
-generated images, link unfurls, `/spec` and `/handoff` artifacts, and a
-composer.
+<127.0.0.1:4173/?demo=chat>, which implements the **Familiars Redesign v2**
+design: the ward at the centre of the chat, with a "Needs you" section, held
+actions the familiar stops at until you decide, a composer that warns before a
+draft crosses into the must-ask tier, and an inspector for the familiar's
+purpose, access, and activity. The design files it was built from are under
+`docs/superpowers/specs/2026-09-01-familiars-redesign-v2/`.
+
+<127.0.0.1:4173/?demo=messages> is the earlier Messages-shaped surface it
+replaced, kept reachable for side-by-side comparison. It previews generated
+images, link unfurls, `/spec` and `/handoff` artifacts, and a composer.
 
 **It connects to nothing.** No Cave, no network, no persistence. Replies come
 from canned strings and a timer, link unfurls invent their metadata from the

@@ -18,16 +18,22 @@ import type { ReactNode } from 'react';
 
 export type IconName =
   | 'archive'
+  | 'arrow-clockwise'
   | 'arrow-counter-clockwise'
   | 'arrow-up-bold'
   | 'books'
   | 'brain'
   | 'caret-down'
+  | 'caret-right'
   | 'caret-up'
   | 'caret-up-down'
   | 'cat'
+  | 'chats-circle'
+  | 'check'
   | 'check-circle-fill'
+  | 'clock-counter-clockwise'
   | 'copy'
+  | 'dots-three'
   | 'envelope'
   | 'file-text'
   | 'flask'
@@ -37,20 +43,28 @@ export type IconName =
   | 'globe'
   | 'hand'
   | 'heartbeat'
+  | 'hourglass'
+  | 'image'
   | 'info'
+  | 'list-checks'
   | 'magnifying-glass'
   | 'microphone'
   | 'paint-brush'
+  | 'paper-plane-right'
   | 'paper-plane-tilt'
+  | 'paperclip'
   | 'pencil-simple'
   | 'plus'
+  | 'seal-check'
   | 'sidebar-simple'
   | 'sliders-horizontal'
   | 'sparkle'
   | 'squares-four'
   | 'terminal-window'
+  | 'timer'
   | 'warning-circle-fill'
   | 'waveform'
+  | 'wrench'
   | 'x';
 
 /**
@@ -60,7 +74,12 @@ export type IconName =
  * it, which is why the check and the warning below use `evenodd`: the mark is
  * a hole in the disc, so it takes the colour of whatever sits behind it.
  */
-const FILLED = new Set<IconName>(['arrow-up-bold', 'check-circle-fill', 'warning-circle-fill']);
+const FILLED = new Set<IconName>([
+  'arrow-up-bold',
+  'check-circle-fill',
+  'dots-three',
+  'warning-circle-fill',
+]);
 
 const GLYPHS: Record<IconName, ReactNode> = {
   archive: (
@@ -68,6 +87,12 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <rect x="3" y="4" width="18" height="4.5" rx="1.2" />
       <path d="M5 8.5v10.3a1.2 1.2 0 0 0 1.2 1.2h11.6a1.2 1.2 0 0 0 1.2-1.2V8.5" />
       <path d="M9.6 12.4h4.8" />
+    </>
+  ),
+  'arrow-clockwise': (
+    <>
+      <path d="M19.8 5.2v5h-5" />
+      <path d="M19.4 10.2a7.8 7.8 0 1 0 .4 3.6" />
     </>
   ),
   'arrow-counter-clockwise': (
@@ -92,6 +117,7 @@ const GLYPHS: Record<IconName, ReactNode> = {
     </>
   ),
   'caret-down': <path d="m6.4 9.4 5.6 5.4 5.6-5.4" />,
+  'caret-right': <path d="m9.4 6.4 5.4 5.6-5.4 5.6" />,
   'caret-up': <path d="m6.4 14.6 5.6-5.4 5.6 5.4" />,
   'caret-up-down': (
     <>
@@ -110,16 +136,37 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M14.3 12.9v.6" />
     </>
   ),
+  'chats-circle': (
+    <>
+      <path d="M9.6 4.2a6.2 6.2 0 0 0-3.5 11.3l-1.7 3.1 3.4-1.1A6.2 6.2 0 1 0 9.6 4.2z" />
+      <path d="M14.6 9.6a5.2 5.2 0 0 1 3 9.2l1.4 2.6-2.9-.9a5.2 5.2 0 0 1-5.8-1.8" />
+    </>
+  ),
+  check: <path d="m5 12.6 4.4 4.4L19 7.4" />,
   'check-circle-fill': (
     <path
       fillRule="evenodd"
       d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm5.1 7.3-6.2 6.6-3.6-3.5 1.4-1.5 2.1 2.1 4.8-5.1z"
     />
   ),
+  'clock-counter-clockwise': (
+    <>
+      <path d="M4.2 5.2v5h5" />
+      <path d="M4.6 10.2a7.8 7.8 0 1 1-.4 3.6" />
+      <path d="M12 8.2v4.2l3 1.8" />
+    </>
+  ),
   copy: (
     <>
       <rect x="8.2" y="8.2" width="11.3" height="11.3" rx="2" />
       <path d="M15.8 8.2V6.2a1.7 1.7 0 0 0-1.7-1.7H6.2a1.7 1.7 0 0 0-1.7 1.7v7.9a1.7 1.7 0 0 0 1.7 1.7h2" />
+    </>
+  ),
+  'dots-three': (
+    <>
+      <circle cx="5.6" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="18.4" cy="12" r="1.7" />
     </>
   ),
   envelope: (
@@ -185,11 +232,36 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M3.6 11.9H7l1.8-3.2 2.9 6.4 2-3.2h6.7" />
     </>
   ),
+  hourglass: (
+    <>
+      <path d="M6.4 3.4h11.2" />
+      <path d="M6.4 20.6h11.2" />
+      <path d="M7.6 3.4v2.8a4.4 4.4 0 0 0 1.8 3.5L12 12l-2.6 2.3a4.4 4.4 0 0 0-1.8 3.5v2.8" />
+      <path d="M16.4 3.4v2.8a4.4 4.4 0 0 1-1.8 3.5L12 12l2.6 2.3a4.4 4.4 0 0 1 1.8 3.5v2.8" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="4.4" width="18" height="15.2" rx="2.2" />
+      <circle cx="8.6" cy="9.2" r="1.6" />
+      <path d="m3.6 17.4 4.8-4.6 3.4 3.2 3.6-3.6 5 4.8" />
+    </>
+  ),
   info: (
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11.4v5.2" />
       <path d="M12 7.8v.6" />
+    </>
+  ),
+  'list-checks': (
+    <>
+      <path d="m3.6 6.2 1.6 1.6 3-3" />
+      <path d="M11.2 6.4h9.2" />
+      <path d="m3.6 12.2 1.6 1.6 3-3" />
+      <path d="M11.2 12.4h9.2" />
+      <path d="m3.6 18.2 1.6 1.6 3-3" />
+      <path d="M11.2 18.4h9.2" />
     </>
   ),
   'magnifying-glass': (
@@ -211,11 +283,20 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="m9.4 11-1.7 1.7a3 3 0 0 0-.4 3.7c.5.8.4 1.9-.3 2.5-1.2 1.2-3.2.4-3.3-1.3 0-1 .6-1.5 1.2-2.1a3 3 0 0 0 .5-3.4" />
     </>
   ),
+  'paper-plane-right': (
+    <>
+      <path d="M3.6 3.8 20.4 12 3.6 20.2l2.6-8.2z" />
+      <path d="M6.2 12h14.2" />
+    </>
+  ),
   'paper-plane-tilt': (
     <>
       <path d="M20.6 3.4 3.9 9.1a.6.6 0 0 0-.1 1.1l6.7 3.3 3.3 6.7a.6.6 0 0 0 1.1-.1z" />
       <path d="M20.6 3.4 10.5 13.5" />
     </>
+  ),
+  paperclip: (
+    <path d="m16.8 8.6-7.2 7.2a2.3 2.3 0 0 1-3.3-3.3l8-8a3.8 3.8 0 0 1 5.4 5.4l-8.3 8.3a5.3 5.3 0 0 1-7.5-7.5L10.4 4" />
   ),
   'pencil-simple': (
     <>
@@ -227,6 +308,12 @@ const GLYPHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 5.2v13.6" />
       <path d="M5.2 12h13.6" />
+    </>
+  ),
+  'seal-check': (
+    <>
+      <path d="m12 2.8 2.1 1.6 2.6-.4.9 2.5 2.4 1.1-.3 2.6L21 12l-1.3 2.3.3 2.6-2.4 1.1-.9 2.5-2.6-.4L12 21.2l-2.1-1.6-2.6.4-.9-2.5L4 16.4l.3-2.6L3 12l1.3-2.3L4 7.1l2.4-1.1.9-2.5 2.6.4z" />
+      <path d="m8.6 12.3 2.3 2.3 4.6-4.8" />
     </>
   ),
   'sidebar-simple': (
@@ -266,6 +353,14 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M13 15h3.8" />
     </>
   ),
+  timer: (
+    <>
+      <circle cx="12" cy="13.4" r="7.4" />
+      <path d="M12 9.4v4l2.6 1.8" />
+      <path d="M9.6 3.2h4.8" />
+      <path d="M12 3.2v2.8" />
+    </>
+  ),
   'warning-circle-fill': (
     <path
       fillRule="evenodd"
@@ -280,6 +375,9 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M16 4.4v15.2" />
       <path d="M20.2 10.4v3.2" />
     </>
+  ),
+  wrench: (
+    <path d="M20.4 6.2a5.2 5.2 0 0 1-6.9 6.6L7 19.3a2 2 0 0 1-2.9-2.9l6.5-6.5a5.2 5.2 0 0 1 6.6-6.9l-3.1 3.1 1.1 2.7 2.7 1.1z" />
   ),
   x: (
     <>
