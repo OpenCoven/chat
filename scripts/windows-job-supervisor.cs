@@ -5920,15 +5920,6 @@ namespace OpenCoven
                     MaxStderrBytes,
                     DirectoryQuotas,
                     null);
-                lock (quarantineSync)
-                {
-                    terminalProducerSucceeded =
-                        result.ExitCode == 0 &&
-                        !result.TimedOut &&
-                        !result.StdoutOverflow &&
-                        !result.StderrOverflow &&
-                        !result.ResourceQuotaExceeded;
-                }
             }
             catch (Exception error)
             {
@@ -5964,6 +5955,16 @@ namespace OpenCoven
                 throw new InvalidOperationException(
                     "Terminal producer identity quarantine failed.",
                     quarantineFailure);
+            }
+            ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);
+            lock (quarantineSync)
+            {
+                terminalProducerSucceeded =
+                    result.ExitCode == 0 &&
+                    !result.TimedOut &&
+                    !result.StdoutOverflow &&
+                    !result.StderrOverflow &&
+                    !result.ResourceQuotaExceeded;
             }
             return result;
         }
@@ -6474,27 +6475,11 @@ namespace OpenCoven
                     }
                     if (segment.IndexOf('*') >= 0)
                     {
-                        string[] matches;
-                        try
-                        {
-                            matches = Directory.GetDirectories(
-                                candidate,
-                                segment,
-                                SearchOption.TopDirectoryOnly);
-                        }
-                        catch (FileNotFoundException)
-                        {
-                            continue;
-                        }
-                        catch (DirectoryNotFoundException)
-                        {
-                            continue;
-                        }
-                        if (matches.Length > MaximumQuotaEntries - next.Count)
-                        {
-                            throw new IOException(
-                                "Directory quota entry bound exceeded.");
-                        }
+                        List<string> matches = ReadBoundedDirectorySnapshot(
+                            candidate,
+                            segment,
+                            true,
+                            MaximumQuotaEntries - next.Count);
                         foreach (string matched in matches)
                         {
                             next.Add(matched);
@@ -6532,6 +6517,65 @@ namespace OpenCoven
             return candidates;
         }
 
+        private static List<string> ReadBoundedDirectorySnapshot(
+            string directory,
+            string searchPattern,
+            bool directoriesOnly,
+            int maximumEntries)
+        {
+            List<string> snapshot = new List<string>();
+            IEnumerable<string> entries;
+            IEnumerator<string> enumerator;
+            try
+            {
+                entries = directoriesOnly
+                    ? Directory.EnumerateDirectories(
+                        directory,
+                        searchPattern,
+                        SearchOption.TopDirectoryOnly)
+                    : Directory.EnumerateFileSystemEntries(directory);
+                enumerator = entries.GetEnumerator();
+            }
+            catch (FileNotFoundException)
+            {
+                return snapshot;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return snapshot;
+            }
+            using (enumerator)
+            {
+                while (true)
+                {
+                    bool moved;
+                    try
+                    {
+                        moved = enumerator.MoveNext();
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        break;
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        break;
+                    }
+                    if (!moved)
+                    {
+                        break;
+                    }
+                    if (snapshot.Count >= maximumEntries)
+                    {
+                        throw new IOException(
+                            "Directory quota entry bound exceeded.");
+                    }
+                    snapshot.Add(enumerator.Current);
+                }
+            }
+            return snapshot;
+        }
+
         private static long MeasureDirectoryBytes(string root, long remaining)
         {
             long total = 0;
@@ -6558,24 +6602,12 @@ namespace OpenCoven
                 {
                     continue;
                 }
-                string[] snapshot;
-                try
-                {
-                    snapshot = Directory.GetFileSystemEntries(directory);
-                }
-                catch (FileNotFoundException)
-                {
-                    continue;
-                }
-                catch (DirectoryNotFoundException)
-                {
-                    continue;
-                }
-                if (snapshot.Length > MaximumQuotaEntries - entries)
-                {
-                    throw new IOException("Directory quota entry bound exceeded.");
-                }
-                entries = checked(entries + snapshot.Length);
+                List<string> snapshot = ReadBoundedDirectorySnapshot(
+                    directory,
+                    null,
+                    false,
+                    MaximumQuotaEntries - entries);
+                entries = checked(entries + snapshot.Count);
                 foreach (string entry in snapshot)
                 {
                     FileAttributes attributes;
@@ -6623,6 +6655,42 @@ namespace OpenCoven
                 }
             }
             return total;
+        }
+
+        private static void ApplyTerminalDirectoryQuotaCheck(
+            WindowsJobRunResult result,
+            WindowsDirectoryQuota[] quotas)
+        {
+            if (result == null)
+            {
+                throw new InvalidOperationException(
+                    "Terminal producer did not return a result.");
+            }
+            if (quotas.Length == 0)
+            {
+                return;
+            }
+            try
+            {
+                WindowsDirectoryQuota exceededQuota;
+                if (DirectoryQuotasExceeded(quotas, out exceededQuota))
+                {
+                    result.ResourceQuotaExceeded = true;
+                    if (!result.ResourceQuotaMonitorError &&
+                        result.ResourceQuotaLabel == null)
+                    {
+                        result.ResourceQuotaLabel = exceededQuota.Label;
+                    }
+                    result.ExitCode = SupervisorFailureExitCode;
+                }
+            }
+            catch
+            {
+                result.ResourceQuotaExceeded = true;
+                result.ResourceQuotaMonitorError = true;
+                result.ResourceQuotaLabel = null;
+                result.ExitCode = SupervisorFailureExitCode;
+            }
         }
 
         public void Dispose()

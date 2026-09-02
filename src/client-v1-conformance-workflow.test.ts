@@ -1000,7 +1000,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'ResourceQuotaLabel',
         'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
-        'Directory.GetFileSystemEntries',
+        'Directory.EnumerateFileSystemEntries',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1047,13 +1047,31 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source.indexOf('GetExitCodeProcess(process.hProcess')).toBeLessThan(
         source.indexOf('TerminateJobAndWaitForZero(jobHandle'),
       );
+      const terminalProducerStart = source.indexOf(
+        'private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(',
+      );
+      const terminalProducerEnd = source.indexOf(
+        '\n        private WindowsJobRunResult RunAsUserCore(',
+        terminalProducerStart,
+      );
+      const terminalProducer = source.slice(terminalProducerStart, terminalProducerEnd);
+      expect(terminalProducer.indexOf('QuarantineIsolatedIdentity();')).toBeLessThan(
+        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+      );
+      expect(
+        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+      ).toBeLessThan(terminalProducer.lastIndexOf('terminalProducerSucceeded ='));
       const quotaScannerStart = source.indexOf('private static Task MonitorDirectoryQuotasAsync(');
       const quotaScanner = source.slice(
         quotaScannerStart,
         source.indexOf('\n        public void Dispose()', quotaScannerStart),
       );
-      expect(quotaScanner).not.toContain('Directory.EnumerateFileSystemEntries');
       expect(quotaScanner).not.toContain('Directory.Exists(');
+      expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
+      expect(quotaScanner).not.toContain('Directory.GetDirectories');
+      expect(quotaScanner).toContain('Directory.EnumerateFileSystemEntries');
+      expect(quotaScanner).toContain('Directory.EnumerateDirectories');
+      expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
       expect(
         countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
@@ -2158,7 +2176,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
     expect(supervisor).toContain('/bin/test -w "$tool_directory"');
     expect(supervisor).not.toContain('/usr/bin/test');
-    expect(supervisor).toContain('if (( ${#command_arguments[@]} > 0 )); then');
+    expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');
     expect(supervisor).toContain('/usr/bin/dsmemberutil checkmembership');
     expect(supervisor).not.toContain('/usr/sbin/dsmemberutil');
 

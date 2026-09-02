@@ -536,13 +536,14 @@ for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
 protected checkout's Git objects, 768 MiB for each SDK/Chat/Cave/Coven/
 validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
-bootstrap root. Quotas are rechecked after the root process exits so a
-last-moment excess cannot escape the watchdog. Each scan uses bounded,
-materialized directory snapshots and ignores only file/directory disappearance
-races caused by concurrent producer cleanup; permission failures, malformed
-paths, bound exhaustion, overflow, and other monitor errors still terminate the
-Job fail closed. Failures report either the fixed reviewed quota label or a
-path-free quota-monitor error.
+bootstrap root. Quotas are rechecked after the root process exits and again
+after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
+the watchdog. Each scan materializes only a bounded number of entries through
+bounded enumeration and ignores only file/directory disappearance races caused
+by concurrent producer cleanup; permission failures, malformed paths, bound
+exhaustion, overflow, and other monitor errors still terminate the Job fail
+closed. Failures report either the fixed reviewed quota label or a path-free
+quota-monitor error.
 
 The child receives a constructed environment rather than the runner
 environment. It contains no GitHub token, OIDC request value, Git credential,
@@ -997,7 +998,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 454,965 | `eae81397a2413194d16ca6e1263e652667f8e9db79417a70871c59260c919e78` |
+| `.github/workflows/client-v1-conformance.yml` | 457,821 | `82e33d2782406beb38f3f239bb36dade4646317a451dc6ec5ee94c5724d97d97` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1022,7 +1023,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 8,083 | `c7d2d023d4c1f1ba3cdb3da1e95b30af1763602932a91592388bb117de6bd397` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 287,408 | `80239da9d422640a575678b68271af56a060219b972258cc0e93832010fca03c` |
+| `scripts/windows-job-supervisor.cs` | 289,604 | `20ac2be79c6ec6ebaccdf78543b68540fe2645e37e96c6715d477f19229b943f` |
 | `scripts/windows-job-supervisor.test.ps1` | 168,772 | `74df69934cf26c7d6c083ce74abe840f472613b4df39d93584f5cb6391b951bf` |
 
 Before parsing or executing SDK authority, the harness queries the verified
