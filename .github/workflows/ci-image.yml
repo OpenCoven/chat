@@ -220,10 +220,11 @@ jobs:
       - name: Open or update the bump pull request
         env:
           # GITHUB_TOKEN is used for all git-data write operations (creating the
-          # branch and committing the file).  A separate CI_IMAGE_BUMP_TOKEN --
-          # a PAT that can trigger workflows -- is used only for `gh pr create`
-          # so the resulting pull request runs CI on itself.  Without that
-          # secret the PR still opens; the verify job above is its evidence.
+          # branch and committing the file). A separate CI_IMAGE_BUMP_TOKEN --
+          # a fine-grained PAT with Pull requests: write on this repository --
+          # is used only for `gh pr create` so the resulting pull request runs
+          # CI on itself. Without that secret the PR still opens; the verify job
+          # above is its evidence.
           # Keeping the tokens separate avoids a 403 when CI_IMAGE_BUMP_TOKEN is
           # a fine-grained PAT whose contents scope is read-only.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

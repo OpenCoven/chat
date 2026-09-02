@@ -1078,6 +1078,23 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain("github.ref_name == 'main'");
   });
 
+  it('uses the default token for git-data writes and the bump token only for PR creation', () => {
+    const workflow = readText('.github/workflows/ci-image.yml');
+    const propose = workflow.slice(workflow.indexOf('\n  propose:'));
+
+    expect(propose).toContain('contents: write');
+    expect(propose).toContain('pull-requests: write');
+    expect(propose).toContain('GH_TOKEN: $' + '{{ secrets.GITHUB_TOKEN }}');
+    expect(propose).toContain(
+      'PR_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
+    );
+    expect(propose).toContain('Pull requests: write on this repository');
+    expect(propose).toContain('GH_TOKEN="$' + '{PR_TOKEN}" gh pr create');
+    expect(propose).not.toContain(
+      'GH_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
+    );
+  });
+
   it('decides the image bump on contents rather than on a layer digest', () => {
     // A layer digest hashes a tar stream carrying file timestamps, so an
     // otherwise identical rebuild produces a new one. Comparing digests would
