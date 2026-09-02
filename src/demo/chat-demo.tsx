@@ -38,7 +38,8 @@ const RAIL_KEYBOARD_STEP = 12;
  *
  * This is a demo of what later phases will present, driven entirely by local
  * mock data. It connects to nothing. The Phase 1 read-only production app
- * remains the real entry point; this renders only at `?demo=chat`.
+ * remains the real entry point; this renders only at `?demo=messages`, the
+ * Messages-shaped direction that `?demo=chat` (the Familiars Redesign) replaced.
  */
 
 /**
