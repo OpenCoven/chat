@@ -19,9 +19,8 @@ to [OpenCoven/coven-cave](https://github.com/OpenCoven/coven-cave).
 
 Chat does not write canonical conversations or messages to browser
 `localStorage` or IndexedDB; the current client keeps those reads in memory and
-uses native secure storage for credentials. Do not report the absence of a
-plaintext browser database as a vulnerability in this release. Any future local
-read cache must document its encryption and storage guarantees before shipping.
+uses native secure storage for credentials. Any future local read cache must
+document its encryption and storage guarantees before shipping.
 
 ## Reporting a vulnerability
 

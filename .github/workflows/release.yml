@@ -1,9 +1,9 @@
 name: Release
 
-# Tag-triggered release pipeline. A push of an annotated, signed `v*` tag is the
-# only thing that starts it: the tag is the release, and everything downstream
-# refuses to run until the tag has been proven to be both signed and consistent
-# with the versions committed in the tree.
+# Tag-triggered release pipeline, with a manual dry-run path for existing tags.
+# A push of an annotated, signed `v*` tag is the production path: the tag is the
+# release, and everything downstream refuses to run until it has been proven to
+# be both signed and consistent with the versions committed in the tree.
 #
 # Third-party actions are pinned to a full commit SHA with a version comment,
 # matching the convention in .github/workflows/ci.yml. The toolchain versions
