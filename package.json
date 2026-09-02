@@ -31,7 +31,8 @@
     "cargo:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "cargo:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "app:dev": "tauri dev",
-    "app:build": "tauri build"
+    "app:build": "tauri build",
+    "app:build:demo": "VITE_DEFAULT_DEMO=chat tauri build --config src-tauri/tauri.demo.conf.json"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
