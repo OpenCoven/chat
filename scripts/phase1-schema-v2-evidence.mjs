@@ -54,15 +54,35 @@ const OPERATOR_STATE_IDS = Object.freeze([
 ]);
 const gitOidPattern = /^[0-9a-f]{40}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
+const sha1GitObjectFormat = Object.freeze({
+  name: 'sha1',
+  hashAlgorithm: 'sha1',
+  oidByteLength: 20,
+  oidPattern: gitOidPattern,
+});
+const sha256GitObjectFormat = Object.freeze({
+  name: 'sha256',
+  hashAlgorithm: 'sha256',
+  oidByteLength: 32,
+  oidPattern: sha256Pattern,
+});
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const opaqueIdPattern = /^[0-9a-f]{32}$/u;
 const MAXIMUM_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024;
 const EVIDENCE_READ_CHUNK_BYTES = 64 * 1024;
 const MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES = 64 * 1024 * 1024;
 const MAXIMUM_VALIDATOR_MODULE_LIST_BYTES = 4 * 1024 * 1024;
+const MAXIMUM_VALIDATOR_TREE_ENTRIES = 100_000;
+const MAXIMUM_VALIDATOR_TREE_OBJECTS = 4_096;
+const MAXIMUM_VALIDATOR_TREE_GRAPH_BYTES = 16 * 1024 * 1024;
+const MAXIMUM_VALIDATOR_TREE_DEPTH = 64;
+const MAXIMUM_VALIDATOR_TREE_TRAVERSAL_ENTRIES = 10_000;
+const MAXIMUM_VALIDATOR_PATH_BYTES = 4_096;
 const validatorModulePathPattern = /^scripts\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.mjs$/u;
+const validatorRelativePathPattern = /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
 const validatorModuleSnapshots = new WeakMap();
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -194,107 +214,394 @@ export function readConsistentEvidenceFile(root, relativePath, label) {
   }
 }
 
-function readCommittedValidatorModules(validatorRoot, identity) {
-  const treeEntries = execFileSync(
-    'git',
-    ['-C', validatorRoot, 'ls-tree', '-r', '-z', '-l', identity.commit, '--', 'scripts'],
-    {
+function runVerifiedValidatorGit(validatorRoot, args, label, maxBuffer, encoding) {
+  try {
+    return execFileSync('git', ['--no-replace-objects', '-C', validatorRoot, ...args], {
+      encoding,
       env: createGitEnvironment(process.env),
-      maxBuffer: MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    },
-  )
-    .toString('utf8')
-    .split('\0')
-    .filter((entry) => entry.length > 0);
-  const modules = new Map();
-  let totalSize = 0;
-
-  for (const treeEntry of treeEntries) {
-    const match = /^(100644|100755) blob ([0-9a-f]{40}) +([0-9]+)\t(.+)$/u.exec(treeEntry);
-    if (match === null) {
-      continue;
-    }
-    const [, , objectId, sizeText, path] = match;
-    if (!path.endsWith('.mjs')) {
-      continue;
-    }
-    if (!validatorModulePathPattern.test(path)) {
-      throw new Error(`SDK validator module path is unsafe: ${path}`);
-    }
-    const size = Number(sizeText);
-    if (
-      !Number.isSafeInteger(size) ||
-      size < 1 ||
-      size > MAXIMUM_EVIDENCE_FILE_BYTES ||
-      totalSize + size > MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES
-    ) {
-      throw new Error('SDK validator module graph exceeds the evidence size limit.');
-    }
-    const bytes = execFileSync('git', ['-C', validatorRoot, 'cat-file', 'blob', objectId], {
-      env: createGitEnvironment(process.env),
-      maxBuffer: size + 1,
+      maxBuffer,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 15_000,
       killSignal: 'SIGKILL',
     });
-    if (bytes.byteLength !== size) {
-      throw new Error(`Committed SDK validator module ${path} changed while it was read.`);
+  } catch (error) {
+    if (error?.code === 'ENOBUFS') {
+      throw new Error(`${label} exceeds the evidence size limit.`);
     }
-    totalSize += size;
-    modules.set(path, {
-      bytes: Buffer.from(bytes),
-      metadata: Object.freeze({
-        path,
-        size,
-        sha256: sha256(bytes),
-      }),
-    });
-  }
-
-  for (const path of [
-    'scripts/conformance-contract.mjs',
-    'scripts/github-conformance-evidence.mjs',
-  ]) {
-    if (!modules.has(path)) {
-      throw new Error(`Committed SDK validator module is missing: ${path}`);
+    if (error?.code === 'ETIMEDOUT') {
+      throw new Error(`${label} Git read timed out.`);
     }
+    throw new Error(`${label} is unavailable at the verified SDK revision.`);
   }
-
-  return modules;
 }
 
-export function createVerifiedValidatorModuleSnapshot(optionsValue) {
-  const options = requireRecord(optionsValue, 'SDK validator module snapshot options');
-  if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
-    throw new Error('SDK validator root must be a non-empty path.');
+function readValidatorGitObjectFormat(validatorRoot) {
+  const format = runVerifiedValidatorGit(
+    validatorRoot,
+    ['rev-parse', '--show-object-format'],
+    'SDK validator object format',
+    1024,
+    'utf8',
+  ).trim();
+  if (format === sha1GitObjectFormat.name) {
+    return sha1GitObjectFormat;
   }
-  const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
-  if (
-    expectedValue.repository !== 'OpenCoven/sdk' ||
-    !gitOidPattern.test(expectedValue.commit ?? '') ||
-    !gitOidPattern.test(expectedValue.tree ?? '')
-  ) {
-    throw new Error('Frozen SDK validator identity is invalid.');
+  if (format === sha256GitObjectFormat.name) {
+    return sha256GitObjectFormat;
   }
+  throw new Error('SDK validator Git object format is unsupported.');
+}
 
-  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+function verifyCommittedGitObject(bytes, type, expectedObjectId, objectFormat) {
+  if (!objectFormat.oidPattern.test(expectedObjectId)) {
+    throw new Error(`SDK committed ${type} object ID is invalid.`);
+  }
+  const actualObjectId = createHash(objectFormat.hashAlgorithm)
+    .update(Buffer.from(`${type} ${bytes.byteLength}\0`, 'utf8'))
+    .update(bytes)
+    .digest('hex');
+  if (actualObjectId !== expectedObjectId) {
+    if (type === 'commit') {
+      throw new Error('SDK validator commit failed object ID verification.');
+    }
+    throw new Error(`SDK committed ${type} failed object ID verification.`);
+  }
+}
+
+function readVerifiedValidatorGitObject(
+  validatorRoot,
+  type,
+  objectId,
+  objectFormat,
+  label,
+  maxBuffer,
+) {
+  const bytes = runVerifiedValidatorGit(
+    validatorRoot,
+    ['cat-file', type, objectId],
+    label,
+    maxBuffer,
+  );
+  if (!Buffer.isBuffer(bytes)) {
+    throw new Error(`${label} changed while it was being read.`);
+  }
+  const committedBytes = Buffer.from(bytes);
+  verifyCommittedGitObject(committedBytes, type, objectId, objectFormat);
+  return committedBytes;
+}
+
+function parseVerifiedCommitTree(commitBytes, objectFormat) {
+  const headerEnd = commitBytes.indexOf(Buffer.from('\n\n', 'ascii'));
+  if (headerEnd <= 0) {
+    throw new Error('SDK validator commit tree header is invalid.');
+  }
+  const headerBytes = commitBytes.subarray(0, headerEnd);
+  let headerText;
+  try {
+    headerText = utf8Decoder.decode(headerBytes);
+  } catch {
+    throw new Error('SDK validator commit tree header is invalid.');
+  }
+  const treeHeaders = headerText
+    .split('\n')
+    .filter((line) => line.startsWith('tree '))
+    .map((line) => line.slice('tree '.length));
+  if (
+    treeHeaders.length !== 1 ||
+    !objectFormat.oidPattern.test(treeHeaders[0]) ||
+    !headerText.startsWith(`tree ${treeHeaders[0]}\n`)
+  ) {
+    throw new Error('SDK validator commit tree header is invalid.');
+  }
+  return treeHeaders[0];
+}
+
+function hasUnsafeTreeEntryCharacter(name) {
+  for (const character of name) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0x1f || codePoint === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseVerifiedGitTree(treeBytes, objectFormat) {
+  const entries = new Map();
+  let offset = 0;
+  let previousSortKey;
+  while (offset < treeBytes.byteLength) {
+    if (entries.size >= MAXIMUM_VALIDATOR_TREE_ENTRIES) {
+      throw new Error('SDK committed tree exceeds the evidence size limit.');
+    }
+    const modeEnd = treeBytes.indexOf(0x20, offset);
+    const nameEnd = modeEnd < 0 ? -1 : treeBytes.indexOf(0, modeEnd + 1);
+    const objectIdEnd = nameEnd < 0 ? -1 : nameEnd + 1 + objectFormat.oidByteLength;
+    if (modeEnd <= offset || nameEnd <= modeEnd + 1 || objectIdEnd > treeBytes.byteLength) {
+      throw new Error('SDK committed tree is malformed.');
+    }
+    const modeBytes = treeBytes.subarray(offset, modeEnd);
+    if ([...modeBytes].some((byte) => byte < 0x30 || byte > 0x39)) {
+      throw new Error('SDK committed tree entry mode is unsupported.');
+    }
+    const mode = modeBytes.toString('ascii');
+    const nameBytes = treeBytes.subarray(modeEnd + 1, nameEnd);
+    let name;
+    try {
+      name = utf8Decoder.decode(nameBytes);
+    } catch {
+      throw new Error('SDK committed tree contains an unsafe entry name.');
+    }
+    if (
+      name.length === 0 ||
+      name === '.' ||
+      name === '..' ||
+      name.includes('/') ||
+      name.includes('\\') ||
+      hasUnsafeTreeEntryCharacter(name)
+    ) {
+      throw new Error('SDK committed tree contains an unsafe entry name.');
+    }
+    if (!['40000', '100644', '100755', '120000', '160000'].includes(mode)) {
+      throw new Error('SDK committed tree entry mode is unsupported.');
+    }
+    if (entries.has(name)) {
+      throw new Error('SDK committed tree contains duplicate entry names.');
+    }
+    const sortKey = Buffer.concat([
+      nameBytes,
+      mode === '40000' ? Buffer.from('/', 'ascii') : Buffer.alloc(0),
+    ]);
+    if (previousSortKey !== undefined && Buffer.compare(previousSortKey, sortKey) >= 0) {
+      throw new Error('SDK committed tree entries are not canonical.');
+    }
+    previousSortKey = sortKey;
+    const objectId = treeBytes.subarray(nameEnd + 1, objectIdEnd).toString('hex');
+    if (!objectFormat.oidPattern.test(objectId)) {
+      throw new Error('SDK committed tree entry object ID is invalid.');
+    }
+    entries.set(
+      name,
+      Object.freeze({
+        mode,
+        name,
+        objectId,
+      }),
+    );
+    offset = objectIdEnd;
+  }
+  if (offset !== treeBytes.byteLength) {
+    throw new Error('SDK committed tree is malformed.');
+  }
+  return entries;
+}
+
+function createVerifiedValidatorGitSnapshot(validatorRoot, expectedIdentity, objectFormat) {
+  const head = runVerifiedValidatorGit(
+    validatorRoot,
+    ['rev-parse', 'HEAD'],
+    'SDK validator commit',
+    1024,
+    'utf8',
+  ).trim();
+  if (!objectFormat.oidPattern.test(head)) {
+    throw new Error('SDK validator identity is invalid.');
+  }
+  if (head !== expectedIdentity.commit) {
+    throw new Error(`SDK validator commit ${head} does not match ${expectedIdentity.commit}.`);
+  }
+  const commitBytes = readVerifiedValidatorGitObject(
+    validatorRoot,
+    'commit',
+    head,
+    objectFormat,
+    'SDK validator commit',
+    MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+  );
+  const rootTree = parseVerifiedCommitTree(commitBytes, objectFormat);
+  if (expectedIdentity.tree !== undefined && rootTree !== expectedIdentity.tree) {
+    throw new Error(`SDK validator tree ${rootTree} does not match ${expectedIdentity.tree}.`);
+  }
   const identity = Object.freeze({
     repository: 'OpenCoven/sdk',
-    commit: expectedValue.commit,
-    tree: expectedValue.tree,
+    commit: head,
+    tree: rootTree,
   });
-  const actual = readGitIdentity(validatorRoot);
-  if (actual.commit !== identity.commit) {
-    throw new Error(`SDK validator commit ${actual.commit} does not match ${identity.commit}.`);
-  }
-  if (actual.tree !== identity.tree) {
-    throw new Error(`SDK validator tree ${actual.tree} does not match ${identity.tree}.`);
-  }
+  const treeCache = new Map();
+  let treeGraphBytes = 0;
 
-  const modules = readCommittedValidatorModules(validatorRoot, identity);
+  const readTree = (objectId, label) => {
+    const cached = treeCache.get(objectId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const type = runVerifiedValidatorGit(
+      validatorRoot,
+      ['cat-file', '-t', objectId],
+      label,
+      64,
+      'utf8',
+    ).trim();
+    if (type !== 'tree') {
+      throw new Error('SDK committed tree entry type is invalid.');
+    }
+    if (treeCache.size >= MAXIMUM_VALIDATOR_TREE_OBJECTS) {
+      throw new Error('SDK committed tree graph exceeds the evidence size limit.');
+    }
+    const bytes = readVerifiedValidatorGitObject(
+      validatorRoot,
+      'tree',
+      objectId,
+      objectFormat,
+      label,
+      MAXIMUM_VALIDATOR_MODULE_LIST_BYTES,
+    );
+    treeGraphBytes += bytes.byteLength;
+    if (treeGraphBytes > MAXIMUM_VALIDATOR_TREE_GRAPH_BYTES) {
+      throw new Error('SDK committed tree graph exceeds the evidence size limit.');
+    }
+    const entries = parseVerifiedGitTree(bytes, objectFormat);
+    treeCache.set(objectId, entries);
+    return entries;
+  };
+
+  const resolveEntry = (relativePath, label) => {
+    if (!validatorRelativePathPattern.test(relativePath)) {
+      throw new Error(`${label} is unavailable at the verified SDK revision.`);
+    }
+    const components = relativePath.split('/');
+    let treeObjectId = rootTree;
+    let entry;
+    for (const [index, component] of components.entries()) {
+      const entries = readTree(treeObjectId, label);
+      entry = entries.get(component);
+      if (entry === undefined) {
+        throw new Error(`${label} is unavailable at the verified SDK revision.`);
+      }
+      if (index < components.length - 1) {
+        if (entry.mode !== '40000') {
+          throw new Error('SDK committed tree entry type is invalid.');
+        }
+        treeObjectId = entry.objectId;
+      }
+    }
+    return entry;
+  };
+
+  const readBlob = (entry, label) => {
+    if (entry.mode !== '100644' && entry.mode !== '100755') {
+      throw new Error('SDK committed tree entry mode is unsupported.');
+    }
+    const type = runVerifiedValidatorGit(
+      validatorRoot,
+      ['cat-file', '-t', entry.objectId],
+      label,
+      64,
+      'utf8',
+    ).trim();
+    if (type !== 'blob') {
+      throw new Error('SDK committed tree entry object type is invalid.');
+    }
+    return readVerifiedValidatorGitObject(
+      validatorRoot,
+      'blob',
+      entry.objectId,
+      objectFormat,
+      label,
+      MAXIMUM_EVIDENCE_FILE_BYTES + 1,
+    );
+  };
+
+  readTree(rootTree, 'SDK validator root tree');
+
+  return Object.freeze({
+    identity,
+    readFile(relativePath, label) {
+      const entry = resolveEntry(relativePath, label);
+      const bytes = readBlob(entry, label);
+      if (bytes.byteLength < 1 || bytes.byteLength > MAXIMUM_EVIDENCE_FILE_BYTES) {
+        throw new Error(`${label} exceeds the evidence file size limit.`);
+      }
+      return {
+        bytes,
+        metadata: Object.freeze({
+          path: relativePath,
+          size: bytes.byteLength,
+          sha256: sha256(bytes),
+        }),
+      };
+    },
+    readModules() {
+      const modules = new Map();
+      let totalSize = 0;
+      let traversedEntries = 0;
+      const walk = (treeObjectId, prefix, depth) => {
+        if (depth > MAXIMUM_VALIDATOR_TREE_DEPTH) {
+          throw new Error('SDK validator module graph exceeds the traversal limit.');
+        }
+        const entries = readTree(treeObjectId, 'SDK validator module graph');
+        for (const entry of entries.values()) {
+          traversedEntries += 1;
+          if (traversedEntries > MAXIMUM_VALIDATOR_TREE_TRAVERSAL_ENTRIES) {
+            throw new Error('SDK validator module graph exceeds the traversal limit.');
+          }
+          const path = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+          if (Buffer.byteLength(path, 'utf8') > MAXIMUM_VALIDATOR_PATH_BYTES) {
+            throw new Error('SDK validator module graph exceeds the traversal limit.');
+          }
+          if (entry.mode === '40000') {
+            walk(entry.objectId, path, depth + 1);
+            continue;
+          }
+          if (entry.mode !== '100644' && entry.mode !== '100755') {
+            throw new Error('SDK committed tree entry mode is unsupported.');
+          }
+          if (!path.endsWith('.mjs')) {
+            continue;
+          }
+          if (!validatorModulePathPattern.test(path)) {
+            throw new Error(`SDK validator module path is unsafe: ${path}`);
+          }
+          const bytes = readBlob(entry, `Committed SDK validator module ${path}`);
+          if (
+            bytes.byteLength < 1 ||
+            bytes.byteLength > MAXIMUM_EVIDENCE_FILE_BYTES ||
+            totalSize + bytes.byteLength > MAXIMUM_VALIDATOR_MODULE_GRAPH_BYTES
+          ) {
+            throw new Error('SDK validator module graph exceeds the evidence size limit.');
+          }
+          totalSize += bytes.byteLength;
+          modules.set(path, {
+            bytes,
+            metadata: Object.freeze({
+              path,
+              size: bytes.byteLength,
+              sha256: sha256(bytes),
+            }),
+          });
+        }
+      };
+      const scriptsEntry = resolveEntry('scripts', 'SDK validator module graph');
+      if (scriptsEntry.mode !== '40000') {
+        throw new Error('SDK committed tree entry type is invalid.');
+      }
+      walk(scriptsEntry.objectId, 'scripts', 1);
+      for (const path of [
+        'scripts/conformance-contract.mjs',
+        'scripts/github-conformance-evidence.mjs',
+      ]) {
+        if (!modules.has(path)) {
+          throw new Error(`Committed SDK validator module is missing: ${path}`);
+        }
+      }
+      return modules;
+    },
+  });
+}
+
+function createVerifiedValidatorModuleSnapshotForGitSnapshot(validatorRoot, gitSnapshot) {
+  const { identity } = gitSnapshot;
+  const modules = gitSnapshot.readModules();
   const graphHash = createHash('sha256');
   for (const [path, module] of [...modules.entries()].sort(([left], [right]) =>
     left.localeCompare(right),
@@ -388,6 +695,31 @@ export function createVerifiedValidatorModuleSnapshot(optionsValue) {
       }
     },
   });
+}
+
+export function createVerifiedValidatorModuleSnapshot(optionsValue) {
+  const options = requireRecord(optionsValue, 'SDK validator module snapshot options');
+  if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
+    throw new Error('SDK validator root must be a non-empty path.');
+  }
+  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+  const objectFormat = readValidatorGitObjectFormat(validatorRoot);
+  const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
+  if (
+    expectedValue.repository !== 'OpenCoven/sdk' ||
+    !objectFormat.oidPattern.test(expectedValue.commit ?? '') ||
+    !objectFormat.oidPattern.test(expectedValue.tree ?? '')
+  ) {
+    throw new Error('Frozen SDK validator identity is invalid.');
+  }
+
+  const identity = Object.freeze({
+    repository: 'OpenCoven/sdk',
+    commit: expectedValue.commit,
+    tree: expectedValue.tree,
+  });
+  const gitSnapshot = createVerifiedValidatorGitSnapshot(validatorRoot, identity, objectFormat);
+  return createVerifiedValidatorModuleSnapshotForGitSnapshot(validatorRoot, gitSnapshot);
 }
 
 function metadataForExpectedFile(root, expected, label) {
@@ -598,66 +930,41 @@ export async function verifySchemaV2ProducerCheckout({
   };
 }
 
-function readGitIdentity(root) {
-  const run = (revision) =>
-    execFileSync('git', ['-C', root, 'rev-parse', revision], {
-      encoding: 'utf8',
-      env: createGitEnvironment(process.env),
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    }).trim();
-  return {
-    repository: 'OpenCoven/sdk',
-    commit: run('HEAD'),
-    tree: run('HEAD^{tree}'),
-  };
-}
-
 export async function loadSdkEvidenceContract(optionsValue) {
   const options = requireRecord(optionsValue, 'SDK validator options');
   if (typeof options.validatorRoot !== 'string' || options.validatorRoot.length === 0) {
     throw new Error('SDK validator root must be a non-empty path.');
   }
+  const validatorRoot = realpathSync(resolve(options.validatorRoot));
+  const objectFormat = readValidatorGitObjectFormat(validatorRoot);
   const expectedValue = requireRecord(options.validatorIdentity, 'Frozen SDK validator');
   if (
     expectedValue.repository !== 'OpenCoven/sdk' ||
-    !gitOidPattern.test(expectedValue.commit ?? '') ||
-    (expectedValue.tree !== undefined && !gitOidPattern.test(expectedValue.tree))
+    !objectFormat.oidPattern.test(expectedValue.commit ?? '') ||
+    (expectedValue.tree !== undefined && !objectFormat.oidPattern.test(expectedValue.tree))
   ) {
     throw new Error('Frozen SDK validator identity is invalid.');
   }
-  const expected = {
+  const expected = Object.freeze({
     repository: 'OpenCoven/sdk',
     commit: expectedValue.commit,
     tree: expectedValue.tree,
-  };
-  const validatorRoot = realpathSync(resolve(options.validatorRoot));
-  const actual = readGitIdentity(validatorRoot);
-  if (actual.commit !== expected.commit) {
-    throw new Error(`SDK validator commit ${actual.commit} does not match ${expected.commit}.`);
-  }
-  if (expected.tree !== undefined && actual.tree !== expected.tree) {
-    throw new Error(`SDK validator tree ${actual.tree} does not match ${expected.tree}.`);
-  }
-
-  const validatorModules = createVerifiedValidatorModuleSnapshot({
-    validatorRoot,
-    validatorIdentity: actual,
   });
-  const schemaFile = readConsistentEvidenceFile(
+  const gitSnapshot = createVerifiedValidatorGitSnapshot(validatorRoot, expected, objectFormat);
+  const { identity: actual } = gitSnapshot;
+  const validatorModules = createVerifiedValidatorModuleSnapshotForGitSnapshot(
     validatorRoot,
+    gitSnapshot,
+  );
+  const schemaFile = gitSnapshot.readFile(
     'conformance/client-v1-cross-repository-evidence.schema.json',
     'SDK evidence schema',
   );
-  const registryFile = readConsistentEvidenceFile(
-    validatorRoot,
+  const registryFile = gitSnapshot.readFile(
     'conformance/client-v1-cross-repository-assertions.json',
     'SDK assertion registry',
   );
-  const lockFile = readConsistentEvidenceFile(
-    validatorRoot,
+  const lockFile = gitSnapshot.readFile(
     'conformance/client-v1-cross-repository-lock.json',
     'SDK frozen conformance lock',
   );

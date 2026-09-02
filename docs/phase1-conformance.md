@@ -17,10 +17,12 @@ the final bytes.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `20633346c444ded9e05ca5a3db45d74c28918d69`, the
-  expected missing-keychain trust-control successor to `dbbcf3a`;
+- Chat production `edd4728792321771496df58bfc0e6122908a96ec`, tree
+  `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
+  authority;
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `e74078a147c084bd761d929654f0990df66ef99f`;
+- Cave authority `6325fc4c1154c7d7398074a9760a2e2dc323b424`, tree
+  `9144939792d3dbdd91c208d7e2abc5ecc0eac089`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support at the exact `harness.revision` and
   `harnessAuthority.tree` generated from the preceding code/integration
@@ -30,6 +32,17 @@ the final bytes.
 - manifest digest
   `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
+
+Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
+contract committed in SDK validator
+`933a9523ccbee071417eca01b8a7a37e54d6cbc0`. This is source-authority
+compatibility only. SDK 933 still names Chat producer
+`4dc8f64bb71634a01ee647542dcdafdd0888b4f9`, while SDK #100 currently binds
+Chat `95de47f7aa2bf8233f71a601ad16011a82905e41`; neither is the final producer
+identity for this fix. Full producer compatibility and provenance remain
+blocked until this Chat change merges, a reachable authority commit pins the
+final behavior commit, and the SDK validator is rebound to that final
+post-merge Chat authority commit.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
@@ -972,7 +985,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 445,413 | `244343b76309705c3e6f5681c66a83232421a00844ccb72d9ca5e481e57fe4b9` |
+| `.github/workflows/client-v1-conformance.yml` | 445,413 | `c111264aff9afce69ea33958a666962e7f76a1ce43998f71d3214e590d5a3cf2` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -984,7 +997,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
-| `scripts/phase1-schema-v2-evidence.mjs` | 40,969 | `4384d9827ce2cb29f73af00060c61c2ef6eee3c55e483d90e6f36e2037fa38d8` |
+| `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
 | `scripts/phase1-schema-v2-producer.mjs` | 141,680 | `40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
@@ -1000,6 +1013,14 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.cs` | 280,235 | `12650946c6ecc0c5d5297c72d2a465465f3593e4d01b8f8a9c414f5190d8df0d` |
 | `scripts/windows-job-supervisor.test.ps1` | 166,680 | `3e4c02f82d7f4528ab87105208cc3f3188f4736cdb97a094c2eb191b8d315731` |
 
+Before parsing or executing SDK authority, the harness queries the verified
+checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
+`sha256`, and independently recomputes each committed blob ID over the exact
+`blob <byte-length>\0<raw-bytes>` Git object representation. This covers the
+complete executable `.mjs` snapshot, evidence schema, assertion registry, and
+frozen lock. Any mismatch fails with a fixed diagnostic before substituted
+bytes are parsed or executed.
+
 The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
 harness module executes, Windows verifies the complete 16-module static and
 runtime `.mjs` graph with trusted inline PowerShell, including
@@ -1014,11 +1035,13 @@ after this commit is created; no SDK validator SHA is committed into Chat.
 
 ## Non-cyclic SDK handoff
 
-The Chat producer commit is created first. SDK #74 then freezes that exact
-producer commit/tree, package manifest, harness, workflow, environment ID, and
-source/signer digests in a later validator commit. Operators dispatch the
-already-committed Chat workflow with that full SDK commit as
-`validator_revision`.
+The governed loader behavior is committed first. A separate Chat authority
+commit then pins that prior behavior commit, its tree, and every changed
+governed blob and SHA-256. After the Chat fix merges, SDK #100 must freeze the
+final reachable Chat authority commit/tree, package manifest, harness,
+workflow, environment ID, and source/signer digests in a later validator
+commit. Operators dispatch the already-committed Chat workflow with that full
+SDK commit as `validator_revision`.
 
 The workflow producer and executable harness are intentionally distinct
 authorities. The workflow checkout remains at the final producer commit that
@@ -1030,15 +1053,16 @@ historical harness checks to the workflow checkout, or producer-contract checks
 to the historical harness checkout, is rejected rather than accepted as an
 alternate SHA.
 
-The pre-repin SDK validator is expected to reject this new workflow
-graph until that one-time metadata update is reviewed and merged. Chat-local
-tests therefore require the old validator's rejection while independently
-guarding the new graph and supervisor APIs. The later SDK change must replace
-the producer workflow size/SHA-256 and producer commit/tree metadata and record
-the validation and attestation job names, static artifact names and record
-paths, pinned download and attestation actions, and protected environment
-variable prerequisite. Chat's runtime `validator_revision` model remains
-unchanged, and no SDK validator SHA is added to Chat.
+The pre-rebind SDK validator remains authoritative for its old producer and is
+not evidence that this PR head is producer-compatible. Chat's always-on frozen
+fixture proves only that the local Phase 1 lock matches SDK 933's committed
+source contract, while the optional real-checkout integration continues to
+exercise the exact SDK loader. The later SDK change must replace the producer
+workflow size/SHA-256 and producer commit/tree metadata and retain the
+validation and attestation job names, static artifact names and record paths,
+pinned download and attestation actions, and protected environment variable
+prerequisite. Chat's runtime `validator_revision` model remains unchanged, and
+no SDK validator SHA is added to Chat.
 
 The selected validator commit and tree, plus its contract and schema digests,
 are recomputed from the exact clean checkout and embedded in the platform

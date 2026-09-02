@@ -1,9 +1,18 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 import { describe, expect, test } from 'vitest';
 
@@ -12,7 +21,9 @@ import {
   validatePhase1SanitizedReport,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
 import { buildObservedSchemaV2Assertions } from '../scripts/phase1-conformance.mjs';
+import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
 import {
+  assertSdkContractMatchesPhase1Lock,
   buildSchemaV2PlatformEvidence,
   createObservedAssertionRecorder,
   loadSdkEvidenceContract,
@@ -20,6 +31,15 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const sdk933FixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-933a9523');
+const sdk933LockFixturePath = resolve(
+  sdk933FixtureRoot,
+  'client-v1-cross-repository-lock.json.fixture',
+);
+const sdk933LockProvenancePath = resolve(
+  sdk933FixtureRoot,
+  'client-v1-cross-repository-lock.provenance.json',
+);
 const validatorRoot =
   process.env.OPENCOVEN_SDK_VALIDATOR_ROOT ??
   resolve(projectRoot, '..', 'build-conformance-contract');
@@ -36,6 +56,10 @@ const validatorTree = validatorAvailable
       encoding: 'utf8',
     }).trim()
   : '';
+const phase1CompatibilityValidator = {
+  commit: '933a9523ccbee071417eca01b8a7a37e54d6cbc0',
+  tree: 'abce229089be13b990d498f343e1392e8f68a039',
+} as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -106,7 +130,7 @@ function reverseObjectKeys(value: unknown): unknown {
   );
 }
 
-function validatorModuleFixture() {
+function validatorModuleFixture(objectFormat: 'sha1' | 'sha256' = 'sha1') {
   const scratchParent = resolve(projectRoot, '.artifacts');
   mkdirSync(scratchParent, { recursive: true });
   const root = mkdtempSync(resolve(scratchParent, 'schema-v2-validator-modules-'));
@@ -140,6 +164,8 @@ export function verifyProtectedWorkflow() {
   const packageBytes = Buffer.from('{"name":"validator-module-fixture"}\n');
   const harnessBytes = Buffer.from('export {};\n');
   const workflowBytes = Buffer.from('name: validator module fixture\n');
+  const schemaBytes = Buffer.from('{"sourceMarker":"committed-schema"}\n');
+  const registryBytes = Buffer.from('{"sourceMarker":"committed-registry"}\n');
   const producer = {
     status: 'compatible',
     repository: 'OpenCoven/chat',
@@ -152,16 +178,20 @@ export function verifyProtectedWorkflow() {
     },
     workflow: metadata('.github/workflows/client-v1-conformance.yml', workflowBytes),
   };
+  const frozenLockBytes = Buffer.from(
+    `${JSON.stringify({
+      sourceMarker: 'committed-lock',
+      evidenceProducer: producer,
+      toolchain: {},
+    })}\n`,
+  );
   const files = new Map<string, string | Buffer>([
     ['scripts/conformance-contract.mjs', contractBytes],
     ['scripts/github-conformance-evidence.mjs', githubContractBytes],
     ['scripts/github-conformance-helper.mjs', "export const marker = 'committed-helper';\n"],
-    [
-      'conformance/client-v1-cross-repository-lock.json',
-      `${JSON.stringify({ evidenceProducer: producer, toolchain: {} })}\n`,
-    ],
-    ['conformance/client-v1-cross-repository-evidence.schema.json', '{}\n'],
-    ['conformance/client-v1-cross-repository-assertions.json', '{}\n'],
+    ['conformance/client-v1-cross-repository-lock.json', frozenLockBytes],
+    ['conformance/client-v1-cross-repository-evidence.schema.json', schemaBytes],
+    ['conformance/client-v1-cross-repository-assertions.json', registryBytes],
     ['producer/package.json', packageBytes],
     ['producer/scripts/phase1-conformance.mjs', harnessBytes],
     ['producer/.github/workflows/client-v1-conformance.yml', workflowBytes],
@@ -171,7 +201,7 @@ export function verifyProtectedWorkflow() {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
   }
-  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['init', '--quiet', `--object-format=${objectFormat}`], { cwd: root });
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync(
     'git',
@@ -195,6 +225,10 @@ export function verifyProtectedWorkflow() {
     contractPath,
     githubContractPath,
     contractBytes,
+    frozenLockBytes,
+    schemaBytes,
+    registryBytes,
+    objectFormat,
     commit: execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
@@ -204,6 +238,356 @@ export function verifyProtectedWorkflow() {
       encoding: 'utf8',
     }).trim(),
   };
+}
+
+function corruptLooseValidatorBlob(
+  validator: ReturnType<typeof validatorModuleFixture>,
+  relativePath: string,
+  committedBytes: Buffer,
+) {
+  const objectId = execFileSync('git', ['rev-parse', `${validator.commit}:${relativePath}`], {
+    cwd: validator.root,
+    encoding: 'utf8',
+  }).trim();
+  const corruptedBytes = Buffer.from(
+    committedBytes.toString('utf8').replace('committed-', 'corrupted-'),
+    'utf8',
+  );
+  if (
+    corruptedBytes.equals(committedBytes) ||
+    corruptedBytes.byteLength !== committedBytes.byteLength
+  ) {
+    throw new Error('Corrupt validator fixture must replace equal-length committed bytes.');
+  }
+
+  const looseObjectPath = resolve(
+    validator.root,
+    execFileSync(
+      'git',
+      ['rev-parse', '--git-path', `objects/${objectId.slice(0, 2)}/${objectId.slice(2)}`],
+      {
+        cwd: validator.root,
+        encoding: 'utf8',
+      },
+    ).trim(),
+  );
+  const looseObjectBytes = deflateSync(
+    Buffer.concat([Buffer.from(`blob ${corruptedBytes.byteLength}\0`, 'utf8'), corruptedBytes]),
+  );
+  chmodSync(looseObjectPath, 0o600);
+  writeFileSync(looseObjectPath, looseObjectBytes);
+
+  return {
+    objectId,
+    corruptedBytes,
+    actualObjectId: execFileSync('git', ['hash-object', '--stdin'], {
+      cwd: validator.root,
+      encoding: 'utf8',
+      input: corruptedBytes,
+    }).trim(),
+  };
+}
+
+type ValidatorModuleFixture = ReturnType<typeof validatorModuleFixture>;
+type GitObjectType = 'blob' | 'commit' | 'tree';
+
+function validatorObjectIdByteLength(validator: ValidatorModuleFixture) {
+  return validator.objectFormat === 'sha1' ? 20 : 32;
+}
+
+function readRawGitObject(
+  validator: ValidatorModuleFixture,
+  type: GitObjectType,
+  objectId: string,
+) {
+  return execFileSync('git', ['cat-file', type, objectId], {
+    cwd: validator.root,
+  });
+}
+
+function looseGitObjectPath(validator: ValidatorModuleFixture, objectId: string) {
+  return resolve(
+    validator.root,
+    execFileSync(
+      'git',
+      ['rev-parse', '--git-path', `objects/${objectId.slice(0, 2)}/${objectId.slice(2)}`],
+      {
+        cwd: validator.root,
+        encoding: 'utf8',
+      },
+    ).trim(),
+  );
+}
+
+function overwriteLooseGitObject(
+  validator: ValidatorModuleFixture,
+  storedObjectId: string,
+  type: GitObjectType,
+  bytes: Buffer,
+) {
+  const objectPath = looseGitObjectPath(validator, storedObjectId);
+  chmodSync(objectPath, 0o600);
+  writeFileSync(
+    objectPath,
+    deflateSync(Buffer.concat([Buffer.from(`${type} ${bytes.byteLength}\0`, 'utf8'), bytes])),
+  );
+}
+
+function writeGitObject(
+  validator: ValidatorModuleFixture,
+  type: GitObjectType,
+  bytes: Buffer,
+  literally = false,
+) {
+  return execFileSync(
+    'git',
+    ['hash-object', '-t', type, ...(literally ? ['--literally'] : []), '-w', '--stdin'],
+    {
+      cwd: validator.root,
+      encoding: 'utf8',
+      input: bytes,
+    },
+  ).trim();
+}
+
+function writeFixtureTree(
+  validator: ValidatorModuleFixture,
+  entries: Array<{
+    mode: '100644' | '100755' | '40000';
+    name: string;
+    objectId: string;
+    type: 'blob' | 'tree';
+  }>,
+) {
+  return execFileSync('git', ['mktree'], {
+    cwd: validator.root,
+    encoding: 'utf8',
+    input: entries
+      .map((entry) => `${entry.mode} ${entry.type} ${entry.objectId}\t${entry.name}\n`)
+      .join(''),
+  }).trim();
+}
+
+function parseFixtureTreeEntries(validator: ValidatorModuleFixture, treeBytes: Buffer) {
+  const objectIdByteLength = validatorObjectIdByteLength(validator);
+  const entries: Array<{
+    end: number;
+    mode: string;
+    name: string;
+    nameBytes: Buffer;
+    objectId: string;
+    start: number;
+  }> = [];
+  let offset = 0;
+  while (offset < treeBytes.byteLength) {
+    const modeEnd = treeBytes.indexOf(0x20, offset);
+    const nameEnd = modeEnd < 0 ? -1 : treeBytes.indexOf(0, modeEnd + 1);
+    const objectIdEnd = nameEnd < 0 ? -1 : nameEnd + 1 + objectIdByteLength;
+    if (modeEnd <= offset || nameEnd <= modeEnd + 1 || objectIdEnd > treeBytes.byteLength) {
+      throw new Error('Validator fixture tree is malformed.');
+    }
+    const nameBytes = treeBytes.subarray(modeEnd + 1, nameEnd);
+    entries.push({
+      start: offset,
+      end: objectIdEnd,
+      mode: treeBytes.subarray(offset, modeEnd).toString('ascii'),
+      name: nameBytes.toString('utf8'),
+      nameBytes,
+      objectId: treeBytes.subarray(nameEnd + 1, objectIdEnd).toString('hex'),
+    });
+    offset = objectIdEnd;
+  }
+  return entries;
+}
+
+function replaceFixtureTreeEntry(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+  replacement: { mode?: string; modeBytes?: Buffer; objectId?: string },
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  const objectId = replacement.objectId ?? entry.objectId;
+  const replacementBytes = Buffer.concat([
+    replacement.modeBytes ?? Buffer.from(replacement.mode ?? entry.mode, 'ascii'),
+    Buffer.from(' ', 'ascii'),
+    entry.nameBytes,
+    Buffer.from([0]),
+    Buffer.from(objectId, 'hex'),
+  ]);
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.start),
+    replacementBytes,
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function duplicateFixtureTreeEntry(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.end),
+    treeBytes.subarray(entry.start, entry.end),
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function replaceFixtureTreeEntryName(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+  replacementName: string,
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.start),
+    Buffer.from(entry.mode, 'ascii'),
+    Buffer.from(' ', 'ascii'),
+    Buffer.from(replacementName, 'utf8'),
+    Buffer.from([0]),
+    Buffer.from(entry.objectId, 'hex'),
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function replaceFixtureCommitTree(commitBytes: Buffer, treeObjectId: string) {
+  const firstLineEnd = commitBytes.indexOf(0x0a);
+  if (
+    firstLineEnd < 0 ||
+    !commitBytes.subarray(0, firstLineEnd).toString('ascii').startsWith('tree ')
+  ) {
+    throw new Error('Validator fixture commit is malformed.');
+  }
+  return Buffer.concat([
+    Buffer.from(`tree ${treeObjectId}`, 'ascii'),
+    commitBytes.subarray(firstLineEnd),
+  ]);
+}
+
+function createFixtureIdentity(
+  validator: ValidatorModuleFixture,
+  treeObjectId: string,
+  commitBytes = replaceFixtureCommitTree(
+    readRawGitObject(validator, 'commit', validator.commit),
+    treeObjectId,
+  ),
+) {
+  const commit = writeGitObject(validator, 'commit', commitBytes, true);
+  execFileSync('git', ['update-ref', 'HEAD', commit], { cwd: validator.root });
+  return {
+    repository: 'OpenCoven/sdk',
+    commit,
+    tree: treeObjectId,
+  } as const;
+}
+
+function createFixtureIdentityWithScriptsTree(
+  validator: ValidatorModuleFixture,
+  scriptsTreeBytes: Buffer,
+  literally = false,
+) {
+  const scriptsTree = writeGitObject(validator, 'tree', scriptsTreeBytes, literally);
+  const rootTreeBytes = replaceFixtureTreeEntry(
+    validator,
+    readRawGitObject(validator, 'tree', validator.tree),
+    'scripts',
+    { objectId: scriptsTree },
+  );
+  const tree = writeGitObject(validator, 'tree', rootTreeBytes);
+  return {
+    ...createFixtureIdentity(validator, tree),
+    scriptsTree,
+  };
+}
+
+function redirectedValidatorContract(validator: ValidatorModuleFixture) {
+  const redirectedBytes = Buffer.from(
+    validator.contractBytes
+      .toString('utf8')
+      .replace("'committed-contract'", "'redirected-contract'"),
+    'utf8',
+  );
+  const redirectedBlob = writeGitObject(validator, 'blob', redirectedBytes);
+  const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+    cwd: validator.root,
+    encoding: 'utf8',
+  }).trim();
+  const redirectedScriptsBytes = replaceFixtureTreeEntry(
+    validator,
+    readRawGitObject(validator, 'tree', scriptsTree),
+    'conformance-contract.mjs',
+    { objectId: redirectedBlob },
+  );
+  return {
+    redirectedBlob,
+    redirectedBytes,
+    redirectedScriptsBytes,
+    scriptsTree,
+  };
+}
+
+function runFixtureContractLoader(
+  validator: ValidatorModuleFixture,
+  identity: { commit: string; tree: string } = validator,
+  timeout?: number,
+) {
+  return spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+        const { loadSdkEvidenceContract } = await import(process.argv[1]);
+        const loaded = await loadSdkEvidenceContract({
+          validatorRoot: process.argv[2],
+          validatorIdentity: {
+            repository: 'OpenCoven/sdk',
+            commit: process.argv[3],
+            tree: process.argv[4],
+          },
+        });
+        process.stdout.write(JSON.stringify({
+          contract: loaded.contract.marker,
+          lock: loaded.frozenLock.sourceMarker,
+          schema: loaded.schema.sourceMarker,
+          registry: loaded.registry.sourceMarker,
+        }));
+      `,
+      pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+      validator.root,
+      identity.commit,
+      identity.tree,
+    ],
+    {
+      encoding: 'utf8',
+      timeout,
+    },
+  );
+}
+
+function expectFixtureLoaderFailure(
+  result: ReturnType<typeof runFixtureContractLoader>,
+  diagnostic: string,
+) {
+  expect(result.error).toBeUndefined();
+  expect(result.status).not.toBe(0);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toContain(`Error: ${diagnostic}`);
 }
 
 async function fixture() {
@@ -514,6 +898,666 @@ async function fixture() {
   return { contract, input, registry };
 }
 
+describe('Phase 1 SDK source contract authority', () => {
+  test.each(['unstaged', 'staged', 'untracked', 'hidden'] as const)(
+    'loads committed schema, registry, and lock bytes despite a %s checkout substitute',
+    (substitution) => {
+      const validator = validatorModuleFixture();
+      const relativePaths = [
+        'conformance/client-v1-cross-repository-lock.json',
+        'conformance/client-v1-cross-repository-evidence.schema.json',
+        'conformance/client-v1-cross-repository-assertions.json',
+      ] as const;
+      try {
+        if (substitution === 'untracked') {
+          execFileSync('git', ['rm', '--cached', '--quiet', '--force', '--', ...relativePaths], {
+            cwd: validator.root,
+          });
+        } else if (substitution === 'hidden') {
+          execFileSync('git', ['update-index', '--skip-worktree', '--', ...relativePaths], {
+            cwd: validator.root,
+          });
+        }
+
+        writeFileSync(
+          resolve(validator.root, relativePaths[0]),
+          '{"sourceMarker":"substituted-lock","evidenceProducer":{},"toolchain":{}}\n',
+        );
+        writeFileSync(
+          resolve(validator.root, relativePaths[1]),
+          '{"sourceMarker":"substituted-schema"}\n',
+        );
+        writeFileSync(
+          resolve(validator.root, relativePaths[2]),
+          '{"sourceMarker":"substituted-registry"}\n',
+        );
+        if (substitution === 'staged') {
+          execFileSync('git', ['add', '--', ...relativePaths], { cwd: validator.root });
+        }
+
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.commit);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.tree);
+
+        const loaded = JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              '--input-type=module',
+              '--eval',
+              `
+                const { loadSdkEvidenceContract } = await import(process.argv[1]);
+                const loaded = await loadSdkEvidenceContract({
+                  validatorRoot: process.argv[2],
+                  validatorIdentity: {
+                    repository: 'OpenCoven/sdk',
+                    commit: process.argv[3],
+                    tree: process.argv[4],
+                  },
+                });
+                process.stdout.write(JSON.stringify({
+                  frozenLock: loaded.frozenLock,
+                  schema: loaded.schema,
+                  registry: loaded.registry,
+                  frozenLockText: loaded.frozenLockText,
+                  schemaText: loaded.schemaText,
+                  registryText: loaded.registryText,
+                  validator: loaded.validator,
+                }));
+              `,
+              pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+              validator.root,
+              validator.commit,
+              validator.tree,
+            ],
+            { encoding: 'utf8' },
+          ),
+        ) as JsonRecord;
+
+        expect((loaded.frozenLock as JsonRecord).sourceMarker).toBe('committed-lock');
+        expect((loaded.schema as JsonRecord).sourceMarker).toBe('committed-schema');
+        expect((loaded.registry as JsonRecord).sourceMarker).toBe('committed-registry');
+        expect(loaded.frozenLockText).toBe(validator.frozenLockBytes.toString('utf8'));
+        expect(loaded.schemaText).toBe(validator.schemaBytes.toString('utf8'));
+        expect(loaded.registryText).toBe(validator.registryBytes.toString('utf8'));
+        expect((loaded.validator as JsonRecord).schema).toEqual(
+          metadata(
+            'conformance/client-v1-cross-repository-evidence.schema.json',
+            validator.schemaBytes,
+          ),
+        );
+      } finally {
+        rmSync(validator.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    {
+      label: 'frozen lock',
+      path: 'conformance/client-v1-cross-repository-lock.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.frozenLockBytes,
+    },
+    {
+      label: 'evidence schema',
+      path: 'conformance/client-v1-cross-repository-evidence.schema.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.schemaBytes,
+    },
+    {
+      label: 'assertion registry',
+      path: 'conformance/client-v1-cross-repository-assertions.json',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.registryBytes,
+    },
+    {
+      label: 'executable contract module',
+      path: 'scripts/conformance-contract.mjs',
+      bytes: (validator: ReturnType<typeof validatorModuleFixture>) => validator.contractBytes,
+    },
+  ])(
+    'rejects a corrupt loose $label object even when the verified tree reports its expected OID',
+    ({ path, bytes }) => {
+      const validator = validatorModuleFixture();
+      try {
+        const corruption = corruptLooseValidatorBlob(validator, path, bytes(validator));
+        const treeEntry = execFileSync(
+          'git',
+          ['ls-tree', '-z', '-l', validator.commit, '--', path],
+          {
+            cwd: validator.root,
+            encoding: 'utf8',
+          },
+        )
+          .split('\0')
+          .filter((entry) => entry.length > 0);
+        const [entryMetadata, entryPath] = treeEntry[0]?.split('\t') ?? [];
+
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.commit);
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+            cwd: validator.root,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(validator.tree);
+        expect(treeEntry).toHaveLength(1);
+        expect(entryMetadata?.split(/\s+/u)).toEqual([
+          '100644',
+          'blob',
+          corruption.objectId,
+          String(corruption.corruptedBytes.byteLength),
+        ]);
+        expect(entryPath).toBe(path);
+        expect(
+          execFileSync('git', ['cat-file', 'blob', corruption.objectId], {
+            cwd: validator.root,
+          }),
+        ).toEqual(corruption.corruptedBytes);
+        expect(corruption.actualObjectId).not.toBe(corruption.objectId);
+        expect(() =>
+          execFileSync('git', ['fsck', '--no-progress'], {
+            cwd: validator.root,
+            stdio: ['ignore', 'ignore', 'ignore'],
+          }),
+        ).toThrow();
+
+        const result = spawnSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `
+              const { loadSdkEvidenceContract } = await import(process.argv[1]);
+              const loaded = await loadSdkEvidenceContract({
+                validatorRoot: process.argv[2],
+                validatorIdentity: {
+                  repository: 'OpenCoven/sdk',
+                  commit: process.argv[3],
+                  tree: process.argv[4],
+                },
+              });
+              process.stdout.write(JSON.stringify({
+                contract: loaded.contract.marker,
+                lock: loaded.frozenLock.sourceMarker,
+                schema: loaded.schema.sourceMarker,
+                registry: loaded.registry.sourceMarker,
+              }));
+            `,
+            pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+            validator.root,
+            validator.commit,
+            validator.tree,
+          ],
+          {
+            encoding: 'utf8',
+          },
+        );
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Error: SDK committed blob failed object ID verification.');
+        expect(result.stderr).not.toContain(path);
+      } finally {
+        rmSync(validator.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('rejects a corrupt intermediate tree that redirects a verified module', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const redirected = redirectedValidatorContract(validator);
+      overwriteLooseGitObject(
+        validator,
+        redirected.scriptsTree,
+        'tree',
+        redirected.redirectedScriptsBytes,
+      );
+
+      expect(
+        execFileSync('git', ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(redirected.redirectedBlob);
+      expect(
+        execFileSync('git', ['cat-file', 'blob', redirected.redirectedBlob], {
+          cwd: validator.root,
+        }),
+      ).toEqual(redirected.redirectedBytes);
+      expect(
+        execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+          input: redirected.redirectedScriptsBytes,
+        }).trim(),
+      ).not.toBe(redirected.scriptsTree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK committed tree failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a corrupt root tree that redirects a verified module graph', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const redirected = redirectedValidatorContract(validator);
+      const redirectedScriptsTree = writeGitObject(
+        validator,
+        'tree',
+        redirected.redirectedScriptsBytes,
+      );
+      const redirectedRootBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', validator.tree),
+        'scripts',
+        { objectId: redirectedScriptsTree },
+      );
+      overwriteLooseGitObject(validator, validator.tree, 'tree', redirectedRootBytes);
+
+      expect(
+        execFileSync('git', ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(redirected.redirectedBlob);
+      expect(
+        execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+          input: redirectedRootBytes,
+        }).trim(),
+      ).not.toBe(validator.tree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK committed tree failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects corrupt raw commit bytes even when HEAD and its tree OID are unchanged', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const commitBytes = readRawGitObject(validator, 'commit', validator.commit);
+      const corruptCommitBytes = Buffer.from(
+        commitBytes
+          .toString('utf8')
+          .replace('validator module fixture', 'validator module fixturE'),
+        'utf8',
+      );
+      if (corruptCommitBytes.equals(commitBytes)) {
+        throw new Error('Validator fixture commit corruption was not applied.');
+      }
+      overwriteLooseGitObject(validator, validator.commit, 'commit', corruptCommitBytes);
+
+      expect(
+        execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(validator.commit);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK validator commit failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a commit with more than one tree header', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const commitBytes = readRawGitObject(validator, 'commit', validator.commit);
+      const firstLineEnd = commitBytes.indexOf(0x0a);
+      if (firstLineEnd < 0) {
+        throw new Error('Validator fixture commit is malformed.');
+      }
+      const duplicateTreeHeaderCommit = Buffer.concat([
+        commitBytes.subarray(0, firstLineEnd + 1),
+        Buffer.from(`tree ${validator.tree}\n`, 'ascii'),
+        commitBytes.subarray(firstLineEnd + 1),
+      ]);
+      const identity = createFixtureIdentity(validator, validator.tree, duplicateTreeHeaderCommit);
+
+      expect(
+        execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(validator.tree);
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK validator commit tree header is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    {
+      label: 'trailing junk',
+      diagnostic: 'SDK committed tree is malformed.',
+      mutate: (_validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        Buffer.concat([treeBytes, Buffer.from([0x31])]),
+    },
+    {
+      label: 'a duplicate entry',
+      diagnostic: 'SDK committed tree contains duplicate entry names.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        duplicateFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs'),
+    },
+    {
+      label: 'an unsafe entry name',
+      diagnostic: 'SDK committed tree contains an unsafe entry name.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntryName(validator, treeBytes, 'conformance-contract.mjs', '..'),
+    },
+    {
+      label: 'a symlink mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '120000',
+        }),
+    },
+    {
+      label: 'a gitlink mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '160000',
+        }),
+    },
+    {
+      label: 'a noncanonical regular-file mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '100664',
+        }),
+    },
+    {
+      label: 'high-bit mode bytes that ASCII-decode as a regular file',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          modeBytes: Buffer.from([0xb1, 0xb0, 0xb0, 0xb6, 0xb4, 0xb4]),
+        }),
+    },
+  ])('rejects a verified tree object containing $label', ({ diagnostic, mutate }) => {
+    const validator = validatorModuleFixture();
+    try {
+      const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+        cwd: validator.root,
+        encoding: 'utf8',
+      }).trim();
+      const identity = createFixtureIdentityWithScriptsTree(
+        validator,
+        mutate(validator, readRawGitObject(validator, 'tree', scriptsTree)),
+        true,
+      );
+
+      expectFixtureLoaderFailure(runFixtureContractLoader(validator, identity), diagnostic);
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a regular-file target whose object is a tree', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+        cwd: validator.root,
+        encoding: 'utf8',
+      }).trim();
+      const scriptsTreeBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', scriptsTree),
+        'conformance-contract.mjs',
+        { objectId: scriptsTree },
+      );
+      const identity = createFixtureIdentityWithScriptsTree(validator, scriptsTreeBytes);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK committed tree entry object type is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an intermediate tree target whose mode is a regular file', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const rootTreeBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', validator.tree),
+        'scripts',
+        { mode: '100644' },
+      );
+      const tree = writeGitObject(validator, 'tree', rootTreeBytes, true);
+      const identity = createFixtureIdentity(validator, tree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK committed tree entry type is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('bounds shared-subtree traversal independently of unique tree objects and module bytes', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const leafBlob = writeGitObject(validator, 'blob', Buffer.from('leaf', 'utf8'));
+      let sharedTree = writeFixtureTree(validator, [
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: leafBlob,
+          name: 'leaf.txt',
+        },
+      ]);
+      for (let depth = 0; depth < 28; depth += 1) {
+        sharedTree = writeFixtureTree(validator, [
+          {
+            mode: '40000',
+            type: 'tree',
+            objectId: sharedTree,
+            name: 'left',
+          },
+          {
+            mode: '40000',
+            type: 'tree',
+            objectId: sharedTree,
+            name: 'right',
+          },
+        ]);
+      }
+
+      const contractBlob = execFileSync(
+        'git',
+        ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`],
+        {
+          cwd: validator.root,
+          encoding: 'utf8',
+        },
+      ).trim();
+      const githubBlob = execFileSync(
+        'git',
+        ['rev-parse', `${validator.commit}:scripts/github-conformance-evidence.mjs`],
+        {
+          cwd: validator.root,
+          encoding: 'utf8',
+        },
+      ).trim();
+      const scriptsTree = writeFixtureTree(validator, [
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: contractBlob,
+          name: 'conformance-contract.mjs',
+        },
+        {
+          mode: '100644',
+          type: 'blob',
+          objectId: githubBlob,
+          name: 'github-conformance-evidence.mjs',
+        },
+        {
+          mode: '40000',
+          type: 'tree',
+          objectId: sharedTree,
+          name: 'shared',
+        },
+      ]);
+      const rootTree = writeGitObject(
+        validator,
+        'tree',
+        replaceFixtureTreeEntry(
+          validator,
+          readRawGitObject(validator, 'tree', validator.tree),
+          'scripts',
+          { objectId: scriptsTree },
+        ),
+      );
+      const identity = createFixtureIdentity(validator, rootTree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity, 2_000),
+        'SDK validator module graph exceeds the traversal limit.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('loads committed authority from a SHA-256 validator repository', () => {
+    const validator = validatorModuleFixture('sha256');
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+            const { loadSdkEvidenceContract } = await import(process.argv[1]);
+            const loaded = await loadSdkEvidenceContract({
+              validatorRoot: process.argv[2],
+              validatorIdentity: {
+                repository: 'OpenCoven/sdk',
+                commit: process.argv[3],
+                tree: process.argv[4],
+              },
+            });
+            process.stdout.write(JSON.stringify({
+              validator: loaded.validator,
+              contract: loaded.contract.marker,
+              lock: loaded.frozenLock.sourceMarker,
+              schema: loaded.schema.sourceMarker,
+              registry: loaded.registry.sourceMarker,
+            }));
+          `,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          validator.root,
+          validator.commit,
+          validator.tree,
+        ],
+        {
+          encoding: 'utf8',
+        },
+      );
+      const loaded = JSON.parse(result.stdout) as JsonRecord;
+
+      expect(validator.commit).toMatch(/^[0-9a-f]{64}$/u);
+      expect(validator.tree).toMatch(/^[0-9a-f]{64}$/u);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(loaded.validator).toMatchObject({
+        repository: 'OpenCoven/sdk',
+        commit: validator.commit,
+        tree: validator.tree,
+      });
+      expect(loaded.contract).toBe('committed-contract');
+      expect(loaded.lock).toBe('committed-lock');
+      expect(loaded.schema).toBe('committed-schema');
+      expect(loaded.registry).toBe('committed-registry');
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('matches the immutable SDK 933 source contract while retaining its pre-rebind producer', () => {
+    const provenance = JSON.parse(readFileSync(sdk933LockProvenancePath, 'utf8')) as JsonRecord;
+    expect(provenance).toEqual({
+      repository: 'OpenCoven/sdk',
+      revision: phase1CompatibilityValidator.commit,
+      tree: phase1CompatibilityValidator.tree,
+      path: 'conformance/client-v1-cross-repository-lock.json',
+      blob: '30cc0e68af7e01657b7d3ee096641a1dd05e4ab2',
+      size: 10641,
+      sha256: '94e8c7e312ecabc377531f58e01675046a1db9902ad74d9fa64098ebb3987fa1',
+    });
+
+    const frozenLockBytes = readFileSync(sdk933LockFixturePath);
+    expect(frozenLockBytes.byteLength).toBe(provenance.size);
+    expect(sha256(frozenLockBytes)).toBe(provenance.sha256);
+    const frozenLock = JSON.parse(frozenLockBytes.toString('utf8')) as JsonRecord;
+    const phase1Lock = readPhase1ConformanceLock();
+
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).not.toThrow();
+    expect(frozenLock.sources).toMatchObject({
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+        commit: phase1Lock.cave.revision,
+      },
+      coven: {
+        repository: 'OpenCoven/coven',
+        commit: phase1Lock.coven.revision,
+      },
+      chat: {
+        repository: 'OpenCoven/chat',
+        commit: phase1Lock.chat.revision,
+      },
+    });
+    expect(frozenLock.candidate).toMatchObject({
+      repository: 'OpenCoven/sdk',
+      commit: phase1Lock.sdk.revision,
+    });
+    expect(frozenLock.evidenceProducer).toMatchObject({
+      status: 'compatible',
+      repository: 'OpenCoven/chat',
+      commit: '4dc8f64bb71634a01ee647542dcdafdd0888b4f9',
+      tree: '915232e3595196de447521d9fca59866aeade956',
+    });
+  });
+});
+
 describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', () => {
   test('records each observed assertion exactly once without filling omissions', () => {
     const recorder = createObservedAssertionRecorder(['sdk.one', 'sdk.two'], 'SDK');
@@ -655,7 +1699,7 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(() => buildObservedSchemaV2Assertions(options)).toThrow(/missing/u);
   });
 
-  test('loads the exact validator-owned lock, registry, schema, and executable contract', async () => {
+  test('accepts the canonical source pins without treating this Chat head as the SDK producer', () => {
     const loaded = JSON.parse(
       execFileSync(
         process.execPath,
@@ -664,16 +1708,20 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
           '--eval',
           `
             const {
+              assertSdkContractMatchesPhase1Lock,
               loadSdkEvidenceContract,
             } = await import(process.argv[1]);
+            const { readPhase1ConformanceLock } = await import(process.argv[2]);
             const loaded = await loadSdkEvidenceContract({
-              validatorRoot: process.argv[2],
+              validatorRoot: process.argv[3],
               validatorIdentity: {
                 repository: 'OpenCoven/sdk',
-                commit: process.argv[3],
-                tree: process.argv[4],
+                commit: process.argv[4],
+                tree: process.argv[5],
               },
             });
+            const phase1Lock = readPhase1ConformanceLock();
+            assertSdkContractMatchesPhase1Lock(loaded, phase1Lock);
             process.stdout.write(JSON.stringify({
               validator: loaded.validator,
               frozenLockSchemaVersion: loaded.frozenLock.schemaVersion,
@@ -682,12 +1730,37 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
               producer: loaded.contract.assertEvidenceProducerCompatibility(
                 loaded.frozenLock,
               ),
+              phase1Sources: {
+                sdk: phase1Lock.sdk,
+                cave: phase1Lock.cave,
+                coven: phase1Lock.coven,
+                chat: phase1Lock.chat,
+              },
+              frozenSources: {
+                sdk: {
+                  repository: loaded.frozenLock.candidate.repository,
+                  revision: loaded.frozenLock.candidate.commit,
+                },
+                cave: {
+                  repository: loaded.frozenLock.sources.cave.repository,
+                  revision: loaded.frozenLock.sources.cave.commit,
+                },
+                coven: {
+                  repository: loaded.frozenLock.sources.coven.repository,
+                  revision: loaded.frozenLock.sources.coven.commit,
+                },
+                chat: {
+                  repository: loaded.frozenLock.sources.chat.repository,
+                  revision: loaded.frozenLock.sources.chat.commit,
+                },
+              },
             }));
           `,
           pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+          pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-conformance-lock.mjs')).href,
           validatorRoot,
-          validatorCommit,
-          validatorTree,
+          phase1CompatibilityValidator.commit,
+          phase1CompatibilityValidator.tree,
         ],
         { encoding: 'utf8' },
       ),
@@ -697,9 +1770,11 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       registrySchemaVersion: number;
       schemaId: string;
       producer: JsonRecord;
+      phase1Sources: JsonRecord;
+      frozenSources: JsonRecord;
     };
 
-    expect(loaded.validator.commit).toBe(validatorCommit);
+    expect(loaded.validator.commit).toBe(phase1CompatibilityValidator.commit);
     expect(loaded.frozenLockSchemaVersion).toBe(2);
     expect(loaded.registrySchemaVersion).toBe(2);
     expect(loaded.schemaId).toBe(
@@ -709,10 +1784,13 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
+      commit: '4dc8f64bb71634a01ee647542dcdafdd0888b4f9',
+      tree: '915232e3595196de447521d9fca59866aeade956',
       workflow: {
         environmentId: '20863036831',
       },
     });
+    expect(loaded.phase1Sources).toEqual(loaded.frozenSources);
   }, 30_000);
 
   test('executes the committed contract bytes after its checkout path mutates', async () => {

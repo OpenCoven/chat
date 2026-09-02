@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   chmodSync,
@@ -76,11 +77,27 @@ const fileSymlinksSupported = supportsFileSymlinks();
 const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
+const expectedBehaviorAuthority = {
+  revision: 'fafa2c5332c3b2415192fe235b87e3cb3da776d8',
+  tree: '2620aca48e652452c6f81b638e3a3ecfc685dae3',
+  files: [
+    {
+      path: 'scripts/phase1-schema-v2-evidence.mjs',
+      blob: '0d0424731a06f169342258e76216583667e4deb0',
+      sha256: 'a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387',
+    },
+    {
+      path: '.github/workflows/client-v1-conformance.yml',
+      blob: '3fde56ad1942291ebae8b4c96dae94263845535a',
+      sha256: 'c111264aff9afce69ea33958a666962e7f76a1ce43998f71d3214e590d5a3cf2',
+    },
+  ],
+} as const;
 
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: '20633346c444ded9e05ca5a3db45d74c28918d69',
+    revision: 'edd4728792321771496df58bfc0e6122908a96ec',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
@@ -88,7 +105,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: 'e74078a147c084bd761d929654f0990df66ef99f',
+    revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
   },
   coven: {
     repository: 'OpenCoven/coven',
@@ -96,11 +113,11 @@ const expectedEntries = {
   },
   harness: {
     repository: 'OpenCoven/chat',
-    revision: '19f6c6793556d768e3e523ea34dafbd945a7f266',
+    revision: expectedBehaviorAuthority.revision,
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
-    tree: '72de37ed3c1afd36dcbd2824570f0a00b46459c6',
+    tree: 'c373902b48b06520450f520e669a34f72b64a35d',
     files: [
       {
         path: 'src-tauri/Cargo.toml',
@@ -119,8 +136,8 @@ const expectedEntries = {
       },
       {
         path: 'src-tauri/src/conformance.rs',
-        blob: 'e0997e45a2371cc231bc3923a55d9d62d7cff2a0',
-        sha256: '32c1b24e2ce27fb666af5ffe73a42d626f258285dd0d680852014799054d953d',
+        blob: '8271a0c39c5e213067c96e08e154faa95b340f03',
+        sha256: 'dac67fb376e2c80aa1a562720ec300c772c1d68146370b4b403d54b8ecd83896',
       },
       {
         path: 'src-tauri/src/coven.rs',
@@ -134,8 +151,8 @@ const expectedEntries = {
       },
       {
         path: 'src-tauri/src/lib.rs',
-        blob: 'd9c97b4fb24e73fb103330fa9a8f778ccad42a3a',
-        sha256: 'f42a987b0dcb61b7c98f9dcdbf264d079134defe4bbe63e5019d4560ea967e21',
+        blob: '48c048a4b8830ddcf7a09b0b30dc9f4d2723b203',
+        sha256: 'd25bf49f3b41ea3ad9a6f8da49f8a01397aa340e943f029926b97945fec78314',
       },
     ],
   },
@@ -470,8 +487,39 @@ describe('Phase 1 conformance lock', () => {
     });
     expect(committedHarnessAuthority).toMatchObject({
       revision: expectedEntries.harness.revision,
-      tree: 'b1dd12214a06291761d7e512fc988a044912eb15',
+      tree: expectedBehaviorAuthority.tree,
     });
+  });
+
+  test('pins the behavior commit and each changed governed Git object', () => {
+    for (const expected of expectedBehaviorAuthority.files) {
+      expect(
+        committedHarnessAuthority.files.find(
+          (file: { path: string }) => file.path === expected.path,
+        ),
+      ).toEqual(expected);
+    }
+  });
+
+  gitTest('binds the production Chat authority to the pinned Git objects', () => {
+    const lock = readPhase1ConformanceLock();
+
+    expect(runGit(['rev-parse', `${lock.chat.revision}^{tree}`], projectRoot)).toBe(
+      lock.chatAuthority.tree,
+    );
+    for (const file of lock.chatAuthority.files) {
+      const object = `${lock.chat.revision}:${file.path}`;
+      expect(runGit(['rev-parse', object], projectRoot)).toBe(file.blob);
+      const bytes = execFileSync('git', ['cat-file', 'blob', object], {
+        cwd: projectRoot,
+        env: createTestGitEnvironment(),
+        maxBuffer: gitTestMaxBuffer,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: gitTestCommandTimeout,
+        killSignal: 'SIGKILL',
+      });
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(file.sha256);
+    }
   });
 
   test('keeps the Windows supervisor source reachable from the frozen harness checkout', () => {
