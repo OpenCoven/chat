@@ -19,7 +19,7 @@ if (!rootElement) {
 }
 
 /**
- * `?demo=chat`, `?demo=minimal`, and `?demo=familiars` render a
+ * `?demo=chat`, `?demo=messages`, and `?demo=minimal` render a
  * proof-of-concept surface instead of the Phase 1 read-only production app.
  *
  * A query flag rather than a replacement: the read-only production app is
@@ -27,22 +27,22 @@ if (!rootElement) {
  * Each demo is a preview of later phases driven entirely by local mock data,
  * and all of them are meant to be deleted when the real richer surfaces land.
  *
- * Three of them because they are directions, not revisions. `chat` is the
- * Messages-shaped surface; `minimal` implements the approved "Coven Cave
- * Minimal (macOS)" design; `familiars` implements the "Familiars Redesign v2"
- * design, which puts the ward — what a familiar may do alone and what it must
- * ask about — at the centre of the chat. Keeping them means the choice between
- * them can be made by looking at them side by side rather than from memory.
+ * `chat` is the current direction: the "Familiars Redesign v2" design, which
+ * puts the ward — what a familiar may do alone and what it must ask about —
+ * at the centre of the chat. `messages` is the earlier Messages-shaped
+ * surface it replaced, kept reachable so the two can be compared side by
+ * side rather than from memory; `minimal` implements the approved "Coven Cave
+ * Minimal (macOS)" design.
  */
 const demo = new URLSearchParams(window.location.search).get('demo');
 
 function surfaceFor(name: string | null) {
   if (name === 'chat') {
-    return <DemoShell />;
+    return <FamiliarsShell />;
   }
 
-  if (name === 'familiars') {
-    return <FamiliarsShell />;
+  if (name === 'messages') {
+    return <DemoShell />;
   }
 
   return name === 'minimal' ? <MinimalMacOS /> : <App />;

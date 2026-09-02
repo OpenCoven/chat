@@ -4,6 +4,13 @@ test('preserves the local demo routes alongside the default app', async ({ page 
   await page.goto('/?demo=chat');
 
   await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=chat');
+  await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Held action' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+
+  await page.goto('/?demo=messages');
+
+  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=messages');
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 
@@ -12,17 +19,10 @@ test('preserves the local demo routes alongside the default app', async ({ page 
   await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=minimal');
   await expect(page.getByText('Chats', { exact: true })).toBeVisible();
   await expect(page.getByText('Familiars', { exact: true })).toBeVisible();
-
-  await page.goto('/?demo=familiars');
-
-  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=familiars');
-  await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Held action' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 });
 
 test('keeps the chat sidebar compact and fully interactive', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   const sidebar = page.getByRole('complementary', { name: 'Conversations' });
   await expect(sidebar.locator('select')).toHaveCount(0);
@@ -63,14 +63,14 @@ test('keeps the chat sidebar compact and fully interactive', async ({ page }) =>
 });
 
 test('does not reserve a top row for the active familiar', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   await expect(page.locator('.thread-header')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Active familiar: Astra' })).toHaveCount(0);
 });
 
 test('opens conversation command search from the rail and keyboard shortcut', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   await page.getByRole('button', { name: 'Search conversations' }).click();
   const dialog = page.getByRole('dialog', { name: 'Search conversations' });
@@ -89,7 +89,7 @@ test('opens conversation command search from the rail and keyboard shortcut', as
 });
 
 test('resizes both desktop side rails by dragging their inner edges', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   const conversations = page.getByRole('complementary', { name: 'Conversations' });
   const inspector = page.getByRole('complementary', { name: 'Agent inspector' });
@@ -127,7 +127,7 @@ test('resizes both desktop side rails by dragging their inner edges', async ({ p
 });
 
 test('expands generated images against a focused dark backdrop', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   const inlineImage = page.getByRole('button', {
     name: 'Expand image: A purple cat in a glowing garden',
@@ -149,7 +149,7 @@ test('expands generated images against a focused dark backdrop', async ({ page }
 });
 
 test('shows an expandable reasoning summary for the demo response', async ({ page }) => {
-  await page.goto('/?demo=chat');
+  await page.goto('/?demo=messages');
 
   const reasoning = page.locator('.reasoning-block');
   const toggle = reasoning.getByRole('button');
