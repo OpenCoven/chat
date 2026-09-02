@@ -1,5 +1,4 @@
 import {
-  type ChangeEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -10,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
-
+import { type CompletionCommand, Composer, type ComposerAttachment } from '../ui';
 import {
   clockLabel,
   FAM_COMMANDS,
@@ -76,6 +75,15 @@ const SIDEBAR_WIDTH = 300;
 const REPLY_DELAY = 1200;
 const DECISION_DELAY = 1400;
 const GUEST_DELAY = 900;
+const UPLOAD_STEP = 240;
+
+/** What the paperclip attaches, in order; the third fails so the chip's failed state has a home. */
+const MOCK_FILES: readonly Readonly<{ name: string; meta: string; fails?: true }>[] = [
+  { name: 'vendor-a.md', meta: '12 KB' },
+  { name: 'evidence-map.png', meta: '418 KB' },
+  { name: 'q3-deck.key', meta: '212 MB', fails: true },
+  { name: 'ledger.md', meta: '9 KB' },
+];
 
 type FamCard = Readonly<{ x: number; y: number; familiarId: string }>;
 
@@ -110,6 +118,8 @@ type ShellState = Readonly<{
   /** The familiar's screen: the panel, and the full watch view over it. */
   screenOpen: boolean;
   watching: boolean;
+  /** Files attached to the current draft, with their (mock) upload state. */
+  attachments: readonly ComposerAttachment[];
 }>;
 
 type ShellAction =
@@ -119,6 +129,8 @@ type ShellAction =
   | { type: 'send'; conversationId: string; message: FamMessage }
   | { type: 'reply'; conversationId: string; message: FamMessage }
   | { type: 'toggle-activity'; key: ActivityKey }
+  | { type: 'attachment'; attachment: ComposerAttachment }
+  | { type: 'remove-attachment'; id: string }
   | { type: 'summon'; familiar: MockFamiliar; conversation: FamConversation }
   | { type: 'escape' };
 
@@ -143,6 +155,7 @@ function reduce(state: ShellState, action: ShellAction): ShellState {
         searchOpen: false,
         famCard: null,
         thinking: false,
+        attachments: [],
       };
     case 'decide':
       return {
@@ -157,7 +170,25 @@ function reduce(state: ShellState, action: ShellAction): ShellState {
         draft: '',
         slashOpen: false,
         thinking: true,
+        attachments: [],
         extra: append(state.extra, action.conversationId, action.message),
+      };
+    case 'attachment': {
+      const present = state.attachments.some((item) => item.id === action.attachment.id);
+
+      return {
+        ...state,
+        attachments: present
+          ? state.attachments.map((item) =>
+              item.id === action.attachment.id ? action.attachment : item,
+            )
+          : [...state.attachments, action.attachment],
+      };
+    }
+    case 'remove-attachment':
+      return {
+        ...state,
+        attachments: state.attachments.filter((item) => item.id !== action.id),
       };
     case 'reply':
       return {
@@ -225,6 +256,7 @@ function initialState(props: FamiliarsShellProps): ShellState {
     summon: null,
     screenOpen: false,
     watching: false,
+    attachments: [],
   };
 }
 
@@ -370,7 +402,20 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
       : [];
     const guestNames = guests.map((guest) => `@${guest.name}`).join(' and ');
 
-    dispatch({ type: 'send', conversationId, message: { kind: 'user', time: at, text } });
+    const attached = current.attachments
+      .filter((item) => item.state !== 'failed')
+      .map((item) => item.name);
+
+    dispatch({
+      type: 'send',
+      conversationId,
+      message: {
+        kind: 'user',
+        time: at,
+        text,
+        ...(attached.length > 0 ? { attachments: attached } : {}),
+      },
+    });
     cancelTimers();
     track(
       window.setTimeout(() => {
@@ -538,6 +583,56 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     });
   }
 
+  /**
+   * Attach the next mock file and walk it through the chip's states.
+   *
+   * There is no file picker in the demo; what matters is the lifecycle the
+   * real one will drive — uploading with progress, then ready or failed.
+   */
+  function attach() {
+    const taken = state.attachments.length;
+    const file = MOCK_FILES[taken % MOCK_FILES.length];
+
+    if (!file) {
+      return;
+    }
+    const id = `att-${Date.now().toString(36)}-${taken}`;
+    const base: ComposerAttachment = { id, name: file.name, meta: file.meta };
+
+    dispatch({ type: 'attachment', attachment: { ...base, state: 'uploading', progress: 0 } });
+    [25, 55, 85].forEach((progress, step) => {
+      track(
+        window.setTimeout(
+          () => {
+            dispatch({
+              type: 'attachment',
+              attachment: { ...base, state: 'uploading', progress },
+            });
+          },
+          UPLOAD_STEP * (step + 1),
+        ),
+      );
+    });
+    track(
+      window.setTimeout(() => {
+        dispatch({
+          type: 'attachment',
+          attachment: file.fails
+            ? { ...base, state: 'failed', meta: `Too large — ${file.meta}, 25 MB limit` }
+            : { ...base, state: 'ready' },
+        });
+      }, UPLOAD_STEP * 4),
+    );
+  }
+
+  const paletteCommands: CompletionCommand[] = FAM_COMMANDS.map((command) => ({
+    id: command.name,
+    label: command.name,
+    description: command.hint,
+    meta: command.tier,
+    ...(command.tier === 'must ask' ? { metaTone: 'warning' as const } : {}),
+  }));
+
   function openSlash() {
     patch({ slashOpen: true, draft: '/' });
     composerRef.current?.focus();
@@ -548,6 +643,11 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     composerRef.current?.focus();
   }
 
+  /**
+   * Keys the host claims before the composer's own handling: completing the
+   * inline `@` and `/` menus, closing them, and keeping ⌘⏎ from reaching the
+   * window's approve shortcut while a draft is being sent.
+   */
   function onComposerKey(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     const first = commands[0];
     const firstMention = mentionOptions[0];
@@ -561,13 +661,13 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     } else if (event.key === 'Tab' && slashOpen && first) {
       event.preventDefault();
       pickCommand(first.name);
-    } else if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      if (slashOpen && first && /^\/\S*$/.test(state.draft)) {
+    } else if (event.key === 'Enter' && !event.shiftKey && slashOpen && first) {
+      if (/^\/\S*$/.test(state.draft)) {
+        event.preventDefault();
         pickCommand(first.name);
-      } else {
-        send();
       }
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && state.draft.trim()) {
+      event.stopPropagation();
     } else if (event.key === 'Escape' && slashOpen) {
       event.stopPropagation();
       patch({ draft: '', slashOpen: false });
@@ -588,11 +688,6 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     }
   }
 
-  const rows = Math.min(
-    8,
-    Math.max(2, state.draft.split('\n').length + (state.draft.length > 90 ? 1 : 0)),
-  );
-  const ready = state.draft.trim().length > 0;
   const lightboxMessage = state.lightbox === null ? undefined : messages[state.lightbox];
   const lightbox =
     lightboxMessage?.kind === 'image' && lightboxMessage.plot ? lightboxMessage : null;
@@ -912,112 +1007,86 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
 
         <div className="fr-composer-wrap">
           <div className="fr-composer-inner">
-            {mentionOpen ? (
-              <div role="listbox" aria-label="Mention a familiar" className="fr-slash">
-                {mentionOptions.map((candidate, index) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    role="option"
-                    aria-selected={index === 0}
-                    className="fr-slash-option fr-mention-option"
-                    onClick={() => pickMention(candidate.name)}
-                  >
-                    <Avatar
-                      initial={candidate.name[0] ?? '?'}
-                      size={24}
-                      presence={candidate.status}
-                      elevated
-                    />
-                    <span className="fr-switcher-copy">
-                      <span className="fr-switcher-name">@{candidate.name}</span>
-                      <span className="fr-switcher-role">{candidate.role}</span>
-                    </span>
-                    <span className="fr-slash-tier">{candidate.status}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {slashOpen && commands.length > 0 && !mentionOpen ? (
-              <div role="listbox" aria-label="Commands" className="fr-slash">
-                {commands.map((command, index) => (
-                  <button
-                    key={command.name}
-                    type="button"
-                    role="option"
-                    aria-selected={index === 0}
-                    className="fr-slash-option"
-                    onClick={() => pickCommand(command.name)}
-                  >
-                    <code className="fr-slash-name">{command.name}</code>
-                    <span className="fr-slash-hint">{command.hint}</span>
-                    <span
-                      className={cx(
-                        'fr-slash-tier',
-                        command.tier === 'must ask' && 'fr-slash-tier--ask',
-                      )}
+            <Composer
+              value={state.draft}
+              onValueChange={(next) => patch({ draft: next, slashOpen: false })}
+              label={`Message ${familiar.name}`}
+              textareaRef={composerRef}
+              onKeyDown={onComposerKey}
+              onSend={send}
+              running={state.thinking}
+              onStop={cancelTimers}
+              attachments={state.attachments}
+              onRemoveAttachment={(id) => dispatch({ type: 'remove-attachment', id })}
+              onAttach={attach}
+              onOpenCommands={openSlash}
+              commands={paletteCommands}
+              onSelectCommand={(command) => pickCommand(command.label)}
+              warning={
+                trigger
+                  ? {
+                      label: 'Held for approval',
+                      title: `“${trigger.action}” is in ${familiar.name}’s must-ask tier`,
+                      onClick: goAccess,
+                    }
+                  : null
+              }
+            >
+              {mentionOpen ? (
+                <div role="listbox" aria-label="Mention a familiar" className="fr-slash">
+                  {mentionOptions.map((candidate, index) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      role="option"
+                      aria-selected={index === 0}
+                      className="fr-slash-option fr-mention-option"
+                      onClick={() => pickMention(candidate.name)}
                     >
-                      {command.tier === 'must ask' ? (
-                        <span className="fr-dot" aria-hidden="true" />
-                      ) : null}
-                      {command.tier}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <div className={cx('fr-composer', trigger && 'fr-composer--warn')}>
-              <div className="fr-composer-bar">
-                <FamIconButton icon="paperclip" size="sm" label="Attach file" title="Attach" />
-                <FamIconButton
-                  icon="terminal-window"
-                  size="sm"
-                  label="Commands"
-                  title="Commands  /"
-                  onClick={openSlash}
-                />
-                <label htmlFor="fr-composer" className="fr-composer-label">
-                  Message {familiar.name}
-                </label>
-                <span className="fr-spacer" />
-                {trigger ? (
-                  <button
-                    type="button"
-                    className="fr-hold-warn"
-                    title={`“${trigger.action}” is in ${familiar.name}’s must-ask tier`}
-                    onClick={goAccess}
-                  >
-                    <span className="fr-dot" aria-hidden="true" />
-                    Held for approval
-                  </button>
-                ) : null}
-              </div>
-              <div className="fr-composer-row">
-                <textarea
-                  id="fr-composer"
-                  ref={composerRef}
-                  className="fr-textarea"
-                  value={state.draft}
-                  rows={rows}
-                  placeholder="Type a message, or / for commands."
-                  aria-label="Message"
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                    patch({ draft: event.target.value, slashOpen: false })
-                  }
-                  onKeyDown={onComposerKey}
-                />
-                <button
-                  type="button"
-                  className={cx('fr-send', ready && 'fr-send--ready')}
-                  aria-label="Send"
-                  title="Send  ⏎ · newline  ⇧⏎"
-                  disabled={!ready}
-                  onClick={send}
-                >
-                  <Icon name="paper-plane-right" size={14} />
-                </button>
-              </div>
-            </div>
+                      <Avatar
+                        initial={candidate.name[0] ?? '?'}
+                        size={24}
+                        presence={candidate.status}
+                        elevated
+                      />
+                      <span className="fr-switcher-copy">
+                        <span className="fr-switcher-name">@{candidate.name}</span>
+                        <span className="fr-switcher-role">{candidate.role}</span>
+                      </span>
+                      <span className="fr-slash-tier">{candidate.status}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {slashOpen && commands.length > 0 && !mentionOpen ? (
+                <div role="listbox" aria-label="Commands" className="fr-slash">
+                  {commands.map((command, index) => (
+                    <button
+                      key={command.name}
+                      type="button"
+                      role="option"
+                      aria-selected={index === 0}
+                      className="fr-slash-option"
+                      onClick={() => pickCommand(command.name)}
+                    >
+                      <code className="fr-slash-name">{command.name}</code>
+                      <span className="fr-slash-hint">{command.hint}</span>
+                      <span
+                        className={cx(
+                          'fr-slash-tier',
+                          command.tier === 'must ask' && 'fr-slash-tier--ask',
+                        )}
+                      >
+                        {command.tier === 'must ask' ? (
+                          <span className="fr-dot" aria-hidden="true" />
+                        ) : null}
+                        {command.tier}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </Composer>
           </div>
         </div>
       </main>

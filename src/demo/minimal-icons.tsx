@@ -61,6 +61,7 @@ export type IconName =
   | 'sidebar-simple'
   | 'sliders-horizontal'
   | 'sparkle'
+  | 'stop-circle'
   | 'squares-four'
   | 'terminal-window'
   | 'timer'
@@ -346,6 +347,12 @@ const GLYPHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 3.4c.9 4.1 1.6 4.8 5.7 5.7-4.1.9-4.8 1.6-5.7 5.7-.9-4.1-1.6-4.8-5.7-5.7 4.1-.9 4.8-1.6 5.7-5.7z" />
       <path d="M18.4 15.2c.5 2.1.8 2.4 2.9 2.9-2.1.5-2.4.8-2.9 2.9-.5-2.1-.8-2.4-2.9-2.9 2.1-.5 2.4-.8 2.9-2.9z" />
+    </>
+  ),
+  'stop-circle': (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <rect x="9" y="9" width="6" height="6" rx="1.2" />
     </>
   ),
   'squares-four': (

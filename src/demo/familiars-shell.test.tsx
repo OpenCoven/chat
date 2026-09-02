@@ -20,7 +20,7 @@ function inspectorRail() {
 }
 
 function composer() {
-  return screen.getByRole('textbox', { name: 'Message' });
+  return screen.getByRole('textbox', { name: /^Message / });
 }
 
 function threadTitle() {

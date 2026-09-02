@@ -1,0 +1,562 @@
+/*
+ * OpenCoven/ui, vendored: the styles behind src/ui/*.tsx.
+ *
+ * Upstream expresses these as Tailwind utilities over shadcn-named tokens
+ * (--presence, --background, --radius-2 …). Here the same intent is written
+ * against this app's tokens, with fallbacks so the components stand up outside
+ * a surface that defines them. Selectors use the components' `data-slot` /
+ * `data-variant` hooks, as upstream's contract does, at :where() specificity
+ * so a surface can tune them without fighting.
+ */
+
+:where([data-slot="button"]) {
+  --oc-presence: var(--accent-presence, #a79bf5);
+  --oc-presence-fg: var(--accent-presence-foreground, #0c0c0e);
+  --oc-danger: var(--color-danger, oklch(0.66 0.11 24));
+  --oc-ring: var(--ring-focus, #a79bf5);
+
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: var(--text-primary, #f0eff4);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition:
+    background-color 120ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 120ms cubic-bezier(0.2, 0, 0, 1),
+    color 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+:where([data-slot="button"]) svg {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+:where([data-slot="button"][data-density="compact"]) {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+:where([data-slot="button"][data-size="icon"]) {
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+:where([data-slot="button"]):focus-visible {
+  outline: 2px solid var(--oc-ring);
+  outline-offset: 2px;
+}
+
+:where([data-slot="button"]):disabled,
+:where([data-slot="button"][aria-disabled="true"]) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+:where([data-slot="button"][data-variant="primary"]) {
+  background: var(--text-primary, #f0eff4);
+  color: var(--bg-base, #0c0c0e);
+}
+
+:where([data-slot="button"][data-variant="presence"]) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+    color-mix(in oklch, var(--oc-presence) 26%, var(--bg-elevated, #232327));
+  border-color: color-mix(in oklch, var(--oc-presence) 45%, rgba(255, 255, 255, 0.12));
+  color: var(--text-primary, #f0eff4);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:where([data-slot="button"][data-variant="presence"]):hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+    color-mix(in oklch, var(--oc-presence) 34%, var(--bg-elevated, #232327));
+}
+
+:where([data-slot="button"][data-variant="presence"]):active {
+  transform: translateY(1px);
+}
+
+:where([data-slot="button"][data-variant="outline"]) {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.16));
+  background: var(--bg-raised, #1c1c1f);
+}
+
+:where([data-slot="button"][data-variant="outline"]):hover,
+:where([data-slot="button"][data-variant="outline"][aria-expanded="true"]) {
+  background: var(--bg-hover, #26262b);
+}
+
+:where([data-slot="button"][data-variant="secondary"]) {
+  background: var(--bg-elevated, #232327);
+}
+
+:where([data-slot="button"][data-variant="secondary"]):hover {
+  background: var(--bg-hover, #26262b);
+}
+
+:where([data-slot="button"][data-variant="ghost"]) {
+  color: var(--text-secondary, #a2a1ab);
+}
+
+:where([data-slot="button"][data-variant="ghost"]):hover,
+:where([data-slot="button"][data-variant="ghost"][aria-expanded="true"]) {
+  background: var(--bg-hover, #26262b);
+  color: var(--text-primary, #f0eff4);
+}
+
+:where([data-slot="button"][data-variant="destructive"]) {
+  border-color: color-mix(in oklch, var(--oc-danger) 35%, transparent);
+  background: color-mix(in oklch, var(--oc-danger) 12%, transparent);
+  color: var(--oc-danger);
+}
+
+:where([data-slot="button"][data-variant="destructive"]):hover {
+  background: color-mix(in oklch, var(--oc-danger) 20%, transparent);
+}
+
+:where([data-slot="button"][data-variant="link"]) {
+  padding: 0;
+  color: var(--oc-presence);
+  text-underline-offset: 4px;
+}
+
+:where([data-slot="button"][data-variant="link"]):hover {
+  text-decoration: underline;
+}
+
+/* -------------------------------------------------------------- textarea */
+
+:where([data-slot="textarea"]) {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-raised, #1c1c1f);
+  color: var(--text-primary, #f0eff4);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+:where([data-slot="textarea"])::placeholder {
+  color: var(--text-muted, #6f6e78);
+}
+
+:where([data-slot="textarea"]):focus-visible {
+  border-color: color-mix(
+    in oklch,
+    var(--accent-presence, #a79bf5) 45%,
+    var(--border-strong, rgba(255, 255, 255, 0.16))
+  );
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence, #a79bf5) 12%, transparent);
+}
+
+:where([data-slot="textarea"][data-density="compact"]) {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+:where([data-slot="textarea"]):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* -------------------------------------------------------------- progress */
+
+:where([data-slot="progress"]) {
+  display: block;
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-elevated, #232327);
+  overflow: hidden;
+}
+
+:where([data-slot="progress-indicator"]) {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent-presence, #a79bf5);
+  transition: width 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ---------------------------------------------------------------- menus */
+
+.oc-menu-positioner {
+  isolation: isolate;
+  z-index: 50;
+  outline: none;
+}
+
+:where([data-slot="dropdown-menu-content"]) {
+  z-index: 50;
+  min-width: 240px;
+  max-height: var(--available-height);
+  padding: 4px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
+  border-radius: 8px;
+  background: var(--bg-elevated, #232327);
+  color: var(--text-primary, #f0eff4);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  overflow: auto;
+  outline: none;
+  transform-origin: var(--transform-origin);
+  animation: oc-menu-in 140ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+:where([data-slot="dropdown-menu-label"]) {
+  padding: 6px 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6f6e78);
+}
+
+:where([data-slot="dropdown-menu-item"]) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: default;
+  user-select: none;
+  outline: none;
+}
+
+:where([data-slot="dropdown-menu-item"]):focus,
+:where([data-slot="dropdown-menu-item"][data-highlighted]) {
+  background: var(--bg-hover, #26262b);
+}
+
+:where([data-slot="dropdown-menu-item"][data-disabled]) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.oc-palette {
+  width: 320px;
+}
+
+.oc-palette-label {
+  font-family: var(--font-jetbrains-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-presence, #a79bf5);
+}
+
+.oc-palette-description {
+  font-size: 12px;
+  color: var(--text-secondary, #a2a1ab);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.oc-palette-meta {
+  font-size: 11px;
+  color: var(--text-muted, #6f6e78);
+  white-space: nowrap;
+}
+
+.oc-palette-meta--warning {
+  color: var(--color-warning, oklch(0.76 0.08 78));
+}
+
+.oc-kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-hairline, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  background: var(--bg-sunken, #101012);
+  font-family: var(--font-jetbrains-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-muted, #6f6e78);
+}
+
+/* ----------------------------------------------------------- attachment */
+
+:where([data-slot="attachment-chip"]) {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  max-width: 288px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid var(--border-hairline, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--bg-raised, #1c1c1f);
+  font-size: 12px;
+}
+
+:where([data-slot="attachment-chip"][data-state="uploading"]) {
+  border-style: dashed;
+}
+
+:where([data-slot="attachment-chip"][data-state="failed"]) {
+  border-color: color-mix(in oklch, var(--color-danger, oklch(0.66 0.11 24)) 45%, transparent);
+}
+
+.oc-attachment-icon {
+  display: inline-flex;
+  color: var(--text-secondary, #a2a1ab);
+}
+
+:where([data-slot="attachment-chip"][data-state="uploading"]) .oc-attachment-icon {
+  animation: oc-spin 1s linear infinite;
+}
+
+:where([data-slot="attachment-chip"][data-state="failed"]) .oc-attachment-icon,
+:where([data-slot="attachment-chip"][data-state="failed"]) .oc-attachment-meta {
+  color: var(--color-danger, oklch(0.66 0.11 24));
+}
+
+:where([data-slot="attachment-chip"][data-state="failed"]) .oc-attachment-meta {
+  font-weight: 600;
+}
+
+.oc-attachment-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.oc-attachment-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.oc-attachment-meta {
+  font-family: var(--font-jetbrains-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--text-muted, #6f6e78);
+}
+
+.oc-attachment-progress {
+  margin-top: 3px;
+  height: 3px;
+}
+
+/* --------------------------------------------------------- send control */
+
+:where([data-slot="send-control"]) {
+  display: inline-flex;
+  border-radius: var(--radius-control, 8px);
+  overflow: hidden;
+}
+
+:where([data-slot="send-control"]) .oc-send-main {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+:where([data-slot="send-control"]) .oc-send-options {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start-color: color-mix(in oklch, var(--text-primary, #f0eff4) 20%, transparent);
+}
+
+.oc-send-stop {
+  min-width: 96px;
+}
+
+/* ------------------------------------------------------------- composer */
+
+:where([data-slot="composer"]) {
+  position: relative;
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 40%), var(--bg-raised, #1c1c1f);
+  box-shadow:
+    0 12px 32px -18px rgba(0, 0, 0, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition:
+    border-color 160ms,
+    box-shadow 240ms;
+}
+
+:where([data-slot="composer"]):focus-within {
+  border-color: color-mix(
+    in oklch,
+    var(--accent-presence, #a79bf5) 45%,
+    var(--border-strong, rgba(255, 255, 255, 0.16))
+  );
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--accent-presence, #a79bf5) 12%, transparent),
+    0 16px 40px -16px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+:where([data-slot="composer"][data-tone="warning"]) {
+  border-color: color-mix(in oklch, var(--color-warning, oklch(0.76 0.08 78)) 50%, transparent);
+}
+
+.oc-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 0 6px;
+}
+
+.oc-composer-label {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #a2a1ab);
+}
+
+.oc-composer-spacer {
+  flex: 1;
+}
+
+.oc-composer-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-warning, oklch(0.76 0.08 78));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  animation: oc-fade 140ms;
+}
+
+.oc-composer-warning:hover {
+  text-decoration: underline;
+}
+
+.oc-composer-warning:focus-visible {
+  outline: 2px solid var(--ring-focus, #a79bf5);
+  outline-offset: 1px;
+}
+
+.oc-composer-warning-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+:where([data-slot="composer"]) .oc-composer-field {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 12px 6px;
+  resize: none;
+  max-height: calc(1.5em * 8 + 14px);
+}
+
+/*
+ * The composer glows as a whole on focus-within, so the field inside it
+ * carries no ring of its own — including the app's global :focus-visible
+ * outline, which this out-specifies on purpose.
+ */
+:where([data-slot="composer"]) .oc-composer-field:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+textarea[data-slot="textarea"]:focus-visible {
+  outline: none;
+}
+
+.oc-composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0 10px 6px;
+  list-style: none;
+}
+
+.oc-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 8px 12px;
+}
+
+.oc-composer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted, #6f6e78);
+}
+
+/* ----------------------------------------------------------- keyframes */
+
+@keyframes oc-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oc-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-slot="button"]),
+  :where([data-slot="composer"]),
+  :where([data-slot="progress-indicator"]) {
+    transition: none;
+  }
+
+  :where([data-slot="dropdown-menu-content"]),
+  .oc-composer-warning,
+  :where([data-slot="attachment-chip"][data-state="uploading"]) .oc-attachment-icon {
+    animation: none;
+  }
+}
