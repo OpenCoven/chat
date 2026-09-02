@@ -433,11 +433,11 @@ IFS=:
 for tool_directory in $tool_path; do
   if [[ "$host_os" == Linux ]]; then
     if /usr/bin/setpriv --reuid="$producer_uid" --regid="$producer_gid" --init-groups \
-      /usr/bin/test -w "$tool_directory"; then
+      /bin/test -w "$tool_directory"; then
       echo 'unix-producer-supervisor: restricted identity can mutate a tool directory' >&2
       exit 1
     fi
-  elif /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/test -w "$tool_directory"; then
+  elif /usr/bin/sudo -n -u "#$producer_uid" /bin/test -w "$tool_directory"; then
     echo 'unix-producer-supervisor: restricted identity can mutate a tool directory' >&2
     exit 1
   fi
@@ -553,6 +553,10 @@ restricted_environment=(
 if [[ -n "$validator_revision" ]]; then
   restricted_environment+=("OPENCOVEN_VALIDATOR_REVISION=$validator_revision")
 fi
+producer_invocation=("$trusted_command")
+if (( ${#command_arguments[@]} > 0 )); then
+  producer_invocation+=("${command_arguments[@]}")
+fi
 
 if [[ "$host_os" == Linux ]]; then
   [[ "$(/usr/bin/stat -fc '%T' /sys/fs/cgroup)" == cgroup2fs ]] ||
@@ -577,7 +581,7 @@ if [[ "$host_os" == Linux ]]; then
       /bin/bash -c \
       'exec 7<&- 8<&- 9<&-; kill -STOP $$; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' \
       opencoven-producer \
-      "$trusted_command" "${command_arguments[@]}" &
+      "${producer_invocation[@]}" &
   producer_pid=$!
   stopped=0
   for _ in $(/usr/bin/seq 1 200); do
@@ -597,7 +601,7 @@ else
   /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/env -i "${restricted_environment[@]}" \
     /bin/bash -c \
     'exec 7<&- 8<&- 9<&-; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' opencoven-producer \
-    "$trusted_command" "${command_arguments[@]}" &
+    "${producer_invocation[@]}" &
   producer_pid=$!
   producer_contained=1
 fi

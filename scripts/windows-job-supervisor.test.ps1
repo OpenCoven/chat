@@ -4630,6 +4630,70 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     $mismatchJob.Dispose()
   }
 
+  $quotaChurnDirectory = Join-Path $root 'quota-churn'
+  [IO.Directory]::CreateDirectory($quotaChurnDirectory) | Out-Null
+  $quotaChurnScript = Join-Path $root 'quota-churn.ps1'
+  [IO.File]::WriteAllText(
+    $quotaChurnScript,
+    @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+`$deadline = [DateTime]::UtcNow.AddSeconds(6)
+`$iteration = 0
+while ([DateTime]::UtcNow -lt `$deadline) {
+  `$batch = Join-Path '$($quotaChurnDirectory.Replace("'", "''"))' "batch-`$iteration"
+  [IO.Directory]::CreateDirectory(`$batch) | Out-Null
+  for (`$file = 0; `$file -lt 64; `$file++) {
+    [IO.File]::WriteAllBytes(
+      (Join-Path `$batch "entry-`$file.bin"),
+      [byte[]]::new(1KB)
+    )
+  }
+  [IO.Directory]::Delete(`$batch, `$true)
+  `$iteration++
+}
+[Console]::Out.Write('quota-churn-ok')
+"@,
+    [Text.UTF8Encoding]::new($false)
+  )
+  $quotaChurnJob = [OpenCoven.WindowsJobSupervisor]::Create(
+    "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))",
+    $isolatedUser
+  )
+  try {
+    $quotaChurnResult = $quotaChurnJob.RunAsUser(
+      $isolatedUser,
+      $trustedPwsh,
+      "-NoLogo -NoProfile -NonInteractive -File `"$quotaChurnScript`"",
+      $root,
+      $childEnvironment,
+      [TimeSpan]::FromSeconds(20),
+      1MB,
+      1MB,
+      @(
+        [OpenCoven.WindowsDirectoryQuota]::new(
+          'quota-churn-test',
+          $quotaChurnDirectory,
+          16MB
+        )
+      )
+    )
+    if (
+      $quotaChurnResult.ExitCode -ne 0 -or
+      $quotaChurnResult.TimedOut -or
+      $quotaChurnResult.StdoutOverflow -or
+      $quotaChurnResult.StderrOverflow -or
+      $quotaChurnResult.ResourceQuotaExceeded -or
+      $quotaChurnResult.ResourceQuotaMonitorError -or
+      $null -ne $quotaChurnResult.ResourceQuotaLabel -or
+      $quotaChurnResult.Stdout -cne 'quota-churn-ok'
+    ) {
+      throw 'Directory churn below quota produced a false ResourceQuotaExceeded.'
+    }
+  } finally {
+    $quotaChurnJob.Dispose()
+  }
+
   $quotaDirectory = Join-Path $root 'quota'
   [IO.Directory]::CreateDirectory($quotaDirectory) | Out-Null
   $quotaPids = Join-Path $root 'quota-pids.txt'
@@ -4660,7 +4724,12 @@ Start-Sleep -Seconds 300
       1MB,
       @([OpenCoven.WindowsDirectoryQuota]::new('quota-test', $quotaDirectory, 1MB))
     )
-    if (-not $quotaResult.ResourceQuotaExceeded -or $quotaResult.ExitCode -eq 0) {
+    if (
+      -not $quotaResult.ResourceQuotaExceeded -or
+      $quotaResult.ExitCode -eq 0 -or
+      $quotaResult.ResourceQuotaMonitorError -or
+      $quotaResult.ResourceQuotaLabel -cne 'quota-test'
+    ) {
       throw 'Directory quota excess did not fail closed.'
     }
   } finally {

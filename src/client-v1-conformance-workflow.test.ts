@@ -997,7 +997,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'TotalTimeout',
         'WindowsDirectoryQuota',
         'ResourceQuotaExceeded',
+        'ResourceQuotaLabel',
+        'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
+        'Directory.EnumerateFileSystemEntries',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1044,13 +1047,43 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source.indexOf('GetExitCodeProcess(process.hProcess')).toBeLessThan(
         source.indexOf('TerminateJobAndWaitForZero(jobHandle'),
       );
+      const terminalProducerStart = source.indexOf(
+        'private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(',
+      );
+      const terminalProducerEnd = source.indexOf(
+        '\n        private WindowsJobRunResult RunAsUserCore(',
+        terminalProducerStart,
+      );
+      const terminalProducer = source.slice(terminalProducerStart, terminalProducerEnd);
+      expect(terminalProducer.indexOf('QuarantineIsolatedIdentity();')).toBeLessThan(
+        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+      );
+      expect(
+        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+      ).toBeLessThan(terminalProducer.lastIndexOf('terminalProducerSucceeded ='));
+      const quotaScannerStart = source.indexOf('private static Task MonitorDirectoryQuotasAsync(');
+      const quotaScanner = source.slice(
+        quotaScannerStart,
+        source.indexOf('\n        public void Dispose()', quotaScannerStart),
+      );
+      expect(quotaScanner).not.toContain('Directory.Exists(');
+      expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
+      expect(quotaScanner).not.toContain('Directory.GetDirectories');
+      expect(quotaScanner).toContain('Directory.EnumerateFileSystemEntries');
+      expect(quotaScanner).toContain('Directory.EnumerateDirectories');
+      expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
+      expect(
+        countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
+      ).toBeGreaterThanOrEqual(3);
+      expect(
+        countOccurrences(quotaScanner, 'catch (DirectoryNotFoundException)'),
+      ).toBeGreaterThanOrEqual(3);
+      expect(quotaScanner).toContain('failure.RecordMonitorError();');
+      expect(quotaScanner).toContain('failure.RecordQuotaExceeded(exceededQuota.Label);');
       const finalTeardown = source.indexOf(
         'TerminateJobAndWaitForZero(\n                    jobHandle',
       );
-      const finalQuotaCheck = source.indexOf(
-        'DirectoryQuotasExceeded(DirectoryQuotas)',
-        finalTeardown,
-      );
+      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceeded(', finalTeardown);
       const finalOutputCheck = source.indexOf('Task.WaitAll(ioTasks.ToArray()', finalQuotaCheck);
       expect(finalTeardown).toBeGreaterThan(-1);
       expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
@@ -1572,6 +1605,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Unsupervised native process with valid existing Job A binding',
       'Wrong existing native Job binding',
       'Valid native Job binding did not reach native RPC startup.',
+      'Directory churn below quota produced a false ResourceQuotaExceeded.',
       'Directory quota excess did not fail closed.',
       'Successful root teardown did not terminate the retained Job handle descendant.',
       'Query-only Job Object reopen was denied.',
@@ -2103,8 +2137,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(unixStep).toContain('scripts/unix-producer-supervisor.sh');
     expect(unixStep).toContain('--command scripts/unix-producer-command.sh');
     expect(unixStep).toContain(
-      '--handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff"',
+      '--handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff"',
     );
+    expect(trustedSetup).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(unixStep).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(trustedSetup).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
+    expect(unixStep).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(unixStep).not.toContain('--tool-path "$PATH"');
     expect(unixStep).toContain(
@@ -2136,6 +2174,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('/bin/test -w "$tool_directory"');
+    expect(supervisor).not.toContain('/usr/bin/test');
+    expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');
     expect(supervisor).toContain('/usr/bin/dsmemberutil checkmembership');
     expect(supervisor).not.toContain('/usr/sbin/dsmemberutil');
 
@@ -2214,6 +2255,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'in-place rewrite artifact handoff unexpectedly succeeded',
       'ephemeral producer UID was reused or not deleted',
       'producer and broker UIDs were not distinct',
+      'zero command arguments were not forwarded safely',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }
@@ -2497,6 +2539,9 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     }
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
-    expect(bootstrap).toContain('Supervised Windows production exceeded a resource quota.');
+    expect(bootstrap).toContain('Supervised Windows resource quota monitor failed closed.');
+    expect(bootstrap).toContain(
+      "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
+    );
   });
 });
