@@ -12,6 +12,13 @@ test('preserves the local demo routes alongside the default app', async ({ page 
   await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=minimal');
   await expect(page.getByText('Chats', { exact: true })).toBeVisible();
   await expect(page.getByText('Familiars', { exact: true })).toBeVisible();
+
+  await page.goto('/?demo=familiars');
+
+  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=familiars');
+  await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Held action' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 });
 
 test('keeps the chat sidebar compact and fully interactive', async ({ page }) => {

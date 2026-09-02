@@ -773,3 +773,10 @@ export function dayBars(days: FamActivity['days'], height = 96): DayBar[] {
 export function clockLabel(date = new Date()): string {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
+
+/** The project each familiar is scoped to, as the Overview tab shows it. */
+export const FAM_PROJECTS: Readonly<Record<string, string>> = {
+  astra: 'Quick chats',
+  cody: 'coven-chat',
+  echo: 'Inbox',
+};
