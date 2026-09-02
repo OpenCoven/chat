@@ -2150,7 +2150,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
-    expect(toolPathStep).toContain("[''node'', ''pnpm'', ''rustup'']");
+    expect(toolPathStep).toContain("[''node'', ''corepack'', ''rustup'']");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
@@ -2189,7 +2189,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
-      'pnpm install --frozen-lockfile --ignore-scripts',
+      'corepack pnpm --version',
+      'corepack pnpm install --frozen-lockfile --ignore-scripts',
       'rustup toolchain install 1.95.0 --profile minimal',
       'phase1-linux-secret-service.sh',
       'phase1-conformance.mjs',
@@ -2265,8 +2266,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
-    const tauriIndex = command.indexOf("pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'");
+    const installIndex = command.indexOf(
+      'corepack pnpm install --frozen-lockfile --ignore-scripts',
+    );
+    const tauriIndex = command.indexOf(
+      "corepack pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
+    );
 
     expect(earlyToolchainCheck).not.toContain(
       "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
@@ -2334,6 +2339,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(runBody).toContain('-MaximumRedirects');
     expect(runBody).toContain("'github.com', 'release-assets.githubusercontent.com'");
     expect(runBody).not.toContain("'objects.githubusercontent.com'");
+    expect(runBody).toMatch(
+      /'PortableGit extraction',\s+\(Join-Path \$bootstrapRoot 'tools\\git'\),\s+400MB/u,
+    );
+    expect(runBody).not.toMatch(
+      /'PortableGit extraction',\s+\(Join-Path \$bootstrapRoot 'tools\\git'\),\s+384MB/u,
+    );
     expect(runBody).toContain('--config.store-dir=$($env:PNPM_STORE_DIR)');
     expect(runBody).toContain('CARGO_NET_GIT_FETCH_WITH_CLI');
     expect(runBody).toContain('$recordPath = $env:OPENCOVEN_WINDOWS_SOURCE_RECORD');
