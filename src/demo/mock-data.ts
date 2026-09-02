@@ -38,10 +38,16 @@ export type MockMessage = {
    */
   reasoning?: {
     summary: string;
+    duration: string;
+    toolCalls: number;
+    footer: string;
     steps: Array<{
       kind: 'analysis' | 'design' | 'safety';
       label: string;
       text: string;
+      tool: string;
+      duration: string;
+      status?: 'ok' | 'failed' | 'retry';
     }>;
   };
   /**
@@ -98,21 +104,30 @@ export const MOCK_CONVERSATIONS: MockConversation[] = [
         sentAt: '10:41 PM',
         reasoning: {
           summary: 'Built a compact visual response from the two constraints in the prompt.',
+          duration: '3s',
+          toolCalls: 3,
+          footer: 'Rendered locally. No external model or network request was used.',
           steps: [
             {
               kind: 'analysis',
               label: 'Interpret prompt',
               text: 'Identified “cat” as the subject and “purple” as the palette constraint.',
+              tool: 'prompt.parse',
+              duration: '<1s',
             },
             {
               kind: 'design',
               label: 'Compose image',
               text: 'Used a centered silhouette so the subject remains legible at transcript size.',
+              tool: 'image.render',
+              duration: '2s',
             },
             {
               kind: 'safety',
               label: 'Keep it local',
               text: 'Rendered a deterministic SVG so this demo does not call an external model.',
+              tool: 'ward.check',
+              duration: '<1s',
             },
           ],
         },
