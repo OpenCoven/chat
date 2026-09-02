@@ -997,7 +997,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'TotalTimeout',
         'WindowsDirectoryQuota',
         'ResourceQuotaExceeded',
+        'ResourceQuotaLabel',
+        'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
+        'Directory.GetFileSystemEntries',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1044,13 +1047,25 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source.indexOf('GetExitCodeProcess(process.hProcess')).toBeLessThan(
         source.indexOf('TerminateJobAndWaitForZero(jobHandle'),
       );
+      const quotaScannerStart = source.indexOf('private static Task MonitorDirectoryQuotasAsync(');
+      const quotaScanner = source.slice(
+        quotaScannerStart,
+        source.indexOf('\n        public void Dispose()', quotaScannerStart),
+      );
+      expect(quotaScanner).not.toContain('Directory.EnumerateFileSystemEntries');
+      expect(quotaScanner).not.toContain('Directory.Exists(');
+      expect(
+        countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
+      ).toBeGreaterThanOrEqual(3);
+      expect(
+        countOccurrences(quotaScanner, 'catch (DirectoryNotFoundException)'),
+      ).toBeGreaterThanOrEqual(3);
+      expect(quotaScanner).toContain('failure.RecordMonitorError();');
+      expect(quotaScanner).toContain('failure.RecordQuotaExceeded(exceededQuota.Label);');
       const finalTeardown = source.indexOf(
         'TerminateJobAndWaitForZero(\n                    jobHandle',
       );
-      const finalQuotaCheck = source.indexOf(
-        'DirectoryQuotasExceeded(DirectoryQuotas)',
-        finalTeardown,
-      );
+      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceeded(', finalTeardown);
       const finalOutputCheck = source.indexOf('Task.WaitAll(ioTasks.ToArray()', finalQuotaCheck);
       expect(finalTeardown).toBeGreaterThan(-1);
       expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
@@ -1572,6 +1587,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Unsupervised native process with valid existing Job A binding',
       'Wrong existing native Job binding',
       'Valid native Job binding did not reach native RPC startup.',
+      'Directory churn below quota produced a false ResourceQuotaExceeded.',
       'Directory quota excess did not fail closed.',
       'Successful root teardown did not terminate the retained Job handle descendant.',
       'Query-only Job Object reopen was denied.',
@@ -2505,6 +2521,9 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     }
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
-    expect(bootstrap).toContain('Supervised Windows production exceeded a resource quota.');
+    expect(bootstrap).toContain('Supervised Windows resource quota monitor failed closed.');
+    expect(bootstrap).toContain(
+      "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
+    );
   });
 });
