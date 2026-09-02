@@ -1099,6 +1099,13 @@
   white-space: nowrap;
 }
 
+.chat-demo .reasoning-step-heading code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .chat-demo .reasoning-step-heading > span {
   font-variant-numeric: tabular-nums;
   text-align: right;

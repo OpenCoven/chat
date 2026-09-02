@@ -617,45 +617,97 @@ function ArtifactCard({
 }
 
 function ReasoningBlock({ reasoning }: { reasoning: NonNullable<MockMessage['reasoning']> }) {
+  const [open, setOpen] = useState(true);
+  const bodyId = useId();
   const stepIcons = {
     analysis: 'magnifying-glass',
     design: 'paint-brush',
     safety: 'check-circle-fill',
   } as const;
+  const failedSteps = reasoning.steps.filter((step) => step.status === 'failed').length;
 
   return (
-    <details className="reasoning-block" open>
-      <summary className="reasoning-summary">
+    <section className="reasoning-block" aria-label="Reasoning">
+      <button
+        type="button"
+        className="reasoning-summary"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((current) => !current)}
+      >
         <span className="reasoning-mark" aria-hidden="true">
           <Icon name="brain" size={15} />
         </span>
-        <span className="reasoning-label">Reasoning</span>
-        <span className="reasoning-meta">
-          <span className="reasoning-demo">Demo</span>
-          <span>{reasoning.steps.length} steps</span>
+        <span className="reasoning-heading">
+          <span className="reasoning-label">Reasoning</span>
+          <span className="reasoning-description">{reasoning.summary}</span>
         </span>
-        <Icon name="caret-down" size={13} />
-      </summary>
-      <div className="reasoning-content">
-        <p className="reasoning-intent">
-          <Icon name="sparkle" size={13} />
-          <span>{reasoning.summary}</span>
-        </p>
-        <ol>
-          {reasoning.steps.map((step) => (
-            <li key={step.label} className="reasoning-step" data-kind={step.kind}>
-              <span className="reasoning-step-icon" aria-hidden="true">
-                <Icon name={stepIcons[step.kind]} size={13} />
+        <span className="reasoning-meta">
+          {failedSteps > 0 ? (
+            <span className="reasoning-failure">
+              <Icon name="warning-circle-fill" size={11} />
+              {failedSteps === 1 ? '1 failed' : `${failedSteps} failed`}
+            </span>
+          ) : null}
+          <span>
+            {reasoning.steps.length} {reasoning.steps.length === 1 ? 'step' : 'steps'}
+          </span>
+          <span>{reasoning.duration}</span>
+        </span>
+        <span className="reasoning-caret" aria-hidden="true">
+          <Icon name="caret-down" size={14} />
+        </span>
+      </button>
+      <div id={bodyId} className={`reasoning-body ${open ? 'is-open' : ''}`} aria-hidden={!open}>
+        <div className="reasoning-body-clip">
+          <div className="reasoning-content">
+            <ol>
+              {reasoning.steps.map((step, index) => (
+                <li
+                  key={step.label}
+                  className="reasoning-step"
+                  data-kind={step.kind}
+                  data-status={step.status ?? 'ok'}
+                  style={{ animationDelay: `${80 + index * 60}ms` }}
+                >
+                  <span className="reasoning-step-rail" aria-hidden="true">
+                    <span className="reasoning-step-icon">
+                      <Icon name={stepIcons[step.kind]} size={16} />
+                    </span>
+                    <span
+                      className="reasoning-step-line"
+                      style={{ animationDelay: `${200 + index * 60}ms` }}
+                    />
+                  </span>
+                  <span className="reasoning-step-copy">
+                    <span className="reasoning-step-heading">
+                      <strong>{step.label}</strong>
+                      <code>{step.tool}</code>
+                      <span>{step.duration}</span>
+                    </span>
+                    <span>
+                      {step.status === 'failed' ? (
+                        <strong className="reasoning-state">Failed — </strong>
+                      ) : null}
+                      {step.status === 'retry' ? (
+                        <strong className="reasoning-state">Retried — </strong>
+                      ) : null}
+                      {step.text}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <footer className="reasoning-footer">
+              <span>{reasoning.footer}</span>
+              <span>
+                {reasoning.toolCalls} {reasoning.toolCalls === 1 ? 'tool call' : 'tool calls'}
               </span>
-              <span className="reasoning-step-copy">
-                <strong>{step.label}</strong>
-                <span>{step.text}</span>
-              </span>
-            </li>
-          ))}
-        </ol>
+            </footer>
+          </div>
+        </div>
       </div>
-    </details>
+    </section>
   );
 }
 
