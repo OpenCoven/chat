@@ -649,7 +649,9 @@ function ReasoningBlock({ reasoning }: { reasoning: NonNullable<MockMessage['rea
               {failedSteps === 1 ? '1 failed' : `${failedSteps} failed`}
             </span>
           ) : null}
-          <span>{reasoning.steps.length} steps</span>
+          <span>
+            {reasoning.steps.length} {reasoning.steps.length === 1 ? 'step' : 'steps'}
+          </span>
           <span>{reasoning.duration}</span>
         </span>
         <span className="reasoning-caret" aria-hidden="true">
@@ -698,7 +700,9 @@ function ReasoningBlock({ reasoning }: { reasoning: NonNullable<MockMessage['rea
             </ol>
             <footer className="reasoning-footer">
               <span>{reasoning.footer}</span>
-              <span>{reasoning.toolCalls} tool calls</span>
+              <span>
+                {reasoning.toolCalls} {reasoning.toolCalls === 1 ? 'tool call' : 'tool calls'}
+              </span>
             </footer>
           </div>
         </div>
