@@ -8,6 +8,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 
 import {
@@ -21,8 +22,12 @@ import {
   type HoldState,
   holdMessage,
   matchTrigger,
+  mentionedFamiliars,
+  mentionQuery,
   pendingHolds,
+  randomName,
   summonFamiliar,
+  TEMPLATE_NAMES,
   TEMPLATE_WARDS,
 } from './familiars-data';
 import { type DocRequest, FamiliarInspector } from './familiars-inspector';
@@ -70,10 +75,12 @@ const INSPECTOR_WIDTHS = { narrow: 320, compact: 360, comfortable: 400 } as cons
 const SIDEBAR_WIDTH = 300;
 const REPLY_DELAY = 1200;
 const DECISION_DELAY = 1400;
+const GUEST_DELAY = 900;
 
-type Point = Readonly<{ x: number; y: number }>;
+type FamCard = Readonly<{ x: number; y: number; familiarId: string }>;
 
-type SummonDraft = Readonly<{ templateId: string; name: string }>;
+/** `suggested` marks a name the dialog chose, which a template change may replace. */
+type SummonDraft = Readonly<{ templateId: string; name: string; suggested: boolean }>;
 
 type ShellState = Readonly<{
   conversationId: string;
@@ -92,7 +99,7 @@ type ShellState = Readonly<{
   activityOpen: ActivityKey | null;
   groups: Readonly<Partial<Record<AccessGroupKey, boolean>>>;
   lightbox: number | null;
-  famCard: Point | null;
+  famCard: FamCard | null;
   doc: DocRequest | null;
   headerHidden: boolean;
   recentAll: boolean;
@@ -100,6 +107,9 @@ type ShellState = Readonly<{
   familiars: readonly MockFamiliar[];
   conversations: readonly FamConversation[];
   summon: SummonDraft | null;
+  /** The familiar's screen: the panel, and the full watch view over it. */
+  screenOpen: boolean;
+  watching: boolean;
 }>;
 
 type ShellAction =
@@ -180,6 +190,8 @@ function reduce(state: ShellState, action: ShellAction): ShellState {
         famCard: null,
         doc: null,
         summon: null,
+        screenOpen: false,
+        watching: false,
       };
     default:
       return state;
@@ -211,6 +223,8 @@ function initialState(props: FamiliarsShellProps): ShellState {
     familiars: MOCK_FAMILIARS,
     conversations: FAM_CONVERSATIONS,
     summon: null,
+    screenOpen: false,
+    watching: false,
   };
 }
 
@@ -266,6 +280,24 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     .filter((candidate) => candidate.familiarId === familiar.id)
     .map((candidate) => holdMessage(candidate.id)?.title.toLowerCase() ?? '');
   const inspectorWidth = INSPECTOR_WIDTHS[props.inspectorWidth ?? 'compact'];
+  const mention = mentionQuery(state.draft);
+  const mentionOptions =
+    mention === undefined
+      ? []
+      : state.familiars.filter(
+          (candidate) =>
+            candidate.id !== familiar.id &&
+            candidate.name.toLowerCase().startsWith(mention.toLowerCase()),
+        );
+  const mentionOpen = mention !== undefined && mentionOptions.length > 0;
+  // Familiars who have spoken in this thread after being tagged.
+  const participants = state.familiars.filter(
+    (candidate) =>
+      candidate.id !== familiar.id &&
+      messages.some((item) => item.kind === 'familiar' && item.author === candidate.id),
+  );
+  const cardFamiliar =
+    state.familiars.find((item) => item.id === state.famCard?.familiarId) ?? familiar;
 
   /** Track a timer so every pending callback can be cancelled together. */
   const track = useCallback((id: number) => {
@@ -333,6 +365,10 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     }
     const at = clockLabel();
     const crossed = author ? matchTrigger(author, text) : undefined;
+    const guests = author
+      ? mentionedFamiliars(text, current.familiars).filter((guest) => guest.id !== author.id)
+      : [];
+    const guestNames = guests.map((guest) => `@${guest.name}`).join(' and ');
 
     dispatch({ type: 'send', conversationId, message: { kind: 'user', time: at, text } });
     cancelTimers();
@@ -346,11 +382,33 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
             time: at,
             text: crossed
               ? `I can prepare that, but “${crossed.action}” is in my must-ask tier — I’ll get it ready and hold at the boundary for you.`
-              : 'On it. I’ll keep everything inside notes/ and log each step to the ledger.',
+              : guests.length > 0
+                ? `On it. I’ve brought ${guestNames} in; each of us stays inside our own ward.`
+                : 'On it. I’ll keep everything inside notes/ and log each step to the ledger.',
           },
         });
       }, REPLY_DELAY),
     );
+    // A tagged familiar answers in its own voice, a beat after the host.
+    guests.forEach((guest, position) => {
+      track(
+        window.setTimeout(
+          () => {
+            dispatch({
+              type: 'reply',
+              conversationId,
+              message: {
+                kind: 'familiar',
+                time: at,
+                author: guest.id,
+                text: `@${author?.name ?? ''} looped me in — I’ll take the ${guest.role.toLowerCase()} side of this and hold at my own boundary if it comes to that.`,
+              },
+            });
+          },
+          REPLY_DELAY + GUEST_DELAY * (position + 1),
+        ),
+      );
+    });
     scrollToEnd();
   }, [cancelTimers, scrollToEnd, track]);
 
@@ -416,7 +474,7 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     }
   }
 
-  function openFamiliarCard(event: ReactMouseEvent<HTMLButtonElement>) {
+  function openFamiliarCard(event: ReactMouseEvent<HTMLButtonElement>, familiarId: string) {
     const root = rootRef.current;
 
     if (!root) {
@@ -427,12 +485,26 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
     const x = Math.max(0, Math.min(box.left - rootBox.left, rootBox.width - 320));
     const y = Math.max(0, Math.min(box.bottom - rootBox.top + 8, rootBox.height - 260));
 
-    patch({ famCard: { x, y } });
+    patch({ famCard: { x, y, familiarId } });
+  }
+
+  function pickMention(name: string) {
+    patch({ draft: state.draft.replace(/@[\p{L}\p{N}_-]*$/u, `@${name} `) });
+    composerRef.current?.focus();
   }
 
   function openSummon() {
+    const templateId = FAMILIAR_TEMPLATES[0]?.id ?? 'researcher';
+
     patch({
-      summon: { templateId: FAMILIAR_TEMPLATES[0]?.id ?? 'researcher', name: '' },
+      summon: {
+        templateId,
+        name: randomName(
+          templateId,
+          state.familiars.map((item) => item.name),
+        ),
+        suggested: true,
+      },
       switcherOpen: false,
     });
   }
@@ -478,8 +550,15 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
 
   function onComposerKey(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     const first = commands[0];
+    const firstMention = mentionOptions[0];
 
-    if (event.key === 'Tab' && slashOpen && first) {
+    if (mentionOpen && firstMention && (event.key === 'Tab' || event.key === 'Enter')) {
+      event.preventDefault();
+      pickMention(firstMention.name);
+    } else if (mentionOpen && event.key === 'Escape') {
+      event.stopPropagation();
+      patch({ draft: state.draft.replace(/@[\p{L}\p{N}_-]*$/u, '') });
+    } else if (event.key === 'Tab' && slashOpen && first) {
       event.preventDefault();
       pickCommand(first.name);
     } else if (event.key === 'Enter' && !event.shiftKey) {
@@ -722,6 +801,26 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
       </aside>
 
       <main className={cx('fr-thread', state.headerHidden && 'fr-thread--header-hidden')}>
+        <button
+          type="button"
+          className={cx(
+            'fr-rail-handle fr-rail-handle--left',
+            !state.sidebarOpen && 'fr-rail-handle--closed',
+          )}
+          aria-label={state.sidebarOpen ? 'Hide conversations rail' : 'Show conversations rail'}
+          title={state.sidebarOpen ? 'Hide conversations  [' : 'Show conversations  ['}
+          onClick={() => patch({ sidebarOpen: !state.sidebarOpen })}
+        />
+        <button
+          type="button"
+          className={cx(
+            'fr-rail-handle fr-rail-handle--right',
+            !state.inspectorOpen && 'fr-rail-handle--closed',
+          )}
+          aria-label={state.inspectorOpen ? 'Hide inspector rail' : 'Show inspector rail'}
+          title={state.inspectorOpen ? 'Hide inspector  ]' : 'Show inspector  ]'}
+          onClick={() => patch({ inspectorOpen: !state.inspectorOpen })}
+        />
         <header className="fr-thread-header">
           <div className="fr-thread-header-lead">
             {!state.sidebarOpen ? (
@@ -735,8 +834,22 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
             ) : null}
             <span className="fr-thread-title">{conversation.title}</span>
             <span className="fr-thread-familiar">{familiar.name}</span>
+            {participants.map((guest) => (
+              <span key={guest.id} className="fr-participant" title={`${guest.name} was tagged in`}>
+                <Avatar initial={guest.name[0] ?? '?'} size={22} presence={guest.status} />
+                {guest.name}
+              </span>
+            ))}
           </div>
           <div className="fr-thread-header-actions">
+            <FamIconButton
+              icon="monitor"
+              size="sm"
+              label={`${familiar.name}’s screen`}
+              title="Screen"
+              aria-pressed={state.screenOpen}
+              onClick={() => patch({ screenOpen: !state.screenOpen })}
+            />
             {pendingHere ? (
               <button type="button" className="fr-held-jump" onClick={jumpToHold}>
                 <span className="fr-dot" aria-hidden="true" />1 held
@@ -765,6 +878,7 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
                 message={message}
                 index={index}
                 familiar={familiar}
+                familiars={state.familiars}
                 holdState={holdState}
                 decidedAt={state.decidedAt || '10:54 PM'}
                 onApprove={() => decide('approved')}
@@ -798,7 +912,33 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
 
         <div className="fr-composer-wrap">
           <div className="fr-composer-inner">
-            {slashOpen && commands.length > 0 ? (
+            {mentionOpen ? (
+              <div role="listbox" aria-label="Mention a familiar" className="fr-slash">
+                {mentionOptions.map((candidate, index) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    role="option"
+                    aria-selected={index === 0}
+                    className="fr-slash-option fr-mention-option"
+                    onClick={() => pickMention(candidate.name)}
+                  >
+                    <Avatar
+                      initial={candidate.name[0] ?? '?'}
+                      size={24}
+                      presence={candidate.status}
+                      elevated
+                    />
+                    <span className="fr-switcher-copy">
+                      <span className="fr-switcher-name">@{candidate.name}</span>
+                      <span className="fr-switcher-role">{candidate.role}</span>
+                    </span>
+                    <span className="fr-slash-tier">{candidate.status}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {slashOpen && commands.length > 0 && !mentionOpen ? (
               <div role="listbox" aria-label="Commands" className="fr-slash">
                 {commands.map((command, index) => (
                   <button
@@ -904,6 +1044,34 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
           demoEmpty={props.demoEmpty}
         />
       </aside>
+
+      {state.screenOpen && !state.watching ? (
+        <section className="fr-screen-panel" aria-label={`${familiar.name}’s screen`}>
+          <div className="fr-screen-panel-bar">
+            <FamIconButton icon="gear-six" size="sm" label="Screen settings" />
+            <FamIconButton
+              icon="x"
+              size="sm"
+              label="Close screen"
+              onClick={() => patch({ screenOpen: false })}
+            />
+          </div>
+          <button
+            type="button"
+            className="fr-screen-placeholder"
+            aria-label={`Watch ${familiar.name}’s screen`}
+            title="Watch"
+            onClick={() => patch({ watching: true })}
+          >
+            <Icon name="monitor" size={28} />
+          </button>
+          <span className="fr-screen-caption">{familiar.name}’s screen</span>
+        </section>
+      ) : null}
+
+      {state.watching ? (
+        <ScreenWatch familiar={familiar} onClose={() => patch({ watching: false })} />
+      ) : null}
 
       {state.searchOpen ? (
         <div role="dialog" aria-modal="true" aria-label="Search conversations" className="fr-scrim">
@@ -1029,7 +1197,7 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
           />
           <section
             role="dialog"
-            aria-label={`About ${familiar.name}`}
+            aria-label={`About ${cardFamiliar.name}`}
             className="fr-popover"
             style={
               { '--x': `${state.famCard.x}px`, '--y': `${state.famCard.y}px` } as CSSProperties
@@ -1037,9 +1205,9 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
           >
             <div className="fr-popover-head">
               <Avatar
-                initial={familiar.name[0] ?? '?'}
+                initial={cardFamiliar.name[0] ?? '?'}
                 size={36}
-                presence={familiar.status}
+                presence={cardFamiliar.status}
                 live
                 ring
                 elevated
@@ -1047,33 +1215,35 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
                 surface="elevated"
               />
               <span className="fr-popover-copy">
-                <span className="fr-popover-name">{familiar.name}</span>
+                <span className="fr-popover-name">{cardFamiliar.name}</span>
                 <span className="fr-popover-role">
-                  {familiar.role} · {familiar.creature} · {familiar.pronouns}
+                  {cardFamiliar.role} · {cardFamiliar.creature} · {cardFamiliar.pronouns}
                 </span>
               </span>
             </div>
-            <p className="fr-popover-purpose">{familiar.soul.purpose}</p>
+            <p className="fr-popover-purpose">{cardFamiliar.soul.purpose}</p>
             <div className="fr-popover-stats">
               <div className="fr-popover-stat">
                 <span className="fr-fact-label">May act</span>
                 <span className="fr-popover-stat-value fr-accent">
-                  {familiar.ward.approvalTiers.auto.length}
+                  {cardFamiliar.ward.approvalTiers.auto.length}
                 </span>
               </div>
               <div className="fr-popover-stat">
                 <span className="fr-fact-label">Must ask</span>
                 <span className="fr-popover-stat-value fr-warn">
-                  {familiar.ward.approvalTiers.humanReview.length}
+                  {cardFamiliar.ward.approvalTiers.humanReview.length}
                 </span>
               </div>
               <div className="fr-popover-stat">
                 <span className="fr-fact-label">Status</span>
-                <span className="fr-popover-stat-value fr-capitalize">{familiar.status}</span>
+                <span className="fr-popover-stat-value fr-capitalize">{cardFamiliar.status}</span>
               </div>
             </div>
             <div className="fr-popover-foot">
-              <code className="fr-mono fr-small fr-muted">ward.toml {familiar.ward.version}</code>
+              <code className="fr-mono fr-small fr-muted">
+                ward.toml {cardFamiliar.ward.version}
+              </code>
               <FamButton
                 variant="secondary"
                 size="xs"
@@ -1263,6 +1433,7 @@ function SummonDialog({
   const name = draft.name.trim();
   const duplicate = taken.includes(name.toLowerCase());
   const ready = name.length > 0 && !duplicate && ward !== undefined;
+  const example = TEMPLATE_NAMES[draft.templateId]?.[0] ?? 'Sage';
 
   return (
     <article className="fr-doc fr-summon">
@@ -1286,7 +1457,17 @@ function SummonDialog({
               type="button"
               className="fr-summon-template"
               aria-pressed={template.id === draft.templateId}
-              onClick={() => onChange({ ...draft, templateId: template.id })}
+              onClick={() =>
+                onChange({
+                  templateId: template.id,
+                  // A name you typed is yours; a suggested one follows the template.
+                  name:
+                    draft.suggested || draft.name.trim() === ''
+                      ? randomName(template.id, taken)
+                      : draft.name,
+                  suggested: draft.suggested || draft.name.trim() === '',
+                })
+              }
             >
               <span className="fr-summon-template-name">{template.name}</span>
               <span className="fr-summon-template-creature">{template.creature}</span>
@@ -1294,47 +1475,96 @@ function SummonDialog({
             </button>
           ))}
         </fieldset>
-        <label className="fr-summon-field">
-          <span className="fr-summon-label">Name</span>
-          <input
-            className="fr-summon-input"
-            aria-label="Name"
-            value={draft.name}
-            placeholder="Something you can call across a room"
-            // biome-ignore lint/a11y/noAutofocus: the dialog exists to take a name; focus is the point.
-            autoFocus
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && ready) {
-                event.preventDefault();
-                onSummon();
+        <div className="fr-summon-field">
+          <label htmlFor="fr-summon-name" className="fr-summon-label">
+            Name
+          </label>
+          <div className="fr-summon-name-row">
+            <input
+              id="fr-summon-name"
+              className="fr-summon-input"
+              value={draft.name}
+              placeholder={`e.g. ${example}`}
+              // biome-ignore lint/a11y/noAutofocus: the dialog exists to take a name; focus is the point.
+              autoFocus
+              onChange={(event) =>
+                onChange({ ...draft, name: event.target.value, suggested: false })
               }
-            }}
-          />
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && ready) {
+                  event.preventDefault();
+                  onSummon();
+                }
+              }}
+            />
+            <FamButton
+              variant="secondary"
+              size="md"
+              leadingIcon="arrow-clockwise"
+              title="Suggest a name in the spirit of this template"
+              onClick={() =>
+                onChange({
+                  ...draft,
+                  name: randomName(draft.templateId, [...taken, draft.name]),
+                  suggested: true,
+                })
+              }
+            >
+              Suggest a name
+            </FamButton>
+          </div>
           {duplicate ? (
             <span className="fr-summon-error">There is already a familiar called {name}.</span>
           ) : null}
-        </label>
+        </div>
         {ward ? (
           <section className="fr-summon-ward" aria-label="Ward preview">
-            <div className="fr-summon-ward-col">
-              <span className="fr-fact-label fr-accent">May act</span>
+            <div className="fr-summon-ward-col fr-summon-ward-col--act">
+              <span className="fr-summon-ward-head">
+                <span className="fr-summon-ward-glyph">
+                  <Icon name="check" size={13} />
+                </span>
+                May act
+                <span className="fr-summon-ward-count">{ward.auto.length}</span>
+              </span>
+              <span className="fr-summon-ward-hint">Runs on its own, logged</span>
               {ward.auto.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-            <div className="fr-summon-ward-col">
-              <span className="fr-fact-label fr-warn">Must ask</span>
-              {ward.humanReview.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-            <div className="fr-summon-ward-col">
-              <span className="fr-fact-label">Workspace reach</span>
-              {ward.editablePaths.map((item) => (
-                <code key={item} className="fr-mono fr-small">
+                <span key={item} className="fr-summon-ward-item">
+                  <Icon name="check" size={12} />
                   {item}
-                </code>
+                </span>
+              ))}
+            </div>
+            <div className="fr-summon-ward-col fr-summon-ward-col--ask">
+              <span className="fr-summon-ward-head">
+                <span className="fr-summon-ward-glyph">
+                  <Icon name="hand" size={13} />
+                </span>
+                Must ask
+                <span className="fr-summon-ward-count">{ward.humanReview.length}</span>
+              </span>
+              <span className="fr-summon-ward-hint">Stops and waits for you</span>
+              {ward.humanReview.map((item) => (
+                <span key={item} className="fr-summon-ward-item">
+                  <span className="fr-dot" aria-hidden="true" />
+                  {item}
+                </span>
+              ))}
+            </div>
+            <div className="fr-summon-ward-col fr-summon-ward-col--reach">
+              <span className="fr-summon-ward-head">
+                <span className="fr-summon-ward-glyph">
+                  <Icon name="folder-open" size={13} />
+                </span>
+                Workspace reach
+                <span className="fr-summon-ward-count">{ward.editablePaths.length}</span>
+              </span>
+              <span className="fr-summon-ward-hint">The only paths it may change</span>
+              {ward.editablePaths.map((item) => (
+                <span key={item} className="fr-summon-ward-item">
+                  <Icon name={item.endsWith('/') ? 'folder-open' : 'file-text'} size={12} />
+                  <code className="fr-mono fr-small">{item}</code>
+                </span>
               ))}
             </div>
           </section>
@@ -1360,5 +1590,61 @@ function SummonDialog({
         </span>
       </footer>
     </article>
+  );
+}
+
+/* -------------------------------------------------------------- screen */
+
+/**
+ * The familiar's screen, watched.
+ *
+ * There is no screen to share yet, so this is the frame the real one will
+ * arrive in: a titled bar, a running clock, and the shared area bordered in
+ * the recording colour so it is never mistaken for the app itself.
+ */
+function ScreenWatch({ familiar, onClose }: { familiar: MockFamiliar; onClose: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
+
+    return () => window.clearInterval(id);
+  }, []);
+
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = String(elapsed % 60).padStart(2, '0');
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${familiar.name}’s screen`}
+      className="fr-watch"
+    >
+      <div className="fr-watch-bar">
+        <span className="fr-watch-title">{familiar.name} is watching and learning</span>
+        <span className="fr-spacer" />
+        <output className="fr-watch-rec" aria-label="Recording">
+          <span className="fr-watch-rec-dot" aria-hidden="true" />
+          {minutes}:{seconds}
+        </output>
+        <FamIconButton icon="x" size="sm" label="Stop watching" onClick={onClose} />
+      </div>
+      <div className="fr-watch-screen">
+        <div className="fr-watch-desktop" aria-hidden="true">
+          <div className="fr-watch-dock">
+            <span className="fr-watch-dock-app">
+              <Icon name="globe" size={22} />
+            </span>
+            <span className="fr-watch-dock-app">
+              <Icon name="folder-open" size={22} />
+            </span>
+            <span className="fr-watch-dock-app">
+              <Icon name="terminal-window" size={22} />
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

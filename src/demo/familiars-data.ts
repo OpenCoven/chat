@@ -63,7 +63,14 @@ export type HoldState = 'approved' | 'declined' | 'expired';
 export type FamMessage =
   | Readonly<{ kind: 'divider'; text: string }>
   | Readonly<{ kind: 'user'; time: string; text: string }>
-  | Readonly<{ kind: 'familiar'; time: string; text: string; decision?: true }>
+  | Readonly<{
+      kind: 'familiar';
+      time: string;
+      text: string;
+      decision?: true;
+      /** Which familiar spoke; the conversation's own when absent. */
+      author?: string;
+    }>
   | Readonly<{ kind: 'reasoning'; id: string; card: ReasoningCardData }>
   | Readonly<{
       kind: 'image';
@@ -838,7 +845,7 @@ export const TEMPLATE_WARDS: Readonly<Record<string, TemplateWard>> = {
     humanReview: ['publish a finding', 'open a pull request'],
     editablePaths: ['TOOLS.md', 'HEARTBEAT.md', 'notes/'],
   },
-  implementer: {
+  builder: {
     role: 'Implementation',
     pronouns: 'they/them',
     emoji: '\u{2692}',
@@ -854,29 +861,37 @@ export const TEMPLATE_WARDS: Readonly<Record<string, TemplateWard>> = {
     humanReview: ['push a branch', 'merge a pull request', 'change CI'],
     editablePaths: ['TOOLS.md', 'scratch/'],
   },
-  correspondent: {
-    role: 'Correspondence',
+  manager: {
+    role: 'Coordination',
     pronouns: 'they/them',
-    emoji: '\u{1F4EF}',
-    purpose: 'To keep correspondence answered without answering as the person.',
-    coreWork: ['Triage what arrives', 'Draft replies in the person\u2019s register'],
-    whatIAmNot: ['Not the sender of anything', 'Not a voice that speaks as the person'],
-    boundaries: ['Never sends or archives without an explicit gesture'],
-    auto: ['read mail', 'draft a reply'],
-    humanReview: ['send', 'archive'],
-    editablePaths: ['TOOLS.md'],
+    emoji: '\u{1F5C2}',
+    purpose: 'To keep the plan honest so nothing slips without someone knowing.',
+    coreWork: [
+      'Track who is doing what, and by when',
+      'Surface what is slipping before it is late',
+      'Draft the status update the team would otherwise skip',
+    ],
+    whatIAmNot: ['Not the one who decides priorities', 'Not a voice that commits others'],
+    boundaries: ['Never assigns work or moves a deadline on its own'],
+    auto: ['read files', 'read the calendar', 'draft a plan', 'write to plans/'],
+    humanReview: ['assign work', 'change a deadline', 'send a status update'],
+    editablePaths: ['TOOLS.md', 'plans/'],
   },
-  archivist: {
-    role: 'Memory curation',
+  communicator: {
+    role: 'Social media and blog',
     pronouns: 'they/them',
-    emoji: '\u{1F4DA}',
-    purpose: 'To keep memory worth returning to, without rewriting what happened.',
-    coreWork: ['Curate memory', 'Prune what is stale', 'Keep records findable'],
-    whatIAmNot: ['Not an editor of history', 'Not a judge of what mattered'],
-    boundaries: ['Never rewrites or deletes a record on its own'],
-    auto: ['read memory', 'tag entries', 'move stale entries to archive/'],
-    humanReview: ['delete a record', 'rewrite a record'],
-    editablePaths: ['TOOLS.md', 'archive/'],
+    emoji: '\u{1F4E3}',
+    purpose: 'To keep the outside world told, in the person\u2019s voice, never ahead of them.',
+    coreWork: [
+      'Draft posts and blog pieces from what shipped',
+      'Keep a queue of what is ready to say',
+      'Read what people say back and summarise it',
+    ],
+    whatIAmNot: ['Not the publisher of anything', 'Not a voice that speaks as the person'],
+    boundaries: ['Never publishes, replies publicly, or schedules without an explicit gesture'],
+    auto: ['read analytics', 'draft a post', 'write to drafts/'],
+    humanReview: ['publish a post', 'reply publicly', 'schedule a campaign'],
+    editablePaths: ['TOOLS.md', 'drafts/'],
   },
 };
 
@@ -939,4 +954,104 @@ export function summonFamiliar(
     },
     memory: null,
   };
+}
+
+/* ------------------------------------------------------------ mentions */
+
+/** The `@name` being typed at the end of a draft, if the caret is on one. */
+export function mentionQuery(draft: string): string | undefined {
+  return /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(draft)?.[1];
+}
+
+/** Familiars named with `@` anywhere in the text, in order of first mention. */
+export function mentionedFamiliars(
+  text: string,
+  familiars: readonly MockFamiliar[],
+): MockFamiliar[] {
+  const lower = text.toLowerCase();
+
+  return familiars
+    .map((familiar) => ({ familiar, at: lower.indexOf(`@${familiar.name.toLowerCase()}`) }))
+    .filter((hit) => hit.at >= 0)
+    .sort((a, b) => a.at - b.at)
+    .map((hit) => hit.familiar);
+}
+
+/**
+ * Names in the spirit of each template, for the summon dialog's suggester.
+ *
+ * Ten each, none of them a shipped familiar's; `randomName` skips whatever is
+ * already taken and falls back to numbering when a whole list is used up.
+ */
+export const TEMPLATE_NAMES: Readonly<Record<string, readonly string[]>> = {
+  researcher: [
+    'Sage',
+    'Vega',
+    'Atlas',
+    'Lumen',
+    'Meridian',
+    'Wren',
+    'Orrin',
+    'Tessa',
+    'Halcyon',
+    'Ptolemy',
+  ],
+  builder: [
+    'Forge',
+    'Anvil',
+    'Rivet',
+    'Mason',
+    'Lathe',
+    'Bolt',
+    'Wright',
+    'Ember',
+    'Tinker',
+    'Cog',
+  ],
+  manager: [
+    'Marshal',
+    'Tally',
+    'Ledger',
+    'Quorum',
+    'Beacon',
+    'Warden',
+    'Keel',
+    'Roster',
+    'Cadence',
+    'Steady',
+  ],
+  communicator: [
+    'Quill',
+    'Chime',
+    'Ballad',
+    'Signal',
+    'Crier',
+    'Lark',
+    'Banner',
+    'Verse',
+    'Sonnet',
+    'Bellow',
+  ],
+};
+
+export function randomName(
+  templateId: string,
+  taken: readonly string[],
+  random: () => number = Math.random,
+): string {
+  const pool = TEMPLATE_NAMES[templateId] ?? TEMPLATE_NAMES.researcher ?? [];
+  const lower = taken.map((name) => name.toLowerCase());
+  const free = pool.filter((name) => !lower.includes(name.toLowerCase()));
+
+  if (free.length > 0) {
+    return free[Math.floor(random() * free.length)] ?? 'Familiar';
+  }
+  const base = pool[Math.floor(random() * pool.length)] ?? 'Familiar';
+  let n = 2;
+
+  while (lower.includes(`${base} ${n}`.toLowerCase())) {
+    n += 1;
+  }
+
+  return `${base} ${n}`;
 }
