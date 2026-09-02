@@ -131,6 +131,15 @@ purpose, access, and activity. The design files it was built from are under
 replaced, kept reachable for side-by-side comparison. It previews generated
 images, link unfurls, `/spec` and `/handoff` artifacts, and a composer.
 
+### Demo build
+
+`pnpm app:build:demo` (`VITE_DEFAULT_DEMO=chat tauri build --config
+src-tauri/tauri.demo.conf.json`) packages **OpenCoven Chat Demo**
+(`ai.opencoven.chat.demo`), which opens on the
+familiars surface with no query flag and installs alongside the real app. The
+overlay changes only the name, identifier, blurb, and macOS signing identity;
+the production build is unaffected because `VITE_DEFAULT_DEMO` stays unset.
+
 **It connects to nothing.** No Cave, no network, no persistence. Replies come
 from canned strings and a timer, link unfurls invent their metadata from the
 hostname rather than fetching the page, and the generated image is a drawn
