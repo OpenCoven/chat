@@ -13,13 +13,24 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (for example v0.0.1)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and verify, but do not create a GitHub Release'
+        required: false
+        default: true
+        type: boolean
 
 # Nothing here needs write access by default. The single job that publishes the
 # release asks for `contents: write` explicitly; every other job is read-only.
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -30,23 +41,36 @@ jobs:
   verify-tag:
     name: Verify signed tag
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+    environment: release-signing
     permissions:
       contents: read
     outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      sha: ${{ steps.check.outputs.sha }}
       version: ${{ steps.check.outputs.version }}
       prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
           # The tag object and its signature are needed, not just the commit it
           # points at, so the full history and all tags are fetched.
           fetch-depth: 0
           persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
       - id: check
         name: Verify tag is annotated, signed, and version-consistent
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
           # Optional allowed-signers file (SSH tag signing) supplied as a
           # secret. When present, git can verify SSH-signed tags; when absent,
           # verification of an SSH signature will fail and block the release,
@@ -56,7 +80,21 @@ jobs:
           set -euo pipefail
 
           echo "Tag under release: ${TAG}"
+          if ! printf '%s' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::${TAG} is not a v<major>.<minor>.<patch>[-prerelease] tag."
+            exit 1
+          fi
 
+          tag_commit="$(git rev-parse "${TAG}^{commit}")"
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${tag_commit}" != "${GITHUB_SHA}" ]; then
+            echo "::error::${TAG} moved after the workflow event; expected ${GITHUB_SHA}, found ${tag_commit}."
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${tag_commit}" refs/remotes/origin/main; then
+            echo "::error::${TAG} points at ${tag_commit}, which is not reachable from origin/main."
+            exit 1
+          fi
           # 1. The tag must be annotated. A lightweight tag is just a branch-like
           #    pointer with no object to sign, so it can never carry a signature.
           object_type=$(git cat-file -t "${TAG}")
@@ -84,6 +122,14 @@ jobs:
             exit 1
           fi
           echo "Tag signature verified."
+
+          tag_object="$(git rev-parse "${TAG}")"
+          api_verified="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object}" --jq '.verification.verified')"
+          api_reason="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object}" --jq '.verification.reason')"
+          if [ "${api_verified}" != "true" ]; then
+            echo "::error::GitHub does not verify ${TAG} (reason: ${api_reason})."
+            exit 1
+          fi
 
           # 4. The version encoded in the tag (strip the leading v) must match
           #    every place the version is committed. A tag that disagrees with
@@ -113,9 +159,9 @@ jobs:
           fi
           echo "All manifest versions match the tag."
 
-          # 5. A tag with a pre-release suffix (v0.0.1-rc.1, v0.0.1-beta) is
-          #    published as a GitHub pre-release.
-          if [[ "${tag_version}" == *-* ]]; then
+          # 5. A 0.x version or a tag with a pre-release suffix
+          #    (v1.2.3-rc.1, v1.2.3-beta) is published as a GitHub pre-release.
+          if [[ "${tag_version}" == 0.* || "${tag_version}" == *-* ]]; then
             prerelease=true
           else
             prerelease=false
@@ -123,9 +169,26 @@ jobs:
           echo "prerelease=${prerelease}"
 
           {
+            echo "tag=${TAG}"
+            echo "sha=${tag_commit}"
             echo "version=${tag_version}"
             echo "prerelease=${prerelease}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Check bundling is enabled
+        run: |
+          set -euo pipefail
+          active="$(node -p "String(require('./src-tauri/tauri.conf.json').bundle?.active === true)")"
+          if [ "${active}" != "true" ]; then
+            echo "::error::src-tauri/tauri.conf.json has bundle.active = false. A release build would produce an executable and no installers."
+            exit 1
+          fi
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test:unit:normal
+      - run: pnpm build
 
   # ---------------------------------------------------------------------------
   # Build real installers on each platform, sign them when the signing secrets
@@ -160,7 +223,7 @@ jobs:
             target: aarch64-apple-darwin
             bundles: app,dmg
           - platform: macos-x86_64
-            runner: macos-14
+            runner: macos-13
             target: x86_64-apple-darwin
             bundles: app,dmg
           - platform: windows-x86_64
@@ -174,6 +237,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.verify-tag.outputs.sha }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -278,18 +342,25 @@ jobs:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
+          Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-cert.pfx'
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $securePass = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $cert = Get-PfxCertificate -FilePath $pfxPath -Password $securePass
+          $cert = Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Password $securePass
           $bundleRoot = "src-tauri/target/${{ matrix.target }}/release/bundle"
           $targets = Get-ChildItem -Path $bundleRoot -Recurse -Include *.msi,*.exe -ErrorAction SilentlyContinue
           if (-not $targets) { throw "No Windows installers found under $bundleRoot to sign." }
           foreach ($file in $targets) {
             Write-Host "Signing $($file.FullName)"
-            Set-AuthenticodeSignature -FilePath $file.FullName -Certificate $cert `
-              -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256 | Out-Null
+            $result = Set-AuthenticodeSignature -FilePath $file.FullName -Certificate $cert `
+              -TimestampServer 'https://timestamp.digicert.com' -HashAlgorithm SHA256
+            if ($result.Status -ne 'Valid') {
+              throw "Authenticode signing failed for $($file.Name): $($result.Status)"
+            }
           }
           Remove-Item $pfxPath -Force
 
@@ -325,6 +396,17 @@ jobs:
             echo "::error::No installers were produced for ${{ matrix.platform }} under ${bundle_root}."
             exit 1
           fi
+          minimum=$((1024 * 1024))
+          for artifact in dist/*; do
+            case "${artifact}" in
+              *.sig) continue ;;
+            esac
+            size="$(wc -c < "${artifact}" | tr -d ' ')"
+            if [ "${size}" -lt "${minimum}" ]; then
+              echo "::error::${artifact} is only ${size} bytes, which is too small to be a real bundle."
+              exit 1
+            fi
+          done
           # The macOS updater archive (.app.tar.gz) and its .sig are named after
           # the product only -- no arch -- so the aarch64 and x86_64 builds emit
           # the same filename and would clobber each other when both platforms'
@@ -380,6 +462,17 @@ jobs:
                 [ -n "${app}" ] || { echo "::error::Staged .app tar had no .app inside."; exit 1; }
                 [ -d "${app}/Contents/MacOS" ] || { echo "::error::${app} is missing Contents/MacOS."; exit 1; }
                 [ -f "${app}/Contents/Info.plist" ] || { echo "::error::${app} is missing Contents/Info.plist."; exit 1; }
+                bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")
+                bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app}/Contents/Info.plist")
+                [ "${bundle_version}" = "${{ needs.verify-tag.outputs.version }}" ] || {
+                  echo "::error::${app} reports version ${bundle_version}, expected ${{ needs.verify-tag.outputs.version }}."; exit 1; }
+                [ "${bundle_id}" = "ai.opencoven.chat" ] || {
+                  echo "::error::${app} reports bundle identifier ${bundle_id}, expected ai.opencoven.chat."; exit 1; }
+                binary="${app}/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${app}/Contents/Info.plist")"
+                case "${{ matrix.target }}" in
+                  aarch64-*) lipo -archs "${binary}" | grep -qw arm64 ;;
+                  x86_64-*) lipo -archs "${binary}" | grep -qw x86_64 ;;
+                esac
                 echo "  ok: .app structure (${app})"
                 if [ "${MACOS_SIGNED}" = "true" ]; then
                   echo "  verifying code signature..."
@@ -423,6 +516,7 @@ jobs:
     needs: [verify-tag, build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: release-signing
     permissions:
       # The only place in the workflow that writes: creating the release and
       # uploading its assets.
@@ -430,10 +524,11 @@ jobs:
     env:
       VERSION: ${{ needs.verify-tag.outputs.version }}
       PRERELEASE: ${{ needs.verify-tag.outputs.prerelease }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.verify-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.verify-tag.outputs.sha }}
           persist-credentials: false
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -449,36 +544,21 @@ jobs:
           mkdir -p release
           # The .app tar was only needed for the smoke test; it is not a release
           # asset, so it is excluded here.
-          find staging -type f ! -name '*.app.tar' -exec cp -v {} release/ \;
+          while IFS= read -r -d '' artifact; do
+            name="$(basename "${artifact}")"
+            destination="release/${name}"
+            if [ -e "${destination}" ]; then
+              echo "::error::Duplicate release asset name: ${name}"
+              exit 1
+            fi
+            cp -v "${artifact}" "${destination}"
+          done < <(find staging -type f ! -name '*.app.tar' -print0)
           if [ -z "$(ls -A release)" ]; then
             echo "::error::No artifacts were downloaded from the build jobs."
             exit 1
           fi
           echo "Release assets:"
           ls -la release
-
-      # A SHA256SUMS file over every published asset, verified in place. The
-      # verification step is the release's checksum smoke test: if shasum -c
-      # fails, the release does not publish.
-      - name: Generate and verify SHA256SUMS
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd release
-          : > SHA256SUMS
-          shopt -s nullglob
-          for f in *; do
-            [ "$f" = "SHA256SUMS" ] && continue
-            shasum -a 256 "$f" >> SHA256SUMS
-          done
-          if [ ! -s SHA256SUMS ]; then
-            echo "::error::SHA256SUMS is empty; nothing to publish."
-            exit 1
-          fi
-          echo "SHA256SUMS:"
-          cat SHA256SUMS
-          echo "Verifying checksums..."
-          shasum -a 256 -c SHA256SUMS
 
       # Emit the Tauri updater manifest (latest.json) ONLY when signed updater
       # artifacts actually exist. As of v0.0.1 the repo has no `plugins.updater`
@@ -502,7 +582,8 @@ jobs:
             exit 0
           fi
           if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "::warning::Updater .sig files are present but TAURI_SIGNING_PRIVATE_KEY was not set for the build; latest.json may reference unverifiable signatures."
+            echo "::error::Updater .sig files are present but TAURI_SIGNING_PRIVATE_KEY is unavailable in the release environment."
+            exit 1
           fi
           VERSION="${VERSION}" TAG="${TAG}" REPO="${REPO}" node <<'EOF'
           const fs = require('node:fs');
@@ -532,8 +613,15 @@ jobs:
             if (!files.includes(artifact)) continue;
             const key = platformFor(artifact);
             if (!key) continue;
+            const signature = fs.readFileSync(sig, 'utf8').trim();
+            if (!signature) {
+              throw new Error(`Updater signature is empty: ${sig}`);
+            }
+            if (platforms[key]) {
+              throw new Error(`Multiple updater artifacts map to ${key}`);
+            }
             platforms[key] = {
-              signature: fs.readFileSync(sig, 'utf8').trim(),
+              signature,
               url: `${base}/${encodeURIComponent(artifact)}`,
             };
           }
@@ -555,6 +643,30 @@ jobs:
           console.log(fs.readFileSync('latest.json', 'utf8'));
           EOF
 
+      # A SHA256SUMS file over every published asset, verified in place. The
+      # verification step is the release's checksum smoke test: if shasum -c
+      # fails, the release does not publish. This runs after latest.json so the
+      # manifest itself is covered by the published checksum file.
+      - name: Generate and verify SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          : > SHA256SUMS
+          shopt -s nullglob
+          for f in *; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            shasum -a 256 "$f" >> SHA256SUMS
+          done
+          if [ ! -s SHA256SUMS ]; then
+            echo "::error::SHA256SUMS is empty; nothing to publish."
+            exit 1
+          fi
+          echo "SHA256SUMS:"
+          cat SHA256SUMS
+          echo "Verifying checksums..."
+          shasum -a 256 -c SHA256SUMS
+
       # Publish with the gh CLI (pre-installed on the runner) so no additional
       # third-party action needs pinning. --verify-tag makes gh refuse a tag
       # that does not exist on the remote; the signature gate already ran in
@@ -562,7 +674,7 @@ jobs:
       - name: Publish GitHub release
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           prerelease_flag=""
@@ -573,14 +685,28 @@ jobs:
 
           Verify downloads against \`SHA256SUMS\`:
 
-              shasum -a 256 -c SHA256SUMS
+              shasum -a 256 -c SHA256SUMS"
+          if [ -f release/latest.json ]; then
+            notes="${notes}
 
           Auto-update clients consume \`latest.json\`."
+          else
+            notes="${notes}
 
+          Auto-update is not enabled for this release."
+          fi
+
+          if gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::A release already exists for ${TAG}; refusing to overwrite it."
+            exit 1
+          fi
+          assets=(release/*)
           gh release create "${TAG}" \
             --repo "${{ github.repository }}" \
             --title "OpenCoven Chat ${VERSION}" \
             --notes "${notes}" \
             --verify-tag \
+            --draft \
             ${prerelease_flag} \
-            release/*
+            "${assets[@]}"
+          gh release edit "${TAG}" --repo "${{ github.repository }}" --draft=false

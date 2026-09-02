@@ -1,11 +1,11 @@
 # Releasing OpenCoven Chat
 
 This document is the runbook for cutting a public release of **OpenCoven Chat**
-(`ai.opencoven.chat`). Releases are driven entirely by pushing a **signed,
-annotated `v*` tag**. The `.github/workflows/release.yml` pipeline does the
-rest: it verifies the tag, builds signed installers for macOS, Windows, and
-Linux, checksums them, generates the updater manifest, and publishes a GitHub
-Release.
+(`ai.opencoven.chat`). Releases are driven by pushing a **signed, annotated
+`v*` tag**. The `.github/workflows/release.yml` pipeline verifies the tag,
+re-runs the tagged tree's checks, builds installers for macOS, Windows, and
+Linux, checksums them, and publishes a GitHub Release. If updater artifacts are
+enabled, it also generates `latest.json`.
 
 The first public release is **v0.0.1**.
 
@@ -54,9 +54,9 @@ Run through this in order. Every step is runnable as written.
    corepack pnpm app:build   # local sanity build
    ```
 
-5. **Make sure the updater signing keypair exists** and its public key is in
-   `src-tauri/tauri.conf.json` (see §4). Without it, auto-update cannot be
-   verified by clients.
+5. **If auto-update is enabled, make sure the updater signing keypair exists**
+   and its public key is in `src-tauri/tauri.conf.json` (see §4). This is not
+   required for v0.0.1, which intentionally ships without auto-update.
 
 6. **Create a signed, annotated tag** on the merge commit (see §2):
 
@@ -75,9 +75,9 @@ Run through this in order. Every step is runnable as written.
 8. **Watch the `Release` workflow.** It will:
    - verify the tag is signed and version-consistent,
    - build installers on each platform and smoke-test them,
-   - generate `SHA256SUMS` and `latest.json`,
-   - publish the GitHub Release (a **pre-release** if the tag has a suffix such
-     as `-rc.1` or `-beta`).
+   - generate `SHA256SUMS` and, when auto-update is enabled, `latest.json`,
+   - publish the GitHub Release (a **pre-release** for `0.x` versions or a tag
+     with a suffix such as `-rc.1` or `-beta`).
 
 9. **Verify the published release**: download an installer and check it against
    the published checksums.
@@ -87,6 +87,12 @@ Run through this in order. Every step is runnable as written.
    ```
 
 10. **Announce** the release per the usual OpenCoven channels.
+
+To rehearse an existing tag without publishing anything, run **Release** from
+the GitHub Actions tab, enter the tag, and leave `dry_run` enabled. The
+workflow still verifies the tag, checks the tagged tree, builds every platform,
+smoke-tests the artifacts, and generates checksums; it stops before creating a
+GitHub Release.
 
 ---
 
@@ -189,7 +195,7 @@ picks it up automatically:
 1. **Generate the updater keypair:**
 
    ```bash
-   pnpm tauri signer generate -w ~/.tauri/opencoven-chat-updater.key
+   corepack pnpm tauri signer generate -w ~/.tauri/opencoven-chat-updater.key
    ```
 
    This prints a **public key** and writes the **private key** to the path

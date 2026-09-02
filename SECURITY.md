@@ -8,8 +8,20 @@ upgrade to the latest release before reporting an issue.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| Latest release (currently `0.0.1`) | :white_check_mark: |
+| Latest published release | :white_check_mark: |
 | Any earlier tag | :x: |
+
+## Scope and related components
+
+This policy covers the OpenCoven Chat client in this repository. Vulnerabilities
+in the Coven Cave service or its canonical conversation APIs should be reported
+to [OpenCoven/coven-cave](https://github.com/OpenCoven/coven-cave).
+
+Chat does not write canonical conversations or messages to browser
+`localStorage` or IndexedDB; the current client keeps those reads in memory and
+uses native secure storage for credentials. Do not report the absence of a
+plaintext browser database as a vulnerability in this release. Any future local
+read cache must document its encryption and storage guarantees before shipping.
 
 ## Reporting a vulnerability
 
