@@ -672,6 +672,7 @@ jobs:
       # that does not exist on the remote; the signature gate already ran in
       # verify-tag.
       - name: Publish GitHub release
+        if: github.event.inputs.dry_run != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -710,3 +711,18 @@ jobs:
             ${prerelease_flag} \
             "${assets[@]}"
           gh release edit "${TAG}" --repo "${{ github.repository }}" --draft=false
+
+      - name: Summarize dry run
+        if: github.event.inputs.dry_run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Dry run for \`${TAG}\`"
+            echo
+            echo "Verification, tagged-tree checks, artifact assembly, and checksum validation passed."
+            echo
+            echo '```'
+            cat release/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
