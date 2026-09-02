@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenCoven Chat Demo",
+  "identifier": "ai.opencoven.chat.demo",
+  "bundle": {
+    "shortDescription": "Demo of the OpenCoven Chat familiars surface.",
+    "longDescription": "OpenCoven Chat Demo opens straight into the Familiars Redesign: held actions, the ward at the centre of the chat, summoning familiars, @-mentions, and a familiar's screen. It connects to nothing and keeps nothing; every reply is local mock data.",
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "Developer ID Application: Soul Protocol LLC (9LR8Z8UQ9X)"
+    }
+  }
+}

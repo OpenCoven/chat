@@ -34,7 +34,15 @@ if (!rootElement) {
  * side rather than from memory; `minimal` implements the approved "Coven Cave
  * Minimal (macOS)" design.
  */
-const demo = new URLSearchParams(window.location.search).get('demo');
+/**
+ * A demo build opens on a demo surface without a query flag.
+ *
+ * `VITE_DEFAULT_DEMO` is set at build time (see src-tauri/tauri.demo.conf.json
+ * and the release notes); the production build leaves it unset, so the
+ * read-only app stays the default there.
+ */
+const defaultDemo = import.meta.env.VITE_DEFAULT_DEMO ?? null;
+const demo = new URLSearchParams(window.location.search).get('demo') ?? defaultDemo;
 
 function surfaceFor(name: string | null) {
   if (name === 'chat') {
