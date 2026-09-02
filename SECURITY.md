@@ -8,19 +8,27 @@ upgrade to the latest release before reporting an issue.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| Latest published release | :white_check_mark: |
+| Latest release | :white_check_mark: |
 | Any earlier tag | :x: |
 
-## Scope and related components
+## Scope
 
-This policy covers the OpenCoven Chat client in this repository. Vulnerabilities
-in the Coven Cave service or its canonical conversation APIs should be reported
-to [OpenCoven/coven-cave](https://github.com/OpenCoven/coven-cave).
+Report vulnerabilities in the OpenCoven Chat desktop client, its packaged
+release artifacts, or this repository's build and release automation here.
+Vulnerabilities in the Coven Cave service, daemon, or server-side data handling
+belong in
+[`OpenCoven/coven-cave`](https://github.com/OpenCoven/coven-cave/security);
+use that repository's private vulnerability reporting channel rather than a
+public issue.
 
-Chat does not write canonical conversations or messages to browser
-`localStorage` or IndexedDB; the current client keeps those reads in memory and
-uses native secure storage for credentials. Any future local read cache must
-document its encryption and storage guarantees before shipping.
+OpenCoven Chat does not persist authenticated conversation bodies in
+IndexedDB, `localStorage`, or `sessionStorage`. Canonical reads are held only in
+bounded memory caches, while installation identity and credentials stay in the
+operating system keyring. The explicit browser demos use canned data and do not
+persist it. Reports showing that sensitive conversation data reaches browser
+storage are in scope because that would violate the current security boundary.
+Any future local read cache must document its encryption and storage guarantees
+before shipping.
 
 ## Reporting a vulnerability
 

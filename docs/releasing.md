@@ -1,11 +1,11 @@
 # Releasing OpenCoven Chat
 
 This document is the runbook for cutting a public release of **OpenCoven Chat**
-(`ai.opencoven.chat`). Releases are driven by pushing a **signed, annotated
-`v*` tag**. The `.github/workflows/release.yml` pipeline verifies the tag,
-re-runs the tagged tree's checks, builds installers for macOS, Windows, and
-Linux, checksums them, and publishes a GitHub Release. If updater artifacts are
-enabled, it also generates `latest.json`.
+(`ai.opencoven.chat`). Releases are driven entirely by pushing a **signed,
+annotated `v*` tag**. The `.github/workflows/release.yml` pipeline does the
+rest: it verifies the tag, builds signed installers for macOS, Windows, and
+Linux, checksums them, conditionally generates the updater manifest when
+auto-update is configured, and publishes a GitHub Release.
 
 The first public release is **v0.0.1**.
 
@@ -54,9 +54,9 @@ Run through this in order. Every step is runnable as written.
    corepack pnpm app:build   # local sanity build
    ```
 
-5. **If auto-update is enabled, make sure the updater signing keypair exists**
-   and its public key is in `src-tauri/tauri.conf.json` (see §4). This is not
-   required for v0.0.1, which intentionally ships without auto-update.
+5. **Make sure the updater signing keypair exists** and its public key is in
+   `src-tauri/tauri.conf.json` (see §4). Without it, auto-update cannot be
+   verified by clients.
 
 6. **Create a signed, annotated tag** on the merge commit (see §2):
 
@@ -74,10 +74,13 @@ Run through this in order. Every step is runnable as written.
 
 8. **Watch the `Release` workflow.** It will:
    - verify the tag is signed and version-consistent,
+   - rerun lint, typechecking, unit tests, and the web build against the tagged
+     tree,
    - build installers on each platform and smoke-test them,
-   - generate `SHA256SUMS` and, when auto-update is enabled, `latest.json`,
-   - publish the GitHub Release (a **pre-release** for `0.x` versions or a tag
-     with a suffix such as `-rc.1` or `-beta`).
+   - generate `SHA256SUMS` and, only when signed updater artifacts exist,
+     `latest.json`,
+   - publish the GitHub Release (a **pre-release** if the tag has a suffix such
+     as `-rc.1` or `-beta`, or if its major version is `0`).
 
 9. **Verify the published release**: download an installer and check it against
    the published checksums.
@@ -87,12 +90,6 @@ Run through this in order. Every step is runnable as written.
    ```
 
 10. **Announce** the release per the usual OpenCoven channels.
-
-To rehearse an existing tag without publishing anything, run **Release** from
-the GitHub Actions tab, enter the tag, and leave `dry_run` enabled. The
-workflow still verifies the tag, checks the tagged tree, builds every platform,
-smoke-tests the artifacts, and generates checksums; it stops before creating a
-GitHub Release.
 
 ---
 
@@ -127,10 +124,11 @@ git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
 # each line: "<principal-email> namespaces=\"git\" ssh-ed25519 AAAA..."
 ```
 
-In CI, the same allowed-signers content is supplied to the workflow through the
-`TAG_ALLOWED_SIGNERS` secret so the `verify-tag` job can verify SSH signatures.
-If the signature cannot be verified, the release is **blocked** — that is the
-intended behavior for an unverifiable tag.
+In CI, GitHub's tag API must report the annotated tag signature as verified.
+When the optional `TAG_ALLOWED_SIGNERS` secret is configured, the `verify-tag`
+job independently runs `git verify-tag` for SSH-signed tags. A disagreement
+blocks the release. Without that secret, GitHub's successful verification is
+the authority; the workflow never treats an unverifiable tag as releasable.
 
 Delete a bad *local* tag before it is pushed:
 
@@ -138,15 +136,28 @@ Delete a bad *local* tag before it is pushed:
 git tag -d v0.0.1
 ```
 
+## Dry-run rehearsal
+
+The workflow can be run manually against an existing signed tag. In
+**Actions → Release → Run workflow**, select the branch containing the workflow
+change, enter the tag, and leave `dry_run` at its default value of `true`.
+
+A dry run verifies the remote tag, checks out its exact commit, reruns the
+release-relevant tests, builds and smoke-tests all four native targets,
+generates and verifies checksums, and then stops without creating or modifying
+a GitHub Release. Use this path to validate workflow changes and signing-secret
+wiring before the next real tag push.
+
 ---
 
 ## 3. Required secrets
 
 All signing secrets live in the GitHub deployment **environment**
 `release-signing`. Configure them under **Settings → Environments →
-release-signing**. When a signing secret is absent, the workflow still runs and
-produces a clearly-marked **unsigned** build for that platform rather than
-failing.
+release-signing**. When a platform signing secret is absent, the workflow still
+runs and produces a clearly-marked **unsigned** build for that platform rather
+than failing. `TAG_ALLOWED_SIGNERS` is optional because GitHub API verification
+is always required; when present, it adds an independent local SSH check.
 
 | Secret | Purpose | Environment |
 | ------ | ------- | ----------- |
@@ -243,7 +254,9 @@ The product name contains a space, so installer filenames look like
 Per release, the workflow publishes:
 
 - **macOS**: `OpenCoven Chat.app` (packaged) + `.dmg` for `aarch64` and
-  `x86_64`, signed and notarized when Apple secrets are present.
+  `x86_64`, signed and notarized when Apple secrets are present. The Intel
+  target runs natively on GitHub's `macos-15-intel` runner rather than
+  cross-compiling on Apple silicon.
 - **Windows**: `.msi` and NSIS `.exe` for `x86_64`, Authenticode-signed when
   the Windows secret is present.
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
@@ -268,13 +281,12 @@ pushes a bad build to users who did nothing.
 > **Not applicable to v0.0.1**, which ships without auto-update (no
 > `latest.json`; see §4). If auto-update is still disabled, skip to §6.2.
 
-1. **Remove or neutralize `latest.json` for the bad version.** Clients update
-   only when `latest.json` advertises a newer version. Either:
-   - edit the GitHub Release and **delete the `latest.json` asset**, or
-   - replace it with a `latest.json` that points at the **last known-good**
-     version so clients that already pulled the bad manifest are steered back.
-2. If updates were already served, prepare a **superseding release** (see 6.3)
-   with a higher version — that is the only way to move auto-updaters forward.
+1. **Delete the bad release's `latest.json` asset.** This stops new clients
+   from fetching that manifest, although caches and clients that already read
+   it may still retain it. Do not point the manifest at an older version:
+   updater version checks do not provide a reliable downgrade path.
+2. Prepare a **superseding release** (see 6.3) with a higher version. That is
+   the only reliable way to move auto-updaters forward.
 
 ### 6.2 Mark the bad GitHub Release
 
