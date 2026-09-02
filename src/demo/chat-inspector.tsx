@@ -6,6 +6,7 @@ import {
   formatDuration,
   formatSuccessRate,
 } from './minimal-familiar-sdk';
+import { Icon, type IconName } from './minimal-icons';
 import { contractReport, type MockFamiliar } from './mock-familiars';
 import { MOCK_CREDENTIAL, MOCK_HEALTH } from './settings-page';
 
@@ -20,6 +21,11 @@ export type ChatInspectorProps = Readonly<{
 
 const TABS: readonly InspectorTab[] = ['overview', 'access', 'activity'];
 const APP_TABS: readonly AppTab[] = ['general', 'connection'];
+const TAB_ICONS: Record<InspectorTab, IconName> = {
+  overview: 'info',
+  access: 'hand',
+  activity: 'heartbeat',
+};
 
 function titleCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
@@ -92,48 +98,165 @@ function Overview({ familiar }: { familiar: MockFamiliar }) {
   );
 }
 
-function DetailList({ items }: { items: readonly string[] }) {
-  if (items.length === 0) {
-    return <span className="inspector-value">None</span>;
-  }
-
+function AccessGroup({
+  defaultOpen = false,
+  icon,
+  items,
+  label,
+  summary,
+  tone,
+}: {
+  defaultOpen?: boolean;
+  icon: IconName;
+  items: readonly string[];
+  label: string;
+  summary: string;
+  tone: 'safe' | 'review' | 'scope';
+}) {
   return (
-    <ul className="inspector-detail-list">
-      {items.map((item) => (
-        <li key={item}>{item}</li>
-      ))}
-    </ul>
+    <details className={`access-group access-group-${tone}`} open={defaultOpen}>
+      <summary>
+        <span className="access-group-icon">
+          <Icon name={icon} size={17} />
+        </span>
+        <span className="access-group-copy">
+          <strong>{label}</strong>
+          <span>{summary}</span>
+        </span>
+        <span className="access-group-count">{items.length}</span>
+        <Icon name="caret-down" size={13} />
+      </summary>
+      <ul className="access-group-list">
+        {items.map((item) => (
+          <li key={item}>
+            <Icon
+              name={
+                tone === 'safe' ? 'check-circle-fill' : tone === 'review' ? 'hand' : 'folder-open'
+              }
+              size={13}
+            />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
 function Access({ familiar }: { familiar: MockFamiliar }) {
   const report = contractReport(familiar);
   const passed = report.every((property) => property.pass);
+  const passingChecks = report.filter((property) => property.pass).length;
+  const autoCount = familiar.ward.approvalTiers.auto.length;
+  const reviewCount = familiar.ward.approvalTiers.humanReview.length;
 
   return (
-    <>
-      <p className="inspector-eyebrow">Bounded authority</p>
-      <p className="inspector-summary">
-        The ward decides what {familiar.name} may do here and what must wait for you.
-      </p>
-      <div className="inspector-detail">
-        <strong>May do</strong>
-        <DetailList items={familiar.ward.approvalTiers.auto} />
+    <div className="access-view">
+      <div className={`access-hero ${passed ? 'is-met' : 'needs-review'}`}>
+        <span className="access-orbit" aria-hidden="true">
+          <span className="access-orbit-core">
+            <Icon name="hand" size={20} />
+          </span>
+          <span className="access-orbit-node access-orbit-node-safe" />
+          <span className="access-orbit-node access-orbit-node-review" />
+          <span className="access-orbit-node access-orbit-node-scope" />
+        </span>
+        <span className="access-hero-copy">
+          <span className="access-status">
+            <span aria-hidden="true" />
+            Human in control
+          </span>
+          <strong>Clear boundaries, visible at a glance.</strong>
+          <span>
+            {familiar.name} can handle routine work, while consequential actions stop for you.
+          </span>
+        </span>
       </div>
-      <div className="inspector-detail">
-        <strong>Must ask</strong>
-        <DetailList items={familiar.ward.approvalTiers.humanReview} />
+
+      <section className="access-totals" aria-label="Authority summary">
+        <div className="access-total access-total-safe">
+          <span>
+            <Icon name="sparkle" size={14} />
+            Can act
+          </span>
+          <strong>{autoCount}</strong>
+        </div>
+        <div className="access-total access-total-review">
+          <span>
+            <Icon name="hand" size={14} />
+            Asks first
+          </span>
+          <strong>{reviewCount}</strong>
+        </div>
+      </section>
+
+      <div className="access-groups">
+        <AccessGroup
+          defaultOpen
+          icon="sparkle"
+          items={familiar.ward.approvalTiers.auto}
+          label="May act"
+          summary="Routine actions that can run immediately"
+          tone="safe"
+        />
+        <AccessGroup
+          defaultOpen
+          icon="hand"
+          items={familiar.ward.approvalTiers.humanReview}
+          label="Must ask"
+          summary="Actions held until you approve them"
+          tone="review"
+        />
+        <AccessGroup
+          icon="folder-open"
+          items={familiar.ward.editablePaths}
+          label="Workspace reach"
+          summary="The only paths this familiar may change"
+          tone="scope"
+        />
       </div>
-      <div className="inspector-detail">
-        <strong>Editable paths</strong>
-        <DetailList items={familiar.ward.editablePaths} />
-      </div>
-      <SettingRow
-        label="Contract"
-        hint={`ward.toml ${familiar.ward.version}`}
-        value={passed ? 'Met' : 'Review'}
-      />
-    </>
+
+      <details className={`access-contract ${passed ? 'is-met' : 'needs-review'}`}>
+        <summary>
+          <span className="access-contract-icon">
+            <Icon name={passed ? 'check-circle-fill' : 'warning-circle-fill'} size={17} />
+          </span>
+          <span className="access-contract-copy">
+            <strong>Familiar contract</strong>
+            <span>ward.toml {familiar.ward.version}</span>
+          </span>
+          <span className="access-contract-score">
+            {passingChecks}/{report.length}
+          </span>
+          <Icon name="caret-down" size={13} />
+        </summary>
+        <div
+          className="access-contract-meter"
+          role="img"
+          aria-label={`${passingChecks} of ${report.length} contract checks met`}
+        >
+          {report.map((property) => (
+            <span
+              key={property.property}
+              className={property.pass ? 'is-met' : 'needs-review'}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+        <ul className="access-contract-list">
+          {report.map((property) => (
+            <li key={property.property} className={property.pass ? 'is-met' : 'needs-review'}>
+              <Icon name={property.pass ? 'check-circle-fill' : 'warning-circle-fill'} size={14} />
+              <span>
+                <strong>{property.property}</strong>
+                <span>{property.note}</span>
+              </span>
+              <code>{property.file}</code>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
   );
 }
 
@@ -362,6 +485,7 @@ export function ChatInspector({ familiar, onClose }: ChatInspectorProps) {
             onClick={() => setTab(name)}
             onKeyDown={(event) => onTabKeyDown(event, index)}
           >
+            <Icon name={TAB_ICONS[name]} size={13} />
             {titleCase(name)}
           </button>
         ))}

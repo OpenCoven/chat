@@ -162,23 +162,31 @@ describe('chat demo shell', () => {
   it('shows concise demo reasoning for an agent response', () => {
     render(<DemoShell />);
 
-    const reasoningLabel = screen.getByText('Reasoning', { selector: '.reasoning-label' });
-    const reasoning = reasoningLabel.closest('details');
+    const reasoningToggle = screen.getByRole('button', { name: /Reasoning/ });
+    const reasoning = reasoningToggle.closest('.reasoning-block');
     expect(reasoning).toBeVisible();
-    expect(reasoning).toHaveAttribute('open');
+    expect(reasoningToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(reasoningToggle).toHaveTextContent(
+      'Built a compact visual response from the two constraints in the prompt.',
+    );
+    expect(reasoningToggle).toHaveTextContent('3 steps');
+    expect(reasoningToggle).toHaveTextContent('3s');
     expect(reasoning).toHaveTextContent('Identified “cat” as the subject');
-    expect(reasoning).toHaveTextContent('Demo');
     expect(reasoning).toHaveTextContent('Interpret prompt');
+    expect(reasoning).toHaveTextContent('prompt.parse');
     expect(reasoning).toHaveTextContent('Compose image');
+    expect(reasoning).toHaveTextContent('image.render');
     expect(reasoning).toHaveTextContent('Keep it local');
+    expect(reasoning).toHaveTextContent('ward.check');
+    expect(reasoning).toHaveTextContent(
+      'Rendered locally. No external model or network request was used.',
+    );
+    expect(reasoning).toHaveTextContent('3 tool calls');
     expect(reasoning?.querySelectorAll('.reasoning-step-icon .mm-icon')).toHaveLength(3);
 
-    const summary = reasoningLabel.closest('summary');
-    if (!(summary instanceof HTMLElement)) {
-      throw new Error('Reasoning summary was not rendered');
-    }
-    fireEvent.click(summary);
-    expect(reasoning).not.toHaveAttribute('open');
+    fireEvent.click(reasoningToggle);
+    expect(reasoningToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(reasoning?.querySelector('.reasoning-body')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('updates the inspector when the active conversation changes agent', () => {

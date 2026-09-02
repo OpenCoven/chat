@@ -144,12 +144,15 @@ test('expands generated images against a focused dark backdrop', async ({ page }
 test('shows an expandable reasoning summary for the demo response', async ({ page }) => {
   await page.goto('/?demo=chat');
 
-  const reasoning = page.locator('details.reasoning-block');
-  await expect(reasoning).toHaveAttribute('open', '');
+  const reasoning = page.locator('.reasoning-block');
+  const toggle = reasoning.getByRole('button');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(reasoning).toContainText('Identified “cat” as the subject');
-  await expect(reasoning).toContainText('Demo');
+  await expect(reasoning).toContainText('prompt.parse');
+  await expect(reasoning).toContainText('3 tool calls');
   await expect(reasoning.locator('.reasoning-step-icon')).toHaveCount(3);
 
-  await reasoning.locator('summary').click();
-  await expect(reasoning).not.toHaveAttribute('open', '');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(reasoning.locator('.reasoning-body')).toHaveAttribute('aria-hidden', 'true');
 });

@@ -13,8 +13,20 @@ describe('ChatInspector', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Access' }));
 
     const panel = screen.getByRole('tabpanel', { name: 'Access' });
+    expect(panel).toHaveTextContent('Human in control');
+    expect(screen.getByText('Can act').parentElement).toHaveTextContent('3');
+    expect(screen.getByText('Asks first').parentElement).toHaveTextContent('2');
     expect(panel).toHaveTextContent('Must ask');
     expect(panel).toHaveTextContent('publish a finding');
+
+    const contractSummary = screen.getByText('Familiar contract');
+    const contract = contractSummary.closest('details');
+    expect(contract).not.toHaveAttribute('open');
+
+    fireEvent.click(contractSummary);
+    expect(contract).toHaveAttribute('open');
+    expect(panel).toHaveTextContent('Named Identity');
+    expect(panel).toHaveTextContent('5/5');
   });
 
   it('moves between tabs with arrow keys', () => {
