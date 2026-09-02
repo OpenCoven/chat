@@ -42,12 +42,15 @@ representing the project in public spaces.
 
 ## Reporting
 
-Report unacceptable behaviour privately to the maintainers:
+Report unacceptable behaviour through one of these channels:
 
 - Use GitHub's **Report content** control on the specific comment, issue, or
-  pull request, and
+  pull request for GitHub-hosted content; or
 - Contact the maintainers through the OpenCoven Discord
   (https://discord.gg/opencoven) and ask for a private channel.
+
+Security vulnerabilities are handled separately; follow
+[`SECURITY.md`](SECURITY.md).
 
 Do not post details of an incident publicly before the maintainers have had a
 chance to respond.

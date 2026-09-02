@@ -17,7 +17,7 @@ sections that apply to your change before you open a pull request.
 
 Requirements:
 
-- Node.js 24.18.0+ (24 recommended)
+- Node.js 24.18.1 (the package engine accepts `>=24.18.0 <25`)
 - pnpm 10.34.0 via Corepack (`corepack enable`)
 - Rust stable toolchain (see [`rust-toolchain.toml`](rust-toolchain.toml))
 - Tauri desktop prerequisites for your platform
@@ -113,11 +113,14 @@ boundaries and narrow, well-named modules over large ones.
 
 ## The conformance lock
 
-`phase1-conformance.lock.json` cryptographically pins the Rust host, the
-contents of `scripts/`, and two workflow files (`ci.yml` and
-`client-v1-conformance.yml`). If your change touches any pinned path, the
-conformance suite will fail until the lock is repinned, which is a two-commit
-process:
+`phase1-conformance.lock.json` cryptographically pins the Phase 1 authority
+graph: the Chat, SDK, Cave, Coven, and harness revisions; selected Chat host
+files; selected harness scripts and both workflow files
+(`.github/workflows/ci.yml` and `.github/workflows/client-v1-conformance.yml`);
+release and evidence metadata; and the Windows supervisor artifact. It does
+not pin every file under `src-tauri/` or `scripts/`. If your change touches a
+listed authority path, the conformance suite will fail until the lock is
+repinned, which is a two-commit process:
 
 1. Commit the functional change on its own.
 2. Commit a second change updating the pinned revision, tree, and blob hashes
