@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-
+import { AttachmentChip } from '../ui';
 import type {
   FamMessage,
   HoldMessage,
@@ -116,8 +116,19 @@ export function MessageRow(props: MessageRowProps) {
       return (
         <div className="fr-user fr-msg" style={delayStyle(index)}>
           <span className="fr-time">{message.time}</span>
-          <div className="fr-bubble fr-bubble--user">
-            <MentionText text={message.text} familiars={familiars} />
+          <div className="fr-user-body">
+            <div className="fr-bubble fr-bubble--user">
+              <MentionText text={message.text} familiars={familiars} />
+            </div>
+            {message.attachments && message.attachments.length > 0 ? (
+              <ul className="fr-bubble-attachments" aria-label="Attachments">
+                {message.attachments.map((name) => (
+                  <li key={name}>
+                    <AttachmentChip name={name} meta="attached" />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         </div>
       );

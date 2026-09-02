@@ -11,6 +11,7 @@ import './demo/familiars-shell.css';
 import { MinimalMacOS } from './demo/minimal-macos';
 import './demo/minimal-macos.css';
 import './styles.css';
+import './ui/ui.css';
 
 const rootElement = document.getElementById('root');
 

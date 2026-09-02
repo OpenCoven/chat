@@ -62,7 +62,7 @@ export type HoldState = 'approved' | 'declined' | 'expired';
 
 export type FamMessage =
   | Readonly<{ kind: 'divider'; text: string }>
-  | Readonly<{ kind: 'user'; time: string; text: string }>
+  | Readonly<{ kind: 'user'; time: string; text: string; attachments?: readonly string[] }>
   | Readonly<{
       kind: 'familiar';
       time: string;

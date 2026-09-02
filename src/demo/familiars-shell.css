@@ -1195,8 +1195,25 @@
   white-space: pre-wrap;
 }
 
-.fr-bubble--user {
+.fr-user-body {
   max-width: 72%;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.fr-bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fr-bubble--user {
+  max-width: 100%;
   padding: 9px 13px;
   border-radius: 12px 12px 4px 12px;
   background:
@@ -1917,7 +1934,6 @@
 }
 
 .fr-composer-inner {
-  position: relative;
   width: 100%;
 }
 
