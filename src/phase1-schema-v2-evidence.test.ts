@@ -288,6 +288,288 @@ function corruptLooseValidatorBlob(
   };
 }
 
+type ValidatorModuleFixture = ReturnType<typeof validatorModuleFixture>;
+type GitObjectType = 'blob' | 'commit' | 'tree';
+
+function validatorObjectIdByteLength(validator: ValidatorModuleFixture) {
+  return validator.objectFormat === 'sha1' ? 20 : 32;
+}
+
+function readRawGitObject(
+  validator: ValidatorModuleFixture,
+  type: GitObjectType,
+  objectId: string,
+) {
+  return execFileSync('git', ['cat-file', type, objectId], {
+    cwd: validator.root,
+  });
+}
+
+function looseGitObjectPath(validator: ValidatorModuleFixture, objectId: string) {
+  return resolve(
+    validator.root,
+    execFileSync(
+      'git',
+      ['rev-parse', '--git-path', `objects/${objectId.slice(0, 2)}/${objectId.slice(2)}`],
+      {
+        cwd: validator.root,
+        encoding: 'utf8',
+      },
+    ).trim(),
+  );
+}
+
+function overwriteLooseGitObject(
+  validator: ValidatorModuleFixture,
+  storedObjectId: string,
+  type: GitObjectType,
+  bytes: Buffer,
+) {
+  const objectPath = looseGitObjectPath(validator, storedObjectId);
+  chmodSync(objectPath, 0o600);
+  writeFileSync(
+    objectPath,
+    deflateSync(Buffer.concat([Buffer.from(`${type} ${bytes.byteLength}\0`, 'utf8'), bytes])),
+  );
+}
+
+function writeGitObject(
+  validator: ValidatorModuleFixture,
+  type: GitObjectType,
+  bytes: Buffer,
+  literally = false,
+) {
+  return execFileSync(
+    'git',
+    ['hash-object', '-t', type, ...(literally ? ['--literally'] : []), '-w', '--stdin'],
+    {
+      cwd: validator.root,
+      encoding: 'utf8',
+      input: bytes,
+    },
+  ).trim();
+}
+
+function parseFixtureTreeEntries(validator: ValidatorModuleFixture, treeBytes: Buffer) {
+  const objectIdByteLength = validatorObjectIdByteLength(validator);
+  const entries: Array<{
+    end: number;
+    mode: string;
+    name: string;
+    nameBytes: Buffer;
+    objectId: string;
+    start: number;
+  }> = [];
+  let offset = 0;
+  while (offset < treeBytes.byteLength) {
+    const modeEnd = treeBytes.indexOf(0x20, offset);
+    const nameEnd = modeEnd < 0 ? -1 : treeBytes.indexOf(0, modeEnd + 1);
+    const objectIdEnd = nameEnd < 0 ? -1 : nameEnd + 1 + objectIdByteLength;
+    if (modeEnd <= offset || nameEnd <= modeEnd + 1 || objectIdEnd > treeBytes.byteLength) {
+      throw new Error('Validator fixture tree is malformed.');
+    }
+    const nameBytes = treeBytes.subarray(modeEnd + 1, nameEnd);
+    entries.push({
+      start: offset,
+      end: objectIdEnd,
+      mode: treeBytes.subarray(offset, modeEnd).toString('ascii'),
+      name: nameBytes.toString('utf8'),
+      nameBytes,
+      objectId: treeBytes.subarray(nameEnd + 1, objectIdEnd).toString('hex'),
+    });
+    offset = objectIdEnd;
+  }
+  return entries;
+}
+
+function replaceFixtureTreeEntry(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+  replacement: { mode?: string; objectId?: string },
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  const objectId = replacement.objectId ?? entry.objectId;
+  const replacementBytes = Buffer.concat([
+    Buffer.from(replacement.mode ?? entry.mode, 'ascii'),
+    Buffer.from(' ', 'ascii'),
+    entry.nameBytes,
+    Buffer.from([0]),
+    Buffer.from(objectId, 'hex'),
+  ]);
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.start),
+    replacementBytes,
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function duplicateFixtureTreeEntry(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.end),
+    treeBytes.subarray(entry.start, entry.end),
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function replaceFixtureTreeEntryName(
+  validator: ValidatorModuleFixture,
+  treeBytes: Buffer,
+  name: string,
+  replacementName: string,
+) {
+  const entries = parseFixtureTreeEntries(validator, treeBytes);
+  const entry = entries.find((candidate) => candidate.name === name);
+  if (entry === undefined || entries.filter((candidate) => candidate.name === name).length !== 1) {
+    throw new Error(`Validator fixture tree entry is unavailable: ${name}`);
+  }
+  return Buffer.concat([
+    treeBytes.subarray(0, entry.start),
+    Buffer.from(entry.mode, 'ascii'),
+    Buffer.from(' ', 'ascii'),
+    Buffer.from(replacementName, 'utf8'),
+    Buffer.from([0]),
+    Buffer.from(entry.objectId, 'hex'),
+    treeBytes.subarray(entry.end),
+  ]);
+}
+
+function replaceFixtureCommitTree(commitBytes: Buffer, treeObjectId: string) {
+  const firstLineEnd = commitBytes.indexOf(0x0a);
+  if (
+    firstLineEnd < 0 ||
+    !commitBytes.subarray(0, firstLineEnd).toString('ascii').startsWith('tree ')
+  ) {
+    throw new Error('Validator fixture commit is malformed.');
+  }
+  return Buffer.concat([
+    Buffer.from(`tree ${treeObjectId}`, 'ascii'),
+    commitBytes.subarray(firstLineEnd),
+  ]);
+}
+
+function createFixtureIdentity(
+  validator: ValidatorModuleFixture,
+  treeObjectId: string,
+  commitBytes = replaceFixtureCommitTree(
+    readRawGitObject(validator, 'commit', validator.commit),
+    treeObjectId,
+  ),
+) {
+  const commit = writeGitObject(validator, 'commit', commitBytes, true);
+  execFileSync('git', ['update-ref', 'HEAD', commit], { cwd: validator.root });
+  return {
+    repository: 'OpenCoven/sdk',
+    commit,
+    tree: treeObjectId,
+  } as const;
+}
+
+function createFixtureIdentityWithScriptsTree(
+  validator: ValidatorModuleFixture,
+  scriptsTreeBytes: Buffer,
+  literally = false,
+) {
+  const scriptsTree = writeGitObject(validator, 'tree', scriptsTreeBytes, literally);
+  const rootTreeBytes = replaceFixtureTreeEntry(
+    validator,
+    readRawGitObject(validator, 'tree', validator.tree),
+    'scripts',
+    { objectId: scriptsTree },
+  );
+  const tree = writeGitObject(validator, 'tree', rootTreeBytes);
+  return {
+    ...createFixtureIdentity(validator, tree),
+    scriptsTree,
+  };
+}
+
+function redirectedValidatorContract(validator: ValidatorModuleFixture) {
+  const redirectedBytes = Buffer.from(
+    validator.contractBytes
+      .toString('utf8')
+      .replace("'committed-contract'", "'redirected-contract'"),
+    'utf8',
+  );
+  const redirectedBlob = writeGitObject(validator, 'blob', redirectedBytes);
+  const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+    cwd: validator.root,
+    encoding: 'utf8',
+  }).trim();
+  const redirectedScriptsBytes = replaceFixtureTreeEntry(
+    validator,
+    readRawGitObject(validator, 'tree', scriptsTree),
+    'conformance-contract.mjs',
+    { objectId: redirectedBlob },
+  );
+  return {
+    redirectedBlob,
+    redirectedBytes,
+    redirectedScriptsBytes,
+    scriptsTree,
+  };
+}
+
+function runFixtureContractLoader(
+  validator: ValidatorModuleFixture,
+  identity: { commit: string; tree: string } = validator,
+) {
+  return spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+        const { loadSdkEvidenceContract } = await import(process.argv[1]);
+        const loaded = await loadSdkEvidenceContract({
+          validatorRoot: process.argv[2],
+          validatorIdentity: {
+            repository: 'OpenCoven/sdk',
+            commit: process.argv[3],
+            tree: process.argv[4],
+          },
+        });
+        process.stdout.write(JSON.stringify({
+          contract: loaded.contract.marker,
+          lock: loaded.frozenLock.sourceMarker,
+          schema: loaded.schema.sourceMarker,
+          registry: loaded.registry.sourceMarker,
+        }));
+      `,
+      pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
+      validator.root,
+      identity.commit,
+      identity.tree,
+    ],
+    {
+      encoding: 'utf8',
+    },
+  );
+}
+
+function expectFixtureLoaderFailure(
+  result: ReturnType<typeof runFixtureContractLoader>,
+  diagnostic: string,
+) {
+  expect(result.error).toBeUndefined();
+  expect(result.status).not.toBe(0);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toContain(`Error: ${diagnostic}`);
+}
+
 async function fixture() {
   const contract = await import(
     pathToFileURL(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs')).href
@@ -812,6 +1094,253 @@ describe('Phase 1 SDK source contract authority', () => {
       }
     },
   );
+
+  test('rejects a corrupt intermediate tree that redirects a verified module', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const redirected = redirectedValidatorContract(validator);
+      overwriteLooseGitObject(
+        validator,
+        redirected.scriptsTree,
+        'tree',
+        redirected.redirectedScriptsBytes,
+      );
+
+      expect(
+        execFileSync('git', ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(redirected.redirectedBlob);
+      expect(
+        execFileSync('git', ['cat-file', 'blob', redirected.redirectedBlob], {
+          cwd: validator.root,
+        }),
+      ).toEqual(redirected.redirectedBytes);
+      expect(
+        execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+          input: redirected.redirectedScriptsBytes,
+        }).trim(),
+      ).not.toBe(redirected.scriptsTree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK committed tree failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a corrupt root tree that redirects a verified module graph', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const redirected = redirectedValidatorContract(validator);
+      const redirectedScriptsTree = writeGitObject(
+        validator,
+        'tree',
+        redirected.redirectedScriptsBytes,
+      );
+      const redirectedRootBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', validator.tree),
+        'scripts',
+        { objectId: redirectedScriptsTree },
+      );
+      overwriteLooseGitObject(validator, validator.tree, 'tree', redirectedRootBytes);
+
+      expect(
+        execFileSync('git', ['rev-parse', `${validator.commit}:scripts/conformance-contract.mjs`], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(redirected.redirectedBlob);
+      expect(
+        execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+          input: redirectedRootBytes,
+        }).trim(),
+      ).not.toBe(validator.tree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK committed tree failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects corrupt raw commit bytes even when HEAD and its tree OID are unchanged', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const commitBytes = readRawGitObject(validator, 'commit', validator.commit);
+      const corruptCommitBytes = Buffer.from(
+        commitBytes
+          .toString('utf8')
+          .replace('validator module fixture', 'validator module fixturE'),
+        'utf8',
+      );
+      if (corruptCommitBytes.equals(commitBytes)) {
+        throw new Error('Validator fixture commit corruption was not applied.');
+      }
+      overwriteLooseGitObject(validator, validator.commit, 'commit', corruptCommitBytes);
+
+      expect(
+        execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(validator.commit);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator),
+        'SDK validator commit failed object ID verification.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a commit with more than one tree header', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const commitBytes = readRawGitObject(validator, 'commit', validator.commit);
+      const firstLineEnd = commitBytes.indexOf(0x0a);
+      if (firstLineEnd < 0) {
+        throw new Error('Validator fixture commit is malformed.');
+      }
+      const duplicateTreeHeaderCommit = Buffer.concat([
+        commitBytes.subarray(0, firstLineEnd + 1),
+        Buffer.from(`tree ${validator.tree}\n`, 'ascii'),
+        commitBytes.subarray(firstLineEnd + 1),
+      ]);
+      const identity = createFixtureIdentity(validator, validator.tree, duplicateTreeHeaderCommit);
+
+      expect(
+        execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+          cwd: validator.root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(validator.tree);
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK validator commit tree header is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    {
+      label: 'trailing junk',
+      diagnostic: 'SDK committed tree is malformed.',
+      mutate: (_validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        Buffer.concat([treeBytes, Buffer.from([0x31])]),
+    },
+    {
+      label: 'a duplicate entry',
+      diagnostic: 'SDK committed tree contains duplicate entry names.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        duplicateFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs'),
+    },
+    {
+      label: 'an unsafe entry name',
+      diagnostic: 'SDK committed tree contains an unsafe entry name.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntryName(validator, treeBytes, 'conformance-contract.mjs', '..'),
+    },
+    {
+      label: 'a symlink mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '120000',
+        }),
+    },
+    {
+      label: 'a gitlink mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '160000',
+        }),
+    },
+    {
+      label: 'a noncanonical regular-file mode',
+      diagnostic: 'SDK committed tree entry mode is unsupported.',
+      mutate: (validator: ValidatorModuleFixture, treeBytes: Buffer) =>
+        replaceFixtureTreeEntry(validator, treeBytes, 'conformance-contract.mjs', {
+          mode: '100664',
+        }),
+    },
+  ])('rejects a verified tree object containing $label', ({ diagnostic, mutate }) => {
+    const validator = validatorModuleFixture();
+    try {
+      const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+        cwd: validator.root,
+        encoding: 'utf8',
+      }).trim();
+      const identity = createFixtureIdentityWithScriptsTree(
+        validator,
+        mutate(validator, readRawGitObject(validator, 'tree', scriptsTree)),
+        true,
+      );
+
+      expectFixtureLoaderFailure(runFixtureContractLoader(validator, identity), diagnostic);
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a regular-file target whose object is a tree', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const scriptsTree = execFileSync('git', ['rev-parse', `${validator.commit}:scripts`], {
+        cwd: validator.root,
+        encoding: 'utf8',
+      }).trim();
+      const scriptsTreeBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', scriptsTree),
+        'conformance-contract.mjs',
+        { objectId: scriptsTree },
+      );
+      const identity = createFixtureIdentityWithScriptsTree(validator, scriptsTreeBytes);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK committed tree entry object type is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an intermediate tree target whose mode is a regular file', () => {
+    const validator = validatorModuleFixture();
+    try {
+      const rootTreeBytes = replaceFixtureTreeEntry(
+        validator,
+        readRawGitObject(validator, 'tree', validator.tree),
+        'scripts',
+        { mode: '100644' },
+      );
+      const tree = writeGitObject(validator, 'tree', rootTreeBytes, true);
+      const identity = createFixtureIdentity(validator, tree);
+
+      expectFixtureLoaderFailure(
+        runFixtureContractLoader(validator, identity),
+        'SDK committed tree entry type is invalid.',
+      );
+    } finally {
+      rmSync(validator.root, { recursive: true, force: true });
+    }
+  });
 
   test('loads committed authority from a SHA-256 validator repository', () => {
     const validator = validatorModuleFixture('sha256');
