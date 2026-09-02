@@ -34,13 +34,13 @@ phase1_source_arguments=(
   --coven-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven"
 )
 
-pnpm --version | grep -qx '10.34.0'
+corepack pnpm --version | grep -qx '10.34.0'
 node --version | grep -qx 'v24.18.1'
-pnpm install --frozen-lockfile --ignore-scripts
+corepack pnpm install --frozen-lockfile --ignore-scripts
 rustup toolchain install 1.95.0 --profile minimal
 rustup default 1.95.0
 rustc --version | grep -q '^rustc 1\.95\.0 '
-pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'
+corepack pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'
 
 if [[ "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" == linux-x64 ]]; then
   bash scripts/phase1-linux-secret-service.sh \
