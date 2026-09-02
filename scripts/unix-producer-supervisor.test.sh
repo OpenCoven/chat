@@ -145,6 +145,27 @@ run_supervisor() {
     --timeout-seconds 30
 }
 
+set +e
+no_argument_output="$(
+  sudo -n "$supervisor" \
+    --platform "$platform" \
+    --source "$source_root" \
+    --destination "$scratch_root/no-arguments.json" \
+    --temp-root "$scratch_root" \
+    --handoff-helper "$handoff" \
+    --command "$attack" \
+    --timeout-seconds 30 2>&1
+)"
+no_argument_status=$?
+set -e
+if (( no_argument_status == 0 )) ||
+   [[ "$no_argument_output" != *'usage: unix-producer-supervisor-attack CASE'* ]] ||
+   [[ "$no_argument_output" == *'command_arguments[@]: unbound variable'* ]]; then
+  echo 'zero command arguments were not forwarded safely' >&2
+  exit 1
+fi
+[[ ! -e "$scratch_root/no-arguments.json" ]]
+
 run_supervisor escape
 node --input-type=module --eval "
   import { readFileSync } from 'node:fs';

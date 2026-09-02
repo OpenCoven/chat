@@ -2103,8 +2103,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(unixStep).toContain('scripts/unix-producer-supervisor.sh');
     expect(unixStep).toContain('--command scripts/unix-producer-command.sh');
     expect(unixStep).toContain(
-      '--handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff"',
+      '--handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff"',
     );
+    expect(trustedSetup).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(unixStep).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(trustedSetup).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
+    expect(unixStep).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(unixStep).not.toContain('--tool-path "$PATH"');
     expect(unixStep).toContain(
@@ -2136,6 +2140,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('/bin/test -w "$tool_directory"');
+    expect(supervisor).not.toContain('/usr/bin/test');
+    expect(supervisor).toContain('if (( ${#command_arguments[@]} > 0 )); then');
     expect(supervisor).toContain('/usr/bin/dsmemberutil checkmembership');
     expect(supervisor).not.toContain('/usr/sbin/dsmemberutil');
 
@@ -2214,6 +2221,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'in-place rewrite artifact handoff unexpectedly succeeded',
       'ephemeral producer UID was reused or not deleted',
       'producer and broker UIDs were not distinct',
+      'zero command arguments were not forwarded safely',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }

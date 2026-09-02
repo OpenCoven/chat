@@ -9165,7 +9165,7 @@ jobs:
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
             ['scripts/unix-producer-command.sh', [3186, 'cb4a9dad362edadeb2cb4d26d0a9bcbd5f17630d6445a8fb5bb43eaaa2f2fdd1']],
-            ['scripts/unix-producer-supervisor.sh', [25070, 'afaf1d9f02949e7e1e937a54a99d26ba0930a2d04f01751904c99c92cad1459e']],
+            ['scripts/unix-producer-supervisor.sh', [25167, '7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);
@@ -9182,7 +9182,7 @@ jobs:
           }
           console.log('Frozen harness module graph verified.');
           EOF
-          broker_root="$RUNNER_TEMP/opencoven-unix-broker"
+          broker_root="/tmp/opencoven-unix-broker"
           (umask 077 && mkdir "$broker_root")
           cc -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O2 \
             scripts/unix-artifact-handoff.c \
@@ -9203,7 +9203,7 @@ jobs:
           if [[ "$(uname -s)" == Darwin ]]; then
             chmod -RN .artifacts
           fi
-          broker_root="$RUNNER_TEMP/opencoven-unix-broker"
+          broker_root="/tmp/opencoven-unix-broker"
           cleanup_broker_root() {
             rm -f -- "$broker_root/unix-artifact-handoff"
             rmdir "$broker_root" 2>/dev/null || true
@@ -9214,7 +9214,7 @@ jobs:
             --source "$GITHUB_WORKSPACE" \
             --destination "$GITHUB_WORKSPACE/.artifacts/client-v1-conformance-${{ matrix.platform }}.json" \
             --temp-root "$broker_root" \
-            --handoff-helper "$RUNNER_TEMP/opencoven-unix-broker/unix-artifact-handoff" \
+            --handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff" \
             --command scripts/unix-producer-command.sh \
             --tool-path "${{ steps['unix-tool-path'].outputs.tool_path }}" \
             --validator-revision "$OPENCOVEN_VALIDATOR_REVISION"
