@@ -1,8 +1,22 @@
 # Standalone QueryAdapter design
 
-Status: **draft for approval — no implementation code written against it yet**
+Status: **implemented in PR #61**
 Target: `v0.0.1`, release blocker "standalone chat, Cave optional"
 Author lane: Kitty (coordination)
+
+This document preserves the pre-implementation design rationale. The shipped
+code is authoritative where implementation details evolved:
+
+- the local adapter reads directly from the store's hydrated in-memory index
+  rather than adding the remote adapter's TTL/cache layer;
+- IndexedDB provides atomic persistence while sorting, paging, and parent
+  selection happen in `ChatStore`;
+- every `ChatSource` has a writer, with Cave represented by a writer whose
+  `canWrite()` is false;
+- `ChatShell` also receives creation and durability props needed by the local
+  composer; and
+- Cave starts only after explicit opt-in, and local text limits are measured in
+  JavaScript string length.
 
 ---
 
