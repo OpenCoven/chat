@@ -6,7 +6,9 @@ test('preserves the local demo routes alongside the default app', async ({ page 
   await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=chat');
   await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Held action' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+  // Exact: the composer also has a "Send options" caret beside Send.
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send options' })).toBeVisible();
 
   await page.goto('/?demo=messages');
 
