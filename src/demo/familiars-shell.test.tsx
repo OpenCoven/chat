@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { TEMPLATE_NAMES } from './familiars-data';
 import { FamiliarsShell } from './familiars-shell';
 
 /**
@@ -24,6 +25,15 @@ function composer() {
 
 function threadTitle() {
   return document.querySelector('.fr-thread-title')?.textContent ?? '';
+}
+
+/** A familiar bubble whose full text (mentions included) contains `text`. */
+function bubbleContaining(text: string) {
+  return screen.getByText(
+    (_, element) =>
+      element?.classList.contains('fr-bubble--familiar') === true &&
+      (element.textContent ?? '').includes(text),
+  );
 }
 
 beforeEach(() => {
@@ -329,6 +339,157 @@ describe('FamiliarsShell', () => {
     fireEvent.click(toggle);
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('summons a new familiar from a template and opens its ward', () => {
+    render(<FamiliarsShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Astra.*Research and synthesis/ }));
+    fireEvent.click(screen.getByRole('button', { name: /New familiar/ }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Summon a familiar' }));
+
+    expect(dialog.getByRole('button', { name: /Researcher/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // The dialog opens with a name already suggested, so one click can summon.
+    const nameField = () => dialog.getByRole('textbox', { name: 'Name' }) as HTMLInputElement;
+    expect(TEMPLATE_NAMES.researcher).toContain(nameField().value);
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeEnabled();
+
+    // Picking a template swaps a suggested name for one in its own spirit.
+    fireEvent.click(dialog.getByRole('button', { name: /Communicator/ }));
+    expect(TEMPLATE_NAMES.communicator).toContain(nameField().value);
+    expect(dialog.getByText('draft a post')).toBeInTheDocument();
+    expect(dialog.getByText('publish a post')).toBeInTheDocument();
+
+    // A typed name survives a template change.
+    fireEvent.change(nameField(), { target: { value: 'Pip' } });
+    fireEvent.click(dialog.getByRole('button', { name: /Manager/ }));
+    expect(nameField().value).toBe('Pip');
+    fireEvent.click(dialog.getByRole('button', { name: /Communicator/ }));
+
+    fireEvent.change(nameField(), { target: { value: '' } });
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeDisabled();
+
+    // A name already in use is caught before anything is created.
+    fireEvent.change(dialog.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'astra' },
+    });
+    expect(dialog.getByText(/already a familiar called astra/)).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeDisabled();
+
+    // The suggester offers a name in the template's spirit, never one in use.
+    fireEvent.click(dialog.getByRole('button', { name: 'Suggest a name' }));
+    const suggested = (dialog.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value;
+    expect(TEMPLATE_NAMES.communicator).toContain(suggested);
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeEnabled();
+
+    fireEvent.change(dialog.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Quill' },
+    });
+    fireEvent.click(dialog.getByRole('button', { name: 'Summon' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Summon a familiar' })).not.toBeInTheDocument();
+    expect(threadTitle()).toBe('New chat');
+    expect(screen.getByText('Quill is ready.')).toBeInTheDocument();
+    const inspector = within(inspectorRail());
+    expect(inspector.getByText('Quill')).toBeInTheDocument();
+    expect(inspector.getByText('Herald · they/them')).toBeInTheDocument();
+    const tabs = within(screen.getByRole('group', { name: 'Familiar details' }));
+    expect(tabs.getByRole('button', { name: 'Access' })).toHaveAttribute('aria-pressed', 'true');
+    // No MEMORY.md yet, so the contract honestly reads 4 of 5 and opens itself.
+    expect(inspector.getByText('4/5')).toBeInTheDocument();
+
+    // The new familiar is a real citizen: it sits in the switcher and its
+    // must-ask wording drives the composer warning.
+    fireEvent.click(screen.getByRole('button', { name: /Quill.*Social media/ }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Familiar switcher' })).getAllByRole('option'),
+    ).toHaveLength(4);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.change(composer(), { target: { value: 'Please publish a post about the release' } });
+    expect(screen.getByRole('button', { name: 'Held for approval' })).toHaveAttribute(
+      'title',
+      '“publish a post” is in Quill’s must-ask tier',
+    );
+  });
+
+  it('tags another familiar with @ and lets it answer in its own voice', () => {
+    render(<FamiliarsShell />);
+
+    fireEvent.change(composer(), { target: { value: 'Check the numbers with @c' } });
+    const menu = within(screen.getByRole('listbox', { name: 'Mention a familiar' }));
+    expect(menu.getAllByRole('option')).toHaveLength(1);
+    expect(menu.getByText('@Cody')).toBeInTheDocument();
+
+    fireEvent.keyDown(composer(), { key: 'Tab' });
+    expect(composer()).toHaveValue('Check the numbers with @Cody ');
+    expect(screen.queryByRole('listbox', { name: 'Mention a familiar' })).not.toBeInTheDocument();
+
+    fireEvent.change(composer(), { target: { value: 'Check the numbers with @Cody please' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+
+    expect(screen.getByText('@Cody', { selector: '.fr-mention' })).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
+    // Mentions are split into their own spans, so match on the whole bubble.
+    expect(bubbleContaining('I’ve brought @Cody in')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(bubbleContaining('@Astra looped me in')).toBeInTheDocument();
+    expect(document.querySelector('.fr-participant')).toHaveTextContent('Cody');
+    // Cody's bubble carries Cody's mark, and it opens Cody's card.
+    fireEvent.click(screen.getByRole('button', { name: 'About Cody' }));
+    expect(screen.getByRole('dialog', { name: 'About Cody' })).toHaveTextContent('Artificer');
+  });
+
+  it("opens the familiar's screen and watches it with a running clock", () => {
+    render(<FamiliarsShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Astra’s screen' }));
+    const panel = within(screen.getByRole('region', { name: 'Astra’s screen' }));
+    expect(panel.getByText('Astra’s screen')).toBeInTheDocument();
+
+    fireEvent.click(panel.getByRole('button', { name: 'Watch Astra’s screen' }));
+    const watch = within(screen.getByRole('dialog', { name: 'Astra’s screen' }));
+    expect(watch.getByText('Astra is watching and learning')).toBeInTheDocument();
+    expect(watch.getByRole('status', { name: 'Recording' })).toHaveTextContent('0:00');
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(watch.getByRole('status', { name: 'Recording' })).toHaveTextContent('0:05');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Astra’s screen' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Astra’s screen' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a full-height hairline toggle on each edge of the thread', () => {
+    render(<FamiliarsShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide conversations rail' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Conversations sidebar' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show conversations rail' })).toHaveClass(
+      'fr-rail-handle--closed',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show conversations rail' }));
+    expect(conversationsRail()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector rail' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Familiar inspector' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show inspector rail' }));
+    expect(inspectorRail()).toBeInTheDocument();
   });
 
   it('lets the failed run in the flaky conversation say so', () => {

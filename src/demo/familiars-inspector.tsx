@@ -48,6 +48,8 @@ export type FamiliarInspectorProps = Readonly<{
   activityOpen: ActivityKey | null;
   onToggleActivity: (key: ActivityKey) => void;
   onOpenDoc: (doc: DocRequest) => void;
+  /** Open the summon dialog, from the no-familiar empty state. */
+  onSummon?: (() => void) | undefined;
   demoEmpty?: DemoEmpty | undefined;
 }>;
 
@@ -113,7 +115,7 @@ export function FamiliarInspector(props: FamiliarInspectorProps) {
             <span className="fr-inspector-empty-text">
               Choose a conversation, or summon a familiar to see its ward here.
             </span>
-            <FamButton variant="secondary" size="sm" leadingIcon="sparkle">
+            <FamButton variant="secondary" size="sm" leadingIcon="sparkle" onClick={props.onSummon}>
               Summon familiar
             </FamButton>
           </div>
@@ -174,7 +176,7 @@ function OverviewTab({ familiar, onGoAccess }: { familiar: MockFamiliar; onGoAcc
         <OverviewRow
           label="Project"
           hint="Files and memory scope"
-          value={FAM_PROJECTS[familiar.id] ?? '—'}
+          value={FAM_PROJECTS[familiar.id] ?? 'Quick chats'}
         />
         <OverviewRow
           label="Memory"

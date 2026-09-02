@@ -49,11 +49,13 @@ export type IconName =
   | 'list-checks'
   | 'magnifying-glass'
   | 'microphone'
+  | 'monitor'
   | 'paint-brush'
   | 'paper-plane-right'
   | 'paper-plane-tilt'
   | 'paperclip'
   | 'pencil-simple'
+  | 'play'
   | 'plus'
   | 'seal-check'
   | 'sidebar-simple'
@@ -277,6 +279,13 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M12 18.2v3" />
     </>
   ),
+  monitor: (
+    <>
+      <rect x="3" y="4.4" width="18" height="12.6" rx="2" />
+      <path d="M12 17v3.4" />
+      <path d="M8.2 20.4h7.6" />
+    </>
+  ),
   'paint-brush': (
     <>
       <path d="M20.2 3.8a2.5 2.5 0 0 0-3.5 0L9.4 11l3.6 3.6 7.2-7.3a2.5 2.5 0 0 0 0-3.5z" />
@@ -298,6 +307,7 @@ const GLYPHS: Record<IconName, ReactNode> = {
   paperclip: (
     <path d="m16.8 8.6-7.2 7.2a2.3 2.3 0 0 1-3.3-3.3l8-8a3.8 3.8 0 0 1 5.4 5.4l-8.3 8.3a5.3 5.3 0 0 1-7.5-7.5L10.4 4" />
   ),
+  play: <path d="M7.2 4.6v14.8L19.4 12z" />,
   'pencil-simple': (
     <>
       <path d="M5 19h3.6L20 7.6a2.1 2.1 0 0 0-3-3L5.6 16z" />

@@ -30,12 +30,14 @@ export type MessageRowProps = Readonly<{
   message: FamMessage;
   index: number;
   familiar: MockFamiliar;
+  /** Everyone who can speak in this thread, for messages by a mentioned familiar. */
+  familiars: readonly MockFamiliar[];
   holdState: HoldState | undefined;
   /** When the hold was decided, as the transcript shows it. */
   decidedAt: string;
   onApprove: () => void;
   onDecline: () => void;
-  onOpenFamiliar: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onOpenFamiliar: (event: ReactMouseEvent<HTMLButtonElement>, familiarId: string) => void;
   onOpenImage: (index: number) => void;
 }>;
 
@@ -48,7 +50,7 @@ function FamiliarMark({
   onOpen,
 }: {
   familiar: MockFamiliar;
-  onOpen: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onOpen: (event: ReactMouseEvent<HTMLButtonElement>, familiarId: string) => void;
 }) {
   return (
     <button
@@ -56,7 +58,7 @@ function FamiliarMark({
       className="fr-avatar-btn"
       aria-label={`About ${familiar.name}`}
       title={`About ${familiar.name}`}
-      onClick={onOpen}
+      onClick={(event) => onOpen(event, familiar.id)}
     >
       <Avatar initial={familiar.name[0] ?? '?'} size={22} />
     </button>
@@ -72,8 +74,40 @@ function FamiliarMeta({ name, time }: { name: string; time: string }) {
   );
 }
 
+/**
+ * Text with `@name` mentions of known familiars set off from the prose.
+ *
+ * Matching is by name, case-insensitively, so what was typed is what shows.
+ */
+export function MentionText({
+  text,
+  familiars,
+}: {
+  text: string;
+  familiars: readonly MockFamiliar[];
+}) {
+  if (familiars.length === 0 || !text.includes('@')) {
+    return text;
+  }
+  const names = familiars
+    .map((familiar) => familiar.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const parts = text.split(new RegExp(`(@(?:${names}))(?![\\p{L}\\p{N}_-])`, 'giu'));
+
+  return parts.map((part, position) =>
+    position % 2 === 1 ? (
+      // A mention has no identity beyond its position in the text.
+      <span key={`${position}-${part}`} className="fr-mention">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function MessageRow(props: MessageRowProps) {
-  const { message, index, familiar, onOpenFamiliar } = props;
+  const { message, index, familiar, familiars, onOpenFamiliar } = props;
 
   switch (message.kind) {
     case 'divider':
@@ -82,19 +116,30 @@ export function MessageRow(props: MessageRowProps) {
       return (
         <div className="fr-user fr-msg" style={delayStyle(index)}>
           <span className="fr-time">{message.time}</span>
-          <div className="fr-bubble fr-bubble--user">{message.text}</div>
-        </div>
-      );
-    case 'familiar':
-      return (
-        <div className="fr-familiar fr-msg" style={delayStyle(index)}>
-          <FamiliarMark familiar={familiar} onOpen={onOpenFamiliar} />
-          <div className="fr-familiar-body">
-            <FamiliarMeta name={familiar.name} time={message.time} />
-            <div className="fr-bubble fr-bubble--familiar">{message.text}</div>
+          <div className="fr-bubble fr-bubble--user">
+            <MentionText text={message.text} familiars={familiars} />
           </div>
         </div>
       );
+    case 'familiar': {
+      const speaker = familiars.find((candidate) => candidate.id === message.author) ?? familiar;
+      const guest = speaker.id !== familiar.id;
+
+      return (
+        <div
+          className={cx('fr-familiar fr-msg', guest && 'fr-familiar--guest')}
+          style={delayStyle(index)}
+        >
+          <FamiliarMark familiar={speaker} onOpen={onOpenFamiliar} />
+          <div className="fr-familiar-body">
+            <FamiliarMeta name={speaker.name} time={message.time} />
+            <div className="fr-bubble fr-bubble--familiar">
+              <MentionText text={message.text} familiars={familiars} />
+            </div>
+          </div>
+        </div>
+      );
+    }
     case 'reasoning':
       return (
         <div className="fr-msg" style={delayStyle(index)}>
