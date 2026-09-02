@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/opencoven-530c9c44-8b06-4dfc-9215-ed70af0a743a/_ds_bundle.css">
+<script src="_ds/opencoven-530c9c44-8b06-4dfc-9215-ed70af0a743a/_ds_bundle.js"></script>
+<style>
+@keyframes rc-step{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes rc-line{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.rc-step{animation:rc-step 460ms cubic-bezier(0.2,0.8,0.2,1) both}
+.rc-line{transform-origin:top;animation:rc-line 420ms cubic-bezier(0.2,0.8,0.2,1) both}
+.rc-head{transition:background-color 200ms cubic-bezier(0.3,0,0,1);outline:none !important}.rc-head:focus-visible{background:var(--bg-hover)}
+.rc-caret{transition:transform 420ms cubic-bezier(0.2,0.8,0.2,1)}
+.rc-body{transition:grid-template-rows 520ms cubic-bezier(0.2,0.8,0.2,1),opacity 360ms cubic-bezier(0.3,0,0,1)}
+@media (prefers-reduced-motion:reduce){.rc-step,.rc-line{animation:none}.rc-body,.rc-caret{transition:none}}
+</style>
+</helmet>
+<section aria-label="Reasoning" style="border:1px solid var(--border-hairline);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.025),transparent 60%),var(--bg-raised);box-shadow:0 1px 2px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden;font-family:var(--font-inter);font-size:13px;color:var(--text-primary)">
+  <button class="rc-head" onClick="{{ toggle }}" aria-expanded="{{ open }}" style="display:grid;grid-template-columns:16px minmax(0,1fr) auto 14px;gap:10px;align-items:center;width:100%;padding:9px 12px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit" style-hover="background:var(--bg-hover)" style-focus="outline:none">
+    <span style="display:inline-flex;color:var(--text-secondary)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:brain" width="15" height="15" hint-size="15px,15px"></x-import></span>
+    <span style="min-width:0;display:flex;gap:8px;align-items:baseline"><span style="font-weight:600;flex:none">Reasoning</span><span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ summary }}</span></span>
+    <span style="display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-muted);white-space:nowrap">
+      <sc-if value="{{ hasFailure }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:4px;color:var(--color-danger)"><x-import component-from-global-scope="CovenCave.Icon" name="ph:warning-circle-fill" width="11" height="11" hint-size="11px,11px"></x-import>{{ failureLabel }}</span></sc-if>
+      <span>{{ stepCount }} steps</span><span style="font-family:var(--font-jetbrains-mono)">{{ duration }}</span>
+    </span>
+    <span class="rc-caret" style="color:var(--text-muted);display:inline-flex;transform:{{ caretRotate }}"><x-import component-from-global-scope="CovenCave.Icon" name="ph:caret-down" width="14" height="14" hint-size="14px,14px"></x-import></span>
+  </button>
+  <div class="rc-body" style="display:grid;grid-template-rows:{{ bodyRows }};opacity:{{ bodyOpacity }};overflow:hidden"><div style="min-height:0;overflow:hidden">
+  <sc-if value="{{ mounted }}" hint-placeholder-val="{{ true }}">
+    <div style="border-top:1px solid var(--border-hairline);padding:12px 12px 4px">
+      <sc-for list="{{ steps }}" as="s" hint-placeholder-count="4">
+        <div class="rc-step" style="display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;animation-delay:{{ s.delay }}">
+          <span style="display:grid;justify-items:center"><span style="display:inline-flex;height:20px;align-items:center;color:{{ s.tone }}"><x-import component-from-global-scope="CovenCave.Icon" name="{{ s.icon }}" width="16" height="16" hint-size="16px,16px"></x-import></span><span class="rc-line" style="width:1px;flex:1;min-height:8px;background:{{ s.lineBg }};animation-delay:{{ s.lineDelay }}"></span></span>
+          <div style="display:grid;gap:2px;padding:0 0 12px;min-width:0">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:12px;align-items:baseline;min-width:0"><span style="font-weight:600;font-size:12px;color:{{ s.titleColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.title }}</span><code style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;text-align:right;min-height:1em">{{ s.tool }}</code><span style="font-family:var(--font-jetbrains-mono);font-size:11px;color:var(--text-secondary);text-align:right;font-variant-numeric:tabular-nums">{{ s.dur }}</span></div>
+            <span style="font-size:12px;color:var(--text-secondary);line-height:1.5"><sc-if value="{{ s.stateWord }}" hint-placeholder-val="{{ false }}"><span style="color:{{ s.tone }};font-weight:600">{{ s.stateWord }} — </span></sc-if>{{ s.text }}</span>
+            <sc-if value="{{ s.collapsedCount }}" hint-placeholder-val="{{ false }}"><button onClick="{{ s.expand }}" style="justify-self:start;margin-top:2px;padding:0;border:0;background:transparent;color:var(--accent-presence);font:inherit;font-size:12px;cursor:pointer" style-hover="text-decoration:underline">Show {{ s.collapsedCount }} routine tool calls</button></sc-if>
+          </div>
+        </div>
+      </sc-for>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 8px 26px;border-top:1px solid var(--border-hairline);font-size:12px;color:var(--text-secondary)"><span>{{ footer }}</span><span style="font-family:var(--font-jetbrains-mono);font-size:11px">{{ toolCalls }} tool calls</span></div>
+    </div>
+  </sc-if>
+  </div></div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:320},&quot;card&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;{summary:string;duration:string;toolCalls:number;footer:string;steps:Array&lt;{icon:string;title:string;text:string;tool?:string;dur?:string;status?:'ok'|'failed';badge?:string}&gt;}&quot;},&quot;defaultOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const S = (icon, title, text, o={}) => Object.assign({ icon, title, text, status:'ok', dur:'' }, o);
+const DEMO = { summary:'Read two decks, verified four cited benchmarks, built the evidence map.', duration:'1m 52s', toolCalls:14, footer:'One fetch timed out and was retried. Nothing was skipped or inferred.', steps:[
+  S('ph:file-text','Read the vendor decks','Both decks in notes/pricing/ parsed; 11 pricing claims extracted with page references.',{tool:'files.read', dur:'6s'}),
+  S('ph:magnifying-glass','Trace cited benchmarks','Three of four claims cite public benchmarks. One cites an internal deck Astra can’t reach — flagged, not inferred.',{tool:'web.search', dur:'21s'}),
+  S('ph:globe','Fetch benchmark source','Timed out after 15s.',{tool:'web.fetch', dur:'15s', status:'failed'}),
+  S('ph:arrow-clockwise','Retry fetch','Second attempt succeeded; the benchmark matches the deck within 3%.',{tool:'web.fetch', dur:'4s', badge:'retry'}),
+  S('ph:list-checks','Write the source ledger','14 entries appended to notes/ledger.md — each claim, its source, and a confidence.',{tool:'files.write', dur:'3s'}),
+  S('ph:image','Compose the evidence map','Claims plotted by strength of evidence so the weak spots read at a glance.',{tool:'image.render', dur:'1m 03s'}),
+]};
+class Component extends DCLogic {
+  state = { open: null, expanded: false, mounted: null };
+  setOpen(next) {
+    clearTimeout(this._t);
+    if (next) { this.setState({ open: true, mounted: true }); }
+    else { this.setState({ open: false }); this._t = setTimeout(() => this.setState({ mounted: false }), 540); }
+  }
+  renderVals() {
+    const c = this.props.card || DEMO;
+    const open = this.state.open ?? (this.props.defaultOpen ?? true);
+    const all = c.steps || [];
+    const fails = all.filter(x => x.status === 'failed').length;
+    let steps = all;
+    if (all.length > 7 && !this.state.expanded) {
+      const routine = (x) => x.status !== 'failed' && !x.badge && !x.keep;
+      const out = []; let run = [];
+      const flush = () => { if (run.length > 2) { out.push(run[0]); out.push({ ...run[1], collapsedCount: run.length - 2, text: `${run.length - 2} more reads and searches inside the ward.`, title: 'Routine tool calls', tool: null, dur: '', icon: 'ph:dots-three', folded: true }); } else out.push(...run); run = []; };
+      for (const x of all) { if (routine(x)) run.push(x); else { flush(); out.push(x); } }
+      flush(); steps = out;
+    }
+    const view = steps.map((st, j) => {
+      const failed = st.status === 'failed', retry = st.badge === 'retry';
+      const tone = failed ? 'var(--color-danger)' : retry ? 'var(--color-warning)' : 'var(--text-secondary)';
+      // Fold former status chips into the description line.
+      let text = st.text; if (failed && st.badge && st.badge !== 'retry' && !/timed out|exit/i.test(text)) text = `${st.badge} — ${text}`;
+      const stateWord = failed ? 'Failed' : retry ? 'Retried' : null; return { ...st, text, tone, stateWord, tool: st.tool || '', titleColor: failed ? 'var(--color-danger)' : 'var(--text-primary)', lineBg: j === steps.length - 1 ? 'transparent' : 'var(--border-hairline)', delay: `${80 + j * 60}ms`, lineDelay: `${200 + j * 60}ms`, expand: () => this.setState({ expanded: true }) };
+    });
+    return { open, toggle: () => this.setOpen(!open), bodyRows: open ? '1fr' : '0fr', bodyOpacity: open ? 1 : 0, mounted: this.state.mounted ?? open, summary: c.summary, duration: c.duration, toolCalls: c.toolCalls, footer: c.footer, stepCount: all.length, hasFailure: fails > 0, failureLabel: fails === 1 ? '1 failed' : `${fails} failed`, caretRotate: open ? 'rotate(180deg)' : 'none', steps: view };
+  }
+}
+</script>
+</body>
+</html>
