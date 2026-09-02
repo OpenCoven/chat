@@ -1,5 +1,5 @@
 import type { IconName } from './minimal-icons';
-import { MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
+import { FAMILIAR_TEMPLATES, MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
 
 /**
  * Mock content for the Familiars Redesign v2 surface.
@@ -703,9 +703,10 @@ export function conversationById(id: string): FamConversation | undefined {
 
 /** Held conversations that still have no decision. */
 export function pendingHolds(
+  conversations: readonly FamConversation[],
   holds: Readonly<Record<string, HoldState | undefined>>,
 ): FamConversation[] {
-  return FAM_CONVERSATIONS.filter((conversation) => conversation.held && !holds[conversation.id]);
+  return conversations.filter((conversation) => conversation.held && !holds[conversation.id]);
 }
 
 export function holdMessage(conversationId: string): HoldMessage | undefined {
@@ -714,9 +715,25 @@ export function holdMessage(conversationId: string): HoldMessage | undefined {
   );
 }
 
-/** The first must-ask rule a draft would cross, if any. */
-export function matchTrigger(familiarId: string, draft: string): FamTrigger | undefined {
-  return FAM_TRIGGERS[familiarId]?.find((trigger) => trigger.pattern.test(draft));
+function escapePattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The first must-ask rule a draft would cross, if any.
+ *
+ * The three shipped familiars carry hand-tuned patterns; a summoned one is
+ * matched on the wording of its own must-ask actions.
+ */
+export function matchTrigger(familiar: MockFamiliar, draft: string): FamTrigger | undefined {
+  const triggers =
+    FAM_TRIGGERS[familiar.id] ??
+    familiar.ward.approvalTiers.humanReview.map((action) => ({
+      pattern: new RegExp(`\\b${escapePattern(action)}\\b`, 'i'),
+      action,
+    }));
+
+  return triggers.find((trigger) => trigger.pattern.test(draft));
 }
 
 export type RunRow = Readonly<{
@@ -780,3 +797,146 @@ export const FAM_PROJECTS: Readonly<Record<string, string>> = {
   cody: 'coven-chat',
   echo: 'Inbox',
 };
+
+/* ----------------------------------------------------------- summoning */
+
+export type TemplateWard = Readonly<{
+  role: string;
+  pronouns: string;
+  emoji: string;
+  purpose: string;
+  coreWork: readonly string[];
+  whatIAmNot: readonly string[];
+  boundaries: readonly string[];
+  auto: readonly string[];
+  humanReview: readonly string[];
+  editablePaths: readonly string[];
+}>;
+
+/**
+ * What each template starts a familiar with.
+ *
+ * The templates in `mock-familiars.ts` are cards; this is the ward and soul
+ * behind each card. A summoned familiar gets these verbatim, a fresh
+ * `ward.toml`, and no MEMORY.md yet — its contract honestly reads 4 of 5
+ * until it has run.
+ */
+export const TEMPLATE_WARDS: Readonly<Record<string, TemplateWard>> = {
+  researcher: {
+    role: 'Research and synthesis',
+    pronouns: 'they/them',
+    emoji: '\u{1F5FA}',
+    purpose: 'To map unfamiliar territory so a decision can be made on evidence.',
+    coreWork: [
+      'Gather sources and record where each claim came from',
+      'Separate what is established from what is inferred',
+      'Write findings that survive being read by a sceptic',
+    ],
+    whatIAmNot: ['Not a summariser that flattens disagreement', 'Not a source of unchecked claims'],
+    boundaries: ['Never presents an inference as a citation'],
+    auto: ['read files', 'search the web', 'write to notes/'],
+    humanReview: ['publish a finding', 'open a pull request'],
+    editablePaths: ['TOOLS.md', 'HEARTBEAT.md', 'notes/'],
+  },
+  implementer: {
+    role: 'Implementation',
+    pronouns: 'they/them',
+    emoji: '\u{2692}',
+    purpose: 'To turn a decided design into working, verified software.',
+    coreWork: [
+      'Work from a written plan',
+      'Verify before reporting',
+      'Leave the tree the way a reviewer would want to find it',
+    ],
+    whatIAmNot: ['Not a designer of what should be built', 'Not a merger of its own work'],
+    boundaries: ['Never pushes or merges without an explicit gesture'],
+    auto: ['run tests', 'read files', 'write to scratch/'],
+    humanReview: ['push a branch', 'merge a pull request', 'change CI'],
+    editablePaths: ['TOOLS.md', 'scratch/'],
+  },
+  correspondent: {
+    role: 'Correspondence',
+    pronouns: 'they/them',
+    emoji: '\u{1F4EF}',
+    purpose: 'To keep correspondence answered without answering as the person.',
+    coreWork: ['Triage what arrives', 'Draft replies in the person\u2019s register'],
+    whatIAmNot: ['Not the sender of anything', 'Not a voice that speaks as the person'],
+    boundaries: ['Never sends or archives without an explicit gesture'],
+    auto: ['read mail', 'draft a reply'],
+    humanReview: ['send', 'archive'],
+    editablePaths: ['TOOLS.md'],
+  },
+  archivist: {
+    role: 'Memory curation',
+    pronouns: 'they/them',
+    emoji: '\u{1F4DA}',
+    purpose: 'To keep memory worth returning to, without rewriting what happened.',
+    coreWork: ['Curate memory', 'Prune what is stale', 'Keep records findable'],
+    whatIAmNot: ['Not an editor of history', 'Not a judge of what mattered'],
+    boundaries: ['Never rewrites or deletes a record on its own'],
+    auto: ['read memory', 'tag entries', 'move stale entries to archive/'],
+    humanReview: ['delete a record', 'rewrite a record'],
+    editablePaths: ['TOOLS.md', 'archive/'],
+  },
+};
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'familiar'
+  );
+}
+
+/**
+ * Build a familiar from a template and a name.
+ *
+ * Returns nothing for a template it does not know. The id is derived from the
+ * name and kept unique against `taken`, so two "Sage"s can coexist.
+ */
+export function summonFamiliar(
+  templateId: string,
+  name: string,
+  taken: readonly string[],
+): MockFamiliar | undefined {
+  const template = FAMILIAR_TEMPLATES.find((candidate) => candidate.id === templateId);
+  const ward = TEMPLATE_WARDS[templateId];
+  const trimmed = name.trim();
+
+  if (!template || !ward || trimmed.length === 0) {
+    return undefined;
+  }
+  const base = slugify(trimmed);
+  let id = base;
+
+  for (let n = 2; taken.includes(id); n += 1) {
+    id = `${base}-${n}`;
+  }
+
+  return {
+    id,
+    name: trimmed,
+    person: 'Val Alexander',
+    creature: template.creature,
+    role: ward.role,
+    description: template.summary,
+    pronouns: ward.pronouns,
+    emoji: ward.emoji,
+    status: 'available',
+    soul: {
+      purpose: ward.purpose,
+      coreWork: [...ward.coreWork],
+      whatIAmNot: [...ward.whatIAmNot],
+      boundaries: [...ward.boundaries],
+    },
+    ward: {
+      version: '0.1.0',
+      protectedFiles: ['SOUL.md', 'IDENTITY.md', 'MEMORY.md', 'ward.toml'],
+      invariants: ['familiar.name', 'familiar.person', 'soul.boundaries'],
+      editablePaths: [...ward.editablePaths],
+      approvalTiers: { auto: [...ward.auto], humanReview: [...ward.humanReview] },
+    },
+    memory: null,
+  };
+}

@@ -3412,3 +3412,191 @@
 .fr-shell :focus-visible {
   outline-color: var(--ring-focus);
 }
+
+/* ------------------------------------------------------------- summon */
+
+.fr-switcher-list {
+  display: grid;
+  gap: 1px;
+}
+
+.fr-switcher-new {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 8px;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+  border-radius: 0 0 6px 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fr-switcher-new:hover {
+  background: var(--bg-hover);
+}
+
+.fr-switcher-new:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: -2px;
+}
+
+.fr-switcher-new-glyph {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong);
+  color: var(--accent-presence);
+}
+
+.fr-thread-empty {
+  margin: 48px auto 0;
+  max-width: 420px;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.fr-thread-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.fr-summon {
+  width: min(720px, 100%);
+}
+
+.fr-summon-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.fr-summon-body {
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: grid;
+  gap: 14px;
+  background: var(--bg-sunken);
+}
+
+.fr-summon-templates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.fr-summon-template {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 60%), var(--bg-raised);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fr-summon-template:hover {
+  border-color: var(--border-strong);
+}
+
+.fr-summon-template:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+.fr-summon-template[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--accent-presence) 55%, var(--border-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--accent-presence) 12%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.fr-summon-template-name {
+  font-weight: 600;
+}
+
+.fr-summon-template-creature {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fr-summon-template-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.fr-summon-field {
+  display: grid;
+  gap: 6px;
+}
+
+.fr-summon-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fr-summon-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.fr-summon-input::placeholder {
+  color: var(--text-muted);
+}
+
+.fr-shell .fr-summon-input:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklch, var(--accent-presence) 45%, var(--border-strong));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 12%, transparent);
+}
+
+.fr-summon-error {
+  font-size: 12px;
+  color: var(--color-warning);
+}
+
+.fr-summon-ward {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.fr-summon-ward-col {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 8px 10px;
+  border-left: 1px solid var(--border-hairline);
+  color: var(--text-primary);
+}
+
+.fr-summon-ward-col:first-child {
+  border-left: 0;
+}

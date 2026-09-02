@@ -331,6 +331,60 @@ describe('FamiliarsShell', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('summons a new familiar from a template and opens its ward', () => {
+    render(<FamiliarsShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Astra.*Research and synthesis/ }));
+    fireEvent.click(screen.getByRole('button', { name: /New familiar/ }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Summon a familiar' }));
+
+    expect(dialog.getByRole('button', { name: /Researcher/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeDisabled();
+
+    fireEvent.click(dialog.getByRole('button', { name: /Correspondent/ }));
+    expect(dialog.getByText('draft a reply')).toBeInTheDocument();
+    expect(dialog.getByText('send')).toBeInTheDocument();
+
+    // A name already in use is caught before anything is created.
+    fireEvent.change(dialog.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'astra' },
+    });
+    expect(dialog.getByText(/already a familiar called astra/)).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Summon' })).toBeDisabled();
+
+    fireEvent.change(dialog.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Quill' },
+    });
+    fireEvent.click(dialog.getByRole('button', { name: 'Summon' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Summon a familiar' })).not.toBeInTheDocument();
+    expect(threadTitle()).toBe('New chat');
+    expect(screen.getByText('Quill is ready.')).toBeInTheDocument();
+    const inspector = within(inspectorRail());
+    expect(inspector.getByText('Quill')).toBeInTheDocument();
+    expect(inspector.getByText('Herald · they/them')).toBeInTheDocument();
+    const tabs = within(screen.getByRole('group', { name: 'Familiar details' }));
+    expect(tabs.getByRole('button', { name: 'Access' })).toHaveAttribute('aria-pressed', 'true');
+    // No MEMORY.md yet, so the contract honestly reads 4 of 5 and opens itself.
+    expect(inspector.getByText('4/5')).toBeInTheDocument();
+
+    // The new familiar is a real citizen: it sits in the switcher and its
+    // must-ask wording drives the composer warning.
+    fireEvent.click(screen.getByRole('button', { name: /Quill.*Correspondence/ }));
+    expect(
+      within(screen.getByRole('listbox', { name: 'Familiar switcher' })).getAllByRole('option'),
+    ).toHaveLength(4);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.change(composer(), { target: { value: 'Please send the digest' } });
+    expect(screen.getByRole('button', { name: 'Held for approval' })).toHaveAttribute(
+      'title',
+      '“send” is in Quill’s must-ask tier',
+    );
+  });
+
   it('lets the failed run in the flaky conversation say so', () => {
     render(<FamiliarsShell initialConversation="flaky" />);
 
