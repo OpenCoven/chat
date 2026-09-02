@@ -208,16 +208,22 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
   const conversation =
     conversationById(state.conversationId) ?? (FAM_CONVERSATIONS[0] as FamConversation);
   const familiar = familiarById(conversation.familiarId) ?? (MOCK_FAMILIARS[0] as MockFamiliar);
-  const holdState = props.holdOverride ?? state.holds[conversation.id];
+  // The override is a board-only prop, but it has to read as one fact
+  // everywhere: a hold shown as expired in the thread cannot still be waiting
+  // in "Needs you" or counted against its familiar in the switcher.
+  const holds: ShellState['holds'] = props.holdOverride
+    ? { ...state.holds, [conversation.id]: props.holdOverride }
+    : state.holds;
+  const holdState = holds[conversation.id];
   const pendingHere = conversation.held === true && holdState === undefined;
   const messages: readonly FamMessage[] = [
     ...(FAM_MESSAGES[conversation.id] ?? []),
     ...(state.extra[conversation.id] ?? []),
   ];
-  const needsYou = pendingHolds(state.holds);
+  const needsYou = pendingHolds(holds);
   const recent = FAM_CONVERSATIONS.filter(
     (candidate) =>
-      !(candidate.held && !state.holds[candidate.id]) &&
+      !(candidate.held && !holds[candidate.id]) &&
       (state.recentAll || candidate.familiarId === familiar.id),
   );
   const recentEmpty = props.demoEmpty === 'conversations' || recent.length === 0;
@@ -843,7 +849,7 @@ export function FamiliarsShell(props: FamiliarsShellProps) {
               {searchResults.map((result, index) => {
                 const owner = familiarById(result.familiarId);
                 const dot =
-                  result.held && !state.holds[result.id] ? 'warn' : result.failed ? 'danger' : null;
+                  result.held && !holds[result.id] ? 'warn' : result.failed ? 'danger' : null;
 
                 return (
                   <button

@@ -1,4 +1,10 @@
-import { type CSSProperties, type MouseEvent as ReactMouseEvent, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import type {
   FamMessage,
@@ -362,6 +368,17 @@ export function ReasoningCard({ card, defaultOpen = true }: ReasoningCardProps) 
   const [mounted, setMounted] = useState(defaultOpen);
   const [expanded, setExpanded] = useState(false);
   const unmountTimer = useRef<number | null>(null);
+
+  // A card closed just before its transcript unmounts would otherwise fire
+  // the deferred unmount into a component that no longer exists.
+  useEffect(
+    () => () => {
+      if (unmountTimer.current !== null) {
+        window.clearTimeout(unmountTimer.current);
+      }
+    },
+    [],
+  );
 
   function setOpenState(next: boolean) {
     if (unmountTimer.current !== null) {

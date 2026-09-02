@@ -161,6 +161,16 @@ describe('FamiliarsShell', () => {
     expect(screen.getByText(/Astra released the run/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ask again' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '1 held' })).not.toBeInTheDocument();
+
+    // One fact everywhere: the expired hold is no longer waiting on you in the
+    // sidebar, and Astra no longer counts it in the switcher.
+    const needsYou = within(screen.getByRole('region', { name: 'Needs you' }));
+    expect(needsYou.queryByText('Q3 pricing evidence map')).not.toBeInTheDocument();
+    expect(needsYou.getAllByRole('button')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /Astra.*Research and synthesis/ }));
+    const switcher = within(screen.getByRole('listbox', { name: 'Familiar switcher' }));
+    expect(switcher.getByRole('option', { name: /Astra/ })).toHaveTextContent('available');
+    expect(switcher.getAllByText('1 held')).toHaveLength(1);
   });
 
   it('offers commands on a slash and marks the ones that must ask', () => {
