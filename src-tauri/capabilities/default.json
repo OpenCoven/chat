@@ -21,6 +21,8 @@
     "allow-cave-list-projects",
     "allow-cave-list-conversations",
     "allow-cave-get-conversation",
-    "allow-cave-list-conversation-messages"
+    "allow-cave-list-conversation-messages",
+    "allow-cave-get-familiar-contract",
+    "allow-cave-get-familiar-analytics"
   ]
 }

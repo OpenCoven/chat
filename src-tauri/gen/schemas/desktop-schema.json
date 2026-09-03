@@ -213,6 +213,18 @@
           "markdownDescription": "Enables the cave_get_conversation command without any pre-configured scope."
         },
         {
+          "description": "Enables the cave_get_familiar_analytics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-get-familiar-analytics",
+          "markdownDescription": "Enables the cave_get_familiar_analytics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cave_get_familiar_contract command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cave-get-familiar-contract",
+          "markdownDescription": "Enables the cave_get_familiar_contract command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cave_health command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cave-health",
@@ -319,6 +331,18 @@
           "type": "string",
           "const": "deny-cave-get-conversation",
           "markdownDescription": "Denies the cave_get_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_get_familiar_analytics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-get-familiar-analytics",
+          "markdownDescription": "Denies the cave_get_familiar_analytics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cave_get_familiar_contract command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cave-get-familiar-contract",
+          "markdownDescription": "Denies the cave_get_familiar_contract command without any pre-configured scope."
         },
         {
           "description": "Denies the cave_health command without any pre-configured scope.",

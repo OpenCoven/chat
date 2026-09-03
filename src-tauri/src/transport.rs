@@ -92,6 +92,14 @@ pub(crate) enum CaveReadPath {
         conversation_id: String,
         page: NativePage,
     },
+    FamiliarContract {
+        familiar_id: String,
+    },
+    FamiliarAnalytics {
+        familiar_id: String,
+        window: Option<String>,
+        recent_limit: Option<u16>,
+    },
 }
 
 #[derive(Clone, Deserialize)]
@@ -175,9 +183,31 @@ impl CaveReadPath {
                 validate_canonical_conversation_id(conversation_id)?;
                 page.validate()
             }
+            Self::FamiliarContract { familiar_id } => validate_canonical_familiar_id(familiar_id),
+            Self::FamiliarAnalytics {
+                familiar_id,
+                window,
+                recent_limit,
+            } => {
+                validate_canonical_familiar_id(familiar_id)?;
+                // Cave refuses an unknown window or an out-of-range recent
+                // count rather than correcting it, so the same values are
+                // refused here instead of being sent to be rejected there.
+                if window
+                    .as_deref()
+                    .is_some_and(|window| !CANONICAL_ANALYTICS_WINDOWS.contains(&window))
+                    || recent_limit.is_some_and(|recent| recent > 100)
+                {
+                    return Err(NativeDiagnostic::new("invalid_native_input", false));
+                }
+                Ok(())
+            }
         }
     }
 }
+
+/// The windows Cave aggregates over. A client may narrow to exactly one.
+const CANONICAL_ANALYTICS_WINDOWS: [&str; 4] = ["7d", "14d", "8w", "all"];
 
 fn is_canonical_cursor(value: &str) -> bool {
     if value.is_empty()
@@ -200,6 +230,26 @@ fn is_canonical_cursor(value: &str) -> bool {
         .position(|candidate| *candidate == value.as_bytes()[value.len() - 1])
         .unwrap_or(usize::MAX);
     trailing != usize::MAX && trailing % (if remainder == 2 { 16 } else { 4 }) == 0
+}
+
+/// A familiar id, held to the slug allow-list Cave itself enforces.
+///
+/// Narrower than a conversation id on purpose: Cave's `isValidFamiliarId`
+/// accepts `[a-z0-9][a-z0-9_-]{0,63}` case-insensitively and nothing else, so
+/// an id this host would have to percent-encode is one Cave could never carry.
+/// Refusing it here means a traversal-shaped id never reaches the wire at all.
+fn validate_canonical_familiar_id(value: &str) -> NativeResult<()> {
+    let bytes = value.as_bytes();
+    let leads = bytes.first().is_some_and(u8::is_ascii_alphanumeric);
+    if !leads
+        || bytes.len() > 64
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
 }
 
 fn validate_canonical_conversation_id(value: &str) -> NativeResult<()> {
@@ -414,6 +464,28 @@ impl NativeCaveTransport for ConstrainedTransport {
                 },
                 Some(page),
             ),
+            CaveReadPath::FamiliarContract { familiar_id } => (
+                format!(
+                    "api/client/v1/familiars/{}/contract",
+                    encoded_cave_path_segment(&familiar_id)
+                ),
+                None,
+            ),
+            CaveReadPath::FamiliarAnalytics {
+                familiar_id,
+                window,
+                recent_limit,
+            } => (
+                with_analytics_query(
+                    format!(
+                        "api/client/v1/familiars/{}/analytics",
+                        encoded_cave_path_segment(&familiar_id)
+                    ),
+                    window.as_deref(),
+                    recent_limit,
+                ),
+                None,
+            ),
         };
         let path = with_page(path, page)?;
         Self::request(authority, Method::GET, &path, Some(bearer), None, None).await
@@ -478,6 +550,31 @@ pub(crate) fn encoded_cave_path_segment(value: &str) -> String {
             }
         })
         .collect()
+}
+
+/// `window` before `recent`, and only what the caller set.
+///
+/// Both values are already proven by `CaveReadPath::validate`, and Cave
+/// refuses a parameter it does not serve rather than ignoring it, so the query
+/// carries exactly the narrowing that was asked for and nothing implied.
+fn with_analytics_query(
+    mut path: String,
+    window: Option<&str>,
+    recent_limit: Option<u16>,
+) -> String {
+    if window.is_none() && recent_limit.is_none() {
+        return path;
+    }
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(window) = window {
+        serializer.append_pair("window", window);
+    }
+    if let Some(recent) = recent_limit {
+        serializer.append_pair("recent", &recent.to_string());
+    }
+    path.push('?');
+    path.push_str(&serializer.finish());
+    path
 }
 
 fn with_page(mut path: String, page: Option<NativePage>) -> NativeResult<String> {
@@ -625,7 +722,8 @@ mod tests {
 
     use super::{
         encoded_cave_path_segment, managed_pairing_created, response_data, response_diagnostic,
-        CaveReadPath, ConstrainedTransport, NativeCaveTransport, NativeHttpResponse, NativePage,
+        with_analytics_query, CaveReadPath, ConstrainedTransport, NativeCaveTransport,
+        NativeHttpResponse, NativePage,
     };
     use crate::cave::{
         pin_owner_discovery_record, OwnerDiscoveryRecord, OwnerDiscoveryRecordMetadata,
@@ -791,6 +889,99 @@ mod tests {
             .validate()
             .is_err());
         }
+    }
+
+    #[test]
+    fn canonical_familiar_ids_are_bounded_to_caves_slug_allow_list() {
+        for familiar_id in ["scribe", "cody", "a", "a-b_c9", &"a".repeat(64)] {
+            assert!(
+                CaveReadPath::FamiliarContract {
+                    familiar_id: familiar_id.to_owned(),
+                }
+                .validate()
+                .is_ok(),
+                "{familiar_id} is a Cave familiar slug"
+            );
+        }
+        // Narrower than a conversation id: `.` and `~` are legal there and not
+        // here, because Cave's own allow-list does not carry them. Anything
+        // this host would have to percent-encode is refused before the wire.
+        for familiar_id in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "space id",
+            "雪",
+            "percent%",
+            "-leading",
+            "_leading",
+            "dot.name",
+            "tilde~name",
+            &"a".repeat(65),
+        ] {
+            assert!(
+                CaveReadPath::FamiliarContract {
+                    familiar_id: familiar_id.to_owned(),
+                }
+                .validate()
+                .is_err(),
+                "{familiar_id} is not a Cave familiar slug"
+            );
+        }
+    }
+
+    #[test]
+    fn familiar_analytics_narrowing_is_refused_before_it_reaches_cave() {
+        let analytics =
+            |window: Option<&str>, recent: Option<u16>| CaveReadPath::FamiliarAnalytics {
+                familiar_id: "scribe".to_owned(),
+                window: window.map(str::to_owned),
+                recent_limit: recent,
+            };
+        for window in ["7d", "14d", "8w", "all"] {
+            assert!(analytics(Some(window), None).validate().is_ok(), "{window}");
+        }
+        assert!(analytics(None, None).validate().is_ok());
+        assert!(analytics(None, Some(0)).validate().is_ok());
+        assert!(analytics(None, Some(100)).validate().is_ok());
+        // Cave refuses these rather than correcting them, so they never leave.
+        for window in ["3d", "7D", "", "all "] {
+            assert!(
+                analytics(Some(window), None).validate().is_err(),
+                "{window}"
+            );
+        }
+        assert!(analytics(None, Some(101)).validate().is_err());
+        assert!(analytics(Some("7d"), Some(101)).validate().is_err());
+    }
+
+    #[test]
+    fn familiar_routes_carry_only_the_narrowing_that_was_asked_for() {
+        assert_eq!(
+            with_analytics_query(
+                "api/client/v1/familiars/scribe/analytics".to_owned(),
+                None,
+                None
+            ),
+            "api/client/v1/familiars/scribe/analytics"
+        );
+        assert_eq!(
+            with_analytics_query(
+                "api/client/v1/familiars/scribe/analytics".to_owned(),
+                Some("7d"),
+                Some(5),
+            ),
+            "api/client/v1/familiars/scribe/analytics?window=7d&recent=5"
+        );
+        assert_eq!(
+            with_analytics_query(
+                "api/client/v1/familiars/scribe/analytics".to_owned(),
+                None,
+                Some(0),
+            ),
+            "api/client/v1/familiars/scribe/analytics?recent=0"
+        );
     }
 
     #[test]
