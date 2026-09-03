@@ -1,6 +1,64 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# How long a readiness wait will wait.
+#
+# Every wait that uses this polls for a marker some spawned process writes, and
+# what it asserts is that the marker APPEARS -- never that it appears quickly.
+# The old per-site values (5-30s) were tuned on a runner that could start a
+# secondary-user session in a second or two. Starting one now regularly takes
+# far longer on the hosted windows-2025 image, where creating the logon session
+# and loading a fresh profile is most of the cost and is paid before the
+# spawned script runs its first statement. Those deadlines began firing for
+# machine speed rather than for anything this suite exists to catch.
+#
+# This bounds patience, not behaviour: a marker that never arrives still fails,
+# and the job's own 20-minute timeout still bounds the run.
+$script:ReadinessTimeout = [TimeSpan]::FromSeconds(60)
+
+function Get-ReadinessDeadline {
+  return [DateTime]::UtcNow.Add($script:ReadinessTimeout)
+}
+
+# Name the cause when something throws.
+#
+# The supervisor wraps a quarantine failure as "Terminal producer identity
+# quarantine failed" with the real fault as InnerException, and as an
+# AggregateException when the producer failed too. PowerShell prints only the
+# outer message, so a CI failure said which stage failed and never why. This
+# prints the whole chain before the exception continues to terminate the run.
+function Write-ExceptionChain {
+  param([Parameter(Mandatory)][AllowNull()][object]$Failure)
+
+  $exception = if ($Failure -is [Management.Automation.ErrorRecord]) {
+    $Failure.Exception
+  } else {
+    $Failure
+  }
+  $depth = 0
+  while ($null -ne $exception -and $depth -lt 12) {
+    Write-Host "cause[$depth] $($exception.GetType().FullName): $($exception.Message)"
+    if ($exception -is [AggregateException]) {
+      $index = 0
+      foreach ($inner in $exception.InnerExceptions) {
+        Write-Host "  aggregate[$index] $($inner.GetType().FullName): $($inner.Message)"
+        $index++
+      }
+    }
+    $exception = $exception.InnerException
+    $depth++
+  }
+}
+
+trap {
+  Write-Host '--- windows-job-supervisor.test.ps1 failure ---'
+  Write-ExceptionChain -Failure $_
+  if ($null -ne $_.ScriptStackTrace) {
+    Write-Host $_.ScriptStackTrace
+  }
+  break
+}
+
 if (-not $IsWindows -or [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
   throw 'Windows Job Object runtime tests require Windows x64.'
 }
@@ -513,7 +571,7 @@ if (
 function Assert-ProcessExited {
   param([Parameter(Mandatory)][int]$ProcessId)
 
-  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  $deadline = Get-ReadinessDeadline
   do {
     try {
       $process = [Diagnostics.Process]::GetProcessById($ProcessId)
@@ -532,7 +590,7 @@ function Assert-BoundedTextMarker {
     [Parameter(Mandatory)][string]$Expected
   )
 
-  $deadline = [DateTime]::UtcNow.AddSeconds(5)
+  $deadline = Get-ReadinessDeadline
   do {
     try {
       if ([IO.File]::Exists($Path)) {
@@ -1875,7 +1933,7 @@ $attack = Start-Process `
   -RedirectStandardError $env:OPENCOVEN_ROOT_ATTACK_STDERR `
   -PassThru
 try {
-  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  $deadline = Get-ReadinessDeadline
   while (-not [IO.File]::Exists($env:OPENCOVEN_ROOT_ATTACK_COMPLETE)) {
     if ($attack.HasExited) {
       throw "Root process attack failed: $(
@@ -2428,7 +2486,7 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     -RedirectStandardError (Join-Path $operatorPrivateRoot 'handoff-race.stderr') `
     -PassThru
   try {
-    $raceDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $raceDeadline = Get-ReadinessDeadline
     while (-not [IO.File]::Exists($raceReady)) {
       if ($raceProcess.HasExited) {
         throw 'Artifact replacement race exited before replacing the record.'
@@ -3262,7 +3320,7 @@ public static class UnsupervisedLogonProcess
       "-NoLogo -NoProfile -NonInteractive -File `"$lateRegistrarScript`" -UserName `"$($serviceEscapeContext.User.UserName)`"",
       $serviceEscapeContext.User.RootPath
     )
-    $lateReadyDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $lateReadyDeadline = Get-ReadinessDeadline
     while (-not [IO.File]::Exists($lateRegistrarReady)) {
       try {
         $lateRegistrar = [Diagnostics.Process]::GetProcessById($lateRegistrarPid)
@@ -3783,7 +3841,7 @@ exit 23
       "-NoLogo -NoProfile -NonInteractive -File `"$failureSleeperScript`"",
       $failureEscapeContext.User.RootPath
     )
-    $failureSleeperDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $failureSleeperDeadline = Get-ReadinessDeadline
     while (-not [IO.File]::Exists($failureSleeperReady)) {
       try {
         $failureSleeper = [Diagnostics.Process]::GetProcessById(
@@ -4039,7 +4097,7 @@ Start-Sleep -Seconds 300
       "-NoLogo -NoProfile -NonInteractive -File `"$setupPath`"",
       $Context.User.RootPath
     )
-    $readyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $readyDeadline = Get-ReadinessDeadline
     while (-not [IO.File]::Exists($readyPath)) {
       try {
         $setupProcess = [Diagnostics.Process]::GetProcessById($setupPid)
@@ -4533,7 +4591,7 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($retainedHandleSource.Replac
     $retainedRootScript,
     @"
 `$descendant = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File','$($retainedHandleScript.Replace("'", "''"))') -RedirectStandardOutput '$((Join-Path $root 'retained-stdout.txt').Replace("'", "''"))' -RedirectStandardError '$((Join-Path $root 'retained-stderr.txt').Replace("'", "''"))' -PassThru
-`$deadline = [DateTime]::UtcNow.AddSeconds(10)
+`$deadline = [DateTime]::UtcNow.AddSeconds(60)
 while (-not [IO.File]::Exists('$($retainedPidPath.Replace("'", "''"))')) {
   if (`$descendant.HasExited) {
     throw 'Retained Job handle descendant exited before reporting readiness.'
