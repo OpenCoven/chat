@@ -1,24 +1,24 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# How long a readiness wait will wait.
+# Readiness waits are 60 seconds, written out at each site.
 #
-# Every wait that uses this polls for a marker some spawned process writes, and
-# what it asserts is that the marker APPEARS -- never that it appears quickly.
-# The old per-site values (5-30s) were tuned on a runner that could start a
+# Every one of them polls for a marker some spawned process writes, and what it
+# asserts is that the marker APPEARS -- never that it appears quickly. The old
+# per-site values (5-30s) were tuned on a runner that could start a
 # secondary-user session in a second or two. Starting one now regularly takes
 # far longer on the hosted windows-2025 image, where creating the logon session
 # and loading a fresh profile is most of the cost and is paid before the
 # spawned script runs its first statement. Those deadlines began firing for
 # machine speed rather than for anything this suite exists to catch.
 #
+# Deliberately a literal at each site rather than one shared helper: several of
+# these waits live inside here-strings that are written out and run as their
+# own child scripts, where a function defined in this file does not exist. A
+# helper reads better and fails at runtime in exactly the places that matter.
+#
 # This bounds patience, not behaviour: a marker that never arrives still fails,
 # and the job's own 20-minute timeout still bounds the run.
-$script:ReadinessTimeout = [TimeSpan]::FromSeconds(60)
-
-function Get-ReadinessDeadline {
-  return [DateTime]::UtcNow.Add($script:ReadinessTimeout)
-}
 
 # Name the cause when something throws.
 #
@@ -571,7 +571,7 @@ if (
 function Assert-ProcessExited {
   param([Parameter(Mandatory)][int]$ProcessId)
 
-  $deadline = Get-ReadinessDeadline
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
   do {
     try {
       $process = [Diagnostics.Process]::GetProcessById($ProcessId)
@@ -590,7 +590,7 @@ function Assert-BoundedTextMarker {
     [Parameter(Mandatory)][string]$Expected
   )
 
-  $deadline = Get-ReadinessDeadline
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
   do {
     try {
       if ([IO.File]::Exists($Path)) {
@@ -1933,7 +1933,7 @@ $attack = Start-Process `
   -RedirectStandardError $env:OPENCOVEN_ROOT_ATTACK_STDERR `
   -PassThru
 try {
-  $deadline = Get-ReadinessDeadline
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
   while (-not [IO.File]::Exists($env:OPENCOVEN_ROOT_ATTACK_COMPLETE)) {
     if ($attack.HasExited) {
       throw "Root process attack failed: $(
@@ -2486,7 +2486,7 @@ while (-not [IO.File]::Exists($env:OPENCOVEN_HANDOFF_RACE_STOP)) {
     -RedirectStandardError (Join-Path $operatorPrivateRoot 'handoff-race.stderr') `
     -PassThru
   try {
-    $raceDeadline = Get-ReadinessDeadline
+    $raceDeadline = [DateTime]::UtcNow.AddSeconds(60)
     while (-not [IO.File]::Exists($raceReady)) {
       if ($raceProcess.HasExited) {
         throw 'Artifact replacement race exited before replacing the record.'
@@ -3320,7 +3320,7 @@ public static class UnsupervisedLogonProcess
       "-NoLogo -NoProfile -NonInteractive -File `"$lateRegistrarScript`" -UserName `"$($serviceEscapeContext.User.UserName)`"",
       $serviceEscapeContext.User.RootPath
     )
-    $lateReadyDeadline = Get-ReadinessDeadline
+    $lateReadyDeadline = [DateTime]::UtcNow.AddSeconds(60)
     while (-not [IO.File]::Exists($lateRegistrarReady)) {
       try {
         $lateRegistrar = [Diagnostics.Process]::GetProcessById($lateRegistrarPid)
@@ -3841,7 +3841,7 @@ exit 23
       "-NoLogo -NoProfile -NonInteractive -File `"$failureSleeperScript`"",
       $failureEscapeContext.User.RootPath
     )
-    $failureSleeperDeadline = Get-ReadinessDeadline
+    $failureSleeperDeadline = [DateTime]::UtcNow.AddSeconds(60)
     while (-not [IO.File]::Exists($failureSleeperReady)) {
       try {
         $failureSleeper = [Diagnostics.Process]::GetProcessById(
@@ -4097,7 +4097,7 @@ Start-Sleep -Seconds 300
       "-NoLogo -NoProfile -NonInteractive -File `"$setupPath`"",
       $Context.User.RootPath
     )
-    $readyDeadline = Get-ReadinessDeadline
+    $readyDeadline = [DateTime]::UtcNow.AddSeconds(60)
     while (-not [IO.File]::Exists($readyPath)) {
       try {
         $setupProcess = [Diagnostics.Process]::GetProcessById($setupPid)
