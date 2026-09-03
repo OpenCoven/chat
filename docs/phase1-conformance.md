@@ -1024,7 +1024,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 289,604 | `20ac2be79c6ec6ebaccdf78543b68540fe2645e37e96c6715d477f19229b943f` |
-| `scripts/windows-job-supervisor.test.ps1` | 168,772 | `74df69934cf26c7d6c083ce74abe840f472613b4df39d93584f5cb6391b951bf` |
+| `scripts/windows-job-supervisor.test.ps1` | 171,179 | `55e9cf065e2dc7cc656c6aa8cc9ea53542259d3d7eee55c368c6cf0fc6356ab9` |
 
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
