@@ -19,6 +19,8 @@ const NATIVE_COMMANDS: &[&str] = &[
     "cave_list_conversations",
     "cave_get_conversation",
     "cave_list_conversation_messages",
+    "cave_familiar_contract",
+    "cave_familiar_analytics",
 ];
 
 fn tauri_config_value<'a>(config: &'a serde_json::Value, key: &str) -> &'a str {

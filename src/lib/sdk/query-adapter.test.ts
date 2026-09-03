@@ -85,6 +85,17 @@ function createReadClient(overrides: Partial<CaveReadClient> = {}): CaveReadClie
       ],
       cursor: { current: 'cursor-messages', hasMore: false },
     }),
+    familiarContract: vi.fn().mockResolvedValue({
+      id: 'familiar-1',
+      present: { soul: true, identity: true, ward: true, memory: true },
+      report: { specVersion: '1.0', pass: true, properties: [], violations: [], warnings: [] },
+    }),
+    familiarAnalytics: vi.fn().mockResolvedValue({
+      generatedAt: '2026-08-25T00:00:00.000Z',
+      windows: {},
+      recentAttempts: [],
+      backfill: { state: 'complete', imported: 0 },
+    }),
     ...overrides,
   };
 }

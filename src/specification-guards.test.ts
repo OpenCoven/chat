@@ -227,6 +227,8 @@ describe('Phase 1 specification guards', () => {
       'allow-cave-list-conversations',
       'allow-cave-get-conversation',
       'allow-cave-list-conversation-messages',
+      'allow-cave-familiar-contract',
+      'allow-cave-familiar-analytics',
     ]);
 
     for (const permission of capability.permissions) {
@@ -680,6 +682,8 @@ describe('Phase 1 specification guards', () => {
       'cave_list_conversations',
       'cave_get_conversation',
       'cave_list_conversation_messages',
+      'cave_familiar_contract',
+      'cave_familiar_analytics',
     ]) {
       expect(buildScript).toContain(`"${command}"`);
     }
@@ -706,6 +710,8 @@ describe('Phase 1 specification guards', () => {
       'cave_list_conversations',
       'cave_get_conversation',
       'cave_list_conversation_messages',
+      'cave_familiar_contract',
+      'cave_familiar_analytics',
     ];
     const schemaCommands = [...schema.matchAll(/"const": "(?:allow|deny)-([^"]+)"/g)]
       .map((match) => match[1]?.replaceAll('-', '_') ?? '')
@@ -743,6 +749,8 @@ describe('Phase 1 specification guards', () => {
       'cave_list_conversations',
       'cave_get_conversation',
       'cave_list_conversation_messages',
+      'cave_familiar_contract',
+      'cave_familiar_analytics',
     ];
 
     expect(registeredCommandNames(commands)).toEqual(expected);

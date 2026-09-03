@@ -1,3 +1,8 @@
+import type {
+  CaveAnalyticsWindowKey,
+  CaveFamiliarAnalytics,
+  CaveFamiliarContract,
+} from '@opencoven/cave-client';
 import {
   type CaveCanonicalFamiliar,
   type CaveConversation,
@@ -17,6 +22,11 @@ export type QueryResult<T> =
   | { status: 'error'; code: string }
   | { status: 'ok'; data: T };
 
+export type FamiliarAnalyticsQuery = Readonly<{
+  window?: CaveAnalyticsWindowKey;
+  recentLimit?: number;
+}>;
+
 export type QueryAdapter = {
   listFamiliars(options?: PageOptions): Promise<QueryResult<Page<CaveCanonicalFamiliar>>>;
   listProjects(options?: PageOptions): Promise<QueryResult<Page<CaveProject>>>;
@@ -26,6 +36,11 @@ export type QueryAdapter = {
     conversationId: string,
     options?: PageOptions,
   ): Promise<QueryResult<Page<CaveConversationMessage>>>;
+  familiarContract(familiarId: string): Promise<QueryResult<CaveFamiliarContract>>;
+  familiarAnalytics(
+    familiarId: string,
+    options?: FamiliarAnalyticsQuery,
+  ): Promise<QueryResult<CaveFamiliarAnalytics>>;
   invalidate(): void;
   dispose(): void;
 };
@@ -37,7 +52,14 @@ export type QueryAdapterOptions = Readonly<{
   maxCacheEntries?: number;
 }>;
 
-type QueryChannel = 'familiars' | 'projects' | 'conversations' | 'conversation-detail' | 'messages';
+type QueryChannel =
+  | 'familiars'
+  | 'projects'
+  | 'conversations'
+  | 'conversation-detail'
+  | 'messages'
+  | 'familiar-contract'
+  | 'familiar-analytics';
 
 type InflightEntry<T> = Readonly<{
   channelGeneration: number;
@@ -430,6 +452,26 @@ export function createQueryAdapter(
         `${conversationId}:${pageIdentity(page)}`,
         detailTtlMs,
         (client, signal) => client.listConversationMessages(conversationId, { ...page, signal }),
+      );
+    },
+    familiarContract(familiarId) {
+      return runRead('familiar-contract', familiarId, detailTtlMs, (client, signal) =>
+        client.familiarContract(familiarId, { signal }),
+      );
+    },
+    familiarAnalytics(familiarId, query) {
+      const window = query?.window;
+      const recentLimit = query?.recentLimit;
+      return runRead(
+        'familiar-analytics',
+        `${familiarId}:${window ?? 'all-windows'}:${recentLimit ?? 'default-recent'}`,
+        detailTtlMs,
+        (client, signal) =>
+          client.familiarAnalytics(familiarId, {
+            ...(window === undefined ? {} : { window }),
+            ...(recentLimit === undefined ? {} : { recentLimit }),
+            signal,
+          }),
       );
     },
     invalidate,

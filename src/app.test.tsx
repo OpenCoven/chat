@@ -107,6 +107,8 @@ function makeQueryAdapter(): QueryAdapter {
         ],
       },
     }),
+    familiarContract: vi.fn().mockResolvedValue({ status: 'not_ready' }),
+    familiarAnalytics: vi.fn().mockResolvedValue({ status: 'not_ready' }),
     invalidate: vi.fn(),
     dispose: vi.fn(),
   };
