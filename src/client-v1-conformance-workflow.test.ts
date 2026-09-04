@@ -2352,6 +2352,16 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
+  test('routes the governed Unix harness through the copied pnpm executable', () => {
+    const harness = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+
+    expect(harness).not.toMatch(/['"]corepack['"]/u);
+    expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
+    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
+    expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");
+    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'exec'");
+  });
+
   test('defines the Windows no-reparse guard inside the restricted child before use', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);

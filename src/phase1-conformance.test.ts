@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, test } from 'vitest';
@@ -1762,11 +1762,33 @@ describe('Phase 1 real-authority conformance harness', () => {
   );
 
   test('observes the exact Node, pnpm, and Rust release toolchain', () => {
-    expect(observeReleaseToolVersions()).toEqual({
-      nodeVersion: 'v24.18.1',
-      packageManagerVersion: 'pnpm@10.34.0',
-      rustVersion: '1.95.0',
-    });
+    const root = mkdtempSync(join(tmpdir(), 'phase1-pnpm-version-'));
+    const command = resolve(root, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm');
+    const originalPath = process.env.PATH;
+    try {
+      writeFileSync(
+        command,
+        process.platform === 'win32'
+          ? '@echo off\r\necho 10.34.0\r\n'
+          : '#!/bin/sh\nprintf "10.34.0\\n"\n',
+      );
+      if (process.platform !== 'win32') {
+        chmodSync(command, 0o700);
+      }
+      process.env.PATH = `${root}${delimiter}${originalPath ?? ''}`;
+      expect(observeReleaseToolVersions()).toEqual({
+        nodeVersion: 'v24.18.1',
+        packageManagerVersion: 'pnpm@10.34.0',
+        rustVersion: '1.95.0',
+      });
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
   }, 30_000);
 
   test('rejects missing or digest-mismatched frozen Windows supervisors', () => {
