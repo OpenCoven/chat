@@ -132,7 +132,7 @@ printf 'fixture\n' >"$source_root/tracked.txt"
 
 trusted_tool_source="$scratch_root/trusted-tool-source"
 trusted_tool_command="$scratch_root/trusted-tool-command"
-pnpm_runtime="$trusted_tool_source/pnpm-runtime"
+pnpm_runtime="$trusted_tool_source/runtime/node_modules/pnpm"
 mkdir -p -m 700 "$pnpm_runtime/bin"
 cat >"$trusted_tool_source/node" <<'EOF'
 #!/usr/bin/env bash

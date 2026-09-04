@@ -1046,7 +1046,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
 | `scripts/unix-producer-supervisor.sh` | 28,719 | `f8d83127dff844cc6ab141a39faf9d7dcd3d3c07302449604e6fc247269105c7` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 10,418 | `20d07612efc11561342e3dcbc7976b258ff5db627970b3e8c6a2da32b9196b1e` |
+| `scripts/unix-producer-supervisor.test.sh` | 10,431 | `4244e456406cbf6882ee3187a48a8467b49b7744ec5d876cc4c054a3f2d16d97` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
