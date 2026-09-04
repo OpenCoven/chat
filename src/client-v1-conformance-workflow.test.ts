@@ -902,6 +902,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
   test('runs one inline supervised Windows production before every action or repository command', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const producer = workflowJob(workflow, 'platform-conformance');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const stepsStart = producer.indexOf('    steps:\n');
     const bootstrapStart = producer.indexOf(
       '      - name: Bootstrap supervised Windows conformance',
@@ -916,6 +917,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
+    expect(childBootstrap).toContain(
+      'if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
+    );
+    expect(childBootstrap).not.toContain(
+      'if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
+    );
 
     for (const name of [
       'Install frozen Linux Secret Service',
@@ -2160,8 +2167,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
-    expect(toolPathStep).toContain("[''node'', ''corepack'', ''rustup'']");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
+    expect(toolPathStep).toContain('.resolvedCommand');
+    expect(toolPathStep).not.toContain('.executable; appendFileSync');
+    expect(toolPathStep).toContain("[''node'', ''corepack'']");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
+    expect(unixStep).toContain(
+      '--rustup-executable "$' + "{{ steps['unix-tool-path'].outputs.rustup_executable }}\"",
+    );
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
     );
@@ -2184,6 +2198,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('trusted_rustup="$trusted_root/rustup"');
+    expect(supervisor).toContain('trusted_cargo="$trusted_root/cargo"');
+    expect(supervisor).toContain('trusted_rustc="$trusted_root/rustc"');
     expect(supervisor).toContain('/bin/test -w "$tool_directory"');
     expect(supervisor).not.toContain('/usr/bin/test');
     expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');

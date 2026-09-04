@@ -8618,7 +8618,7 @@ jobs:
               -Label "$Label detached checkout"
             if (
               (& $git -C $Destination rev-parse HEAD).Trim() -cne $Revision -or
-              (& $git -C $Destination status --porcelain=v2 --untracked-files=all).Count -ne 0 -or
+              @(& $git -C $Destination status --porcelain=v2 --untracked-files=all).Count -ne 0 -or
               (Test-Path -LiteralPath (Join-Path $Destination '.gitmodules'))
             ) {
               throw "$Label checkout verification failed."
@@ -8779,7 +8779,7 @@ jobs:
           if ((& $git -C $workspace rev-parse HEAD).Trim() -ne $env:OPENCOVEN_CHAT_SHA) {
             throw 'Chat checkout HEAD changed.'
           }
-          if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0) {
+          if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0) {
             throw 'Chat checkout is not clean.'
           }
           if (Test-Path -LiteralPath (Join-Path $workspace '.gitmodules')) {
@@ -9486,7 +9486,7 @@ jobs:
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
             ['scripts/unix-producer-command.sh', [3250, 'd786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab']],
-            ['scripts/unix-producer-supervisor.sh', [25197, 'c18cf8880116a5fbf9c269284b1632e8429f6a457f11696eb9c731dc4e8b20d1']],
+            ['scripts/unix-producer-supervisor.sh', [26103, 'cdc8c937306df3b1cbaaa1459c41b8c56e9158a38c5bb9b11c5e81c0b7780f9f']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);
@@ -9512,7 +9512,7 @@ jobs:
       - name: Compute reviewed Unix tool path
         id: unix-tool-path
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''node'', ''corepack'', ''rustup'']); appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\n'');"'
+        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { resolveExecutableInvocation, resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''node'', ''corepack'']); const rustupExecutable = resolveExecutableInvocation(''rustup'', process.env, process.platform, []).resolvedCommand; appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\nrustup_executable='' + rustupExecutable + ''\n'');"'
       - name: Run supervised Unix production and handoff
         if: matrix.platform != 'win32-x64'
         shell: bash
@@ -9537,6 +9537,7 @@ jobs:
             --temp-root "$broker_root" \
             --handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff" \
             --command scripts/unix-producer-command.sh \
+            --rustup-executable "${{ steps['unix-tool-path'].outputs.rustup_executable }}" \
             --tool-path "${{ steps['unix-tool-path'].outputs.tool_path }}" \
             --validator-revision "$OPENCOVEN_VALIDATOR_REVISION"
       - name: Validate broker-owned Unix platform record

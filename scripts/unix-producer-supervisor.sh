@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH [--command-arg VALUE ...] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
+  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH [--command-arg VALUE ...] [--rustup-executable PATH] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
   exit 2
 }
 
@@ -12,6 +12,7 @@ destination_path=
 temp_root=
 handoff_helper=
 command_path=
+rustup_executable=
 tool_path='/usr/bin:/bin:/usr/sbin:/sbin'
 timeout_seconds=3300
 validator_revision=
@@ -26,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --handoff-helper) [[ $# -ge 2 ]] || usage; handoff_helper=$2; shift 2 ;;
     --command) [[ $# -ge 2 ]] || usage; command_path=$2; shift 2 ;;
     --command-arg) [[ $# -ge 2 ]] || usage; command_arguments+=("$2"); shift 2 ;;
+    --rustup-executable) [[ $# -ge 2 ]] || usage; rustup_executable=$2; shift 2 ;;
     --validator-revision) [[ $# -ge 2 ]] || usage; validator_revision=$2; shift 2 ;;
     --tool-path) [[ $# -ge 2 ]] || usage; tool_path=$2; shift 2 ;;
     --timeout-seconds) [[ $# -ge 2 ]] || usage; timeout_seconds=$2; shift 2 ;;
@@ -95,6 +97,10 @@ handoff_helper="$(canonical_file "$handoff_helper")" ||
   { echo 'unix-producer-supervisor: handoff helper is unsafe' >&2; exit 1; }
 command_path="$(canonical_file "$command_path")" ||
   { echo 'unix-producer-supervisor: restricted command is unsafe' >&2; exit 1; }
+if [[ -n "$rustup_executable" ]]; then
+  rustup_executable="$(canonical_file "$rustup_executable")" ||
+    { echo 'unix-producer-supervisor: rustup executable is unsafe' >&2; exit 1; }
+fi
 if [[ "$destination_path" != /* ]]; then
   destination_path="$(pwd -P)/$destination_path"
 fi
@@ -133,7 +139,11 @@ stat_identity() {
   fi
 }
 
-for trusted_file in "$handoff_helper" "$command_path"; do
+trusted_files=("$handoff_helper" "$command_path")
+if [[ -n "$rustup_executable" ]]; then
+  trusted_files+=("$rustup_executable")
+fi
+for trusted_file in "${trusted_files[@]}"; do
   mode="$(stat_mode "$trusted_file")"
   if [[ "$(stat_owner "$trusted_file")" != "$broker_uid" ||
         "$(stat_links "$trusted_file")" != 1 ||
@@ -188,6 +198,9 @@ artifact_workspace="$producer_root/workspace"
 trusted_root="$isolated_root/trusted"
 source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.json"
 trusted_command="$trusted_root/producer-command"
+trusted_rustup="$trusted_root/rustup"
+trusted_cargo="$trusted_root/cargo"
+trusted_rustc="$trusted_root/rustc"
 trusted_handoff="$trusted_root/unix-artifact-handoff"
 
 producer_uid=
@@ -472,12 +485,21 @@ if [[ -e "$source_record" || -L "$source_record" ]]; then
 fi
 cp "$command_path" "$trusted_command"
 cp "$handoff_helper" "$trusted_handoff"
+if [[ -n "$rustup_executable" ]]; then
+  cp "$rustup_executable" "$trusted_rustup"
+  cp "$rustup_executable" "$trusted_cargo"
+  cp "$rustup_executable" "$trusted_rustc"
+fi
 if [[ "$host_os" == Darwin ]]; then
   /bin/chmod -RN "$producer_root" "$workspace" "$trusted_root"
 fi
 chown root:0 "$trusted_root" "$trusted_command" "$trusted_handoff"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
+if [[ -n "$rustup_executable" ]]; then
+  chown root:0 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+  chmod 555 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+fi
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \
@@ -521,7 +543,7 @@ restricted_environment=(
   "COREPACK_HOME=$producer_root/corepack"
   "PNPM_HOME=$producer_root/pnpm-home"
   "PNPM_STORE_DIR=$producer_root/pnpm-store"
-  "PATH=$producer_root/cargo/bin:$tool_path"
+  "PATH=$trusted_root:$producer_root/cargo/bin:$tool_path"
   "LANG=C"
   "LC_ALL=C"
   "CI=1"

@@ -130,6 +130,42 @@ source_root="$scratch_root/source"
 mkdir -p -m 700 "$source_root"
 printf 'fixture\n' >"$source_root/tracked.txt"
 
+trusted_tool_source="$scratch_root/trusted-tool-source"
+trusted_tool_command="$scratch_root/trusted-tool-command"
+mkdir -m 700 "$trusted_tool_source"
+cat >"$trusted_tool_source/rustup" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case "$(basename "$0"):$1" in
+  rustup:--install|cargo:--check) ;;
+  rustc:--emit-record)
+    printf '{"platform":"%s","schemaVersion":2}\n' \
+      "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" >"$OPENCOVEN_UNIX_SOURCE_RECORD"
+    chmod 600 "$OPENCOVEN_UNIX_SOURCE_RECORD"
+    ;;
+  *) exit 1 ;;
+esac
+EOF
+cat >"$trusted_tool_command" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+rustup --install
+cargo --check
+rustc --emit-record
+EOF
+chmod 500 "$trusted_tool_source/rustup" "$trusted_tool_command"
+
+sudo -n "$supervisor" \
+  --platform "$platform" \
+  --source "$source_root" \
+  --destination "$scratch_root/trusted-tool.json" \
+  --temp-root "$scratch_root" \
+  --handoff-helper "$handoff" \
+  --command "$trusted_tool_command" \
+  --rustup-executable "$trusted_tool_source/rustup" \
+  --timeout-seconds 30
+[[ -s "$scratch_root/trusted-tool.json" ]]
+
 run_supervisor() {
   local case_name="$1"
   local destination="$scratch_root/$case_name.json"
