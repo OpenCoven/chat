@@ -78,8 +78,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '95d00af123e1fa8670f29e9ddf7f9dec246beb0c',
-  tree: 'aeb92f078ce86f603d3d4631c927977602ac298f',
+  revision: '7e5a300f4cf3376db78bb83eedb94b8369d090a6',
+  tree: '95e14782b44c441a5b2d93755e66e4b596c9a413',
   files: [
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -88,8 +88,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
-      blob: '670390ee7b2d38805e729dc79584cb517d2536b8',
-      sha256: 'c18cf8880116a5fbf9c269284b1632e8429f6a457f11696eb9c731dc4e8b20d1',
+      blob: 'e5f6366854429dc83c633c798c9d6dab7222b632',
+      sha256: '4223697ff1cd8ba27bd628572e2d5b644d791c8ca22855a1aea4ff627839cb3f',
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
@@ -103,8 +103,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '229c4b14e1469ab4396ae0219c539e5beffb0642',
-      sha256: 'a8c56b1bf9a943012b80c92fb62c6829e118db536d4238d87a5ad0dc8f5ee62e',
+      blob: 'a5326b7de27b9810ddefe2e65ba3b3553f4cfaf4',
+      sha256: '508c81a0445bf0406df1454f62fcff339c7d032d6bd174348008c5b0d4ebb58c',
     },
   ],
 } as const;

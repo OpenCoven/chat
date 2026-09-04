@@ -918,10 +918,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
     expect(childBootstrap).toContain(
-      "if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)",
+      'if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
     );
     expect(childBootstrap).not.toContain(
-      "if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)",
+      'if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
     );
 
     for (const name of [
