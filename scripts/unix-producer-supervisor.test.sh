@@ -132,17 +132,28 @@ printf 'fixture\n' >"$source_root/tracked.txt"
 
 trusted_tool_source="$scratch_root/trusted-tool-source"
 trusted_tool_command="$scratch_root/trusted-tool-command"
-mkdir -m 700 "$trusted_tool_source"
+pnpm_runtime="$trusted_tool_source/runtime/node_modules/pnpm"
+mkdir -p -m 700 "$pnpm_runtime/bin"
 cat >"$trusted_tool_source/node" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "$1" == */pnpm.cjs ]]; then
+  script=$1
+  shift
+  exec "$script" "$@"
+fi
 [[ "$1" == --check ]]
 EOF
-cat >"$trusted_tool_source/pnpm" <<'EOF'
+cat >"$pnpm_runtime/bin/pnpm.cjs" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ "$1" == --check ]]
 EOF
+printf '%s\n' \
+  '#!/bin/sh' \
+  'exit 99' \
+  "# cmd-shim-target=$pnpm_runtime/bin/pnpm.cjs" \
+  >"$trusted_tool_source/pnpm"
 cat >"$trusted_tool_source/rustup" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -168,8 +179,102 @@ EOF
 chmod 500 \
   "$trusted_tool_source/node" \
   "$trusted_tool_source/pnpm" \
+  "$pnpm_runtime/bin/pnpm.cjs" \
   "$trusted_tool_source/rustup" \
   "$trusted_tool_command"
+
+expect_pnpm_rejection() {
+  local case_name="$1"
+  local expected_diagnostic="$2"
+  local case_root="$scratch_root/pnpm-rejection-$case_name"
+  local case_runtime="$case_root/runtime/node_modules/pnpm"
+  local case_launcher="$case_root/pnpm"
+  local destination="$scratch_root/pnpm-rejection-$case_name.json"
+  local output status
+
+  mkdir -p -m 700 "$case_runtime/bin"
+  cp "$pnpm_runtime/bin/pnpm.cjs" "$case_runtime/bin/pnpm.cjs"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'exit 99' \
+    "# cmd-shim-target=$case_runtime/bin/pnpm.cjs" \
+    >"$case_launcher"
+  chmod 500 "$case_runtime/bin/pnpm.cjs"
+
+  case "$case_name" in
+    duplicate-marker)
+      printf '# cmd-shim-target=%s\n' "$case_runtime/bin/pnpm.cjs" >>"$case_launcher"
+      ;;
+    relative-marker)
+      printf '%s\n' \
+        '#!/bin/sh' \
+        'exit 99' \
+        '# cmd-shim-target=runtime/node_modules/pnpm/bin/pnpm.cjs' \
+        >"$case_launcher"
+      ;;
+    carriage-return-marker)
+      printf '#!/bin/sh\nexit 99\n# cmd-shim-target=%s\r\n' \
+        "$case_runtime/bin/pnpm.cjs" >"$case_launcher"
+      ;;
+    symlink)
+      ln -s bin/pnpm.cjs "$case_runtime/linked.cjs"
+      ;;
+    hardlink)
+      mkdir -m 700 "$case_runtime/dist"
+      printf 'module\n' >"$case_runtime/dist/module.cjs"
+      ln "$case_runtime/dist/module.cjs" "$case_runtime/dist/module-copy.cjs"
+      ;;
+    special-file)
+      mkfifo "$case_runtime/runtime.pipe"
+      ;;
+    unsafe-mode)
+      printf 'module\n' >"$case_runtime/unsafe-mode.cjs"
+      chmod 620 "$case_runtime/unsafe-mode.cjs"
+      ;;
+    unsafe-owner)
+      printf 'module\n' >"$case_runtime/unsafe-owner.cjs"
+      sudo -n chown 0:0 "$case_runtime/unsafe-owner.cjs"
+      ;;
+    *)
+      echo "unknown pnpm rejection case: $case_name" >&2
+      exit 1
+      ;;
+  esac
+  chmod 500 "$case_launcher"
+
+  set +e
+  output="$(
+    sudo -n "$supervisor" \
+      --platform "$platform" \
+      --source "$source_root" \
+      --destination "$destination" \
+      --temp-root "$scratch_root" \
+      --handoff-helper "$handoff" \
+      --command "$trusted_tool_command" \
+      --node-executable "$trusted_tool_source/node" \
+      --pnpm-executable "$case_launcher" \
+      --rustup-executable "$trusted_tool_source/rustup" \
+      --timeout-seconds 30 2>&1
+  )"
+  status=$?
+  set -e
+
+  if (( status == 0 )) || [[ "$output" != *"$expected_diagnostic"* ]]; then
+    printf '%s\n' "$output" >&2
+    echo "pnpm rejection case $case_name did not fail safely" >&2
+    exit 1
+  fi
+  [[ ! -e "$destination" ]]
+}
+
+expect_pnpm_rejection duplicate-marker 'pnpm launcher target is unsafe'
+expect_pnpm_rejection relative-marker 'pnpm launcher target is unsafe'
+expect_pnpm_rejection carriage-return-marker 'pnpm launcher target is unsafe'
+expect_pnpm_rejection symlink 'pnpm runtime ownership or mode is unsafe'
+expect_pnpm_rejection hardlink 'pnpm runtime file has multiple links'
+expect_pnpm_rejection special-file 'pnpm runtime contains a special file'
+expect_pnpm_rejection unsafe-mode 'pnpm runtime ownership or mode is unsafe'
+expect_pnpm_rejection unsafe-owner 'pnpm runtime ownership or mode is unsafe'
 
 sudo -n "$supervisor" \
   --platform "$platform" \
