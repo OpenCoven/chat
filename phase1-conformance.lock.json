@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "c4d0bf31763b70e1266439ff2ef1984b543e04fd"
+    "revision": "f839004c51118425b73710100b8b02fe42501872"
   },
   "harnessAuthority": {
-    "revision": "c4d0bf31763b70e1266439ff2ef1984b543e04fd",
-    "tree": "f4bb14af2e0f2a503bb78153645a67e7f7a76f63",
+    "revision": "f839004c51118425b73710100b8b02fe42501872",
+    "tree": "7e8a118a7a89ac828ac53473289e4e13225db7a5",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "30fdc89ef0ef2f0f0df5bf93e36b6fd387cd4dcc",
-        "sha256": "cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b"
+        "blob": "89cb49abef1749f6002ae1258272893523e854a4",
+        "sha256": "663d0259e359fe87e57792617ba7c8e990ef4aff0cdeddbb0ff85c441688efb0"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -106,13 +106,13 @@
       },
       {
         "path": "scripts/unix-producer-command.sh",
-        "blob": "f1dea9278c64f8fb9dda2f4579f72cd482db9af4",
-        "sha256": "d786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab"
+        "blob": "2c1a3e5f8ca96d801d900f5df3886fb3b0d3601b",
+        "sha256": "ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8"
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "c9b31fb7088b0f5147ab69331fc1b4de0d870ecd",
-        "sha256": "cdc8c937306df3b1cbaaa1459c41b8c56e9158a38c5bb9b11c5e81c0b7780f9f"
+        "blob": "fe67daf8cfe6c014c1d20061f16fe83d03f5e1d4",
+        "sha256": "0660d3737b7f551f7e6c9d99d3bf32efedc167c175030de1ad0565d2da8f38f9"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "9a6471eb790d9f1337c6e878fae52c8d9a926fca",
-        "sha256": "824b74b0638f60862e567d5498a526162b279a5a870bb774154ec73c96c6dde9"
+        "blob": "757cf938613108006c0f6c1e5784d49b120d22ec",
+        "sha256": "567b3645b7bf03557b179c18bf506d177518de085ec403d559974f6230721123"
       }
     ],
     "productionDeltas": [

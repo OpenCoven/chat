@@ -861,7 +861,7 @@ export function observeReleaseToolVersions() {
   const toolchain = resolveRustToolchain();
   return validateObservedToolVersions({
     nodeVersion: process.version,
-    pnpmVersion: runSupervisedSync('corepack', ['pnpm@10.34.0', '--version'], {
+    pnpmVersion: runSupervisedSync('pnpm', ['--version'], {
       encoding: 'utf8',
     }).trim(),
     rustcVersion: runSupervisedSync(toolchain.rustcPath, ['--version'], {
@@ -1587,9 +1587,10 @@ export async function cloneExactCheckout({
       '-c',
       `core.hooksPath=${devNull}`,
       '-c',
-      'protocol.file.allow=always',
+      `safe.directory=${sourceRoot}`,
       'clone',
-      '--shared',
+      '--local',
+      '--no-hardlinks',
       '--no-checkout',
       '--quiet',
       sourceRoot,
@@ -1681,9 +1682,8 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   await runCommand(
     artifactRoot,
     `${label} dependency install`,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'install',
       '--frozen-lockfile',
@@ -1848,16 +1848,10 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat'),
   );
   await runPublicPhase1StageAsync('phase1.packaging.chat-web-build.failed', () =>
-    runCommand(
-      artifactRoot,
-      'Chat web package',
-      'corepack',
-      ['pnpm@10.34.0', '--ignore-workspace', 'build'],
-      {
-        cwd: roots.chatRoot,
-        env: environment,
-      },
-    ),
+    runCommand(artifactRoot, 'Chat web package', 'pnpm', ['--ignore-workspace', 'build'], {
+      cwd: roots.chatRoot,
+      env: environment,
+    }),
   );
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
@@ -1938,8 +1932,8 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     runCommand(
       artifactRoot,
       'Cave authority server package',
-      'corepack',
-      ['pnpm@10.34.0', '--ignore-workspace', 'build'],
+      'pnpm',
+      ['--ignore-workspace', 'build'],
       {
         cwd: roots.caveRoot,
         env: caveBuildEnvironment(environment),
@@ -4549,9 +4543,8 @@ async function runVitestObservationSuite({
   await runCommand(
     artifactRoot,
     label,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'exec',
       'vitest',

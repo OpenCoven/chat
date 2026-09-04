@@ -2167,12 +2167,23 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''node''");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''pnpm''");
     expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
     expect(toolPathStep).toContain('.resolvedCommand');
     expect(toolPathStep).not.toContain('.executable; appendFileSync');
-    expect(toolPathStep).toContain("[''node'', ''corepack'']");
+    expect(toolPathStep).not.toContain("''dist'', ''pnpm.cjs''");
+    expect(toolPathStep).toContain("resolveUnixToolPath([''git''])");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(toolPathStep).toContain("node_executable='' + nodeExecutable");
+    expect(toolPathStep).toContain("pnpm_executable='' + pnpmExecutable");
     expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
+    expect(unixStep).toContain(
+      '--node-executable "$' + "{{ steps['unix-tool-path'].outputs.node_executable }}\"",
+    );
+    expect(unixStep).toContain(
+      '--pnpm-executable "$' + "{{ steps['unix-tool-path'].outputs.pnpm_executable }}\"",
+    );
     expect(unixStep).toContain(
       '--rustup-executable "$' + "{{ steps['unix-tool-path'].outputs.rustup_executable }}\"",
     );
@@ -2216,8 +2227,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
-      'corepack pnpm --version',
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
+      'pnpm --version',
+      'pnpm install --frozen-lockfile --ignore-scripts',
       'rustup toolchain install 1.95.0 --profile minimal',
       'phase1-linux-secret-service.sh',
       'phase1-conformance.mjs',
@@ -2322,12 +2333,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const installIndex = command.indexOf(
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
-    );
-    const tauriIndex = command.indexOf(
-      "corepack pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
-    );
+    const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
+    const tauriIndex = command.indexOf("pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'");
 
     expect(earlyToolchainCheck).not.toContain(
       "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
@@ -2338,10 +2345,32 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('binds the restricted Unix install to the isolated pnpm store', () => {
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const install = command.match(/^corepack pnpm install .*$/mu)?.[0];
+    const install = command.match(/^pnpm install .*$/mu)?.[0];
 
     expect(install).toBe(
-      'corepack pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+      'pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+    );
+  });
+
+  test('routes the governed Unix harness through the copied pnpm executable', () => {
+    const harness = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+
+    expect(harness).not.toMatch(/['"]corepack['"]/u);
+    expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
+    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
+    expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");
+    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'exec'");
+  });
+
+  test('defines the Windows no-reparse guard inside the restricted child before use', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const guard = extractPowerShellFunction(childBootstrap, 'Assert-NoReparsePath');
+
+    expect(guard).toContain('[IO.Path]::IsPathFullyQualified($Path)');
+    expect(guard).toContain('[IO.FileAttributes]::ReparsePoint');
+    expect(childBootstrap.indexOf('function Assert-NoReparsePath')).toBeLessThan(
+      childBootstrap.indexOf("Assert-NoReparsePath -Path $modulePath -Label 'Harness module'"),
     );
   });
 

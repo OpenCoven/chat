@@ -1389,7 +1389,7 @@ describe('Phase 1 specification guards', () => {
       'node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance',
     );
     expect(readText('scripts/phase1-conformance.mjs')).toContain(
-      "['pnpm@10.34.0', '--ignore-workspace', 'build']",
+      "'pnpm', ['--ignore-workspace', 'build']",
     );
     expect(readText('scripts/phase1-conformance.mjs')).toContain(
       'NODE_OPTIONS: caveBuildNodeOptions',
