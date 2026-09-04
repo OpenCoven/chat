@@ -2168,6 +2168,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
     expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
+    expect(toolPathStep).toContain('.resolvedCommand');
+    expect(toolPathStep).not.toContain('.executable; appendFileSync');
     expect(toolPathStep).toContain("[''node'', ''corepack'']");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
     expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
