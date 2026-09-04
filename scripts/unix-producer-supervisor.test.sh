@@ -2,10 +2,7 @@
 set -Eeuo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-scratch_parent="$project_root/test-results/unix-producer-supervisor"
-mkdir -p "$scratch_parent"
-scratch_root="$scratch_parent/run-$$"
-mkdir "$scratch_root"
+scratch_root="$(mktemp -d /tmp/opencoven-unix-supervisor-test.XXXXXXXX)"
 scratch_root="$(cd "$scratch_root" && pwd -P)"
 handoff_source="$project_root/scripts/unix-artifact-handoff.c"
 supervisor="$project_root/scripts/unix-producer-supervisor.sh"
@@ -173,6 +170,7 @@ set -e
 if (( no_argument_status == 0 )) ||
    [[ "$no_argument_output" != *'usage: unix-producer-supervisor-attack CASE'* ]] ||
    [[ "$no_argument_output" == *'command_arguments[@]: unbound variable'* ]]; then
+  printf '%s\n' "$no_argument_output" >&2
   echo 'zero command arguments were not forwarded safely' >&2
   exit 1
 fi
