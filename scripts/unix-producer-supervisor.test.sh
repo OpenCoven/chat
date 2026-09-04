@@ -133,6 +133,16 @@ printf 'fixture\n' >"$source_root/tracked.txt"
 trusted_tool_source="$scratch_root/trusted-tool-source"
 trusted_tool_command="$scratch_root/trusted-tool-command"
 mkdir -m 700 "$trusted_tool_source"
+cat >"$trusted_tool_source/node" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "$1" == --check ]]; then
+  exit 0
+fi
+[[ "$1" == "$OPENCOVEN_UNIX_TRUSTED_PNPM" && "$2" == --check ]]
+grep -qx 'trusted pnpm bundle' "$OPENCOVEN_UNIX_TRUSTED_PNPM"
+EOF
+printf 'trusted pnpm bundle\n' >"$trusted_tool_source/pnpm.cjs"
 cat >"$trusted_tool_source/rustup" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -149,11 +159,17 @@ EOF
 cat >"$trusted_tool_command" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+node --check
+node "$OPENCOVEN_UNIX_TRUSTED_PNPM" --check
 rustup --install
 cargo --check
 rustc --emit-record
 EOF
-chmod 500 "$trusted_tool_source/rustup" "$trusted_tool_command"
+chmod 500 \
+  "$trusted_tool_source/node" \
+  "$trusted_tool_source/pnpm.cjs" \
+  "$trusted_tool_source/rustup" \
+  "$trusted_tool_command"
 
 sudo -n "$supervisor" \
   --platform "$platform" \
@@ -162,6 +178,8 @@ sudo -n "$supervisor" \
   --temp-root "$scratch_root" \
   --handoff-helper "$handoff" \
   --command "$trusted_tool_command" \
+  --node-executable "$trusted_tool_source/node" \
+  --pnpm-executable "$trusted_tool_source/pnpm.cjs" \
   --rustup-executable "$trusted_tool_source/rustup" \
   --timeout-seconds 30
 [[ -s "$scratch_root/trusted-tool.json" ]]
@@ -178,6 +196,9 @@ run_supervisor() {
     --handoff-helper "$handoff" \
     --command "$attack" \
     --command-arg "$case_name" \
+    --node-executable "$trusted_tool_source/node" \
+    --pnpm-executable "$trusted_tool_source/pnpm.cjs" \
+    --rustup-executable "$trusted_tool_source/rustup" \
     --timeout-seconds 30
 }
 
@@ -199,6 +220,9 @@ no_argument_output="$(
     --temp-root "$scratch_root" \
     --handoff-helper "$handoff" \
     --command "$attack" \
+    --node-executable "$trusted_tool_source/node" \
+    --pnpm-executable "$trusted_tool_source/pnpm.cjs" \
+    --rustup-executable "$trusted_tool_source/rustup" \
     --timeout-seconds 30 2>&1
 )"
 no_argument_status=$?

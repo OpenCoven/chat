@@ -8285,9 +8285,31 @@ jobs:
           Set-StrictMode -Version Latest
           $ProgressPreference = 'SilentlyContinue'
 
-          Add-Type -TypeDefinition (
-            [IO.File]::ReadAllText($env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)
-          ) -Language CSharp
+            function Assert-NoReparsePath {
+              param(
+                [Parameter(Mandatory)][string]$Path,
+                [Parameter(Mandatory)][string]$Label
+              )
+              if (-not [IO.Path]::IsPathFullyQualified($Path)) {
+                throw "$Label must be absolute."
+              }
+              $root = [IO.Path]::GetPathRoot($Path)
+              $current = $root
+              foreach ($component in $Path.Substring($root.Length).Split(
+                [IO.Path]::DirectorySeparatorChar,
+                [StringSplitOptions]::RemoveEmptyEntries
+              )) {
+                $current = Join-Path $current $component
+                $item = Get-Item -LiteralPath $current -Force
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                  throw "$Label contains a reparse point: $current"
+                }
+              }
+            }
+
+            Add-Type -TypeDefinition (
+              [IO.File]::ReadAllText($env:OPENCOVEN_WINDOWS_JOB_SUPERVISOR_SOURCE)
+            ) -Language CSharp
           [OpenCoven.WindowsJobSupervisor]::RequireRestrictedSupervisorBoundary(
             [int]$env:OPENCOVEN_WINDOWS_SUPERVISOR_PID,
             [long]$env:OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE
@@ -8792,7 +8814,7 @@ jobs:
             @('scripts\owned-temp-directory.mjs', 6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095'),
             @('scripts\phase1-artifact-secret-scan.mjs', 21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a'),
             @('scripts\phase1-conformance-lock.mjs', 47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789'),
-            @('scripts\phase1-conformance.mjs', 187131, 'cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b'),
+            @('scripts\phase1-conformance.mjs', 187156, '26b1f21a6561f9ac7ca6a70af75296d5ab6af24542145f09d331e3831ced1058'),
             @('scripts\phase1-evidence-contract.mjs', 15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f'),
             @('scripts\phase1-evidence-runtime.mjs', 6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159'),
             @('scripts\phase1-linux-secret-service.mjs', 4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92'),
@@ -9472,7 +9494,7 @@ jobs:
             ['scripts/owned-temp-directory.mjs', [6965, 'a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095']],
             ['scripts/phase1-artifact-secret-scan.mjs', [21183, 'be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a']],
             ['scripts/phase1-conformance-lock.mjs', [47460, 'e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789']],
-            ['scripts/phase1-conformance.mjs', [187131, 'cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b']],
+            ['scripts/phase1-conformance.mjs', [187156, '26b1f21a6561f9ac7ca6a70af75296d5ab6af24542145f09d331e3831ced1058']],
             ['scripts/phase1-evidence-contract.mjs', [15088, '24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f']],
             ['scripts/phase1-evidence-runtime.mjs', [6078, '3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159']],
             ['scripts/phase1-linux-secret-service.mjs', [4270, 'ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92']],
@@ -9485,8 +9507,8 @@ jobs:
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
-            ['scripts/unix-producer-command.sh', [3250, 'd786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab']],
-            ['scripts/unix-producer-supervisor.sh', [26103, 'cdc8c937306df3b1cbaaa1459c41b8c56e9158a38c5bb9b11c5e81c0b7780f9f']],
+            ['scripts/unix-producer-command.sh', [3353, '179ddeb6742f44ca0d372b28fbbb15b70cb4c7c3988d2c1f0b6ad1081e7d92da']],
+            ['scripts/unix-producer-supervisor.sh', [26830, '05d5bfc4615f34ef2b821db589634f8d4a47b5b047a3c4e5450e6d31e60001b4']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);
@@ -9512,7 +9534,7 @@ jobs:
       - name: Compute reviewed Unix tool path
         id: unix-tool-path
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { resolveExecutableInvocation, resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''node'', ''corepack'']); const rustupExecutable = resolveExecutableInvocation(''rustup'', process.env, process.platform, []).resolvedCommand; appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\nrustup_executable='' + rustupExecutable + ''\n'');"'
+        run: 'node --input-type=module --eval "import { appendFileSync, lstatSync } from ''node:fs''; import { basename, dirname, resolve } from ''node:path''; import { resolveExecutableInvocation, resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''git'']); const nodeExecutable = resolveExecutableInvocation(''node'', process.env, process.platform, []).resolvedCommand; const pnpmCommand = resolveExecutableInvocation(''pnpm'', process.env, process.platform, []).resolvedCommand; const pnpmExecutable = resolve(dirname(dirname(pnpmCommand)), ''dist'', ''pnpm.cjs''); const pnpmStats = lstatSync(pnpmExecutable); if (basename(pnpmCommand) !== ''pnpm.cjs'' || basename(dirname(pnpmCommand)) !== ''bin'' || !pnpmStats.isFile() || pnpmStats.isSymbolicLink()) throw new Error(''Canonical pnpm bundle is unavailable.''); const rustupExecutable = resolveExecutableInvocation(''rustup'', process.env, process.platform, []).resolvedCommand; appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\nnode_executable='' + nodeExecutable + ''\npnpm_executable='' + pnpmExecutable + ''\nrustup_executable='' + rustupExecutable + ''\n'');"'
       - name: Run supervised Unix production and handoff
         if: matrix.platform != 'win32-x64'
         shell: bash
@@ -9537,6 +9559,8 @@ jobs:
             --temp-root "$broker_root" \
             --handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff" \
             --command scripts/unix-producer-command.sh \
+            --node-executable "${{ steps['unix-tool-path'].outputs.node_executable }}" \
+            --pnpm-executable "${{ steps['unix-tool-path'].outputs.pnpm_executable }}" \
             --rustup-executable "${{ steps['unix-tool-path'].outputs.rustup_executable }}" \
             --tool-path "${{ steps['unix-tool-path'].outputs.tool_path }}" \
             --validator-revision "$OPENCOVEN_VALIDATOR_REVISION"

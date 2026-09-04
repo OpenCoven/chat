@@ -2167,12 +2167,22 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''node''");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''pnpm''");
     expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
     expect(toolPathStep).toContain('.resolvedCommand');
     expect(toolPathStep).not.toContain('.executable; appendFileSync');
-    expect(toolPathStep).toContain("[''node'', ''corepack'']");
+    expect(toolPathStep).toContain("resolveUnixToolPath([''git''])");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(toolPathStep).toContain("node_executable='' + nodeExecutable");
+    expect(toolPathStep).toContain("pnpm_executable='' + pnpmExecutable");
     expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
+    expect(unixStep).toContain(
+      '--node-executable "$' + "{{ steps['unix-tool-path'].outputs.node_executable }}\"",
+    );
+    expect(unixStep).toContain(
+      '--pnpm-executable "$' + "{{ steps['unix-tool-path'].outputs.pnpm_executable }}\"",
+    );
     expect(unixStep).toContain(
       '--rustup-executable "$' + "{{ steps['unix-tool-path'].outputs.rustup_executable }}\"",
     );
@@ -2216,12 +2226,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
-      'corepack pnpm --version',
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
+      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" --version',
+      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts',
       'rustup toolchain install 1.95.0 --profile minimal',
       'phase1-linux-secret-service.sh',
       'phase1-conformance.mjs',
       'OPENCOVEN_UNIX_PRODUCER_REQUIRED',
+      'OPENCOVEN_UNIX_TRUSTED_PNPM',
     ]) {
       expect(command).toContain(required);
       expect(producer).not.toContain(`run: ${required}`);
@@ -2323,10 +2334,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
     const installIndex = command.indexOf(
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
+      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts',
     );
     const tauriIndex = command.indexOf(
-      "corepack pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
+      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" exec tauri --version | grep -qx \'tauri-cli 2.11.4\'',
     );
 
     expect(earlyToolchainCheck).not.toContain(
@@ -2338,10 +2349,22 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('binds the restricted Unix install to the isolated pnpm store', () => {
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const install = command.match(/^corepack pnpm install .*$/mu)?.[0];
+    const install = command.match(/^node "\$OPENCOVEN_UNIX_TRUSTED_PNPM" install .*$/mu)?.[0];
 
     expect(install).toBe(
-      'corepack pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+    );
+  });
+
+  test('defines the Windows no-reparse guard inside the restricted child before use', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const guard = extractPowerShellFunction(childBootstrap, 'Assert-NoReparsePath');
+
+    expect(guard).toContain('[IO.Path]::IsPathFullyQualified($Path)');
+    expect(guard).toContain('[IO.FileAttributes]::ReparsePoint');
+    expect(childBootstrap.indexOf('function Assert-NoReparsePath')).toBeLessThan(
+      childBootstrap.indexOf("Assert-NoReparsePath -Path $modulePath -Label 'Harness module'"),
     );
   });
 

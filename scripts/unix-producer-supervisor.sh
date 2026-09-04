@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH [--command-arg VALUE ...] [--rustup-executable PATH] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
+  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH --node-executable PATH --pnpm-executable PATH --rustup-executable PATH [--command-arg VALUE ...] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
   exit 2
 }
 
@@ -12,6 +12,8 @@ destination_path=
 temp_root=
 handoff_helper=
 command_path=
+node_executable=
+pnpm_executable=
 rustup_executable=
 tool_path='/usr/bin:/bin:/usr/sbin:/sbin'
 timeout_seconds=3300
@@ -27,6 +29,8 @@ while [[ $# -gt 0 ]]; do
     --handoff-helper) [[ $# -ge 2 ]] || usage; handoff_helper=$2; shift 2 ;;
     --command) [[ $# -ge 2 ]] || usage; command_path=$2; shift 2 ;;
     --command-arg) [[ $# -ge 2 ]] || usage; command_arguments+=("$2"); shift 2 ;;
+    --node-executable) [[ $# -ge 2 ]] || usage; node_executable=$2; shift 2 ;;
+    --pnpm-executable) [[ $# -ge 2 ]] || usage; pnpm_executable=$2; shift 2 ;;
     --rustup-executable) [[ $# -ge 2 ]] || usage; rustup_executable=$2; shift 2 ;;
     --validator-revision) [[ $# -ge 2 ]] || usage; validator_revision=$2; shift 2 ;;
     --tool-path) [[ $# -ge 2 ]] || usage; tool_path=$2; shift 2 ;;
@@ -40,7 +44,8 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 if [[ -z "$platform" || -z "$source_path" || -z "$destination_path" ||
-      -z "$temp_root" || -z "$handoff_helper" || -z "$command_path" ]]; then
+      -z "$temp_root" || -z "$handoff_helper" || -z "$command_path" ||
+      -z "$node_executable" || -z "$pnpm_executable" || -z "$rustup_executable" ]]; then
   usage
 fi
 if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]{0,4}$ ]] || (( timeout_seconds > 7200 )); then
@@ -97,10 +102,12 @@ handoff_helper="$(canonical_file "$handoff_helper")" ||
   { echo 'unix-producer-supervisor: handoff helper is unsafe' >&2; exit 1; }
 command_path="$(canonical_file "$command_path")" ||
   { echo 'unix-producer-supervisor: restricted command is unsafe' >&2; exit 1; }
-if [[ -n "$rustup_executable" ]]; then
-  rustup_executable="$(canonical_file "$rustup_executable")" ||
-    { echo 'unix-producer-supervisor: rustup executable is unsafe' >&2; exit 1; }
-fi
+node_executable="$(canonical_file "$node_executable")" ||
+  { echo 'unix-producer-supervisor: node executable is unsafe' >&2; exit 1; }
+pnpm_executable="$(canonical_file "$pnpm_executable")" ||
+  { echo 'unix-producer-supervisor: pnpm executable is unsafe' >&2; exit 1; }
+rustup_executable="$(canonical_file "$rustup_executable")" ||
+  { echo 'unix-producer-supervisor: rustup executable is unsafe' >&2; exit 1; }
 if [[ "$destination_path" != /* ]]; then
   destination_path="$(pwd -P)/$destination_path"
 fi
@@ -139,10 +146,13 @@ stat_identity() {
   fi
 }
 
-trusted_files=("$handoff_helper" "$command_path")
-if [[ -n "$rustup_executable" ]]; then
-  trusted_files+=("$rustup_executable")
-fi
+trusted_files=(
+  "$handoff_helper"
+  "$command_path"
+  "$node_executable"
+  "$pnpm_executable"
+  "$rustup_executable"
+)
 for trusted_file in "${trusted_files[@]}"; do
   mode="$(stat_mode "$trusted_file")"
   if [[ "$(stat_owner "$trusted_file")" != "$broker_uid" ||
@@ -198,6 +208,8 @@ artifact_workspace="$producer_root/workspace"
 trusted_root="$isolated_root/trusted"
 source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.json"
 trusted_command="$trusted_root/producer-command"
+trusted_node="$trusted_root/node"
+trusted_pnpm="$trusted_root/pnpm.cjs"
 trusted_rustup="$trusted_root/rustup"
 trusted_cargo="$trusted_root/cargo"
 trusted_rustc="$trusted_root/rustc"
@@ -485,21 +497,27 @@ if [[ -e "$source_record" || -L "$source_record" ]]; then
 fi
 cp "$command_path" "$trusted_command"
 cp "$handoff_helper" "$trusted_handoff"
-if [[ -n "$rustup_executable" ]]; then
-  cp "$rustup_executable" "$trusted_rustup"
-  cp "$rustup_executable" "$trusted_cargo"
-  cp "$rustup_executable" "$trusted_rustc"
-fi
+cp "$node_executable" "$trusted_node"
+cp "$pnpm_executable" "$trusted_pnpm"
+cp "$rustup_executable" "$trusted_rustup"
+cp "$rustup_executable" "$trusted_cargo"
+cp "$rustup_executable" "$trusted_rustc"
 if [[ "$host_os" == Darwin ]]; then
   /bin/chmod -RN "$producer_root" "$workspace" "$trusted_root"
 fi
-chown root:0 "$trusted_root" "$trusted_command" "$trusted_handoff"
+chown root:0 \
+  "$trusted_root" \
+  "$trusted_command" \
+  "$trusted_handoff" \
+  "$trusted_node" \
+  "$trusted_pnpm" \
+  "$trusted_rustup" \
+  "$trusted_cargo" \
+  "$trusted_rustc"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
-if [[ -n "$rustup_executable" ]]; then
-  chown root:0 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
-  chmod 555 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
-fi
+chmod 555 "$trusted_node" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+chmod 444 "$trusted_pnpm"
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \
@@ -571,6 +589,7 @@ restricted_environment=(
   "OPENCOVEN_UNIX_WORKSPACE=$workspace"
   "OPENCOVEN_UNIX_ARTIFACT_DIRECTORY=$artifact_workspace/.artifacts"
   "OPENCOVEN_UNIX_SOURCE_RECORD=$source_record"
+  "OPENCOVEN_UNIX_TRUSTED_PNPM=$trusted_pnpm"
 )
 if [[ -n "$validator_revision" ]]; then
   restricted_environment+=("OPENCOVEN_VALIDATOR_REVISION=$validator_revision")

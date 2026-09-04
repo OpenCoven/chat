@@ -259,6 +259,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             encoding: 'utf8',
           }).trim(),
         ).toBe(revision);
+        expect(existsSync(join(destination, '.git', 'objects', 'info', 'alternates'))).toBe(false);
       } finally {
         await owned.cleanup();
         rmSync(source, { recursive: true, force: true });
