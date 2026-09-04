@@ -4090,8 +4090,19 @@ namespace OpenCoven
                         {
                             continue;
                         }
-                        throw new InvalidOperationException(
-                            "WTS process primary token SID query was ambiguous.");
+                        // Fails closed: an owner this enumeration cannot read
+                        // is an owner it cannot rule out, so the refusal
+                        // stands. It names the process because the refusal is
+                        // otherwise unactionable -- a process that exited
+                        // between enumeration and read and a permanently
+                        // unreadable system process demand opposite fixes, and
+                        // the message carried neither.
+                        throw new InvalidOperationException(String.Format(
+                            CultureInfo.InvariantCulture,
+                            "WTS process primary token SID query was ambiguous "
+                                + "for process {0} in session {1}.",
+                            information.ProcessId,
+                            information.SessionId));
                     }
                     string sid = ConvertNativeSidToString(
                         information.pUserSid,
