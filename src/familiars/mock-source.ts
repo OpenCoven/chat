@@ -32,7 +32,9 @@ import type {
  *
  * This is the only place mock content lives, per the integration design.
  * Used by the demo build, tests, and the design board states. It always
- * resolves synchronously and never returns anything but `status: 'ok'`.
+ * resolves synchronously, and returns `status: 'ok'` for every id the demo
+ * fixtures cover; an id they do not cover resolves
+ * `{ status: 'error', code: 'not_found' }` rather than throwing.
  *
  * The demo's `FamActivity` is presentation-shaped (`completion: '100%'`,
  * `median: '1m 36s'`) because it was authored to match the design mockup

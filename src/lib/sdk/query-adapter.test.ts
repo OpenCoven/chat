@@ -586,6 +586,99 @@ describe('createQueryAdapter', () => {
     }
   });
 
+  it('forwards the familiar id for a contract read and caches it within the ttl', async () => {
+    let now = 1_000;
+    const client = createReadClient();
+    const adapter = createQueryAdapter(() => client, { now: () => now });
+
+    const first = await adapter.familiarContract('familiar-1');
+    const second = await adapter.familiarContract('familiar-1');
+
+    expect(client.familiarContract).toHaveBeenCalledTimes(1);
+    expect(client.familiarContract).toHaveBeenCalledWith(
+      'familiar-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(second).toBe(first);
+    expect(first).toMatchObject({ status: 'ok', data: { id: 'familiar-1' } });
+
+    now += 5_001;
+    await adapter.familiarContract('familiar-1');
+
+    expect(client.familiarContract).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads a different familiar rather than serving the cached contract of another', async () => {
+    const client = createReadClient();
+    const adapter = createQueryAdapter(() => client);
+
+    await adapter.familiarContract('familiar-1');
+    await adapter.familiarContract('familiar-2');
+
+    expect(client.familiarContract).toHaveBeenCalledTimes(2);
+    expect(client.familiarContract).toHaveBeenLastCalledWith('familiar-2', expect.anything());
+  });
+
+  it('omits analytics query members that were not supplied', async () => {
+    const client = createReadClient();
+    const adapter = createQueryAdapter(() => client);
+
+    await adapter.familiarAnalytics('familiar-1');
+
+    // An exact match, not objectContaining: the point is that `window` and
+    // `recentLimit` are absent rather than forwarded as undefined.
+    expect(client.familiarAnalytics).toHaveBeenCalledWith('familiar-1', {
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('forwards the analytics window and recent limit, keying the cache on both', async () => {
+    const client = createReadClient();
+    const adapter = createQueryAdapter(() => client);
+
+    await adapter.familiarAnalytics('familiar-1', { window: '7d', recentLimit: 5 });
+    await adapter.familiarAnalytics('familiar-1', { window: '7d', recentLimit: 5 });
+
+    expect(client.familiarAnalytics).toHaveBeenCalledTimes(1);
+    expect(client.familiarAnalytics).toHaveBeenCalledWith(
+      'familiar-1',
+      expect.objectContaining({ window: '7d', recentLimit: 5, signal: expect.any(AbortSignal) }),
+    );
+
+    // A different window is a different read, not a cache hit on the first.
+    await adapter.familiarAnalytics('familiar-1', { window: '14d', recentLimit: 5 });
+
+    expect(client.familiarAnalytics).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks an older analytics read stale once the ready client identity changes', async () => {
+    const pending = deferred<Awaited<ReturnType<CaveReadClient['familiarAnalytics']>>>();
+    const first = createReadClient({
+      familiarAnalytics: vi.fn().mockImplementation(() => pending.promise),
+    });
+    const second = createReadClient();
+    let current: CaveReadClient = first;
+    const adapter = createQueryAdapter(() => current);
+
+    const inflight = adapter.familiarAnalytics('familiar-1');
+    current = second;
+    pending.resolve({
+      generatedAt: '2026-08-25T00:00:00.000Z',
+      windows: {},
+      recentAttempts: [],
+      backfill: { state: 'complete', imported: 0 },
+    });
+
+    await expect(inflight).resolves.toEqual({ status: 'stale' });
+  });
+
+  it('returns not_ready for familiar reads when no ready client is available', async () => {
+    const adapter = createQueryAdapter(() => null);
+
+    await expect(adapter.familiarContract('familiar-1')).resolves.toEqual({ status: 'not_ready' });
+    await expect(adapter.familiarAnalytics('familiar-1')).resolves.toEqual({ status: 'not_ready' });
+  });
+
   it('returns frozen immutable snapshots for successful reads and result objects', async () => {
     const source = {
       data: [{ id: 'familiar-1', displayName: 'Mara', role: 'Guide' }],

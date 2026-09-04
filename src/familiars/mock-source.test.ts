@@ -45,7 +45,7 @@ describe('createMockFamiliarsSource', () => {
     expect(detail.present).toEqual({ soul: true, identity: true, ward: true, memory: true });
   });
 
-  it('reports memory absence as a failing contract property without a violation', async () => {
+  it('reports memory absence as a failing contract property with a matching violation', async () => {
     const source = createMockFamiliarsSource();
     const detail = unwrap(await source.familiar('echo'));
 
