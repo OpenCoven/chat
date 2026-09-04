@@ -304,11 +304,13 @@ has no administrator membership or usable password. Its `HOME`, artifact
 workspace, temporary directory, XDG roots, writable `node_modules`,
 pnpm caches, Cargo home, rustup home, and package store are fresh mode-`0700`
 directories below one ephemeral root. The supervisor resolves the exact Node,
-pnpm, and rustup executables while still running as the broker, validates
-their ownership and mode, and copies them into a root-owned, non-writable
-trusted directory. This preserves the standalone executable produced by the
-pinned `pnpm/action-setup` self-update instead of depending on its private
-installation path after the UID transition. The copied checkout and its
+pnpm, and rustup executables while still running as the broker and validates
+their ownership and mode. The pnpm launcher identifies its exact
+content-addressed `pnpm.cjs` package root; the supervisor validates that
+complete regular-file tree, copies it into a root-owned, non-writable trusted
+directory, and installs a fixed wrapper that invokes it through the trusted
+Node copy. This preserves the self-updated pnpm runtime without depending on
+its private installation path after the UID transition. The copied checkout and its
 tracked harness/validator launch sources are root-owned and recursively
 non-writable; local Git clones receive only the exact source path as
 `safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
@@ -1022,7 +1024,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,094 | `567b3645b7bf03557b179c18bf506d177518de085ec403d559974f6230721123` |
+| `.github/workflows/client-v1-conformance.yml` | 462,104 | `a7560a38f1695153c312a0b57ed539819488159cec393e97fbca46a680da8232` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1042,9 +1044,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 26,770 | `0660d3737b7f551f7e6c9d99d3bf32efedc167c175030de1ad0565d2da8f38f9` |
+| `scripts/unix-producer-supervisor.sh` | 28,719 | `f8d83127dff844cc6ab141a39faf9d7dcd3d3c07302449604e6fc247269105c7` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 10,128 | `81ec10e424408791c9c4e57f29e159036d6c1607eb3679486604b7c6ff691556` |
+| `scripts/unix-producer-supervisor.test.sh` | 10,418 | `20d07612efc11561342e3dcbc7976b258ff5db627970b3e8c6a2da32b9196b1e` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
