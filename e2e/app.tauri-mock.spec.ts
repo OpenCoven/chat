@@ -291,6 +291,14 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
 
   await page.goto('/');
 
+  // Cave is opt-in now: the app is already usable before this click.
+  await expect(page.getByRole('button', { name: 'This device' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'Connect to Cave' }).click();
+  await page.getByRole('button', { name: 'Coven Cave' }).click();
+
   await expect(page.getByRole('heading', { name: 'Mocked native thread' })).toBeVisible();
   await expect(page.getByText('Hello from mocked Cave.')).toBeVisible();
   await expect(page.getByText('OpenCoven Chat', { exact: true })).toBeVisible();

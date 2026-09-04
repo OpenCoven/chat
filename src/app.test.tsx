@@ -3,10 +3,32 @@ import { StrictMode } from 'react';
 
 import { App } from './app';
 import type { DesktopHost } from './lib/desktop-host';
+import { EMPTY_RECORDS } from './lib/local/chat-records';
+import type { LocalChatSource } from './lib/local/chat-source';
+import { createChatStore } from './lib/local/chat-store';
+import { createLocalChatWriter } from './lib/local/chat-writer';
+import { createLocalQueryAdapter, LOCAL_FAMILIAR_ID } from './lib/local/local-query-adapter';
+import { createMemoryChatBackend } from './lib/local/memory-backend';
 import type { CaveConnectionController } from './lib/sdk/connection-controller';
 import type { QueryAdapter } from './lib/sdk/query-adapter';
 
 const INSTALLATION_ID = '0b59fec4-5d8e-4d5c-894d-39fcb5f3eef7';
+
+function createLocalSourceFactory() {
+  const store = createChatStore(createMemoryChatBackend(), EMPTY_RECORDS, {
+    familiarId: LOCAL_FAMILIAR_ID,
+  });
+  const source: LocalChatSource = Object.freeze({
+    kind: 'local',
+    label: 'This device',
+    adapter: createLocalQueryAdapter(store),
+    writer: createLocalChatWriter(store),
+    isDurable: store.isDurable(),
+    store,
+  });
+
+  return Object.freeze({ store, factory: () => Promise.resolve(source) });
+}
 
 function createControllerHarness(
   initialState: CaveConnectionController['getState'] extends () => infer T ? T : never,
@@ -115,26 +137,79 @@ function makeQueryAdapter(): QueryAdapter {
 }
 
 describe('App', () => {
-  it('renders the production browser fallback without creating a controller', () => {
+  it('mounts local chat without touching Cave', async () => {
     const controllerFactory = vi.fn();
     const readInstallationId = vi.fn<DesktopHost['readInstallationId']>();
+    const local = createLocalSourceFactory();
 
     render(
       <App
-        desktopIdentityHost={{ canUseTauriCommands: () => false, readInstallationId }}
         controllerFactory={controllerFactory}
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+        localSourceFactory={local.factory}
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'OpenCoven Chat' })).toBeVisible();
-    expect(screen.getByRole('status', { name: 'Connection state' })).toHaveTextContent(
-      'Cave connection requires the desktop app. Open in the OpenCoven app to connect.',
-    );
+    expect(await screen.findByText('This device')).toBeVisible();
     expect(controllerFactory).not.toHaveBeenCalled();
     expect(readInstallationId).not.toHaveBeenCalled();
   });
 
-  it('bootstraps the controller with the native installation ID exactly once in StrictMode', async () => {
+  it('keeps local chat usable when Tauri commands are unavailable', async () => {
+    const controllerFactory = vi.fn();
+    const readInstallationId = vi.fn<DesktopHost['readInstallationId']>();
+    const local = createLocalSourceFactory();
+
+    render(
+      <App
+        controllerFactory={controllerFactory}
+        desktopIdentityHost={{ canUseTauriCommands: () => false, readInstallationId }}
+        localSourceFactory={local.factory}
+      />,
+    );
+
+    expect(
+      await screen.findByText('Coven Cave needs the desktop app. Local chat works here.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Connect to Cave' })).toBeNull();
+    expect(controllerFactory).not.toHaveBeenCalled();
+    expect(readInstallationId).not.toHaveBeenCalled();
+  });
+
+  it('writes a local message and shows it without a fabricated reply', async () => {
+    const local = createLocalSourceFactory();
+
+    render(
+      <App
+        desktopIdentityHost={{
+          canUseTauriCommands: () => false,
+          readInstallationId: vi.fn<DesktopHost['readInstallationId']>(),
+        }}
+        localSourceFactory={local.factory}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }));
+    await screen.findByRole('option', { name: /New conversation/ });
+
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    await waitFor(() => {
+      expect(input).toBeEnabled();
+    });
+    fireEvent.change(input, { target: { value: 'first local note' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('first local note')).toBeVisible();
+    // The harness uses the memory backend, so the app must say so rather than
+    // implying the note was saved.
+    expect(
+      screen.getByText(
+        'This device has no available storage, so these messages are kept in memory only and will be lost when the app closes.',
+      ),
+    ).toBeVisible();
+  });
+
+  it('starts Cave only after the user opts in, exactly once in StrictMode', async () => {
     const harness = createControllerHarness({
       state: 'ready',
       caveInstanceId: 'cave-1',
@@ -145,66 +220,41 @@ describe('App', () => {
       .fn<DesktopHost['readInstallationId']>()
       .mockResolvedValue(INSTALLATION_ID);
     const controllerFactory = vi.fn(() => harness.controller);
+    const local = createLocalSourceFactory();
+
     const { unmount } = render(
       <StrictMode>
         <App
-          desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
           controllerFactory={controllerFactory}
+          desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+          localSourceFactory={local.factory}
           queryAdapterFactory={() => queryAdapter}
         />
       </StrictMode>,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect to Cave' }));
+
     await waitFor(() => {
       expect(harness.controller.start).toHaveBeenCalledTimes(1);
     });
-    await screen.findByText('Hello from Cave.');
     expect(readInstallationId).toHaveBeenCalledTimes(1);
     expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Coven Cave' }));
+    expect(await screen.findByText('Hello from Cave.')).toBeVisible();
 
     expect(harness.controller.dispose).not.toHaveBeenCalled();
     expect(queryAdapter.dispose).not.toHaveBeenCalled();
 
     unmount();
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
-
-    expect(harness.controller.dispose).toHaveBeenCalledTimes(1);
-    expect(queryAdapter.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it('preserves the desktop host receiver while reading the installation ID', async () => {
-    const harness = createControllerHarness({
-      state: 'ready',
-      caveInstanceId: 'cave-1',
-      covenAvailable: false,
-    });
-    const queryAdapter = makeQueryAdapter();
-    const desktopIdentityHost = {
-      installationId: INSTALLATION_ID,
-      canUseTauriCommands() {
-        return true;
-      },
-      readInstallationId() {
-        return Promise.resolve(this.installationId);
-      },
-    };
-    const controllerFactory = vi.fn(() => harness.controller);
-
-    render(
-      <App
-        desktopIdentityHost={desktopIdentityHost}
-        controllerFactory={controllerFactory}
-        queryAdapterFactory={() => queryAdapter}
-      />,
-    );
-
     await waitFor(() => {
-      expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
+      expect(harness.controller.dispose).toHaveBeenCalledTimes(1);
+      expect(queryAdapter.dispose).toHaveBeenCalledTimes(1);
     });
   });
 
-  it('invalidates query reads when the connection leaves ready without disposing the adapter', async () => {
+  it('invalidates query reads and falls back to local when the connection leaves ready', async () => {
     const harness = createControllerHarness({
       state: 'ready',
       caveInstanceId: 'cave-1',
@@ -214,18 +264,24 @@ describe('App', () => {
     const readInstallationId = vi
       .fn<DesktopHost['readInstallationId']>()
       .mockResolvedValue(INSTALLATION_ID);
+    const local = createLocalSourceFactory();
+
     const { unmount } = render(
       <App
-        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
         controllerFactory={() => harness.controller}
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+        localSourceFactory={local.factory}
         queryAdapterFactory={() => queryAdapter}
       />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect to Cave' }));
     await waitFor(() => {
       expect(harness.controller.start).toHaveBeenCalledTimes(1);
     });
-    await screen.findByText('Hello from Cave.');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Coven Cave' }));
+    expect(await screen.findByText('Hello from Cave.')).toBeVisible();
 
     act(() => {
       harness.setState({
@@ -239,15 +295,13 @@ describe('App', () => {
       expect(queryAdapter.invalidate).toHaveBeenCalledTimes(1);
     });
     expect(queryAdapter.dispose).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
-      'Cave offline. Retry the connection or start Cave.',
-    );
+    // The Cave view is gone, but the user still has their own chat.
+    expect(await screen.findByText('Local chat')).toBeVisible();
 
     unmount();
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
   });
 
-  it('rejects malformed and failed installation bootstrap reads before retrying', async () => {
+  it('disables Cave pairing but not local chat when the installation identity is unavailable', async () => {
     const harness = createControllerHarness({
       state: 'ready',
       caveInstanceId: 'cave-1',
@@ -260,14 +314,18 @@ describe('App', () => {
       .mockResolvedValueOnce(INSTALLATION_ID);
     const controllerFactory = vi.fn(() => harness.controller);
     const queryAdapterFactory = vi.fn(makeQueryAdapter);
+    const local = createLocalSourceFactory();
 
     render(
       <App
-        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
         controllerFactory={controllerFactory}
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+        localSourceFactory={local.factory}
         queryAdapterFactory={queryAdapterFactory}
       />,
     );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect to Cave' }));
 
     expect(await screen.findByRole('alert', { name: 'Connection state' })).toHaveTextContent(
       'Secure installation identity unavailable. Retry setup to continue.',
@@ -276,23 +334,15 @@ describe('App', () => {
     expect(queryAdapterFactory).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry setup' }));
-
     await waitFor(() => {
       expect(readInstallationId).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole('alert', { name: 'Connection state' })).toHaveTextContent(
-        'Secure installation identity unavailable. Retry setup to continue.',
-      );
     });
     expect(controllerFactory).not.toHaveBeenCalled();
-    expect(queryAdapterFactory).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry setup' }));
-
-    await waitFor(() => {
-      expect(readInstallationId).toHaveBeenCalledTimes(3);
-      expect(controllerFactory).toHaveBeenCalledWith(INSTALLATION_ID);
-      expect(queryAdapterFactory).toHaveBeenCalledTimes(1);
-      expect(harness.controller.start).toHaveBeenCalledTimes(1);
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Keep using local chat' }));
+    expect(screen.getByRole('button', { name: 'This device' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 });
