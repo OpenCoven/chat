@@ -511,6 +511,9 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
     expect(childEnvironment).not.toContain('OPENCOVEN_WINDOWS_GITHUB_TOKEN');
     expect(childEnvironment).not.toContain('github.token');
+    expect(childEnvironment).toContain(
+      'PATH = "$nodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\\Windows\\System32;C:\\Windows"',
+    );
     expect(workflow).not.toContain('      - name: Install frozen Windows supervisor');
     expect(workflow).not.toContain(
       '        run: pwsh -NoProfile -File scripts/phase1-windows-supervisor-install.ps1',
@@ -2212,6 +2215,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(supervisor).toContain('trusted_rustup="$trusted_root/rustup"');
     expect(supervisor).toContain('trusted_cargo="$trusted_root/cargo"');
     expect(supervisor).toContain('trusted_rustc="$trusted_root/rustc"');
+    expect(supervisor).toContain('trusted_pnpm_root="$trusted_root/pnpm-runtime"');
+    expect(supervisor).toContain('trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"');
+    expect(supervisor).toContain('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"');
+    expect(supervisor).toContain(
+      'exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"',
+    );
     expect(supervisor).toContain('/bin/test -w "$tool_directory"');
     expect(supervisor).not.toContain('/usr/bin/test');
     expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');

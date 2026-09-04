@@ -9035,7 +9035,7 @@ jobs:
               WINDIR = 'C:\Windows'
               COMSPEC = $trustedComspec
               PATHEXT = '.COM;.EXE;.BAT;.CMD'
-              PATH = "$([IO.Path]::GetDirectoryName($trustedPwsh));C:\Windows\System32;C:\Windows"
+              PATH = "$nodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\Windows\System32;C:\Windows"
               HOME = $isolatedUser.ProfilePath
               TEMP = $isolatedUser.TempPath
               TMP = $isolatedUser.TempPath
@@ -9508,7 +9508,7 @@ jobs:
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
             ['scripts/unix-producer-command.sh', [3223, 'ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8']],
-            ['scripts/unix-producer-supervisor.sh', [26770, '0660d3737b7f551f7e6c9d99d3bf32efedc167c175030de1ad0565d2da8f38f9']],
+            ['scripts/unix-producer-supervisor.sh', [28719, 'f8d83127dff844cc6ab141a39faf9d7dcd3d3c07302449604e6fc247269105c7']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);

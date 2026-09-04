@@ -108,6 +108,24 @@ pnpm_executable="$(canonical_file "$pnpm_executable")" ||
   { echo 'unix-producer-supervisor: pnpm executable is unsafe' >&2; exit 1; }
 rustup_executable="$(canonical_file "$rustup_executable")" ||
   { echo 'unix-producer-supervisor: rustup executable is unsafe' >&2; exit 1; }
+pnpm_cli="$(
+  LC_ALL=C /usr/bin/sed -n 's/^# cmd-shim-target=//p' "$pnpm_executable"
+)"
+if [[ "$pnpm_cli" != /* || "$pnpm_cli" == *$'\n'* ]]; then
+  echo 'unix-producer-supervisor: pnpm launcher target is unsafe' >&2
+  exit 1
+fi
+pnpm_cli="$(canonical_file "$pnpm_cli")" ||
+  { echo 'unix-producer-supervisor: pnpm CLI entrypoint is unsafe' >&2; exit 1; }
+pnpm_bin_directory="$(canonical_directory "$(dirname "$pnpm_cli")")" ||
+  { echo 'unix-producer-supervisor: pnpm bin directory is unsafe' >&2; exit 1; }
+pnpm_runtime_root="$(canonical_directory "$(dirname "$pnpm_bin_directory")")" ||
+  { echo 'unix-producer-supervisor: pnpm runtime root is unsafe' >&2; exit 1; }
+if [[ "$(basename "$pnpm_runtime_root")" != pnpm ||
+      "$pnpm_cli" != "$pnpm_runtime_root/bin/pnpm.cjs" ]]; then
+  echo 'unix-producer-supervisor: pnpm launcher target is unexpected' >&2
+  exit 1
+fi
 if [[ "$destination_path" != /* ]]; then
   destination_path="$(pwd -P)/$destination_path"
 fi
@@ -151,6 +169,7 @@ trusted_files=(
   "$command_path"
   "$node_executable"
   "$pnpm_executable"
+  "$pnpm_cli"
   "$rustup_executable"
 )
 for trusted_file in "${trusted_files[@]}"; do
@@ -162,6 +181,26 @@ for trusted_file in "${trusted_files[@]}"; do
     exit 1
   fi
 done
+
+while IFS= read -r -d '' trusted_file; do
+  mode="$(stat_mode "$trusted_file")"
+  if [[ -L "$trusted_file" ||
+        "$(stat_owner "$trusted_file")" != "$broker_uid" ||
+        $((8#$mode & 8#022)) -ne 0 ]]; then
+    echo 'unix-producer-supervisor: pnpm runtime ownership or mode is unsafe' >&2
+    exit 1
+  fi
+  if [[ -f "$trusted_file" ]]; then
+    if [[ "$(stat_links "$trusted_file")" != 1 ]]; then
+      echo 'unix-producer-supervisor: pnpm runtime file has multiple links' >&2
+      exit 1
+    fi
+  elif [[ ! -d "$trusted_file" ]]; then
+    echo 'unix-producer-supervisor: pnpm runtime contains a special file' >&2
+    exit 1
+  fi
+done < <(/usr/bin/find -P "$pnpm_runtime_root" -xdev -print0)
+
 temp_mode="$(stat_mode "$temp_root")"
 destination_mode="$(stat_mode "$destination_parent")"
 if [[ "$(stat_owner "$temp_root")" != "$broker_uid" ||
@@ -210,6 +249,8 @@ source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.js
 trusted_command="$trusted_root/producer-command"
 trusted_node="$trusted_root/node"
 trusted_pnpm="$trusted_root/pnpm"
+trusted_pnpm_root="$trusted_root/pnpm-runtime"
+trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"
 trusted_rustup="$trusted_root/rustup"
 trusted_cargo="$trusted_root/cargo"
 trusted_rustc="$trusted_root/rustc"
@@ -498,7 +539,13 @@ fi
 cp "$command_path" "$trusted_command"
 cp "$handoff_helper" "$trusted_handoff"
 cp "$node_executable" "$trusted_node"
-cp "$pnpm_executable" "$trusted_pnpm"
+mkdir -m 555 "$trusted_pnpm_root"
+cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"
+cat >"$trusted_pnpm" <<'EOF'
+#!/bin/sh
+trusted_root=${0%/*}
+exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"
+EOF
 cp "$rustup_executable" "$trusted_rustup"
 cp "$rustup_executable" "$trusted_cargo"
 cp "$rustup_executable" "$trusted_rustc"
@@ -514,9 +561,11 @@ chown root:0 \
   "$trusted_rustup" \
   "$trusted_cargo" \
   "$trusted_rustc"
+chown -R -h root:0 "$trusted_pnpm_root"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
 chmod 555 "$trusted_node" "$trusted_pnpm" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+chmod -R a+rX,a-w "$trusted_pnpm_root"
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \

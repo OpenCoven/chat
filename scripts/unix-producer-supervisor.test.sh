@@ -132,17 +132,28 @@ printf 'fixture\n' >"$source_root/tracked.txt"
 
 trusted_tool_source="$scratch_root/trusted-tool-source"
 trusted_tool_command="$scratch_root/trusted-tool-command"
-mkdir -m 700 "$trusted_tool_source"
+pnpm_runtime="$trusted_tool_source/pnpm-runtime"
+mkdir -p -m 700 "$pnpm_runtime/bin"
 cat >"$trusted_tool_source/node" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "$1" == */pnpm.cjs ]]; then
+  script=$1
+  shift
+  exec "$script" "$@"
+fi
 [[ "$1" == --check ]]
 EOF
-cat >"$trusted_tool_source/pnpm" <<'EOF'
+cat >"$pnpm_runtime/bin/pnpm.cjs" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ "$1" == --check ]]
 EOF
+printf '%s\n' \
+  '#!/bin/sh' \
+  'exit 99' \
+  "# cmd-shim-target=$pnpm_runtime/bin/pnpm.cjs" \
+  >"$trusted_tool_source/pnpm"
 cat >"$trusted_tool_source/rustup" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -168,6 +179,7 @@ EOF
 chmod 500 \
   "$trusted_tool_source/node" \
   "$trusted_tool_source/pnpm" \
+  "$pnpm_runtime/bin/pnpm.cjs" \
   "$trusted_tool_source/rustup" \
   "$trusted_tool_command"
 
