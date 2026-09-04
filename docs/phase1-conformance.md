@@ -1024,7 +1024,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,104 | `a7560a38f1695153c312a0b57ed539819488159cec393e97fbca46a680da8232` |
+| `.github/workflows/client-v1-conformance.yml` | 462,104 | `256441056fabb6668875f56e1e1aa7a38300e254f4cd6e70946a37937d46f00a` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1044,9 +1044,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 28,719 | `f8d83127dff844cc6ab141a39faf9d7dcd3d3c07302449604e6fc247269105c7` |
+| `scripts/unix-producer-supervisor.sh` | 28,757 | `141c2cc95f2a73a70df70536ca83e825b0bd043f5cdab6ca0f7a92ee2f4b8dff` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 13,314 | `1d189e1c576ec40d5b9630556098227203690532a58d90dc2e1b20f4891d3dbf` |
+| `scripts/unix-producer-supervisor.test.sh` | 13,546 | `57bb329a05b21c9ed86d998738797a5de3ba4a9eb3f1faa7c7e7fea1cfe35bc8` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
