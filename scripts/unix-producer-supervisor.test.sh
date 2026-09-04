@@ -136,15 +136,22 @@ mkdir -m 700 "$trusted_tool_source"
 cat >"$trusted_tool_source/rustup" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-[[ "$1" == --emit-record ]]
-printf '{"platform":"%s","schemaVersion":2}\n' \
-  "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" >"$OPENCOVEN_UNIX_SOURCE_RECORD"
-chmod 600 "$OPENCOVEN_UNIX_SOURCE_RECORD"
+case "$(basename "$0"):$1" in
+  rustup:--install|cargo:--check) ;;
+  rustc:--emit-record)
+    printf '{"platform":"%s","schemaVersion":2}\n' \
+      "$OPENCOVEN_UNIX_PRODUCER_PLATFORM" >"$OPENCOVEN_UNIX_SOURCE_RECORD"
+    chmod 600 "$OPENCOVEN_UNIX_SOURCE_RECORD"
+    ;;
+  *) exit 1 ;;
+esac
 EOF
 cat >"$trusted_tool_command" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-rustup --emit-record
+rustup --install
+cargo --check
+rustc --emit-record
 EOF
 chmod 500 "$trusted_tool_source/rustup" "$trusted_tool_command"
 

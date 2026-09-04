@@ -199,6 +199,8 @@ trusted_root="$isolated_root/trusted"
 source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.json"
 trusted_command="$trusted_root/producer-command"
 trusted_rustup="$trusted_root/rustup"
+trusted_cargo="$trusted_root/cargo"
+trusted_rustc="$trusted_root/rustc"
 trusted_handoff="$trusted_root/unix-artifact-handoff"
 
 producer_uid=
@@ -485,6 +487,8 @@ cp "$command_path" "$trusted_command"
 cp "$handoff_helper" "$trusted_handoff"
 if [[ -n "$rustup_executable" ]]; then
   cp "$rustup_executable" "$trusted_rustup"
+  cp "$rustup_executable" "$trusted_cargo"
+  cp "$rustup_executable" "$trusted_rustc"
 fi
 if [[ "$host_os" == Darwin ]]; then
   /bin/chmod -RN "$producer_root" "$workspace" "$trusted_root"
@@ -493,8 +497,8 @@ chown root:0 "$trusted_root" "$trusted_command" "$trusted_handoff"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
 if [[ -n "$rustup_executable" ]]; then
-  chown root:0 "$trusted_rustup"
-  chmod 555 "$trusted_rustup"
+  chown root:0 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+  chmod 555 "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
 fi
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \

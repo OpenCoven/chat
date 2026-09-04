@@ -9486,7 +9486,7 @@ jobs:
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
             ['scripts/unix-producer-command.sh', [3250, 'd786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab']],
-            ['scripts/unix-producer-supervisor.sh', [25877, '4223697ff1cd8ba27bd628572e2d5b644d791c8ca22855a1aea4ff627839cb3f']],
+            ['scripts/unix-producer-supervisor.sh', [26103, 'cdc8c937306df3b1cbaaa1459c41b8c56e9158a38c5bb9b11c5e81c0b7780f9f']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);

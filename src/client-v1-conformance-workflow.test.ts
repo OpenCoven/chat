@@ -2196,6 +2196,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('trusted_rustup="$trusted_root/rustup"');
+    expect(supervisor).toContain('trusted_cargo="$trusted_root/cargo"');
+    expect(supervisor).toContain('trusted_rustc="$trusted_root/rustc"');
     expect(supervisor).toContain('/bin/test -w "$tool_directory"');
     expect(supervisor).not.toContain('/usr/bin/test');
     expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');
