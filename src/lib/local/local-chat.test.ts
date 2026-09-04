@@ -416,6 +416,22 @@ describe('local query adapter surface', () => {
     }
   });
 
+  it('reports contract and analytics as unavailable rather than inventing them', async () => {
+    const { store } = await seedConversations(1);
+    const adapter = createLocalQueryAdapter(store);
+
+    // An empty contract would read as "this familiar is permitted nothing",
+    // which is a different claim from "nobody asked Cave".
+    await expect(adapter.familiarContract(LOCAL_FAMILIAR_ID)).resolves.toEqual({
+      status: 'error',
+      code: 'service_unavailable',
+    });
+    await expect(adapter.familiarAnalytics(LOCAL_FAMILIAR_ID)).resolves.toEqual({
+      status: 'error',
+      code: 'service_unavailable',
+    });
+  });
+
   it('never emits loading, stale, or reconcile_required', async () => {
     const { store } = await seedConversations(1);
     const adapter = createLocalQueryAdapter(store);
@@ -427,6 +443,8 @@ describe('local query adapter surface', () => {
         adapter.listConversations(),
         adapter.getConversation('missing'),
         adapter.listMessages('missing'),
+        adapter.familiarContract('missing'),
+        adapter.familiarAnalytics('missing'),
       ])
     ).map((result) => result.status);
 
