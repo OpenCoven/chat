@@ -245,3 +245,14 @@ The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
 intentionally kept outside the ignore rules so the capability `$schema` can ship
 with fresh checkouts without granting permissions beyond the reviewed app and
 Cave adapter commands.
+
+## Releasing
+
+Releases are cut from signed `v*` tags by
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which verifies
+the tag signature, checks the tag against every version manifest, builds and
+smoke-tests bundles for macOS (Apple silicon and Intel), Windows, and Debian
+Linux, publishes SHA-256 checksums, and creates the GitHub Release.
+
+The full process, the signing secrets, the dry-run rehearsal path, and the
+failure playbook are documented in [`docs/releasing.md`](docs/releasing.md).
