@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 
+import './familiars-settings.css';
+
 import {
   backfillNote,
   CAVE_ANALYTICS_WINDOWS,
@@ -235,7 +237,7 @@ export function FamiliarsPage() {
             </div>
           </>
         ) : (
-          <p className="fam-empty">No familiar selected.</p>
+          <p className="fam-detail-empty">No familiar selected.</p>
         )}
       </section>
     </div>

@@ -1,6 +1,7 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
 import { canUseTauriCommands } from '../lib/desktop-host';
+import './minimal-macos.css';
 import {
   backfillNote,
   CAVE_ANALYTICS_WINDOWS,

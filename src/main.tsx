@@ -1,20 +1,30 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
-import { StrictMode } from 'react';
+import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app';
-import { DemoShell } from './demo/chat-demo';
-import './demo/chat-demo.css';
-import { FamiliarsShell } from './demo/familiars-shell';
-import './demo/familiars-shell.css';
-import { createMockFamiliarsSource } from './familiars/mock-source';
-import { FamiliarsReadsShell } from './familiars/reads-shell';
-import './familiars/reads-shell.css';
-import { MinimalMacOS } from './demo/minimal-macos';
-import './demo/minimal-macos.css';
 import './styles.css';
 import './ui/ui.css';
+
+const DemoShell = lazy(async () => ({
+  default: (await import('./demo/chat-demo')).DemoShell,
+}));
+const FamiliarsShell = lazy(async () => ({
+  default: (await import('./demo/familiars-shell')).FamiliarsShell,
+}));
+const MinimalMacOS = lazy(async () => ({
+  default: (await import('./demo/minimal-macos')).MinimalMacOS,
+}));
+const FamiliarsReadsShell = lazy(async () => {
+  const [{ FamiliarsReadsShell: Shell }, { createMockFamiliarsSource }] = await Promise.all([
+    import('./familiars/reads-shell'),
+    import('./familiars/mock-source'),
+  ]);
+  const source = createMockFamiliarsSource();
+
+  return { default: () => <Shell source={source} /> };
+});
 
 const rootElement = document.getElementById('root');
 
@@ -43,6 +53,9 @@ if (!rootElement) {
  * honestly serve today, against `MockFamiliarsSource`. It previews the
  * eventual production route; `chat`'s richer, Stage 2-4 behavior stays
  * demo-only until Cave serves it.
+ *
+ * Each demo, its stylesheet, and its mock data are lazy: only the read-only
+ * production app ships in the default bundle.
  */
 /**
  * A demo build opens on a demo surface without a query flag.
@@ -56,18 +69,36 @@ const demo = new URLSearchParams(window.location.search).get('demo') ?? defaultD
 
 function surfaceFor(name: string | null) {
   if (name === 'chat') {
-    return <FamiliarsShell />;
+    return (
+      <Suspense fallback={null}>
+        <FamiliarsShell />
+      </Suspense>
+    );
   }
 
   if (name === 'messages') {
-    return <DemoShell />;
+    return (
+      <Suspense fallback={null}>
+        <DemoShell />
+      </Suspense>
+    );
   }
 
   if (name === 'familiars-reads') {
-    return <FamiliarsReadsShell source={createMockFamiliarsSource()} />;
+    return (
+      <Suspense fallback={null}>
+        <FamiliarsReadsShell />
+      </Suspense>
+    );
   }
 
-  return name === 'minimal' ? <MinimalMacOS /> : <App />;
+  return name === 'minimal' ? (
+    <Suspense fallback={null}>
+      <MinimalMacOS />
+    </Suspense>
+  ) : (
+    <App />
+  );
 }
 
 createRoot(rootElement).render(<StrictMode>{surfaceFor(demo)}</StrictMode>);

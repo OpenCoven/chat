@@ -8,7 +8,7 @@ import {
 } from './minimal-familiar-sdk';
 import { Icon, type IconName } from './minimal-icons';
 import { contractReport, type MockFamiliar } from './mock-familiars';
-import { MOCK_CREDENTIAL, MOCK_HEALTH } from './settings-page';
+import { MOCK_CREDENTIAL, MOCK_HEALTH } from './mock-settings';
 
 type InspectorTab = 'overview' | 'access' | 'activity';
 type InspectorView = 'agent' | 'app';
