@@ -902,6 +902,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
   test('runs one inline supervised Windows production before every action or repository command', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const producer = workflowJob(workflow, 'platform-conformance');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const stepsStart = producer.indexOf('    steps:\n');
     const bootstrapStart = producer.indexOf(
       '      - name: Bootstrap supervised Windows conformance',
@@ -916,6 +917,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
+    expect(childBootstrap).toContain(
+      "if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)",
+    );
+    expect(childBootstrap).not.toContain(
+      "if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)",
+    );
 
     for (const name of [
       'Install frozen Linux Secret Service',
@@ -2160,8 +2167,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
-    expect(toolPathStep).toContain("[''node'', ''corepack'', ''rustup'']");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
+    expect(toolPathStep).toContain("[''node'', ''corepack'']");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
+    expect(unixStep).toContain(
+      '--rustup-executable "$' + "{{ steps['unix-tool-path'].outputs.rustup_executable }}\"",
+    );
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
     );
