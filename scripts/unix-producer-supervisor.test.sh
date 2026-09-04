@@ -145,6 +145,15 @@ run_supervisor() {
     --timeout-seconds 30
 }
 
+if [[ "$platform" == darwin-arm64 ]]; then
+  inaccessible_cwd="$scratch_root/inaccessible-cwd"
+  mkdir -m 700 "$inaccessible_cwd"
+  (
+    cd "$inaccessible_cwd"
+    run_supervisor success
+  )
+fi
+
 set +e
 no_argument_output="$(
   sudo -n "$supervisor" \
@@ -161,6 +170,7 @@ set -e
 if (( no_argument_status == 0 )) ||
    [[ "$no_argument_output" != *'usage: unix-producer-supervisor-attack CASE'* ]] ||
    [[ "$no_argument_output" == *'command_arguments[@]: unbound variable'* ]]; then
+  printf '%s\n' "$no_argument_output" >&2
   echo 'zero command arguments were not forwarded safely' >&2
   exit 1
 fi

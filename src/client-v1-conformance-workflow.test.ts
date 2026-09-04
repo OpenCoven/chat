@@ -161,6 +161,16 @@ function countOccurrences(value: string, expected: string): number {
   return value.split(expected).length - 1;
 }
 
+const windowsDirectoryOwnershipGuardStub = `
+Add-Type -TypeDefinition @'
+namespace OpenCoven {
+  public static class WindowsJobSupervisor {
+    public static void RequireCurrentIdentityOwnsIsolatedDirectory(string path) {}
+  }
+}
+'@
+`;
+
 function staticLocalMjsModuleGraph(entryPath: string): string[] {
   const modules = new Set<string>();
   const pending = [entryPath];
@@ -2267,6 +2277,30 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('starts the macOS producer from a trusted CWD before changing identity', () => {
+    const supervisor = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
+      'utf8',
+    );
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.test.sh'),
+      'utf8',
+    );
+    const attackFixture = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor-attack.c'),
+      'utf8',
+    );
+
+    expect(supervisor).toMatch(
+      /\(\s+cd \/\s+exec \/usr\/bin\/sudo -n -u "#\$producer_uid"[\s\S]*?\) &/u,
+    );
+    expect(runtimeTest).toContain('inaccessible_cwd="$scratch_root/inaccessible-cwd"');
+    expect(runtimeTest).toContain('mkdir -m 700 "$inaccessible_cwd"');
+    expect(runtimeTest).toMatch(/\(\s+cd "\$inaccessible_cwd"\s+run_supervisor success\s+\)/u);
+    expect(attackFixture).toContain('strcmp(cwd, required_text("OPENCOVEN_UNIX_WORKSPACE"))');
+    expect(attackFixture).toContain('descriptor = open("tracked.txt", O_RDONLY | O_CLOEXEC)');
+  });
+
   test('defers the Unix Tauri CLI check until after the frozen dependency install', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
@@ -2283,6 +2317,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(tauriIndex).toBeGreaterThan(installIndex);
+  });
+
+  test('binds the restricted Unix install to the isolated pnpm store', () => {
+    const command = readFileSync(unixProducerCommandPath, 'utf8');
+    const install = command.match(/^corepack pnpm install .*$/mu)?.[0];
+
+    expect(install).toBe(
+      'corepack pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+    );
   });
 
   test('pins and verifies the complete supervised Windows bootstrap and evidence tree', () => {
@@ -2385,6 +2428,45 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
+  test('binds each embedded Windows child process to the checked filesystem location', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const runBody = workflowRunBody(bootstrap);
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+    const checkoutMarker = "Write-Host 'git fetch exact protected Chat revision'";
+    const checkoutMarkerIndex = childBootstrap.indexOf(checkoutMarker);
+    const checkoutStart = childBootstrap.lastIndexOf(
+      'Push-Location $workspace',
+      checkoutMarkerIndex,
+    );
+    const checkoutEnd = childBootstrap.indexOf(
+      '\n} finally {\n  Pop-Location\n}',
+      checkoutMarkerIndex,
+    );
+    const checkoutSequence = childBootstrap.slice(checkoutStart, checkoutEnd);
+
+    expect(invokeChecked).toContain('$location = Get-Location');
+    expect(invokeChecked).toContain("$location.Provider.Name -cne 'FileSystem'");
+    expect(invokeChecked).toContain('$workingDirectory = $location.ProviderPath');
+    expect(invokeChecked).toContain('[IO.Path]::IsPathFullyQualified($workingDirectory)');
+    expect(invokeChecked).toContain(
+      '[OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(',
+    );
+    expect(invokeChecked).toContain('$startInfo.WorkingDirectory = $workingDirectory');
+    expect(invokeChecked.indexOf('$startInfo.WorkingDirectory = $workingDirectory')).toBeLessThan(
+      invokeChecked.indexOf('$process.Start()'),
+    );
+
+    expect(checkoutStart).toBeGreaterThan(-1);
+    expect(checkoutEnd).toBeGreaterThan(checkoutStart);
+    expect(checkoutSequence).toContain(checkoutMarker);
+    expect(countOccurrences(checkoutSequence, 'Invoke-Checked `')).toBe(4);
+    expect(runBody).toMatch(
+      /\$job\.RunProducerAsUserAndQuarantine\([\s\S]*?\$childBootstrapPath[\s\S]*?\$bootstrapRoot,[\s\S]*?\$childEnvironment,[\s\S]*?\[TimeSpan\]::FromMinutes\(55\)/u,
+    );
+  });
+
   test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
     'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
     () => {
@@ -2394,6 +2476,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+${windowsDirectoryOwnershipGuardStub}
 ${invokeChecked}
 $LASTEXITCODE = 0
 try {
@@ -2421,6 +2504,7 @@ try {
     const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+${windowsDirectoryOwnershipGuardStub}
 ${invokeChecked}
 $LASTEXITCODE = 99
 Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero test'

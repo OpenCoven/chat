@@ -36,7 +36,7 @@ phase1_source_arguments=(
 
 corepack pnpm --version | grep -qx '10.34.0'
 node --version | grep -qx 'v24.18.1'
-corepack pnpm install --frozen-lockfile --ignore-scripts
+corepack pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"
 rustup toolchain install 1.95.0 --profile minimal
 rustup default 1.95.0
 rustc --version | grep -q '^rustc 1\.95\.0 '
