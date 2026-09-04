@@ -1042,11 +1042,37 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toMatch(/^ {2}changes:$/m);
     expect(workflow).toContain('docs_only: $' + '{{ steps.classify.outputs.docs_only }}');
 
-    const gatedJobs = [...workflowJobs(workflow)]
-      .filter(([, job]) => /^ {4}if: needs\.changes\.outputs\.docs_only != 'true'$/m.test(job))
+    const jobs = new Map(workflowJobs(workflow));
+    const gatedJobs = [...jobs]
+      .filter(([, job]) => job.includes("needs.changes.outputs.docs_only != 'true'"))
       .map(([name]) => name);
 
-    expect(gatedJobs).toEqual(['e2e', 'phase1-conformance', 'desktop', 'rust', 'unix-supervisor']);
+    expect(gatedJobs).toEqual([
+      'e2e',
+      'phase1-conformance',
+      'desktop',
+      'rust',
+      'unix-supervisor',
+      'windows-supervisor-behavior',
+    ]);
+
+    // Prose is not the only minute worth not spending. macOS bills at ten
+    // times the Linux rate and Windows at twice it, so those runners also wait
+    // for main -- or for a pull request that asks for them by carrying the
+    // `ci:full` label, which any branch touching src-tauri or the supervisors
+    // should. `unix-supervisor` keeps linux-x64 on every branch and admits
+    // darwin-arm64 under the same gate, so it carries the expression in its
+    // matrix rather than in an `if`.
+    for (const name of [
+      'phase1-conformance',
+      'rust',
+      'unix-supervisor',
+      'windows-supervisor-behavior',
+    ]) {
+      const job = jobs.get(name) ?? '';
+      expect(job).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'");
+      expect(job).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
+    }
 
     // The classification has to fail towards running everything. A wrong guess
     // that way wastes a few minutes; the other way merges untested code.

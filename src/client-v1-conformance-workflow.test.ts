@@ -2239,8 +2239,13 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const workflow = readFileSync(resolve(projectRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const job = workflowJob(workflow, 'unix-supervisor');
     expect(job).toContain('runs-on: $' + '{{ matrix.runner }}');
-    expect(job).toContain('runner: ubuntu-24.04');
-    expect(job).toContain('runner: macos-14');
+    // The include list is selected by expression -- linux-x64 on every branch,
+    // darwin-arm64 on main or under the `ci:full` label -- because a matrix
+    // entry cannot carry its own condition. Both platforms must still be
+    // reachable, and the macOS one must be the gated half.
+    expect(job).toContain('"platform":"linux-x64","runner":"ubuntu-24.04"');
+    expect(job).toContain('"platform":"darwin-arm64","runner":"macos-14"');
+    expect(job).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
     expect(job).toContain('bash scripts/unix-producer-supervisor.test.sh');
 
     const runtimeTest = readFileSync(

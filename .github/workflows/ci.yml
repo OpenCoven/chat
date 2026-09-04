@@ -252,7 +252,13 @@ jobs:
     name: Phase 1 real-authority conformance
     runs-on: macos-15
     needs: [web, changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # macOS bills at ten times the Linux rate and this job is the longest one
+    # here, so it runs on main and on a pull request that asks for it by
+    # carrying the `ci:full` label.
+    if: >-
+      needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     timeout-minutes: 120
     permissions:
       contents: read
@@ -458,7 +464,15 @@ jobs:
     needs: changes
     # macOS runners bill at ten times the Linux rate. Spending that on a branch
     # that changed only prose is the least defensible minute in this file.
-    if: needs.changes.outputs.docs_only != 'true'
+    #
+    # It cannot move to Linux: it cross-builds the Windows supervisor from an
+    # arm64 Homebrew mingw-w64 bottle, pinned by digest below. So it runs on
+    # main, and on a pull request that carries the `ci:full` label -- which any
+    # branch touching src-tauri or the supervisors should.
+    if: >-
+      needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -589,12 +603,16 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      # linux-x64 runs everywhere. darwin-arm64 is a macOS runner, so it
+      # joins on main or under the `ci:full` label. A matrix entry cannot
+      # carry its own condition, so the include list is selected here.
       matrix:
-        include:
-          - platform: linux-x64
-            runner: ubuntu-24.04
-          - platform: darwin-arm64
-            runner: macos-14
+        include: >-
+          ${{ fromJSON(
+            ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+              || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+            && '[{"platform":"linux-x64","runner":"ubuntu-24.04"},{"platform":"darwin-arm64","runner":"macos-14"}]'
+            || '[{"platform":"linux-x64","runner":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -606,7 +624,13 @@ jobs:
     name: Windows supervisor behavior
     runs-on: windows-2025
     needs: [changes, rust]
-    if: always() && needs.rust.result == 'success' && needs.changes.outputs.docs_only != 'true'
+    # Windows bills at twice the Linux rate, and this job needs the artifact
+    # `rust` produces, so it follows the same gate.
+    if: >-
+      always() && needs.rust.result == 'success'
+      && needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     timeout-minutes: 20
     permissions:
       contents: read
