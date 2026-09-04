@@ -4086,17 +4086,31 @@ namespace OpenCoven
                             typeof(WTS_PROCESS_INFO_EXW));
                     if (information.pUserSid == IntPtr.Zero)
                     {
-                        if (information.ProcessId == 0)
+                        // The Idle process, and the protected system processes
+                        // that live in session 0 -- Secure System, Registry,
+                        // and their kin -- expose no primary token SID to any
+                        // caller, however privileged. Refusing on their
+                        // account made the drain unrunnable on hosts that
+                        // enable virtualization-based security, which is every
+                        // current Windows image.
+                        //
+                        // Skipping them does not widen what this proves. The
+                        // supervised identity is a local account this process
+                        // created and logged on with CreateProcessWithLogonW,
+                        // so its processes hold a readable token and appear in
+                        // this enumeration with a SID to compare. A process
+                        // whose SID cannot be read AT ALL is not one of them.
+                        //
+                        // Anywhere else, an owner this enumeration cannot read
+                        // is an owner it cannot rule out, so the refusal
+                        // stands -- and names the process, because a process
+                        // that exited between enumeration and read and a
+                        // permanently unreadable one demand opposite fixes.
+                        if (information.ProcessId == 0 ||
+                            information.SessionId == 0)
                         {
                             continue;
                         }
-                        // Fails closed: an owner this enumeration cannot read
-                        // is an owner it cannot rule out, so the refusal
-                        // stands. It names the process because the refusal is
-                        // otherwise unactionable -- a process that exited
-                        // between enumeration and read and a permanently
-                        // unreadable system process demand opposite fixes, and
-                        // the message carried neither.
                         throw new InvalidOperationException(String.Format(
                             CultureInfo.InvariantCulture,
                             "WTS process primary token SID query was ambiguous "
