@@ -280,7 +280,7 @@ packages:
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
   '@opencoven/cave-client@file:vendor/opencoven-sdk/cave-client-0.1.0.tgz':
-    resolution: {integrity: sha512-5USz/yPGgqvj9QQGZYMowU5FVCG74SP5BEyYQuOAzFltpgieBAHie0JDfhmEfykvJIEv2ldpRXX+Eq8OwT2hiQ==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
+    resolution: {integrity: sha512-RcVL85gfejq70t+KOv2SHXd+pD0nMH+0VClncyTYmis/n2TBOwzDx1hXt8iJLfpSYm72we5GTkrBo8A+4PdTpQ==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24.18.0 <25'}
 
@@ -290,7 +290,7 @@ packages:
     engines: {node: '>=24.18.0 <25'}
 
   '@opencoven/sdk-core@file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz':
-    resolution: {integrity: sha512-vPAANJLfsetoT9dnOvExz2zXpBf2a2j1BcMYNIkmnOpSpEe411EMzNRXafKmxepQ7YP18iXCOTF1jZLKZa1ztg==, tarball: file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz}
+    resolution: {integrity: sha512-ZLfkfFNETnLjwg/Lxa5nIXrYs1L1q+y0fChyzZdorIpB1Rq8NeJt2S2PLQsaQXLls3GyCSkVe9+SCD2qoITkiA==, tarball: file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24.18.0 <25'}
 
