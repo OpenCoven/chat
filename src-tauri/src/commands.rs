@@ -28,6 +28,8 @@ pub const REGISTERED_COMMANDS: &[&str] = &[
     "cave_list_conversations",
     "cave_get_conversation",
     "cave_list_conversation_messages",
+    "cave_familiar_contract",
+    "cave_familiar_analytics",
 ];
 
 #[tauri::command]
@@ -282,6 +284,51 @@ pub async fn cave_list_conversation_messages(
                     CaveReadPath::ConversationMessages {
                         conversation_id,
                         page,
+                    },
+                )
+                .await
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn cave_familiar_contract(
+    handle: String,
+    familiar_id: String,
+    operation: NativeOperationInput,
+    state: State<'_, NativeConnectionState>,
+) -> Result<Value, NativeDiagnostic> {
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(handle, CaveReadPath::FamiliarContract { familiar_id })
+                .await
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn cave_familiar_analytics(
+    handle: String,
+    familiar_id: String,
+    window: Option<String>,
+    recent_limit: Option<u8>,
+    operation: NativeOperationInput,
+    state: State<'_, NativeConnectionState>,
+) -> Result<Value, NativeDiagnostic> {
+    let runner = state.inner().clone();
+    let operation_state = runner.clone();
+    runner
+        .run_operation(operation, async move {
+            operation_state
+                .cave_read(
+                    handle,
+                    CaveReadPath::FamiliarAnalytics {
+                        familiar_id,
+                        window,
+                        recent_limit,
                     },
                 )
                 .await

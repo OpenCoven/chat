@@ -21,6 +21,15 @@ test('preserves the local demo routes alongside the default app', async ({ page 
   await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=minimal');
   await expect(page.getByText('Chats', { exact: true })).toBeVisible();
   await expect(page.getByText('Familiars', { exact: true })).toBeVisible();
+
+  await page.goto('/?demo=familiars-reads');
+
+  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=familiars-reads');
+  await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Q3 pricing evidence map/ })).toBeVisible();
+  // Stage 1 has no send capability yet; the composer notice says so rather
+  // than offering a working-looking control.
+  await expect(page.getByText(/^Sending: Not available yet/)).toBeVisible();
 });
 
 test('keeps the chat sidebar compact and fully interactive', async ({ page }) => {

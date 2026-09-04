@@ -92,6 +92,14 @@ pub(crate) enum CaveReadPath {
         conversation_id: String,
         page: NativePage,
     },
+    FamiliarContract {
+        familiar_id: String,
+    },
+    FamiliarAnalytics {
+        familiar_id: String,
+        window: Option<String>,
+        recent_limit: Option<u8>,
+    },
 }
 
 #[derive(Clone, Deserialize)]
@@ -175,6 +183,23 @@ impl CaveReadPath {
                 validate_canonical_conversation_id(conversation_id)?;
                 page.validate()
             }
+            Self::FamiliarContract { familiar_id } => validate_canonical_familiar_id(familiar_id),
+            Self::FamiliarAnalytics {
+                familiar_id,
+                window,
+                recent_limit,
+            } => {
+                validate_canonical_familiar_id(familiar_id)?;
+                if let Some(window) = window {
+                    if !matches!(window.as_str(), "7d" | "14d" | "8w" | "all") {
+                        return Err(NativeDiagnostic::new("invalid_native_input", false));
+                    }
+                }
+                if recent_limit.is_some_and(|limit| limit > 100) {
+                    return Err(NativeDiagnostic::new("invalid_native_input", false));
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -209,6 +234,20 @@ fn validate_canonical_conversation_id(value: &str) -> NativeResult<()> {
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~'))
+    {
+        return Err(NativeDiagnostic::new("invalid_native_input", false));
+    }
+    Ok(())
+}
+
+fn validate_canonical_familiar_id(value: &str) -> NativeResult<()> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 64
+        || !bytes[0].is_ascii_alphanumeric()
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     {
         return Err(NativeDiagnostic::new("invalid_native_input", false));
     }
@@ -414,6 +453,28 @@ impl NativeCaveTransport for ConstrainedTransport {
                 },
                 Some(page),
             ),
+            CaveReadPath::FamiliarContract { familiar_id } => (
+                format!(
+                    "api/client/v1/familiars/{}/contract",
+                    encoded_cave_path_segment(&familiar_id)
+                ),
+                None,
+            ),
+            CaveReadPath::FamiliarAnalytics {
+                familiar_id,
+                window,
+                recent_limit,
+            } => (
+                with_analytics_query(
+                    format!(
+                        "api/client/v1/familiars/{}/analytics",
+                        encoded_cave_path_segment(&familiar_id)
+                    ),
+                    window,
+                    recent_limit,
+                ),
+                None,
+            ),
         };
         let path = with_page(path, page)?;
         Self::request(authority, Method::GET, &path, Some(bearer), None, None).await
@@ -498,6 +559,26 @@ fn with_page(mut path: String, page: Option<NativePage>) -> NativeResult<String>
     path.push('?');
     path.push_str(&serializer.finish());
     Ok(path)
+}
+
+fn with_analytics_query(
+    mut path: String,
+    window: Option<String>,
+    recent_limit: Option<u8>,
+) -> String {
+    if window.is_none() && recent_limit.is_none() {
+        return path;
+    }
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(window) = window {
+        serializer.append_pair("window", &window);
+    }
+    if let Some(limit) = recent_limit {
+        serializer.append_pair("recent", &limit.to_string());
+    }
+    path.push('?');
+    path.push_str(&serializer.finish());
+    path
 }
 
 async fn read_response(mut response: reqwest::Response) -> NativeResult<NativeHttpResponse> {
@@ -791,6 +872,46 @@ mod tests {
             .validate()
             .is_err());
         }
+    }
+
+    #[test]
+    fn canonical_familiar_ids_are_bounded_to_one_unescaped_path_segment() {
+        assert_eq!(encoded_cave_path_segment("astra-01"), "astra-01");
+        let too_long = "a".repeat(65);
+        for familiar_id in [
+            "", ".", "..", "a/b", "space id", "雪", "percent%", &too_long,
+        ] {
+            assert!(CaveReadPath::FamiliarContract {
+                familiar_id: familiar_id.to_owned(),
+            }
+            .validate()
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn familiar_analytics_rejects_out_of_bound_window_and_recent_limit() {
+        assert!(CaveReadPath::FamiliarAnalytics {
+            familiar_id: "astra".to_owned(),
+            window: Some("30d".to_owned()),
+            recent_limit: None,
+        }
+        .validate()
+        .is_err());
+        assert!(CaveReadPath::FamiliarAnalytics {
+            familiar_id: "astra".to_owned(),
+            window: None,
+            recent_limit: Some(101),
+        }
+        .validate()
+        .is_err());
+        assert!(CaveReadPath::FamiliarAnalytics {
+            familiar_id: "astra".to_owned(),
+            window: Some("7d".to_owned()),
+            recent_limit: Some(100),
+        }
+        .validate()
+        .is_ok());
     }
 
     #[test]

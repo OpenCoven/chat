@@ -38,6 +38,8 @@ export type CaveReadClient = Pick<
   | 'listConversations'
   | 'getConversation'
   | 'listConversationMessages'
+  | 'familiarContract'
+  | 'familiarAnalytics'
 >;
 
 type CaveConnectionClient = CaveReadClient &

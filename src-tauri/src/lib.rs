@@ -29,10 +29,11 @@ use transport::{ConstrainedTransport, NativeCaveTransport};
 
 pub use commands::{
     app_identity, app_installation_id, cave_cancel_operation, cave_credential_status,
-    cave_forget_credential, cave_get_conversation, cave_health, cave_launch,
-    cave_list_conversation_messages, cave_list_conversations, cave_list_familiars,
-    cave_list_projects, cave_pairing_create, cave_pairing_exchange, cave_pairing_poll,
-    cave_read_discovery, cave_reset_pairing, coven_health, registered_command_names,
+    cave_familiar_analytics, cave_familiar_contract, cave_forget_credential, cave_get_conversation,
+    cave_health, cave_launch, cave_list_conversation_messages, cave_list_conversations,
+    cave_list_familiars, cave_list_projects, cave_pairing_create, cave_pairing_exchange,
+    cave_pairing_poll, cave_read_discovery, cave_reset_pairing, coven_health,
+    registered_command_names,
 };
 pub use coven::CovenHealthResult;
 pub use metadata::{AppIdentity, APP_IDENTIFIER, APP_NAME, APP_PHASE};
@@ -267,7 +268,9 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             cave_list_projects,
             cave_list_conversations,
             cave_get_conversation,
-            cave_list_conversation_messages
+            cave_list_conversation_messages,
+            cave_familiar_contract,
+            cave_familiar_analytics
         ])
 }
 
@@ -462,6 +465,8 @@ mod smoke_tests {
                 "cave_list_conversations",
                 "cave_get_conversation",
                 "cave_list_conversation_messages",
+                "cave_familiar_contract",
+                "cave_familiar_analytics",
             ]
         );
     }
