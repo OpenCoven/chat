@@ -302,14 +302,20 @@ The trusted root supervisor creates a random local account and primary group
 whose numeric UID and GID differ from the original GitHub runner. The account
 has no administrator membership or usable password. Its `HOME`, artifact
 workspace, temporary directory, XDG roots, writable `node_modules`,
-Corepack/pnpm caches, Cargo home, rustup home, and package store are fresh
-mode-`0700` directories below one ephemeral root. The copied checkout and its
-tracked harness/validator launch sources are root-owned and recursively
-non-writable; Git receives only the exact source path as `safe.directory`.
-The trusted command is a root-owned, non-writable sibling of that producer
-root. It receives an allowlisted environment with no GitHub token, OIDC
-request value, credential helper, operator home, ambient package cache, or
-proxy setting.
+pnpm caches, Cargo home, rustup home, and package store are fresh mode-`0700`
+directories below one ephemeral root. The supervisor resolves the exact Node
+binary, bundled pnpm program, and rustup multicall binary while still running
+as the broker, validates their ownership and mode, and copies them into a
+root-owned, non-writable trusted directory. Restricted pnpm operations run the
+copied bundle through the copied Node binary, so no executable path beneath
+the private runner home is required after the UID transition. The copied
+checkout and its tracked harness/validator launch sources are root-owned and
+recursively non-writable; local Git clones receive only the exact source path
+as `safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
+alternate. The trusted command is a root-owned, non-writable sibling of that
+producer root. It receives an allowlisted environment with no GitHub token,
+OIDC request value, credential helper, operator home, ambient package cache,
+or proxy setting.
 
 Dependency installation, the isolated Rust toolchain installation, all
 candidate/validator/Chat/Cave/Coven checkouts and builds, native RPC work,
@@ -1016,13 +1022,13 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 460,690 | `824b74b0638f60862e567d5498a526162b279a5a870bb774154ec73c96c6dde9` |
+| `.github/workflows/client-v1-conformance.yml` | 462,495 | `19fdc6463fa75c74e28e4fcbb95ed284b08e7b1abf1742edbdb96faf5b47b989` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 187,131 | `cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b` |
+| `scripts/phase1-conformance.mjs` | 187,156 | `26b1f21a6561f9ac7ca6a70af75296d5ab6af24542145f09d331e3831ced1058` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
@@ -1035,10 +1041,10 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
-| `scripts/unix-producer-command.sh` | 3,250 | `d786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab` |
-| `scripts/unix-producer-supervisor.sh` | 26,103 | `cdc8c937306df3b1cbaaa1459c41b8c56e9158a38c5bb9b11c5e81c0b7780f9f` |
+| `scripts/unix-producer-command.sh` | 3,353 | `179ddeb6742f44ca0d372b28fbbb15b70cb4c7c3988d2c1f0b6ad1081e7d92da` |
+| `scripts/unix-producer-supervisor.sh` | 26,830 | `05d5bfc4615f34ef2b821db589634f8d4a47b5b047a3c4e5450e6d31e60001b4` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 9,398 | `fda5f22b3a47639b7293a5ae11c6da5a00cde10bb8da7db630d7201743dd2fc8` |
+| `scripts/unix-producer-supervisor.test.sh` | 10,280 | `9534eb78effa120ef90a9b0396fc60b9285a3d0823f9d87e91e2f4b3f486b509` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
