@@ -1,3 +1,4 @@
+import type { CaveFamiliarAnalytics, CaveFamiliarContract } from '@opencoven/cave-client';
 import type {
   CaveCanonicalFamiliar,
   CaveConversation,
@@ -30,6 +31,19 @@ const NOT_READY_RESULT = Object.freeze({ status: 'not_ready' } as const);
 const INVALID_REQUEST_RESULT = Object.freeze({
   status: 'error',
   code: 'invalid_request',
+} as const);
+
+/**
+ * A familiar's contract and its execution analytics are Cave's to report. They
+ * describe what a familiar has been granted and what it has since done, and a
+ * device holding only local conversations has neither record. Standalone mode
+ * answers `service_unavailable` rather than inventing an empty contract, which
+ * would read as "this familiar is permitted nothing" instead of "nobody asked
+ * Cave".
+ */
+const CAVE_ONLY_RESULT = Object.freeze({
+  status: 'error',
+  code: 'service_unavailable',
 } as const);
 
 const EMPTY_PAGE = Object.freeze({
@@ -194,6 +208,14 @@ export function createLocalQueryAdapter(store: ChatStore): QueryAdapter {
         const page = store.listMessages(conversationId, normalized.limit, normalized.cursor);
         return Object.freeze({ status: 'ok', data: mapPage(page, toCaveMessage) });
       });
+    },
+
+    familiarContract() {
+      return guard<CaveFamiliarContract>(() => CAVE_ONLY_RESULT);
+    },
+
+    familiarAnalytics() {
+      return guard<CaveFamiliarAnalytics>(() => CAVE_ONLY_RESULT);
     },
 
     invalidate() {
