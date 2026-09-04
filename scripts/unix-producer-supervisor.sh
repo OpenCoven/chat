@@ -111,7 +111,9 @@ rustup_executable="$(canonical_file "$rustup_executable")" ||
 pnpm_cli="$(
   LC_ALL=C /usr/bin/sed -n 's/^# cmd-shim-target=//p' "$pnpm_executable"
 )"
-if [[ "$pnpm_cli" != /* || "$pnpm_cli" == *$'\n'* ]]; then
+if [[ "$pnpm_cli" != /* ||
+      "$pnpm_cli" == *$'\n'* ||
+      "$pnpm_cli" == *$'\r'* ]]; then
   echo 'unix-producer-supervisor: pnpm launcher target is unsafe' >&2
   exit 1
 fi

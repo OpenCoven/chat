@@ -2217,6 +2217,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(supervisor).toContain('trusted_rustc="$trusted_root/rustc"');
     expect(supervisor).toContain('trusted_pnpm_root="$trusted_root/pnpm-runtime"');
     expect(supervisor).toContain('trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"');
+    expect(supervisor).toContain(`"$pnpm_cli" == *$'\\r'*`);
     expect(supervisor).toContain('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"');
     expect(supervisor).toContain(
       'exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"',

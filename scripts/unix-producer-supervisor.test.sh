@@ -212,6 +212,10 @@ expect_pnpm_rejection() {
         '# cmd-shim-target=runtime/node_modules/pnpm/bin/pnpm.cjs' \
         >"$case_launcher"
       ;;
+    carriage-return-marker)
+      printf '#!/bin/sh\nexit 99\n# cmd-shim-target=%s\r\n' \
+        "$case_runtime/bin/pnpm.cjs" >"$case_launcher"
+      ;;
     symlink)
       ln -s bin/pnpm.cjs "$case_runtime/linked.cjs"
       ;;
@@ -265,6 +269,7 @@ expect_pnpm_rejection() {
 
 expect_pnpm_rejection duplicate-marker 'pnpm launcher target is unsafe'
 expect_pnpm_rejection relative-marker 'pnpm launcher target is unsafe'
+expect_pnpm_rejection carriage-return-marker 'pnpm launcher target is unsafe'
 expect_pnpm_rejection symlink 'pnpm runtime ownership or mode is unsafe'
 expect_pnpm_rejection hardlink 'pnpm runtime file has multiple links'
 expect_pnpm_rejection special-file 'pnpm runtime contains a special file'
