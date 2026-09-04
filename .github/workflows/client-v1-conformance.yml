@@ -9507,8 +9507,8 @@ jobs:
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
-            ['scripts/unix-producer-command.sh', [3353, '179ddeb6742f44ca0d372b28fbbb15b70cb4c7c3988d2c1f0b6ad1081e7d92da']],
-            ['scripts/unix-producer-supervisor.sh', [26830, '05d5bfc4615f34ef2b821db589634f8d4a47b5b047a3c4e5450e6d31e60001b4']],
+            ['scripts/unix-producer-command.sh', [3223, 'ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8']],
+            ['scripts/unix-producer-supervisor.sh', [26770, '0660d3737b7f551f7e6c9d99d3bf32efedc167c175030de1ad0565d2da8f38f9']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);
@@ -9534,7 +9534,7 @@ jobs:
       - name: Compute reviewed Unix tool path
         id: unix-tool-path
         if: matrix.platform != 'win32-x64'
-        run: 'node --input-type=module --eval "import { appendFileSync, lstatSync } from ''node:fs''; import { basename, dirname, resolve } from ''node:path''; import { resolveExecutableInvocation, resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''git'']); const nodeExecutable = resolveExecutableInvocation(''node'', process.env, process.platform, []).resolvedCommand; const pnpmCommand = resolveExecutableInvocation(''pnpm'', process.env, process.platform, []).resolvedCommand; const pnpmExecutable = resolve(dirname(dirname(pnpmCommand)), ''dist'', ''pnpm.cjs''); const pnpmStats = lstatSync(pnpmExecutable); if (basename(pnpmCommand) !== ''pnpm.cjs'' || basename(dirname(pnpmCommand)) !== ''bin'' || !pnpmStats.isFile() || pnpmStats.isSymbolicLink()) throw new Error(''Canonical pnpm bundle is unavailable.''); const rustupExecutable = resolveExecutableInvocation(''rustup'', process.env, process.platform, []).resolvedCommand; appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\nnode_executable='' + nodeExecutable + ''\npnpm_executable='' + pnpmExecutable + ''\nrustup_executable='' + rustupExecutable + ''\n'');"'
+        run: 'node --input-type=module --eval "import { appendFileSync } from ''node:fs''; import { resolveExecutableInvocation, resolveUnixToolPath } from ''./scripts/executable-resolution.mjs''; const toolPath = resolveUnixToolPath([''git'']); const nodeExecutable = resolveExecutableInvocation(''node'', process.env, process.platform, []).resolvedCommand; const pnpmExecutable = resolveExecutableInvocation(''pnpm'', process.env, process.platform, []).resolvedCommand; const rustupExecutable = resolveExecutableInvocation(''rustup'', process.env, process.platform, []).resolvedCommand; appendFileSync(process.env.GITHUB_OUTPUT, ''tool_path='' + toolPath + ''\nnode_executable='' + nodeExecutable + ''\npnpm_executable='' + pnpmExecutable + ''\nrustup_executable='' + rustupExecutable + ''\n'');"'
       - name: Run supervised Unix production and handoff
         if: matrix.platform != 'win32-x64'
         shell: bash

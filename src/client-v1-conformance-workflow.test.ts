@@ -2172,6 +2172,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
     expect(toolPathStep).toContain('.resolvedCommand');
     expect(toolPathStep).not.toContain('.executable; appendFileSync');
+    expect(toolPathStep).not.toContain("''dist'', ''pnpm.cjs''");
     expect(toolPathStep).toContain("resolveUnixToolPath([''git''])");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
     expect(toolPathStep).toContain("node_executable='' + nodeExecutable");
@@ -2226,13 +2227,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
-      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" --version',
-      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts',
+      'pnpm --version',
+      'pnpm install --frozen-lockfile --ignore-scripts',
       'rustup toolchain install 1.95.0 --profile minimal',
       'phase1-linux-secret-service.sh',
       'phase1-conformance.mjs',
       'OPENCOVEN_UNIX_PRODUCER_REQUIRED',
-      'OPENCOVEN_UNIX_TRUSTED_PNPM',
     ]) {
       expect(command).toContain(required);
       expect(producer).not.toContain(`run: ${required}`);
@@ -2333,12 +2333,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const installIndex = command.indexOf(
-      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts',
-    );
-    const tauriIndex = command.indexOf(
-      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" exec tauri --version | grep -qx \'tauri-cli 2.11.4\'',
-    );
+    const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
+    const tauriIndex = command.indexOf("pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'");
 
     expect(earlyToolchainCheck).not.toContain(
       "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
@@ -2349,10 +2345,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
 
   test('binds the restricted Unix install to the isolated pnpm store', () => {
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const install = command.match(/^node "\$OPENCOVEN_UNIX_TRUSTED_PNPM" install .*$/mu)?.[0];
+    const install = command.match(/^pnpm install .*$/mu)?.[0];
 
     expect(install).toBe(
-      'node "$OPENCOVEN_UNIX_TRUSTED_PNPM" install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+      'pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
     );
   });
 

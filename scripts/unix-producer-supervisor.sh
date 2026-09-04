@@ -209,7 +209,7 @@ trusted_root="$isolated_root/trusted"
 source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.json"
 trusted_command="$trusted_root/producer-command"
 trusted_node="$trusted_root/node"
-trusted_pnpm="$trusted_root/pnpm.cjs"
+trusted_pnpm="$trusted_root/pnpm"
 trusted_rustup="$trusted_root/rustup"
 trusted_cargo="$trusted_root/cargo"
 trusted_rustc="$trusted_root/rustc"
@@ -516,8 +516,7 @@ chown root:0 \
   "$trusted_rustc"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
-chmod 555 "$trusted_node" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
-chmod 444 "$trusted_pnpm"
+chmod 555 "$trusted_node" "$trusted_pnpm" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \
@@ -589,7 +588,6 @@ restricted_environment=(
   "OPENCOVEN_UNIX_WORKSPACE=$workspace"
   "OPENCOVEN_UNIX_ARTIFACT_DIRECTORY=$artifact_workspace/.artifacts"
   "OPENCOVEN_UNIX_SOURCE_RECORD=$source_record"
-  "OPENCOVEN_UNIX_TRUSTED_PNPM=$trusted_pnpm"
 )
 if [[ -n "$validator_revision" ]]; then
   restricted_environment+=("OPENCOVEN_VALIDATOR_REVISION=$validator_revision")
