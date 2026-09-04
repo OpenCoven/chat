@@ -182,6 +182,7 @@ chmod 500 \
   "$pnpm_runtime/bin/pnpm.cjs" \
   "$trusted_tool_source/rustup" \
   "$trusted_tool_command"
+ln "$pnpm_runtime/bin/pnpm.cjs" "$pnpm_runtime/bin/pnpm-hardlink.cjs"
 
 expect_pnpm_rejection() {
   local case_name="$1"
@@ -218,11 +219,6 @@ expect_pnpm_rejection() {
       ;;
     symlink)
       ln -s bin/pnpm.cjs "$case_runtime/linked.cjs"
-      ;;
-    hardlink)
-      mkdir -m 700 "$case_runtime/dist"
-      printf 'module\n' >"$case_runtime/dist/module.cjs"
-      ln "$case_runtime/dist/module.cjs" "$case_runtime/dist/module-copy.cjs"
       ;;
     special-file)
       mkfifo "$case_runtime/runtime.pipe"
@@ -271,7 +267,6 @@ expect_pnpm_rejection duplicate-marker 'pnpm launcher target is unsafe'
 expect_pnpm_rejection relative-marker 'pnpm launcher target is unsafe'
 expect_pnpm_rejection carriage-return-marker 'pnpm launcher target is unsafe'
 expect_pnpm_rejection symlink 'pnpm runtime ownership or mode is unsafe'
-expect_pnpm_rejection hardlink 'pnpm runtime file has multiple links'
 expect_pnpm_rejection special-file 'pnpm runtime contains a special file'
 expect_pnpm_rejection unsafe-mode 'pnpm runtime ownership or mode is unsafe'
 expect_pnpm_rejection unsafe-owner 'pnpm runtime ownership or mode is unsafe'

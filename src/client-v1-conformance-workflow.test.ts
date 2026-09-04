@@ -488,6 +488,8 @@ describe('client-v1 conformance workflow bootstrap', () => {
     const childEnvironmentStart = bootstrap.indexOf('$childEnvironment = [ordered]@{');
     const childEnvironmentEnd = bootstrap.indexOf('\n            }', childEnvironmentStart);
     const childEnvironment = bootstrap.slice(childEnvironmentStart, childEnvironmentEnd);
+    const childNodeRoot =
+      "$childNodeRoot = Join-Path $bootstrapRoot 'tools\\node\\node-v24.18.1-win-x64'";
 
     expect(workflow).toContain('  windows-supervisor:');
     expect(workflow).toContain(
@@ -511,9 +513,11 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
     expect(childEnvironment).not.toContain('OPENCOVEN_WINDOWS_GITHUB_TOKEN');
     expect(childEnvironment).not.toContain('github.token');
+    expect(bootstrap.indexOf(childNodeRoot)).toBeLessThan(childEnvironmentStart);
     expect(childEnvironment).toContain(
-      'PATH = "$nodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\\Windows\\System32;C:\\Windows"',
+      'PATH = "$childNodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\\Windows\\System32;C:\\Windows"',
     );
+    expect(childEnvironment).not.toContain('PATH = "$nodeRoot;');
     expect(workflow).not.toContain('      - name: Install frozen Windows supervisor');
     expect(workflow).not.toContain(
       '        run: pwsh -NoProfile -File scripts/phase1-windows-supervisor-install.ps1',
@@ -2218,7 +2222,12 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(supervisor).toContain('trusted_pnpm_root="$trusted_root/pnpm-runtime"');
     expect(supervisor).toContain('trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"');
     expect(supervisor).toContain(`"$pnpm_cli" == *$'\\r'*`);
+    expect(supervisor).toContain('validate_pnpm_runtime_tree "$pnpm_runtime_root" "$broker_uid" 0');
     expect(supervisor).toContain('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"');
+    expect(supervisor).toContain('validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1');
+    expect(supervisor.indexOf('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"')).toBeLessThan(
+      supervisor.indexOf('validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1'),
+    );
     expect(supervisor).toContain(
       'exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"',
     );

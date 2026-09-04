@@ -81,6 +81,8 @@ import {
   assertPhase1ProducerAuthority,
   readPhase1ConformanceLock,
 } from '../scripts/phase1-conformance-lock.mjs';
+// @ts-expect-error The executable script intentionally has no declaration file.
+import { cloneExactCheckout as cloneSchemaV2ExactCheckout } from '../scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -263,6 +265,67 @@ describe('Phase 1 real-authority conformance harness', () => {
       } finally {
         await owned.cleanup();
         rmSync(source, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'scrubs the checkout-only Git attribute source before cloning',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-local-source-'));
+      const bin = mkdtempSync(join(tmpdir(), 'phase1-git-wrapper-'));
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-local-clone-env-test' });
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'fixture'], { cwd: source });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+        const gitWrapper = join(bin, 'git');
+        writeFileSync(
+          gitWrapper,
+          [
+            '#!/bin/sh',
+            `if [ "\${GIT_ATTR_SOURCE+x}" = x ]; then`,
+            '  exit 42',
+            'fi',
+            `exec ${JSON.stringify(realGit)} "$@"`,
+            '',
+          ].join('\n'),
+        );
+        chmodSync(gitWrapper, 0o755);
+
+        for (const [label, clone] of [
+          ['verified runner', cloneExactCheckout],
+          ['schema-v2', cloneSchemaV2ExactCheckout],
+        ] as const) {
+          await clone({
+            artifactRoot: owned,
+            sourceRoot: source,
+            destinationRoot: join(owned.rootPath, label),
+            repository: 'OpenCoven/chat',
+            revision,
+            environment: {
+              ...process.env,
+              GIT_ATTR_SOURCE: 'HEAD',
+              PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+            },
+            label: `${label} checkout environment fixture`,
+          });
+        }
+      } finally {
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
       }
     },
     30_000,

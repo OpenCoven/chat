@@ -166,12 +166,38 @@ stat_identity() {
   fi
 }
 
+validate_pnpm_runtime_tree() {
+  local runtime_root=$1
+  local expected_owner=$2
+  local require_single_links=$3
+  local trusted_file mode
+
+  while IFS= read -r -d '' trusted_file; do
+    mode="$(stat_mode "$trusted_file")"
+    if [[ -L "$trusted_file" ||
+          "$(stat_owner "$trusted_file")" != "$expected_owner" ||
+          $((8#$mode & 8#022)) -ne 0 ]]; then
+      echo 'unix-producer-supervisor: pnpm runtime ownership or mode is unsafe' >&2
+      return 1
+    fi
+    if [[ -f "$trusted_file" ]]; then
+      if [[ "$require_single_links" == 1 &&
+            "$(stat_links "$trusted_file")" != 1 ]]; then
+        echo 'unix-producer-supervisor: pnpm runtime file has multiple links' >&2
+        return 1
+      fi
+    elif [[ ! -d "$trusted_file" ]]; then
+      echo 'unix-producer-supervisor: pnpm runtime contains a special file' >&2
+      return 1
+    fi
+  done < <(/usr/bin/find -P "$runtime_root" -xdev -print0)
+}
+
 trusted_files=(
   "$handoff_helper"
   "$command_path"
   "$node_executable"
   "$pnpm_executable"
-  "$pnpm_cli"
   "$rustup_executable"
 )
 for trusted_file in "${trusted_files[@]}"; do
@@ -184,24 +210,7 @@ for trusted_file in "${trusted_files[@]}"; do
   fi
 done
 
-while IFS= read -r -d '' trusted_file; do
-  mode="$(stat_mode "$trusted_file")"
-  if [[ -L "$trusted_file" ||
-        "$(stat_owner "$trusted_file")" != "$broker_uid" ||
-        $((8#$mode & 8#022)) -ne 0 ]]; then
-    echo 'unix-producer-supervisor: pnpm runtime ownership or mode is unsafe' >&2
-    exit 1
-  fi
-  if [[ -f "$trusted_file" ]]; then
-    if [[ "$(stat_links "$trusted_file")" != 1 ]]; then
-      echo 'unix-producer-supervisor: pnpm runtime file has multiple links' >&2
-      exit 1
-    fi
-  elif [[ ! -d "$trusted_file" ]]; then
-    echo 'unix-producer-supervisor: pnpm runtime contains a special file' >&2
-    exit 1
-  fi
-done < <(/usr/bin/find -P "$pnpm_runtime_root" -xdev -print0)
+validate_pnpm_runtime_tree "$pnpm_runtime_root" "$broker_uid" 0
 
 temp_mode="$(stat_mode "$temp_root")"
 destination_mode="$(stat_mode "$destination_parent")"
@@ -568,6 +577,7 @@ chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
 chmod 555 "$trusted_node" "$trusted_pnpm" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
 chmod -R a+rX,a-w "$trusted_pnpm_root"
+validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \

@@ -25,6 +25,7 @@ import {
   assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
   assertPhase1ProducerAuthority,
+  createGitCheckoutEnvironment,
   createGitEnvironment,
   readPhase1ConformanceLock,
 } from './phase1-conformance-lock.mjs';
@@ -1577,6 +1578,7 @@ export async function cloneExactCheckout({
   if (!statSync(sourceRoot).isDirectory()) {
     throw new Error(`${label} source root is unavailable.`);
   }
+  const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   await runCommand(
     artifactRoot,
     `${label} clone`,
@@ -1599,8 +1601,7 @@ export async function cloneExactCheckout({
     {
       cwd: projectRoot,
       env: {
-        ...environment,
-        ...createGitEnvironment(environment),
+        ...checkoutEnvironment,
         GIT_ALLOW_PROTOCOL: 'file',
       },
     },
@@ -1610,7 +1611,7 @@ export async function cloneExactCheckout({
     `${label} checkout`,
     'git',
     ['-c', `core.hooksPath=${devNull}`, 'checkout', '--detach', '--force', revision],
-    { cwd: destinationRoot, env: { ...environment, ...createGitEnvironment(environment) } },
+    { cwd: destinationRoot, env: checkoutEnvironment },
   );
 }
 
