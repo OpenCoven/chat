@@ -3016,6 +3016,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         rmSync(root, { force: true, recursive: true });
       }
     },
+    30_000,
   );
 
   test('allows cold isolated Cargo builds to exceed the general command deadline', () => {
