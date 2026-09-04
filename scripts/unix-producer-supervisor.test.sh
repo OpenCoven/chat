@@ -2,7 +2,10 @@
 set -Eeuo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-scratch_root="$(mktemp -d /tmp/opencoven-unix-supervisor-test.XXXXXXXX)"
+scratch_parent="$project_root/test-results/unix-producer-supervisor"
+mkdir -p "$scratch_parent"
+scratch_root="$scratch_parent/run-$$"
+mkdir "$scratch_root"
 scratch_root="$(cd "$scratch_root" && pwd -P)"
 handoff_source="$project_root/scripts/unix-artifact-handoff.c"
 supervisor="$project_root/scripts/unix-producer-supervisor.sh"
@@ -144,6 +147,15 @@ run_supervisor() {
     --command-arg "$case_name" \
     --timeout-seconds 30
 }
+
+if [[ "$platform" == darwin-arm64 ]]; then
+  inaccessible_cwd="$scratch_root/inaccessible-cwd"
+  mkdir -m 700 "$inaccessible_cwd"
+  (
+    cd "$inaccessible_cwd"
+    run_supervisor success
+  )
+fi
 
 set +e
 no_argument_output="$(

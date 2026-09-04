@@ -8345,8 +8345,21 @@ jobs:
               [Parameter(Mandatory)][string[]]$ArgumentList,
               [Parameter(Mandatory)][string]$Label
             )
+            $location = Get-Location
+            $workingDirectory = $location.ProviderPath
+            if (
+              $location.Provider.Name -cne 'FileSystem' -or
+              [String]::IsNullOrWhiteSpace($workingDirectory) -or
+              -not [IO.Path]::IsPathFullyQualified($workingDirectory)
+            ) {
+              throw "$Label working directory is not an absolute filesystem path."
+            }
+            [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(
+              $workingDirectory
+            )
             $startInfo = [Diagnostics.ProcessStartInfo]::new($FilePath)
             $startInfo.UseShellExecute = $false
+            $startInfo.WorkingDirectory = $workingDirectory
             foreach ($argument in $ArgumentList) {
               $startInfo.ArgumentList.Add($argument)
             }
@@ -9472,8 +9485,8 @@ jobs:
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
             ['scripts/phase1-linux-secret-service.sh', [5650, '83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476']],
             ['scripts/unix-artifact-handoff.c', [18704, '2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc']],
-            ['scripts/unix-producer-command.sh', [3213, 'd4ee80fae32f48647cda18501c38e03baee62832caf9ed4393ab6e7edfea2135']],
-            ['scripts/unix-producer-supervisor.sh', [25167, '7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52']],
+            ['scripts/unix-producer-command.sh', [3250, 'd786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab']],
+            ['scripts/unix-producer-supervisor.sh', [25197, 'c18cf8880116a5fbf9c269284b1632e8429f6a457f11696eb9c731dc4e8b20d1']],
           ]);
           for (const [path, [size, digest]] of expected) {
             const stats = lstatSync(path);

@@ -344,13 +344,23 @@ handoff.
 
 On macOS, the supervisor creates the local user and groups with the
 preinstalled Directory Services tools and launches the entire command tree as
-that exact UID. The account is disabled from creation. After the restricted
-root exits, the supervisor reapplies the disabled authentication authority and
-non-login shell, repeatedly enumerates `ps` by exact numeric UID, sends
-`SIGKILL` only to those PIDs, and requires three consecutive zero-process
-observations. It then deletes the user and primary group and proves both that
-the UID has no processes and that Directory Services no longer maps it. Any
-lock, kill, zero-process, account, group, or UID cleanup failure fails closed.
+that exact UID. Before `sudo` changes identity, its exec-preserving launch
+subshell changes to `/`, so the target shell never tries to resolve an
+inaccessible inherited runner workspace; the restricted shell then changes
+only to the copied isolated workspace. The account is disabled from creation.
+After the restricted root exits, the supervisor reapplies the disabled
+authentication authority and non-login shell, repeatedly enumerates `ps` by
+exact numeric UID, sends `SIGKILL` only to those PIDs, and requires three
+consecutive zero-process observations. It then deletes the user and primary
+group and proves both that the UID has no processes and that Directory
+Services no longer maps it. Any lock, kill, zero-process, account, group, or
+UID cleanup failure fails closed.
+
+The restricted Unix dependency install keeps the source copy read-only and
+passes `--config.store-dir="$PNPM_STORE_DIR"` directly to pnpm alongside
+`--frozen-lockfile --ignore-scripts`. Store discovery and package imports
+therefore use the producer-owned isolated store rather than probing the
+read-only source root.
 
 Only after the Linux cgroup or macOS UID is proved empty does the trusted
 supervisor begin handoff. A root-only preparation pass opens the producer
@@ -389,9 +399,12 @@ tries to replace the record after its root exits. Ubuntu proves cgroup-v2
 drain and macOS proves exact-UID process/account cleanup; both verify that the
 escaped PID is dead and the original bytes were handed off. Native cases also
 reject a record symlink, second hardlink, replaced artifact parent, and a
-synchronized in-place rewrite. Local runs without passwordless `sudo` still
-compile and run the descriptor handoff/rewrite cases but explicitly skip, and
-must not claim, the privileged UID/cgroup runtime results.
+synchronized in-place rewrite. The macOS success case invokes the root
+supervisor from a broker-owned mode-`0700` directory that the ephemeral UID
+cannot traverse, then requires the restricted fixture to start in the copied
+workspace and read its tracked source file. Local runs without passwordless
+`sudo` still compile and run the descriptor handoff/rewrite cases but
+explicitly skip, and must not claim, the privileged UID/cgroup runtime results.
 
 ### Windows pre-bootstrap trust boundary
 
@@ -553,7 +566,12 @@ protocols, and enables fetched-object verification. Downloads use a proxy-free
 .NET `HttpClient`, allow only HTTPS, permit at most the reviewed per-asset
 redirect chain (`github.com` to `release-assets.githubusercontent.com` for
 PortableGit; no redirects for Node, pnpm, or rustup), cap time, require an
-exact byte count, and verify SHA-256 before execution or extraction.
+exact byte count, and verify SHA-256 before execution or extraction. Every
+child launched through `Invoke-Checked` receives the current absolute
+FileSystem provider path as `ProcessStartInfo.WorkingDirectory` only after the
+existing isolated-directory ownership and reparse checks pass. Consequently,
+the Chat Git sequence inside `Push-Location $workspace` initializes and
+mutates that exact workspace rather than inheriting the bootstrap root.
 
 The directly downloaded Windows assets are:
 
@@ -998,7 +1016,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 459,800 | `047ae05690461530e609370b3d2d5c90817d5a2ff06484f13ffef9f4d5c775f2` |
+| `.github/workflows/client-v1-conformance.yml` | 460,415 | `a8c56b1bf9a943012b80c92fb62c6829e118db536d4238d87a5ad0dc8f5ee62e` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1017,10 +1035,10 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
-| `scripts/unix-producer-command.sh` | 3,213 | `d4ee80fae32f48647cda18501c38e03baee62832caf9ed4393ab6e7edfea2135` |
-| `scripts/unix-producer-supervisor.sh` | 25,167 | `7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52` |
-| `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
-| `scripts/unix-producer-supervisor.test.sh` | 8,083 | `c7d2d023d4c1f1ba3cdb3da1e95b30af1763602932a91592388bb117de6bd397` |
+| `scripts/unix-producer-command.sh` | 3,250 | `d786c096b8f0b02da8f43a77e7c86e2b7e73c423e68747d686b5d5a41a0690ab` |
+| `scripts/unix-producer-supervisor.sh` | 25,197 | `c18cf8880116a5fbf9c269284b1632e8429f6a457f11696eb9c731dc4e8b20d1` |
+| `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
+| `scripts/unix-producer-supervisor.test.sh` | 8,362 | `3ec1bfc66e09ef688321e73c74c299108e67c5cc331695e2f87cd55d5b534b45` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |

@@ -598,10 +598,13 @@ if [[ "$host_os" == Linux ]]; then
   producer_contained=1
   kill -CONT "$producer_pid"
 else
-  /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/env -i "${restricted_environment[@]}" \
-    /bin/bash -c \
-    'exec 7<&- 8<&- 9<&-; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' opencoven-producer \
-    "${producer_invocation[@]}" &
+  (
+    cd /
+    exec /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/env -i "${restricted_environment[@]}" \
+      /bin/bash -c \
+      'exec 7<&- 8<&- 9<&-; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' opencoven-producer \
+      "${producer_invocation[@]}"
+  ) &
   producer_pid=$!
   producer_contained=1
 fi
