@@ -1375,7 +1375,7 @@ function resolveOperatorHomes() {
   return { caveHome, covenHome };
 }
 
-async function collectToolchainMetadata(artifactRoot, environment, expected) {
+async function collectToolchainMetadata(artifactRoot, environment, expected, toolchainRoot) {
   const pnpm = await runCommand(artifactRoot, 'pnpm version verification', 'pnpm', ['--version'], {
     cwd: projectRoot,
     env: environment,
@@ -1392,7 +1392,7 @@ async function collectToolchainMetadata(artifactRoot, environment, expected) {
     'pnpm',
     ['--ignore-workspace', 'exec', 'tauri', '--version'],
     {
-      cwd: projectRoot,
+      cwd: toolchainRoot,
       env: environment,
       timeoutMs: 30_000,
     },
@@ -4022,10 +4022,14 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
       };
       activeStage = 'phase1.stage.toolchain.failed';
+      const toolchainRoot =
+        supervisorEnvironment.OPENCOVEN_WINDOWS_WORKSPACE ??
+        supervisorEnvironment.OPENCOVEN_UNIX_WORKSPACE;
       toolchain = await collectToolchainMetadata(
         executionRoot,
         environment,
         sdkContract.frozenLock.toolchain,
+        toolchainRoot,
       );
     }
     activeStage = 'phase1.stage.packaging.failed';
