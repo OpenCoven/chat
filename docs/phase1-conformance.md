@@ -1024,10 +1024,11 @@ the bounded release-build phase, including resource exhaustion, compilation,
 page-data, static-page, server-bundle, and postbuild boundaries. A recognized
 bounded command-failure reason remains authoritative even when the captured
 output lacks a phase banner. Pnpm lifecycle banners are recognized with or
-without their workspace path. Verified-runner cleanup retains an earlier
-execution failure instead of replacing it. Captured command output, filesystem
-paths, and the underlying error remain private in-memory causes and are not
-serialized into the public failure result.
+without their workspace path, and a failure before the wrapped lifecycle starts
+is identified at the conformance-wrapper boundary. Verified-runner and
+owned-artifact cleanup retain an earlier execution failure instead of replacing
+it. Captured command output, filesystem paths, and the underlying error remain
+private in-memory causes and are not serialized into the public failure result.
 
 Frozen consumer failures are further bounded to authority verification,
 artifact loading, harness creation, offline installation, isolation checks,
@@ -1074,20 +1075,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,386 | `c0a4f9ff35b413dc5a152bf419977517b7d4f7c7c8a9adef6e8ade094c36915a` |
+| `.github/workflows/client-v1-conformance.yml` | 462,386 | `06845d517c55f197df6ebc25b8f17e652b6a813024ed9f630ab82e15f0befcf4` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
-| `scripts/phase1-conformance.mjs` | 189,801 | `29bd5c57925c729593cfb4cf4cca7839bb180a2c626da83672dd795197281499` |
+| `scripts/phase1-conformance.mjs` | 189,993 | `ad58f43fee62294f0c9912f5a212d507e57013e9aefc5f46306dbffb094e9915` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 152,532 | `372b92b5105477dcc3572d31f772c1f75031b64f14127ef66113303ecb837e87` |
+| `scripts/phase1-schema-v2-producer.mjs` | 153,272 | `2c59db9acd364220969baf1016c9a7203a21757399b32d00ba1e57ae8fb0939f` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

@@ -123,6 +123,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.packaging.cave-build.spawn',
   'phase1.packaging.cave-build.supervisor',
   'phase1.packaging.cave-build.phase.prebuild',
+  'phase1.packaging.cave-build.phase.conformance-wrapper',
   'phase1.packaging.cave-build.phase.next-build',
   'phase1.packaging.cave-build.phase.next-build.resource',
   'phase1.packaging.cave-build.phase.next-build.resource.spawn',
@@ -740,6 +741,8 @@ function classifyCaveBuildFailureDiagnostic(error) {
                     : 'next-build.compile';
   } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
     phase = 'prebuild';
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
+    phase = 'conformance-wrapper';
   }
   return `phase1.packaging.cave-build.phase.${phase}`;
 }
@@ -2645,11 +2648,36 @@ export async function withFixtureDaemon(fixtureDaemon, action) {
 }
 
 export async function withOwnedArtifactRoot(ownedRoot, action) {
+  let result;
+  let actionFailure;
+  let actionFailed = false;
   try {
-    return await action();
-  } finally {
-    await ownedRoot.cleanup();
+    result = await action();
+  } catch (error) {
+    actionFailure = error;
+    actionFailed = true;
   }
+  let cleanupFailure;
+  let cleanupFailed = false;
+  try {
+    await ownedRoot.cleanup();
+  } catch (error) {
+    cleanupFailure = error;
+    cleanupFailed = true;
+  }
+  if (actionFailed && cleanupFailed) {
+    throw new AggregateError(
+      [actionFailure, cleanupFailure],
+      'Owned artifact action and cleanup both failed.',
+    );
+  }
+  if (actionFailed) {
+    throw actionFailure;
+  }
+  if (cleanupFailed) {
+    throw cleanupFailure;
+  }
+  return result;
 }
 
 async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
