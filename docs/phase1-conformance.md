@@ -1019,14 +1019,23 @@ Diagnostics are stable IDs only.
 
 Packaging failures publish only the bounded failing substage: frozen consumer
 verification, Cave install/build, Chat install/web/native build, Coven build,
-or final output verification. Captured command output, filesystem paths, and
-the underlying error remain private in-memory causes and are not serialized
-into the public failure result.
+or final output verification. Cave build failures are further classified to
+the bounded release-build phase, including resource exhaustion, compilation,
+page-data, static-page, server-bundle, and postbuild boundaries. Captured
+command output, filesystem paths, and the underlying error remain private
+in-memory causes and are not serialized into the public failure result.
 
 Frozen consumer failures are further bounded to authority verification,
 artifact loading, harness creation, offline installation, isolation checks,
 Cave fixture matching, packed build, packed verification, or cleanup. The
 cross-process diagnostic file contains only that allowlisted stage.
+
+Schema-v2 native failures publish only an allowlisted scenario substage, such
+as fixture setup, RPC startup, native custody preflight, launch, pairing,
+restart, reads, reconciliation, revocation, stale discovery, cleanup,
+missing-keychain trust, or final isolation proof. Private RPC responses,
+credential identifiers, native-store values, paths, and underlying errors
+remain in-memory only.
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
@@ -1058,7 +1067,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,386 | `e349c26313a056505fd60d14f9a5fd6ed33eeac4b9b3c28abdedcbec9ddff15c` |
+| `.github/workflows/client-v1-conformance.yml` | 462,386 | `04b2b309a45e697ed79a169d81c971ce4e6cf2504b23efb2de5980d2b57f6cbf` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1071,7 +1080,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 143,934 | `4cc529378f35986ae01d67e3ccd8936450d0585c16dfdc46c3c3b7c84799c5e5` |
+| `scripts/phase1-schema-v2-producer.mjs` | 150,374 | `ad5532da0853b18ae7a219005901993b8ee700d4e563a9cd457834ad8a3ab9f3` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
