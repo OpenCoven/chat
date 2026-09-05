@@ -35,6 +35,7 @@ import {
   createGitEnvironment,
   readPhase1CheckoutIdentity,
   requirePhase1HarnessAuthorityVerification,
+  resolveLocalGitDirectory,
 } from './phase1-conformance-lock.mjs';
 import {
   buildIsolationEvidence,
@@ -1456,6 +1457,8 @@ export async function cloneExactCheckout({
     typeof sourceRoot === 'string' && existsSync(sourceRoot) && statSync(sourceRoot).isDirectory()
       ? sourceRoot
       : undefined;
+  const localGitDirectory =
+    localSource === undefined ? undefined : resolveLocalGitDirectory(localSource);
   const source = localSource ?? `https://github.com/${repository}.git`;
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   if (localSource !== undefined) {
@@ -1467,7 +1470,7 @@ export async function cloneExactCheckout({
         '-c',
         `core.hooksPath=${devNull}`,
         '-c',
-        `safe.directory=${localSource}`,
+        `safe.directory=${localGitDirectory}`,
         'clone',
         '--local',
         '--no-hardlinks',

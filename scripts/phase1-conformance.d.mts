@@ -279,6 +279,7 @@ export class CommandExecutionError extends Error {
   constructor(label: string, result: unknown);
 }
 export function publicPhase1FailureDiagnostic(error: unknown): string | undefined;
+export function runnerCheckoutFailureDiagnostic(error: unknown): string;
 export function extractVerifiedRunnerDiagnostic(stderr: unknown): string | undefined;
 export function classifyPackagingCommandFailure(baseId: string, error: unknown): string;
 export function diagnoseCovenLifecycleFailure(
