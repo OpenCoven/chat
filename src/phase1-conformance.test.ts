@@ -934,11 +934,14 @@ describe('Phase 1 real-authority conformance harness', () => {
       'utf8',
     );
     const collectorStart = source.indexOf('async function collectToolchainMetadata');
-    const collectorSource = source.slice(collectorStart, source.indexOf('\nfunction sha256Tree'));
+    const collectorEnd = source.indexOf('\nfunction sha256Tree', collectorStart);
     const runStart = source.indexOf('export async function runSchemaV2Conformance');
-    const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
 
     expect(collectorStart).toBeGreaterThan(-1);
+    expect(collectorEnd).toBeGreaterThan(collectorStart);
+    expect(runStart).toBeGreaterThan(-1);
+    const collectorSource = source.slice(collectorStart, collectorEnd);
+    const runSource = source.slice(runStart);
     expect(collectorSource).toContain(
       'collectToolchainMetadata(artifactRoot, environment, expected, toolchainRoot)',
     );
