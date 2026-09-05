@@ -413,6 +413,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.chat-web-build.failed',
   'phase1.packaging.chat-native-build.failed',
   'phase1.packaging.chat-native-tests.failed',
+  'phase1.packaging.native-test-home.invalid',
   'phase1.packaging.artifact-verification.failed',
   'phase1.packaging.cave-install.failed',
   'phase1.packaging.cave-build.failed',
