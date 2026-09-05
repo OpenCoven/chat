@@ -8568,7 +8568,8 @@ jobs:
               [Parameter(Mandatory)][string]$Repository,
               [Parameter(Mandatory)][string]$Revision,
               [Parameter(Mandatory)][string]$Destination,
-              [Parameter(Mandatory)][string]$Label
+              [Parameter(Mandatory)][string]$Label,
+              [Parameter()][switch]$FetchHistory
             )
             if (
               $Repository -cnotin @(
@@ -8602,28 +8603,30 @@ jobs:
                 "https://github.com/$Repository.git"
               ) `
               -Label "$Label origin configuration"
+            $fetchArguments = @(
+              '-C',
+              $Destination,
+              '-c',
+              'credential.helper=',
+              '-c',
+              'core.hooksPath=NUL',
+              '-c',
+              'fetch.fsckObjects=true',
+              '-c',
+              'transfer.fsckObjects=true',
+              '-c',
+              'protocol.https.allow=always',
+              'fetch',
+              '--quiet',
+              '--no-tags'
+            )
+            if (-not $FetchHistory) {
+              $fetchArguments += '--depth=1'
+            }
+            $fetchArguments += @('origin', $Revision)
             Invoke-Checked `
               -FilePath $git `
-              -ArgumentList @(
-                '-C',
-                $Destination,
-                '-c',
-                'credential.helper=',
-                '-c',
-                'core.hooksPath=NUL',
-                '-c',
-                'fetch.fsckObjects=true',
-                '-c',
-                'transfer.fsckObjects=true',
-                '-c',
-                'protocol.https.allow=always',
-                'fetch',
-                '--quiet',
-                '--no-tags',
-                '--depth=1',
-                'origin',
-                $Revision
-              ) `
+              -ArgumentList $fetchArguments `
               -Label "$Label exact-SHA fetch"
             Invoke-Checked `
               -FilePath $git `
@@ -8919,7 +8922,8 @@ jobs:
             -Repository $phase1Lock.cave.repository `
             -Revision $phase1Lock.cave.revision `
             -Destination $caveRoot `
-            -Label 'Cave authority'
+            -Label 'Cave authority' `
+            -FetchHistory
           Checkout-ExactRepository `
             -Repository $phase1Lock.coven.repository `
             -Revision $phase1Lock.coven.revision `
@@ -9439,6 +9443,7 @@ jobs:
           repository: ${{ steps['phase1-revisions'].outputs.cave_repository }}
           ref: ${{ steps['phase1-revisions'].outputs.cave_revision }}
           path: .phase1-counterparts/coven-cave
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: matrix.platform != 'win32-x64'
