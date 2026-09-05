@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "e0e2ec57e68ad0cf0d8ec9d978d60c6c4447d587"
+    "revision": "9e3b3a45235e63f20f7026b3a189baa78b1a51c8"
   },
   "harnessAuthority": {
-    "revision": "e0e2ec57e68ad0cf0d8ec9d978d60c6c4447d587",
-    "tree": "7979de900b2e2354ae5b5689a275289e54f06906",
+    "revision": "9e3b3a45235e63f20f7026b3a189baa78b1a51c8",
+    "tree": "7d79993406cabb3f85adb26d24d483ab1b910919",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "3abc0bb7c4b54fe13ee25c5ff690ae9bd3bc28bb",
-        "sha256": "b4be44b71e5689955ae2bb190fa91085846a265a8ac5ecf74cddb86efc62290c"
+        "blob": "adee612f4c93a991fb412f612b5a681f30d8d0a5",
+        "sha256": "e349c26313a056505fd60d14f9a5fd6ed33eeac4b9b3c28abdedcbec9ddff15c"
       }
     ],
     "productionDeltas": [
