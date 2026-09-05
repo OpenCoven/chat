@@ -1018,6 +1018,11 @@ verification, Cave install/build, Chat install/web/native build, Coven build,
 or final output verification. Captured command output, filesystem paths, and
 the underlying error remain private in-memory causes and are not serialized
 into the public failure result.
+
+Frozen consumer failures are further bounded to authority verification,
+artifact loading, harness creation, offline installation, isolation checks,
+Cave fixture matching, packed build, packed verification, or cleanup. The
+cross-process diagnostic file contains only that allowlisted stage.
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
@@ -1049,20 +1054,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,200 | `3bb75d780515ed761db761aa2b2f7d8a3bb4d26be54a6800fda79be088468d0b` |
-| `scripts/contract-canary.mjs` | 38,715 | `302ae4388360e484533b9a40ad8d94c7a9cd0602065eae451cc1bf069e93d370` |
+| `.github/workflows/client-v1-conformance.yml` | 462,200 | `51f3d36517b84c8cdcdeb29af81f3dd7fcbc7a767c28829855da6d3e64ca175f` |
+| `scripts/contract-canary.mjs` | 39,241 | `0dade3e1705a167d407b49efacd12671242182439f80804ac1147b8e290635db` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
-| `scripts/phase1-conformance.mjs` | 188,629 | `9f4e416e6b02f439406d6e20f8687307b2da9c9415fafd2cd417f7cf2485d409` |
+| `scripts/phase1-conformance.mjs` | 188,812 | `7a800f34bcdb8f14e58a091f7450f72e103265ff3f58be0dca7ba805a05cb5cc` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 142,452 | `2aa76ff2e1515fbc30901752a6d6049a4cedeb598944fb0305ec4720eb7c1ceb` |
+| `scripts/phase1-schema-v2-producer.mjs` | 143,934 | `4cc529378f35986ae01d67e3ccd8936450d0585c16dfdc46c3c3b7c84799c5e5` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
