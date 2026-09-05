@@ -121,6 +121,9 @@ substituted, hidden-index, filtered, replacement-ref, submodule, oversized, or
 timed-out release checkouts. Each repository's complete verification command
 sequence shares a finite 30-second deadline, which accommodates the frozen
 Cave tree without permitting an unbounded Git child.
+Every clone, fetch, and checkout subprocess receives the checkout-specific
+environment directly. Git attribute sources and other ambient Git overrides
+removed by that projection cannot be reintroduced by the caller environment.
 
 ## Native Coven identity
 
@@ -310,8 +313,12 @@ content-addressed `pnpm.cjs` package root; the supervisor validates that
 complete regular-file tree, copies it into a root-owned, non-writable trusted
 directory, and installs a fixed wrapper that invokes it through the trusted
 Node copy. This preserves the self-updated pnpm runtime without depending on
-its private installation path after the UID transition. The copied checkout and its
-tracked harness/validator launch sources are root-owned and recursively
+its private installation path after the UID transition. The broker-owned source
+runtime may contain action-setup hardlinks, but it must contain no symlink,
+special file, unsafe owner, or writable component. The root-owned copy is then
+validated again after ownership and mode sealing; every copied regular file
+must have link count one before restricted execution begins. The copied checkout
+and its tracked harness/validator launch sources are root-owned and recursively
 non-writable; local Git clones receive only the exact source path as
 `safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
 alternate. The trusted command is a root-owned, non-writable sibling of that
@@ -773,7 +780,8 @@ inheritance. Unix carries only the validated UID/name, broker UID, native
 containment and cgroup membership, source workspace, private artifact
 directory, and source-record path, plus the isolated Secret Service values
 where applicable. Windows carries only the nonce-bound Job identity, trusted
-system PowerShell path, exact bootstrap/workspace/artifact paths, required
+system PowerShell path, exact bootstrap/workspace/artifact paths, the
+deterministic Node distribution path derived by the outer bootstrap, required
 system directories and command processor, isolated temporary directories,
 `PATH`/`PATHEXT`, and the reviewed `LIB`/`INCLUDE` toolchain paths. GitHub and
 OIDC bearer variables are never projected.
@@ -1024,29 +1032,29 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,104 | `256441056fabb6668875f56e1e1aa7a38300e254f4cd6e70946a37937d46f00a` |
+| `.github/workflows/client-v1-conformance.yml` | 462,198 | `d6115401e1880049972e1a1b04d75a6df34fb27a974f4253462c65902addb4e2` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 187,001 | `663d0259e359fe87e57792617ba7c8e990ef4aff0cdeddbb0ff85c441688efb0` |
+| `scripts/phase1-conformance.mjs` | 187,031 | `2ad57742d68388492ed8f8e1fbee6c8d6fe2d25dfb5c3d4de4f424b0e2f0feed` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 141,680 | `40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337` |
+| `scripts/phase1-schema-v2-producer.mjs` | 141,501 | `16aa63fecee0639d9d141cce77d81f349b78ffee464e9b39b01d139ba27d8c56` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 28,757 | `141c2cc95f2a73a70df70536ca83e825b0bd043f5cdab6ca0f7a92ee2f4b8dff` |
+| `scripts/unix-producer-supervisor.sh` | 29,087 | `d14f65fa32c82b33ecee6224dc79c86857c2d8d28965e3fb259578baf41d7a0d` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 13,546 | `57bb329a05b21c9ed86d998738797a5de3ba4a9eb3f1faa7c7e7fea1cfe35bc8` |
+| `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
