@@ -435,7 +435,7 @@ describe('client-v1 conformance workflow bootstrap', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const unixProducerCommand = readFileSync(unixProducerCommandPath, 'utf8');
 
-    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(2);
+    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(3);
     expect(workflow).toContain('scripts/executable-resolution.mjs');
     expect(workflow).toContain('resolveExecutableInvocation');
     expect(workflow).toContain("      GIT_CONFIG_COUNT: '1'");
@@ -474,9 +474,13 @@ describe('client-v1 conformance workflow bootstrap', () => {
       '--coven-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven"',
     );
     expect(workflow).toContain('function Checkout-ExactRepository');
+    expect(workflow).toContain('[Parameter()][switch]$FetchHistory');
+    expect(workflow).toContain('if (-not $FetchHistory) {');
     expect(workflow).toContain("-Label 'SDK candidate'");
     expect(workflow).toContain("-Label 'SDK validator'");
-    expect(workflow).toContain("-Label 'Cave authority'");
+    expect(workflow).toMatch(
+      /-Destination \$caveRoot `\n {12}-Label 'Cave authority' `\n {12}-FetchHistory/u,
+    );
     expect(workflow).toContain("-Label 'Coven authority'");
   });
 
