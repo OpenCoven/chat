@@ -1123,6 +1123,10 @@ describe('Phase 1 real-authority conformance harness', () => {
       'revocation-status',
       'stale-discovery',
       'cleanup',
+      'cleanup-grant',
+      'cleanup-custody',
+      'cleanup-rpc',
+      'cleanup-fixture-daemon',
       'missing-keychain',
       'isolation-proof',
     ]) {
@@ -1133,6 +1137,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
     expect(nativeScenarios.match(/scenarioFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
       8,
+    );
+    expect(nativeScenarios.match(/cleanupFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
+      4,
     );
     expect(nativeScenarios).not.toContain('cause.message');
   });
@@ -2326,11 +2333,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     const failure = new CommandExecutionError('private command', {
       code: 1,
       stdout: [
-        '> coven-cave@0.3.11 prebuild',
-        '> coven-cave@0.3.11 build',
+        '> coven-cave@0.3.11 prebuild /private/coven-cave',
+        '> coven-cave@0.3.11 build /private/coven-cave',
         'Creating an optimized production build',
-        '> coven-cave@0.3.11 build:server',
-        '> coven-cave@0.3.11 postbuild',
+        '> coven-cave@0.3.11 build:server /private/coven-cave',
+        '> coven-cave@0.3.11 postbuild /private/coven-cave',
         'private budget details',
       ].join('\n'),
       stderr: 'private stderr',
@@ -2413,6 +2420,39 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
+  test('classifies an actual pnpm Cave prebuild header with its workspace path', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const failure = new SchemaV2CommandExecutionError('private command', {
+      code: 1,
+      signal: null,
+      stdout: '> coven-cave@0.3.12 prebuild /private/coven-cave\nprivate generator failure',
+      stderr: 'private operator path',
+    });
+
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.prebuild');
+    expect(diagnostic).not.toContain('private');
+  });
+
   test.each([
     ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
     ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
@@ -2473,6 +2513,23 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnose('restart-health')).toBe('phase1.native-scenarios.restart-health');
     expect(diagnose('private operator path')).toBe('phase1.stage.native-scenarios.failed');
   });
+
+  test.each(['cleanup-grant', 'cleanup-custody', 'cleanup-rpc', 'cleanup-fixture-daemon'])(
+    'publishes the bounded schema-v2 native %s stage',
+    async (stage) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const diagnose = producer.schemaV2NativeFailureDiagnostic;
+      expect(diagnose).toBeTypeOf('function');
+      if (typeof diagnose !== 'function') {
+        return;
+      }
+      expect(diagnose(stage)).toBe(`phase1.native-scenarios.${stage}`);
+    },
+  );
 
   test('retains the first caught schema-v2 native assertion failure', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
@@ -2891,6 +2948,29 @@ describe('Phase 1 real-authority conformance harness', () => {
       ),
     ).toBe('phase1.native-scenarios.restart-discovery');
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
+  });
+
+  test('preserves a verified-runner failure when bootstrap cleanup also fails', async () => {
+    const harness = (await import('../scripts/phase1-conformance.mjs')) as Record<string, unknown>;
+    const throwCombined = harness.throwCombinedPhase1Failures;
+    expect(throwCombined).toBeTypeOf('function');
+    if (typeof throwCombined !== 'function') {
+      return;
+    }
+    const primary = new Error('phase1.packaging.cave-build.phase.prebuild');
+    const cleanup = new Error('private bootstrap cleanup path');
+
+    let failure: unknown;
+    try {
+      throwCombined(primary, cleanup, 'Verified runner execution and cleanup both failed.');
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(publicPhase1FailureDiagnostic(failure)).toBe(
+      'phase1.packaging.cave-build.phase.prebuild',
+    );
   });
 
   test('classifies unsafe local checkout ownership without exposing the repository path', () => {

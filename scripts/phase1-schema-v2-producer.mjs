@@ -98,6 +98,10 @@ const schemaV2NativeFailureStages = new Set([
   'revocation-repair',
   'stale-discovery',
   'cleanup',
+  'cleanup-grant',
+  'cleanup-custody',
+  'cleanup-rpc',
+  'cleanup-fixture-daemon',
   'missing-keychain',
   'isolation-proof',
 ]);
@@ -712,9 +716,9 @@ function classifyCaveBuildFailureDiagnostic(error) {
     `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
   ).replaceAll('\r\n', '\n');
   let phase = 'unknown';
-  if (/^> coven-cave@\d+\.\d+\.\d+ postbuild$/mu.test(output)) {
+  if (/^> coven-cave@\d+\.\d+\.\d+ postbuild(?:\s+.+)?$/mu.test(output)) {
     phase = 'postbuild';
-  } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server$/mu.test(output)) {
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server(?:\s+.+)?$/mu.test(output)) {
     phase = 'server-bundle';
   } else if (output.includes('Creating an optimized production build')) {
     phase = /\bEAGAIN\b/u.test(output)
@@ -734,7 +738,7 @@ function classifyCaveBuildFailureDiagnostic(error) {
                   : output.includes('Compiled successfully')
                     ? 'next-build.typescript'
                     : 'next-build.compile';
-  } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild$/mu.test(output)) {
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
     phase = 'prebuild';
   }
   return `phase1.packaging.cave-build.phase.${phase}`;
@@ -3528,45 +3532,55 @@ async function runNativeScenarios({
   }
   activeNativeStage = 'cleanup';
   let cleanupFailure;
-  try {
-    await withFixtureDaemon(fixtureDaemon, async () => {
-      if (rpc !== undefined) {
-        try {
-          if (platformEnvironment !== undefined) {
-            let grant;
-            try {
-              const cleanupInstanceIds = [...nativeInstanceIds].sort();
-              const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
-                instanceIds: cleanupInstanceIds,
-              });
-              if (
-                issued === null ||
-                typeof issued !== 'object' ||
-                typeof issued.grant !== 'string' ||
-                !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
-              ) {
-                throw new Error('Native custody cleanup grant was not canonical.');
-              }
-              grant = issued.grant;
-              issued.grant = undefined;
-              nativeStateAfter = validateNativeCustodyProof(
-                await rpc.ok('conformance_cleanup_native_custody', { grant }),
-                platformEnvironment.nativeCustody,
-                'Native custody cleanup',
-              );
-            } finally {
-              grant = undefined;
-            }
-          }
-        } finally {
-          await rpc.close();
-        }
+  if (rpc !== undefined && platformEnvironment !== undefined) {
+    let grant;
+    try {
+      activeNativeStage = 'cleanup-grant';
+      const cleanupInstanceIds = [...nativeInstanceIds].sort();
+      const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
+        instanceIds: cleanupInstanceIds,
+      });
+      if (
+        issued === null ||
+        typeof issued !== 'object' ||
+        typeof issued.grant !== 'string' ||
+        !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
+      ) {
+        throw new Error('Native custody cleanup grant was not canonical.');
       }
-    });
+      grant = issued.grant;
+      issued.grant = undefined;
+    } catch (error) {
+      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+    }
+    if (grant !== undefined) {
+      try {
+        activeNativeStage = 'cleanup-custody';
+        nativeStateAfter = validateNativeCustodyProof(
+          await rpc.ok('conformance_cleanup_native_custody', { grant }),
+          platformEnvironment.nativeCustody,
+          'Native custody cleanup',
+        );
+      } catch (error) {
+        cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+      } finally {
+        grant = undefined;
+      }
+    }
+  }
+  if (rpc !== undefined) {
+    try {
+      activeNativeStage = 'cleanup-rpc';
+      await rpc.close();
+    } catch (error) {
+      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+    }
+  }
+  try {
+    activeNativeStage = 'cleanup-fixture-daemon';
+    await fixtureDaemon.close();
   } catch (error) {
-    cleanupFailure = new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), {
-      cause: error,
-    });
+    cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
   }
   if (scenarioFailure !== undefined || cleanupFailure !== undefined) {
     const failures = [scenarioFailure, cleanupFailure].filter((failure) => failure !== undefined);

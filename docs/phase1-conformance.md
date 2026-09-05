@@ -1023,9 +1023,11 @@ or final output verification. Cave build failures are further classified to
 the bounded release-build phase, including resource exhaustion, compilation,
 page-data, static-page, server-bundle, and postbuild boundaries. A recognized
 bounded command-failure reason remains authoritative even when the captured
-output lacks a phase banner. Captured command output, filesystem paths, and the
-underlying error remain private in-memory causes and are not serialized into
-the public failure result.
+output lacks a phase banner. Pnpm lifecycle banners are recognized with or
+without their workspace path. Verified-runner cleanup retains an earlier
+execution failure instead of replacing it. Captured command output, filesystem
+paths, and the underlying error remain private in-memory causes and are not
+serialized into the public failure result.
 
 Frozen consumer failures are further bounded to authority verification,
 artifact loading, harness creation, offline installation, isolation checks,
@@ -1037,9 +1039,10 @@ as fixture setup, RPC startup, native custody preflight, launch, pairing,
 restart, reads, reconciliation, revocation, stale discovery, cleanup,
 missing-keychain trust, or final isolation proof. The first failed native
 assertion is retained while later scenarios and mandatory cleanup complete,
-and nested wrappers preserve that bounded identifier. Private RPC responses,
-credential identifiers, native-store values, paths, and underlying errors
-remain in-memory only.
+and cleanup further identifies grant issuance, native-custody cleanup, RPC
+shutdown, or fixture-daemon shutdown. Nested wrappers preserve that bounded
+identifier. Private RPC responses, credential identifiers, native-store
+values, paths, and underlying errors remain in-memory only.
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
