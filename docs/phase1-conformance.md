@@ -1091,6 +1091,17 @@ authority checkout keeps resolving only for as long as the now-orphaned
 source branch survives. A follow-up repin to the real merge commit is the
 only fix once that happens.
 
+The two-step converges in exactly two commits only when every digest update —
+the harness digest, both workflow pin tables, every affected row in the table
+above, and every affected `harnessAuthority.files` entry (the workflow's own
+self-referential one included) — lands in the code commit itself. The repin
+commit that follows must touch nothing but `harness.revision`,
+`harnessAuthority.revision`/`.tree`, and the test's literal copy of them. Move
+any digest into the repin commit instead and it invalidates the digests
+recorded against the commit `harness.revision` still names, forcing a third
+commit to advance the pin again — the exact shape of #102's first attempt and
+#110's first attempt.
+
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
 `sha256`, and independently recomputes each committed blob ID over the exact
