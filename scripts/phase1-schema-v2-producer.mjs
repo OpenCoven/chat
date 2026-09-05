@@ -1376,17 +1376,11 @@ function resolveOperatorHomes() {
 }
 
 async function collectToolchainMetadata(artifactRoot, environment, expected) {
-  const pnpm = await runCommand(
-    artifactRoot,
-    'pnpm version verification',
-    'pnpm',
-    ['--version'],
-    {
-      cwd: projectRoot,
-      env: environment,
-      timeoutMs: 30_000,
-    },
-  );
+  const pnpm = await runCommand(artifactRoot, 'pnpm version verification', 'pnpm', ['--version'], {
+    cwd: projectRoot,
+    env: environment,
+    timeoutMs: 30_000,
+  });
   const rust = await runCommand(artifactRoot, 'Rust version verification', 'rustc', ['--version'], {
     cwd: projectRoot,
     env: environment,
@@ -1707,11 +1701,7 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
     artifactRoot,
     `${label} dependency install`,
     'pnpm',
-    [
-      'install',
-      '--frozen-lockfile',
-      `--config.store-dir=${environment.PNPM_STORE_DIR}`,
-    ],
+    ['install', '--frozen-lockfile', `--config.store-dir=${environment.PNPM_STORE_DIR}`],
     { cwd: rootPath, env: environment },
   );
 }
@@ -1754,16 +1744,10 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     ).observedAssertions;
   }
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await runCommand(
-    artifactRoot,
-    'Cave conformance package',
-    'pnpm',
-    ['build:conformance'],
-    {
-      cwd: roots.caveRoot,
-      env: environment,
-    },
-  );
+  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build:conformance'], {
+    cwd: roots.caveRoot,
+    env: environment,
+  });
 
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
   await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
