@@ -1100,6 +1100,40 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('tracks bounded schema-v2 native substages through scenario and cleanup failures', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const nativeScenarios = source.slice(
+      source.indexOf('async function runNativeScenarios({'),
+      source.indexOf('async function runCovenIdentityScenario('),
+    );
+
+    for (const stage of [
+      'fixture-daemon',
+      'fixture',
+      'rpc-start',
+      'native-preflight',
+      'launch',
+      'pairing',
+      'restart-health',
+      'reads',
+      'reconciliation',
+      'revocation-status',
+      'stale-discovery',
+      'cleanup',
+      'missing-keychain',
+      'isolation-proof',
+    ]) {
+      expect(nativeScenarios).toContain(`'${stage}'`);
+    }
+    expect(nativeScenarios).toContain(
+      'throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });',
+    );
+    expect(nativeScenarios).not.toContain('cause.message');
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
@@ -1109,10 +1143,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain(
       [
         '  } catch (error) {',
-        '    infrastructureFailure ??=',
-        '      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)',
-        '        ? new Error(activeStage, { cause: error })',
-        '        : error;',
+        '    infrastructureFailure ??= schemaV2',
+        '      ? new Error(schemaV2FailureDiagnostic(error, activeStage), { cause: error })',
+        '      : error;',
         "    fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');",
       ].join('\n'),
     );
@@ -2342,6 +2375,55 @@ describe('Phase 1 real-authority conformance harness', () => {
         }),
       ),
     ).toBe('phase1.packaging.cave-build.phase.next-build.resource.killed');
+  });
+
+  test('preserves a bounded Cave build diagnostic through schema-v2 stage wrapping', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    const failure = new SchemaV2CommandExecutionError('private command', {
+      code: 1,
+      signal: null,
+      stdout: 'Creating an optimized production build\nuncaughtException: spawn EAGAIN',
+      stderr: 'private operator path',
+    });
+
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.next-build.resource.spawn');
+    expect(diagnostic).not.toContain('private');
+  });
+
+  test('publishes only an allowlisted schema-v2 native failure stage', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2NativeFailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(diagnose('restart-health')).toBe('phase1.native-scenarios.restart-health');
+    expect(diagnose('private operator path')).toBe('phase1.stage.native-scenarios.failed');
   });
 
   test('classifies Coven verification failures without exposing command output', () => {

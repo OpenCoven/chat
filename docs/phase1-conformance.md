@@ -1019,14 +1019,23 @@ Diagnostics are stable IDs only.
 
 Packaging failures publish only the bounded failing substage: frozen consumer
 verification, Cave install/build, Chat install/web/native build, Coven build,
-or final output verification. Captured command output, filesystem paths, and
-the underlying error remain private in-memory causes and are not serialized
-into the public failure result.
+or final output verification. Cave build failures are further classified to
+the bounded release-build phase, including resource exhaustion, compilation,
+page-data, static-page, server-bundle, and postbuild boundaries. Captured
+command output, filesystem paths, and the underlying error remain private
+in-memory causes and are not serialized into the public failure result.
 
 Frozen consumer failures are further bounded to authority verification,
 artifact loading, harness creation, offline installation, isolation checks,
 Cave fixture matching, packed build, packed verification, or cleanup. The
 cross-process diagnostic file contains only that allowlisted stage.
+
+Schema-v2 native failures publish only an allowlisted scenario substage, such
+as fixture setup, RPC startup, native custody preflight, launch, pairing,
+restart, reads, reconciliation, revocation, stale discovery, cleanup,
+missing-keychain trust, or final isolation proof. Private RPC responses,
+credential identifiers, native-store values, paths, and underlying errors
+remain in-memory only.
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
