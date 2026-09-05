@@ -78,13 +78,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '51b50d107ed7daea3f44c93a7a0298e498095679',
-  tree: '9a23a1aa01279aaeea381f795fa53350b579b6ed',
+  revision: 'e0e2ec57e68ad0cf0d8ec9d978d60c6c4447d587',
+  tree: '7979de900b2e2354ae5b5689a275289e54f06906',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: 'f9dfa197edbc655d4a2a0f40ae585c0aced3e8ad',
-      sha256: 'cddf63a78abfa9f31470b5b9cb65f3dabc85268c40f29c11d3ae3bffbde27ecf',
+      blob: 'd4389950dc2e8650f432ae83cd43437b3e1c5e4b',
+      sha256: '491fb1b70b030d69a88f72c413c6d42e99d163951deeeb563c2210e39fb32a18',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -98,8 +98,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '88b6bbefaf353644a29f98f5ae8805938b8a557b',
-      sha256: '2aa76ff2e1515fbc30901752a6d6049a4cedeb598944fb0305ec4720eb7c1ceb',
+      blob: 'd27f52c3bc992060d53f264dbda7647081e78ed7',
+      sha256: '4cc529378f35986ae01d67e3ccd8936450d0585c16dfdc46c3c3b7c84799c5e5',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -118,13 +118,13 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/contract-canary.mjs',
-      blob: 'ab173316e0d54d2eeade3d4fd80f661add4f6481',
-      sha256: '302ae4388360e484533b9a40ad8d94c7a9cd0602065eae451cc1bf069e93d370',
+      blob: 'ecca86fe95cac90e8294a224ce12ddb30be8fc04',
+      sha256: '63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '535fb673b6a4c9cf1974800e7ee3b28300f8f327',
-      sha256: '876a0e05b6b6b10d83ea7a06031dfae99b5e9f5b53ba1c4ff85ee97d7f70f85f',
+      blob: '3abc0bb7c4b54fe13ee25c5ff690ae9bd3bc28bb',
+      sha256: 'b4be44b71e5689955ae2bb190fa91085846a265a8ac5ecf74cddb86efc62290c',
     },
   ],
 } as const;

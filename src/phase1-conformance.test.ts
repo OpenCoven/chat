@@ -1037,6 +1037,40 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
   });
 
+  test.each([
+    'phase1.packaging.frozen-consumer.authority.failed',
+    'phase1.packaging.frozen-consumer.artifacts.failed',
+    'phase1.packaging.frozen-consumer.harness.failed',
+    'phase1.packaging.frozen-consumer.install.failed',
+    'phase1.packaging.frozen-consumer.isolation.failed',
+    'phase1.packaging.frozen-consumer.fixture.failed',
+    'phase1.packaging.frozen-consumer.build.failed',
+    'phase1.packaging.frozen-consumer.verify.failed',
+    'phase1.packaging.frozen-consumer.cleanup.failed',
+  ])('publishes bounded frozen-consumer diagnostic %s', (diagnostic) => {
+    const wrapped = wrapInfrastructureFailure(
+      new Error(diagnostic, { cause: new Error('/private/operator/path') }),
+      { status: 'failed' },
+    );
+
+    expect(wrapped.message).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
+  });
+
+  test('persists only a bounded frozen-consumer substage across the verifier process', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    expect(source).toContain('verify-frozen-consumer-failure.json');
+    expect(source).toContain('onStage(stage)');
+    expect(source).toContain('JSON.stringify({ stage: activeStage })');
+    expect(source).toContain('`phase1.packaging.frozen-consumer.$' + '{failure.stage}.failed`');
+    expect(source).not.toContain('JSON.stringify({ stage: activeStage, error');
+  });
+
   test('tracks the active schema-v2 packaging substage before each bounded operation', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),

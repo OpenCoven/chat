@@ -841,6 +841,37 @@ describe('contract canary checkout cleanliness', () => {
   );
 
   describe('contract canary packed consumer isolation', () => {
+    test('reports only bounded packed-consumer substages before fallible operations', () => {
+      const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
+      const verifierStart = canary.indexOf('export function verifyFrozenPackedConsumer');
+      const verifierEnd = canary.indexOf('\nfunction safeTarEntries', verifierStart);
+      const verifier = canary.slice(verifierStart, verifierEnd);
+
+      for (const [stage, operation] of [
+        ['authority', 'assertCleanContractCanaryCheckouts'],
+        ['artifacts', 'frozenTarballs'],
+        ['harness', 'createHarness'],
+        ['install', 'installHarnessOfflineAfterWarming'],
+        ['isolation', 'assertIsolatedPackedInstall'],
+        ['fixture', 'assertPackedFixtureMatchesCaveCheckout'],
+        ['build', "runPnpm(['--ignore-workspace', 'run', 'build']"],
+        ['verify', "runPnpm(['--ignore-workspace', 'run', 'verify']"],
+      ] as const) {
+        const marker = verifier.indexOf(`onStage('${stage}')`);
+        expect(marker).toBeGreaterThan(-1);
+        expect(verifier.indexOf(operation)).toBeGreaterThan(marker);
+      }
+      const cleanupStart = canary.indexOf('function cleanupFrozenPackedConsumer');
+      const cleanupEnd = canary.indexOf(
+        '\nexport function verifyFrozenPackedConsumer',
+        cleanupStart,
+      );
+      const cleanup = canary.slice(cleanupStart, cleanupEnd);
+      expect(cleanup.indexOf("onStage('cleanup')")).toBeGreaterThan(
+        cleanup.indexOf('cleanupOwnedTempRoot'),
+      );
+    });
+
     test('removes the warm consumer install before its offline assertion', () => {
       const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
       const warm = canary.indexOf('isolatedInstallArgs({ offline: false })');
