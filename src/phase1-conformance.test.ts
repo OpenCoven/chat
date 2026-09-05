@@ -1067,9 +1067,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain('verify-frozen-consumer-failure.json');
     expect(source).toContain('onStage(stage)');
     expect(source).toContain('JSON.stringify({ stage: activeStage })');
-    expect(source).toContain(
-      '`phase1.packaging.frozen-consumer.${failure.stage}.failed`',
-    );
+    expect(source).toContain('`phase1.packaging.frozen-consumer.$' + '{failure.stage}.failed`');
     expect(source).not.toContain('JSON.stringify({ stage: activeStage, error');
   });
 

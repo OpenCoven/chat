@@ -861,8 +861,14 @@ describe('contract canary checkout cleanliness', () => {
         expect(marker).toBeGreaterThan(-1);
         expect(verifier.indexOf(operation)).toBeGreaterThan(marker);
       }
-      expect(verifier.indexOf("onStage('cleanup')")).toBeGreaterThan(
-        verifier.indexOf('cleanupOwnedTempRoot'),
+      const cleanupStart = canary.indexOf('function cleanupFrozenPackedConsumer');
+      const cleanupEnd = canary.indexOf(
+        '\nexport function verifyFrozenPackedConsumer',
+        cleanupStart,
+      );
+      const cleanup = canary.slice(cleanupStart, cleanupEnd);
+      expect(cleanup.indexOf("onStage('cleanup')")).toBeGreaterThan(
+        cleanup.indexOf('cleanupOwnedTempRoot'),
       );
     });
 

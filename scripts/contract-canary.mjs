@@ -504,6 +504,15 @@ function frozenTarballs(lock, chatRoot = root) {
   return tarballs;
 }
 
+function cleanupFrozenPackedConsumer(artifactContext, onStage) {
+  try {
+    cleanupOwnedTempRoot(artifactContext);
+  } catch (error) {
+    onStage('cleanup');
+    throw error;
+  }
+}
+
 export function verifyFrozenPackedConsumer({
   chatRoot = root,
   sdkRoot,
@@ -562,12 +571,7 @@ export function verifyFrozenPackedConsumer({
     });
   } finally {
     if (artifactContext !== undefined) {
-      try {
-        cleanupOwnedTempRoot(artifactContext);
-      } catch (error) {
-        onStage('cleanup');
-        throw error;
-      }
+      cleanupFrozenPackedConsumer(artifactContext, onStage);
     }
   }
 }
