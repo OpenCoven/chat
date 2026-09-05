@@ -1145,9 +1145,8 @@ async function runVitestObservationSuite({
   await runCommand(
     artifactRoot,
     label,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'exec',
       'vitest',
@@ -1380,8 +1379,8 @@ async function collectToolchainMetadata(artifactRoot, environment, expected) {
   const pnpm = await runCommand(
     artifactRoot,
     'pnpm version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--version'],
+    'pnpm',
+    ['--version'],
     {
       cwd: projectRoot,
       env: environment,
@@ -1396,8 +1395,8 @@ async function collectToolchainMetadata(artifactRoot, environment, expected) {
   const tauri = await runCommand(
     artifactRoot,
     'Tauri version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--ignore-workspace', 'exec', 'tauri', '--version'],
+    'pnpm',
+    ['--ignore-workspace', 'exec', 'tauri', '--version'],
     {
       cwd: projectRoot,
       env: environment,
@@ -1707,9 +1706,8 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   await runCommand(
     artifactRoot,
     `${label} dependency install`,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       'install',
       '--frozen-lockfile',
       `--config.store-dir=${environment.PNPM_STORE_DIR}`,
@@ -1759,8 +1757,8 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
   await runCommand(
     artifactRoot,
     'Cave conformance package',
-    'corepack',
-    ['pnpm@10.34.0', 'build:conformance'],
+    'pnpm',
+    ['build:conformance'],
     {
       cwd: roots.caveRoot,
       env: environment,
@@ -1768,7 +1766,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
   );
 
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
-  await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
+  await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
     cwd: roots.chatRoot,
     env: environment,
   });

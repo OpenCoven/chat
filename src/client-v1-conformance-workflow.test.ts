@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
+const schemaV2ProducerPath = resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs');
 const windowsSupervisorBuildPath = resolve(
   projectRoot,
   'scripts',
@@ -2373,10 +2374,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
   });
 
   test('routes the governed Unix harness through the copied pnpm executable', () => {
-    const harness = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const harness = readFileSync(harnessPath, 'utf8');
+    const schemaV2Producer = readFileSync(schemaV2ProducerPath, 'utf8');
 
     expect(harness).not.toMatch(/['"]corepack['"]/u);
+    expect(schemaV2Producer).not.toMatch(/['"]corepack['"]/u);
     expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
+    expect(schemaV2Producer).toContain(
+      "'pnpm',\n    ['--version']",
+    );
+    expect(schemaV2Producer).toContain(
+      "'pnpm',\n    ['--ignore-workspace', 'exec', 'tauri', '--version']",
+    );
     expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
     expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");
     expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'exec'");
