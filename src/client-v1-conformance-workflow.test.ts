@@ -2377,8 +2377,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const harness = readFileSync(harnessPath, 'utf8');
     const schemaV2Producer = readFileSync(schemaV2ProducerPath, 'utf8');
 
-    expect(harness).not.toMatch(/['"]corepack['"]/u);
-    expect(schemaV2Producer).not.toMatch(/['"]corepack['"]/u);
+    expect(harness).not.toMatch(/['"`]corepack['"`]/u);
+    expect(schemaV2Producer).not.toMatch(/['"`]corepack['"`]/u);
     expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
     expect(schemaV2Producer).toMatch(/'pnpm',\s*\['--version'\]/u);
     expect(schemaV2Producer).toMatch(
