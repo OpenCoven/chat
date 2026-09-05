@@ -2276,7 +2276,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     ]) {
       expect(supervisor).toContain(required);
     }
-    expect(producerHarness).toContain('`safe.directory=$' + '{localSource}`');
+    expect(producerHarness).toContain('`safe.directory=$' + '{localGitDirectory}`');
     for (const required of [
       'openat',
       'O_NOFOLLOW',
@@ -2620,6 +2620,47 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     );
     expect(childBootstrap).toContain('(& $node $pnpmCli --version).Trim()');
     expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
+  });
+
+  test('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const pathStart = childBootstrap.indexOf('$env:PATH = @(');
+    const pathEnd = childBootstrap.indexOf(") -join ';'", pathStart);
+
+    expect(pathStart).toBeGreaterThan(-1);
+    expect(pathEnd).toBeGreaterThan(pathStart);
+
+    const pathAssignment = childBootstrap.slice(pathStart, pathEnd + ") -join ';'".length);
+    const harness = `
+$gitRoot = '/fixture/git'
+$nodeRoot = '/fixture/node'
+$pnpmRoot = '/fixture/pnpm'
+$cargoBin = '/fixture/cargo'
+$env:OPENCOVEN_MSVC_BIN = '/fixture/msvc'
+$env:OPENCOVEN_WINDOWS_SDK_BIN = '/fixture/windows-sdk'
+$env:OPENCOVEN_WINDOWS_SYSTEM_PWSH = '/fixture/powershell/pwsh.exe'
+${pathAssignment}
+[Console]::Out.Write(($env:PATH -split ';' | ConvertTo-Json -Compress))
+`;
+    const entries = JSON.parse(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    );
+
+    expect(entries).toEqual([
+      '/fixture/git\\cmd',
+      '/fixture/node',
+      '/fixture/pnpm',
+      '/fixture/cargo',
+      '/fixture/msvc',
+      '/fixture/windows-sdk',
+      'C:\\Windows\\System32',
+      'C:\\Windows',
+      '/fixture/powershell',
+    ]);
   });
 
   test('walks Windows file ancestors without dereferencing FileInfo.Parent', () => {

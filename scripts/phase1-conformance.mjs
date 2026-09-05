@@ -28,6 +28,7 @@ import {
   createGitCheckoutEnvironment,
   createGitEnvironment,
   readPhase1ConformanceLock,
+  resolveLocalGitDirectory,
 } from './phase1-conformance-lock.mjs';
 import {
   buildPlatformEvidence,
@@ -263,6 +264,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.runner-bootstrap.failed',
   'phase1.stage.runner-lock.failed',
   'phase1.stage.runner-checkout.failed',
+  'phase1.stage.runner-checkout.unsafe-source-owner',
   'phase1.stage.runner-checkout-verification.failed',
   'phase1.stage.verified-runner.failed',
   'phase1.stage.verified-runner.timeout',
@@ -551,6 +553,19 @@ export function publicPhase1FailureDiagnostic(error) {
     }
   }
   return undefined;
+}
+
+export function runnerCheckoutFailureDiagnostic(error) {
+  if (
+    error instanceof CommandExecutionError &&
+    typeof error.result?.stderr === 'string' &&
+    stripVTControlCharacters(error.result.stderr).includes(
+      'detected dubious ownership in repository',
+    )
+  ) {
+    return 'phase1.stage.runner-checkout.unsafe-source-owner';
+  }
+  return 'phase1.stage.runner-checkout.failed';
 }
 
 function runPublicPhase1Stage(id, action) {
@@ -1232,16 +1247,20 @@ async function bootstrapVerifiedRunner(options) {
       ...process.env,
       ...createGitEnvironment(process.env),
     };
-    await runPublicPhase1StageAsync('phase1.stage.runner-checkout.failed', () =>
-      cloneExactCheckout({
-        artifactRoot: bootstrapRoot,
-        sourceRoot: options.chatSourceRoot,
-        destinationRoot: harnessRoot,
-        revision: lock.harness.revision,
-        environment,
-        label: 'Verified Chat conformance harness',
-      }),
-    );
+    await runPublicPhase1StageAsync('phase1.stage.runner-checkout.failed', async () => {
+      try {
+        await cloneExactCheckout({
+          artifactRoot: bootstrapRoot,
+          sourceRoot: options.chatSourceRoot,
+          destinationRoot: harnessRoot,
+          revision: lock.harness.revision,
+          environment,
+          label: 'Verified Chat conformance harness',
+        });
+      } catch (cause) {
+        throw new Error(runnerCheckoutFailureDiagnostic(cause), { cause });
+      }
+    });
     runPublicPhase1Stage('phase1.stage.runner-checkout-verification.failed', () => {
       if (
         runSupervisedSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
@@ -1578,6 +1597,7 @@ export async function cloneExactCheckout({
   if (!statSync(sourceRoot).isDirectory()) {
     throw new Error(`${label} source root is unavailable.`);
   }
+  const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   await runCommand(
     artifactRoot,
@@ -1589,7 +1609,7 @@ export async function cloneExactCheckout({
       '-c',
       `core.hooksPath=${devNull}`,
       '-c',
-      `safe.directory=${sourceRoot}`,
+      `safe.directory=${sourceGitDirectory}`,
       'clone',
       '--local',
       '--no-hardlinks',

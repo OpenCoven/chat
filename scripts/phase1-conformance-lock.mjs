@@ -172,6 +172,31 @@ export function createGitCheckoutEnvironment(inheritedEnvironment = process.env)
   return environment;
 }
 
+export function resolveLocalGitDirectory(repositoryRoot) {
+  const metadataPath = resolve(repositoryRoot, '.git');
+  const metadataStats = lstatSync(metadataPath);
+
+  if (metadataStats.isSymbolicLink()) {
+    throw new Error('Local Git metadata must not be a symbolic link.');
+  }
+  if (metadataStats.isDirectory()) {
+    return realpathSync(metadataPath);
+  }
+  if (!metadataStats.isFile() || metadataStats.size < 1 || metadataStats.size > 4096) {
+    throw new Error('Local Git metadata is not a supported directory or gitfile.');
+  }
+
+  const match = /^gitdir: ([^\0\r\n]+)\r?\n?$/u.exec(readFileSync(metadataPath, 'utf8'));
+  if (match === null) {
+    throw new Error('Local Git metadata gitfile is malformed.');
+  }
+  const gitDirectory = realpathSync(resolve(dirname(metadataPath), match[1]));
+  if (!statSync(gitDirectory).isDirectory()) {
+    throw new Error('Local Git metadata gitfile does not identify a directory.');
+  }
+  return gitDirectory;
+}
+
 function requireRecord(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object.`);

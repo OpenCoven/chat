@@ -60,6 +60,7 @@ import {
   resolveLockedCovenDaemonCommand,
   resolveRustupHome,
   runNativeScenarioOrchestrator,
+  runnerCheckoutFailureDiagnostic,
   runOwnedProcessStatusForTest,
   runPowerShellCommandWithArgs,
   runReservedNativePairing,
@@ -323,6 +324,86 @@ describe('Phase 1 real-authority conformance harness', () => {
           });
         }
       } finally {
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'trusts the exact local Git directory when the immutable source owner differs',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-different-owner-source-'));
+      const linkedSource = join(tmpdir(), `phase1-different-owner-worktree-${randomUUID()}`);
+      const bin = mkdtempSync(join(tmpdir(), 'phase1-different-owner-git-'));
+      const owned = createProcessOwnedArtifactRoot({
+        prefix: 'phase1-different-owner-clone-test',
+      });
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'fixture'], { cwd: source });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['worktree', 'add', '--detach', linkedSource, revision], {
+          cwd: source,
+        });
+        const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+        const gitWrapper = join(bin, 'git');
+        writeFileSync(
+          gitWrapper,
+          [
+            '#!/bin/sh',
+            'for argument in "$@"; do',
+            '  if [ "$argument" = clone ]; then',
+            '    export GIT_TEST_ASSUME_DIFFERENT_OWNER=1',
+            '    break',
+            '  fi',
+            'done',
+            `exec ${JSON.stringify(realGit)} "$@"`,
+            '',
+          ].join('\n'),
+        );
+        chmodSync(gitWrapper, 0o755);
+
+        for (const [sourceLabel, sourceRoot] of [
+          ['repository', source],
+          ['worktree', linkedSource],
+        ] as const) {
+          for (const [cloneLabel, clone] of [
+            ['verified-runner', cloneExactCheckout],
+            ['schema-v2', cloneSchemaV2ExactCheckout],
+          ] as const) {
+            const label = `${sourceLabel}-${cloneLabel}`;
+            await clone({
+              artifactRoot: owned,
+              sourceRoot,
+              destinationRoot: join(owned.rootPath, label),
+              repository: 'OpenCoven/chat',
+              revision,
+              environment: {
+                ...process.env,
+                PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+              },
+              label: `${label} different-owner fixture`,
+            });
+          }
+        }
+      } finally {
+        if (existsSync(linkedSource)) {
+          execFileSync('git', ['worktree', 'remove', '--force', linkedSource], {
+            cwd: source,
+          });
+        }
         await owned.cleanup();
         rmSync(source, { recursive: true, force: true });
         rmSync(bin, { recursive: true, force: true });
@@ -2528,6 +2609,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(new Error('phase1.stage.runner-checkout.failed'))).toBe(
       'phase1.stage.runner-checkout.failed',
     );
+    expect(
+      publicPhase1FailureDiagnostic(new Error('phase1.stage.runner-checkout.unsafe-source-owner')),
+    ).toBe('phase1.stage.runner-checkout.unsafe-source-owner');
     expect(publicPhase1FailureDiagnostic(new Error('phase1.stage.environment.failed'))).toBe(
       'phase1.stage.environment.failed',
     );
@@ -2541,6 +2625,21 @@ describe('Phase 1 real-authority conformance harness', () => {
       publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart-discovery')),
     ).toBe('phase1.native-scenarios.restart-discovery');
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
+  });
+
+  test('classifies unsafe local checkout ownership without exposing the repository path', () => {
+    const diagnostic = runnerCheckoutFailureDiagnostic(
+      new CommandExecutionError('Verified runner clone', {
+        code: 128,
+        signal: null,
+        stdout: '',
+        stderr:
+          "fatal: detected dubious ownership in repository at '/private/operator/repository/.git'",
+      }),
+    );
+
+    expect(diagnostic).toBe('phase1.stage.runner-checkout.unsafe-source-owner');
+    expect(diagnostic).not.toContain('/private/operator/repository');
   });
 
   test.each([

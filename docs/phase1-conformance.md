@@ -319,12 +319,13 @@ special file, unsafe owner, or writable component. The root-owned copy is then
 validated again after ownership and mode sealing; every copied regular file
 must have link count one before restricted execution begins. The copied checkout
 and its tracked harness/validator launch sources are root-owned and recursively
-non-writable; local Git clones receive only the exact source path as
-`safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
-alternate. The trusted command is a root-owned, non-writable sibling of that
-producer root. It receives an allowlisted environment with no GitHub token,
-OIDC request value, credential helper, operator home, ambient package cache,
-or proxy setting.
+non-writable; local Git clones resolve the source's exact Git metadata directory
+for `safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
+alternate. This supports both ordinary checkouts and Git worktrees without
+trusting the broader source path. The trusted command is a root-owned,
+non-writable sibling of that producer root. It receives an allowlisted
+environment with no GitHub token, OIDC request value, credential helper,
+operator home, ambient package cache, or proxy setting.
 
 Dependency installation, the isolated Rust toolchain installation, all
 candidate/validator/Chat/Cave/Coven checkouts and builds, native RPC work,
@@ -784,7 +785,9 @@ system PowerShell path, exact bootstrap/workspace/artifact paths, the
 deterministic Node distribution path derived by the outer bootstrap, required
 system directories and command processor, isolated temporary directories,
 `PATH`/`PATHEXT`, and the reviewed `LIB`/`INCLUDE` toolchain paths. GitHub and
-OIDC bearer variables are never projected.
+OIDC bearer variables are never projected. The restricted bootstrap constructs
+each `PATH` directory as a distinct array entry so pnpm-generated command shims
+can resolve the pinned Node executable without consulting ambient runner paths.
 
 The Windows Job membership probe uses pinned PowerShell 7.6.5
 `-CommandWithArgs`, so the nonce-bound Job name and decimal process ID arrive
@@ -1032,20 +1035,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,198 | `d6115401e1880049972e1a1b04d75a6df34fb27a974f4253462c65902addb4e2` |
+| `.github/workflows/client-v1-conformance.yml` | 462,200 | `8a20765b744a6f933fbc5a800689efac0671dfe517b340185215b33860af3407` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 187,031 | `2ad57742d68388492ed8f8e1fbee6c8d6fe2d25dfb5c3d4de4f424b0e2f0feed` |
+| `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
+| `scripts/phase1-conformance.mjs` | 187,737 | `42ad940646399de7b89e25cb73abfd59308d5db5284e1c5cbdb57d56737dbfa6` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 141,501 | `16aa63fecee0639d9d141cce77d81f349b78ffee464e9b39b01d139ba27d8c56` |
+| `scripts/phase1-schema-v2-producer.mjs` | 141,646 | `6d1802ede905dc0f38646695547c2101fdc80ee68a90d8d398187750f42d6057` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
