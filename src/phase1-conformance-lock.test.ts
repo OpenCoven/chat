@@ -78,48 +78,18 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '4dcf7b974f7919869be970da3425e7dd1ded1ebc',
-  tree: 'e4aeac5db5e50aa6dd841d304f938c5796dab5f5',
+  revision: 'fedbe20a79fd23c06f9c529657361514b08b5fc4',
+  tree: 'cc8ef6a5469db21441c539f5bc5b34fa9cc30d81',
   files: [
     {
-      path: 'scripts/phase1-conformance.mjs',
-      blob: '76e7f934a47e4626a6c2ae59f31deca7505763d4',
-      sha256: '42ad940646399de7b89e25cb73abfd59308d5db5284e1c5cbdb57d56737dbfa6',
-    },
-    {
-      path: 'scripts/phase1-conformance-lock.mjs',
-      blob: '4a9f6f79b6610617661452a6a3918f2da6290b95',
-      sha256: 'dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd',
-    },
-    {
-      path: 'scripts/phase1-schema-v2-evidence.mjs',
-      blob: '0d0424731a06f169342258e76216583667e4deb0',
-      sha256: 'a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387',
-    },
-    {
-      path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'e475cdf22c100126a0a7ac86a60c02e5f97f4d2b',
-      sha256: '275cef71387f9a7b725ef5eda5b0ecb7e47208777ff2b59972d50bd1edd75d10',
-    },
-    {
-      path: 'scripts/unix-producer-supervisor.sh',
-      blob: '81362103449bb6cdfb97330fe7c67932a965982f',
-      sha256: 'd14f65fa32c82b33ecee6224dc79c86857c2d8d28965e3fb259578baf41d7a0d',
-    },
-    {
-      path: 'scripts/windows-job-supervisor.cs',
-      blob: '547f2db1e7cacd539f49f5c879839fa80397ac1d',
-      sha256: '08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110',
-    },
-    {
-      path: 'scripts/unix-producer-command.sh',
-      blob: '2c1a3e5f8ca96d801d900f5df3886fb3b0d3601b',
-      sha256: 'ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8',
+      path: 'scripts/contract-canary.mjs',
+      blob: 'b27dddd7b906e650cd51313441470c22db630bf8',
+      sha256: '2fc9ef940ae015a9b5c5fac86b531c08efaeb3d2861dc609c19eb5f40e205a51',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '5d812f67bb62eeac63d298af38303c216505d6eb',
-      sha256: 'b1c48729634a3ae4222a4f62d3f245af46acc00de721a322a7233642a5bd577c',
+      blob: '8ec8bfe004c90bfdb1cad513e64bf56942a70300',
+      sha256: '0b85485b541d25fffaa6bf3050d3e4dde4cb9faea8306c3fa8fd1a3d90d9ee1b',
     },
   ],
 } as const;
