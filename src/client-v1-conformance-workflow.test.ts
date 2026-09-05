@@ -2382,7 +2382,10 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(contractCanary).not.toMatch(/['"`]corepack['"`]/u);
     expect(harness).not.toMatch(/['"`]corepack['"`]/u);
     expect(schemaV2Producer).not.toMatch(/['"`]corepack['"`]/u);
-    expect(contractCanary).toContain("return run('pnpm', args, cwd, options);");
+    expect(contractCanary).toContain("return execute('pnpm', args, cwd, options);");
+    expect(contractCanary).toContain(
+      'return execute(nodeExecutable, [pnpmExecPath, ...args], cwd, options);',
+    );
     expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
     expect(schemaV2Producer).toMatch(/'pnpm',\s*\['--version'\]/u);
     expect(schemaV2Producer).toMatch(
