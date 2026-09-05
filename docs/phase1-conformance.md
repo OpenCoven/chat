@@ -1039,7 +1039,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,200 | `b1c48729634a3ae4222a4f62d3f245af46acc00de721a322a7233642a5bd577c` |
+| `.github/workflows/client-v1-conformance.yml` | 462,200 | `77aa8dbd632b385b21b046d52509bc821b3cf4632da118c160e370c05d8b0ba3` |
 | `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
