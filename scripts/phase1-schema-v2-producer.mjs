@@ -4022,11 +4022,14 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
       };
       activeStage = 'phase1.stage.toolchain.failed';
+      const toolchainRoot =
+        supervisorEnvironment.OPENCOVEN_WINDOWS_WORKSPACE ??
+        supervisorEnvironment.OPENCOVEN_UNIX_WORKSPACE;
       toolchain = await collectToolchainMetadata(
         executionRoot,
         environment,
         sdkContract.frozenLock.toolchain,
-        options.chatSourceRoot,
+        toolchainRoot,
       );
     }
     activeStage = 'phase1.stage.packaging.failed';

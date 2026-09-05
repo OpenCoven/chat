@@ -945,7 +945,10 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(collectorSource).toContain("['--ignore-workspace', 'exec', 'tauri', '--version']");
     expect(collectorSource).toContain('cwd: toolchainRoot');
     expect(runSource).toContain(
-      'collectToolchainMetadata(\n        executionRoot,\n        environment,\n        sdkContract.frozenLock.toolchain,\n        options.chatSourceRoot,\n      )',
+      'const toolchainRoot =\n        supervisorEnvironment.OPENCOVEN_WINDOWS_WORKSPACE ??\n        supervisorEnvironment.OPENCOVEN_UNIX_WORKSPACE;',
+    );
+    expect(runSource).toContain(
+      'collectToolchainMetadata(\n        executionRoot,\n        environment,\n        sdkContract.frozenLock.toolchain,\n        toolchainRoot,\n      )',
     );
   });
 
