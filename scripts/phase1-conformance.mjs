@@ -431,6 +431,11 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.phase.unknown',
   'phase1.packaging.coven-build.failed',
   'phase1.packaging.coven-tests.failed',
+  // Thrown by `nativeAdapterTestEnvironment` when the operator HOME it must
+  // preserve on macOS is absent or not an absolute real path. It was written
+  // as an identifier but never listed here, so it degraded to the enclosing
+  // stage and reported nothing about its own cause.
+  'phase1.packaging.native-test-home.invalid',
   'phase1.packaging.outputs.failed',
   ...['lib', 'health', 'doc'].flatMap((group) =>
     [
