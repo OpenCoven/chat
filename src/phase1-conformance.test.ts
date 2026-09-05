@@ -1131,11 +1131,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(nativeScenarios).toContain(
       'throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });',
     );
-    expect(
-      nativeScenarios.match(
-        /scenarioFailure = retainSchemaV2NativeFailure\(/gu,
-      ),
-    ).toHaveLength(8);
+    expect(nativeScenarios.match(/scenarioFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
+      8,
+    );
     expect(nativeScenarios).not.toContain('cause.message');
   });
 
@@ -2424,38 +2422,41 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
     ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
     ['disk-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource'],
-  ])('preserves the classified Cave build %s reason without raw output', async (reason, expected) => {
-    // @ts-expect-error The executable script intentionally has no declaration file.
-    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
-      string,
-      unknown
-    >;
-    const diagnose = producer.schemaV2FailureDiagnostic;
-    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
-      label: string,
-      result: {
-        code: number;
-        reason: string;
-        stdout: string;
-        stderr: string;
-      },
-    ) => Error;
-    expect(diagnose).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
-      return;
-    }
-    const failure = new SchemaV2CommandExecutionError('private command', {
-      code: 1,
-      reason,
-      stdout: 'private output without a phase banner',
-      stderr: 'private operator path',
-    });
+  ])(
+    'preserves the classified Cave build %s reason without raw output',
+    async (reason, expected) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const diagnose = producer.schemaV2FailureDiagnostic;
+      const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+        label: string,
+        result: {
+          code: number;
+          reason: string;
+          stdout: string;
+          stderr: string;
+        },
+      ) => Error;
+      expect(diagnose).toBeTypeOf('function');
+      if (typeof diagnose !== 'function') {
+        return;
+      }
+      const failure = new SchemaV2CommandExecutionError('private command', {
+        code: 1,
+        reason,
+        stdout: 'private output without a phase banner',
+        stderr: 'private operator path',
+      });
 
-    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+      const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
-    expect(diagnostic).toBe(expected);
-    expect(diagnostic).not.toContain('private');
-  });
+      expect(diagnostic).toBe(expected);
+      expect(diagnostic).not.toContain('private');
+    },
+  );
 
   test('publishes only an allowlisted schema-v2 native failure stage', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.

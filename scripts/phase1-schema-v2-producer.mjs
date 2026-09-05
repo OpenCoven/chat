@@ -3084,11 +3084,7 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
-      scenarioFailure = retainSchemaV2NativeFailure(
-        scenarioFailure,
-        activeNativeStage,
-        error,
-      );
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3121,11 +3117,7 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
-      scenarioFailure = retainSchemaV2NativeFailure(
-        scenarioFailure,
-        activeNativeStage,
-        error,
-      );
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.create-pending-approve-exchange failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3179,11 +3171,7 @@ async function runNativeScenarios({
       observations.pairingDenied = true;
       addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
     } catch (error) {
-      scenarioFailure = retainSchemaV2NativeFailure(
-        scenarioFailure,
-        activeNativeStage,
-        error,
-      );
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.denial failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3230,11 +3218,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
-        scenarioFailure = retainSchemaV2NativeFailure(
-          scenarioFailure,
-          activeNativeStage,
-          error,
-        );
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.restart-reuse failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3316,11 +3300,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
-        scenarioFailure = retainSchemaV2NativeFailure(
-          scenarioFailure,
-          activeNativeStage,
-          error,
-        );
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.bounded-canonical failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3388,11 +3368,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
-        scenarioFailure = retainSchemaV2NativeFailure(
-          scenarioFailure,
-          activeNativeStage,
-          error,
-        );
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.stale-generation-cursor-reconciliation failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3511,11 +3487,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
-        scenarioFailure = retainSchemaV2NativeFailure(
-          scenarioFailure,
-          activeNativeStage,
-          error,
-        );
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.revocation-repair failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3552,11 +3524,7 @@ async function runNativeScenarios({
     }
     observations.bearerNeverCrossedBoundary = rpc.responsesContainNoSecrets();
   } catch (error) {
-    scenarioFailure = retainSchemaV2NativeFailure(
-      scenarioFailure,
-      activeNativeStage,
-      error,
-    );
+    scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
   }
   activeNativeStage = 'cleanup';
   let cleanupFailure;
