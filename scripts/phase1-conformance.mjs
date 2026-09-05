@@ -554,6 +554,9 @@ export function publicPhase1FailureDiagnostic(error) {
     if ('errors' in current && Array.isArray(current.errors)) {
       pending.push(...current.errors.slice(0, 16));
     }
+    if ('cause' in current) {
+      pending.push(current.cause);
+    }
     if (
       'result' in current &&
       current.result !== null &&

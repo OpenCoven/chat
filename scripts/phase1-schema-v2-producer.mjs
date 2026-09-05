@@ -676,6 +676,17 @@ export function classifyCavePackageFailure(result) {
   return classifications.find(([pattern]) => pattern.test(output))?.[1];
 }
 
+const caveBuildDiagnosticByFailureReason = new Map([
+  ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
+  ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
+  ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
+  ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
+  ['disk-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource'],
+]);
+
 function classifyCaveBuildFailureDiagnostic(error) {
   if (!(error instanceof CommandExecutionError)) {
     return 'phase1.packaging.cave-build.failed';
@@ -689,6 +700,10 @@ function classifyCaveBuildFailureDiagnostic(error) {
   }
   if (reason === 'spawn' || reason === 'tracking') {
     return 'phase1.packaging.cave-build.spawn';
+  }
+  const classifiedDiagnostic = caveBuildDiagnosticByFailureReason.get(reason);
+  if (classifiedDiagnostic !== undefined) {
+    return classifiedDiagnostic;
   }
   if (typeof error.result?.code !== 'number' || error.result.code === 0) {
     return 'phase1.packaging.cave-build.failed';
@@ -745,6 +760,15 @@ export function schemaV2NativeFailureDiagnostic(stage) {
   return schemaV2NativeFailureStages.has(stage)
     ? `phase1.native-scenarios.${stage}`
     : 'phase1.stage.native-scenarios.failed';
+}
+
+export function retainSchemaV2NativeFailure(existingFailure, stage, error) {
+  return (
+    existingFailure ??
+    new Error(schemaV2NativeFailureDiagnostic(stage), {
+      cause: error,
+    })
+  );
 }
 
 function requireString(value, label) {
@@ -3060,6 +3084,7 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3092,6 +3117,7 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.create-pending-approve-exchange failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3145,6 +3171,7 @@ async function runNativeScenarios({
       observations.pairingDenied = true;
       addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.denial failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -3191,6 +3218,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.restart-reuse failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3272,6 +3300,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.bounded-canonical failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3339,6 +3368,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.stale-generation-cursor-reconciliation failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3457,6 +3487,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.revocation-repair failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3493,9 +3524,7 @@ async function runNativeScenarios({
     }
     observations.bearerNeverCrossedBoundary = rpc.responsesContainNoSecrets();
   } catch (error) {
-    scenarioFailure = new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), {
-      cause: error,
-    });
+    scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
   }
   activeNativeStage = 'cleanup';
   let cleanupFailure;
