@@ -71,6 +71,8 @@ const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
+const caveBuildNodeOptions = '--max-old-space-size=6144';
+const caveBuildReportedCpuTotal = '3';
 const ownedProcessGroupsSupported = process.platform !== 'win32';
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const schemaV2NativeFailureStages = new Set([
@@ -182,6 +184,15 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
     }
   }
   return environment;
+}
+
+export function schemaV2CaveBuildEnvironment(environment) {
+  return {
+    ...environment,
+    NODE_OPTIONS: caveBuildNodeOptions,
+    CIRCLE_NODE_TOTAL: caveBuildReportedCpuTotal,
+    COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+  };
 }
 
 export function windowsJobBindingEnvironment(
@@ -1956,9 +1967,9 @@ async function packageLockedArtifacts(
   onStage('phase1.packaging.cave-install.failed');
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
   onStage('phase1.packaging.cave-build.failed');
-  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build:conformance'], {
+  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'], {
     cwd: roots.caveRoot,
-    env: environment,
+    env: schemaV2CaveBuildEnvironment(environment),
   });
 
   onStage('phase1.packaging.chat-install.failed');

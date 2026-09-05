@@ -3591,6 +3591,44 @@ describe('Phase 1 real-authority conformance harness', () => {
     });
   });
 
+  test('runs the schema-v2 Cave build through pinned pnpm without a nested Corepack lookup', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const schemaV2CaveBuildEnvironment = producer.schemaV2CaveBuildEnvironment;
+    expect(schemaV2CaveBuildEnvironment).toBeTypeOf('function');
+    if (typeof schemaV2CaveBuildEnvironment !== 'function') {
+      return;
+    }
+    expect(
+      schemaV2CaveBuildEnvironment({
+        PATH: '/safe/bin',
+        NODE_OPTIONS: '--require=/private/injection.cjs',
+        CIRCLE_NODE_TOTAL: '999',
+      }),
+    ).toEqual({
+      PATH: '/safe/bin',
+      NODE_OPTIONS: '--max-old-space-size=6144',
+      CIRCLE_NODE_TOTAL: '3',
+      COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+    });
+
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const packaging = source.slice(
+      source.indexOf('async function packageLockedArtifacts('),
+      source.indexOf('function environmentValue('),
+    );
+    expect(packaging).toContain(
+      "await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
+    );
+    expect(packaging).not.toContain("['build:conformance']");
+  });
+
   test('uses the operator home only for isolated macOS keychain process tests', () => {
     const isolated = { HOME: '/isolated/home', CARGO_HOME: '/isolated/cargo' };
     expect(nativeAdapterTestEnvironment(isolated, 'darwin', { HOME: '/operator/home' })).toEqual({
