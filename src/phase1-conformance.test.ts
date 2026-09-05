@@ -2453,38 +2453,41 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
-  test('classifies a Cave conformance wrapper failure before a lifecycle stage starts', async () => {
-    // @ts-expect-error The executable script intentionally has no declaration file.
-    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
-      string,
-      unknown
-    >;
-    const diagnose = producer.schemaV2FailureDiagnostic;
-    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
-      label: string,
-      result: {
-        code: number;
-        signal: null;
-        stdout: string;
-        stderr: string;
-      },
-    ) => Error;
-    expect(diagnose).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
-      return;
-    }
-    const failure = new SchemaV2CommandExecutionError('private command', {
-      code: 1,
-      signal: null,
-      stdout: '> coven-cave@0.3.12 build:conformance /private/coven-cave',
-      stderr: 'private operator path',
-    });
+  test.each(['build', 'build:conformance'])(
+    'classifies a Cave conformance wrapper failure before a lifecycle stage starts for %s',
+    async (lifecycleCommand) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const diagnose = producer.schemaV2FailureDiagnostic;
+      const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+        label: string,
+        result: {
+          code: number;
+          signal: null;
+          stdout: string;
+          stderr: string;
+        },
+      ) => Error;
+      expect(diagnose).toBeTypeOf('function');
+      if (typeof diagnose !== 'function') {
+        return;
+      }
+      const failure = new SchemaV2CommandExecutionError('private command', {
+        code: 1,
+        signal: null,
+        stdout: `> coven-cave@0.3.12 ${lifecycleCommand} /private/coven-cave`,
+        stderr: 'private operator path',
+      });
 
-    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+      const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
-    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.conformance-wrapper');
-    expect(diagnostic).not.toContain('private');
-  });
+      expect(diagnostic).toBe('phase1.packaging.cave-build.phase.conformance-wrapper');
+      expect(diagnostic).not.toContain('private');
+    },
+  );
 
   test.each([
     ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
@@ -3589,6 +3592,52 @@ describe('Phase 1 real-authority conformance harness', () => {
       NODE_OPTIONS: '--max-old-space-size=6144',
       CIRCLE_NODE_TOTAL: '3',
     });
+  });
+
+  test('runs the schema-v2 Cave build through pinned pnpm without a nested Corepack lookup', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const schemaV2CaveBuildEnvironment = producer.schemaV2CaveBuildEnvironment;
+    expect(schemaV2CaveBuildEnvironment).toBeTypeOf('function');
+    if (typeof schemaV2CaveBuildEnvironment !== 'function') {
+      return;
+    }
+    expect(
+      schemaV2CaveBuildEnvironment({
+        PATH: '/safe/bin',
+        NODE_OPTIONS: '--require=/private/injection.cjs',
+        CIRCLE_NODE_TOTAL: '999',
+      }),
+    ).toEqual({
+      PATH: '/safe/bin',
+      NODE_OPTIONS: '--max-old-space-size=6144',
+      CIRCLE_NODE_TOTAL: '3',
+      COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+    });
+    expect(schemaV2CaveBuildEnvironment()).toEqual(
+      expect.objectContaining({
+        NODE_OPTIONS: '--max-old-space-size=6144',
+        CIRCLE_NODE_TOTAL: '3',
+        COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+      }),
+    );
+
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const packagingStart = source.indexOf("  onStage('phase1.packaging.cave-install.failed');");
+    const packagingEnd = source.indexOf("  onStage('phase1.packaging.chat-install.failed');");
+    expect(packagingStart).toBeGreaterThanOrEqual(0);
+    expect(packagingEnd).toBeGreaterThan(packagingStart);
+    const packaging = source.slice(packagingStart, packagingEnd);
+    expect(packaging).toContain(
+      "await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
+    );
+    expect(packaging).not.toContain("['build:conformance']");
   });
 
   test('uses the operator home only for isolated macOS keychain process tests', () => {
