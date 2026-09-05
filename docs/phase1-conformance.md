@@ -718,7 +718,11 @@ harness revision and re-executes that detached runner. Before authority work,
 the verified runner checks its own realpath, HEAD, tree, and the locked
 blob/SHA-256 set for every executable harness module. Intentional native
 conformance deltas from the production Chat commit are separately allowlisted
-by exact path, blob, and digest.
+by exact path, blob, and digest. The verified runner keeps executing from that
+detached harness, while its Tauri toolchain probe runs from the supervisor-bound
+source workspace where the frozen dependency installation already completed.
+This avoids consulting an uninstalled `node_modules` tree in the fresh harness
+clone without widening the allowed workspace boundary.
 
 The dedicated workflow is manually dispatchable and uses the protected
 environment `client-v1-conformance`, GitHub environment ID `20863036831`.

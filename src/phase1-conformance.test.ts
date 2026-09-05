@@ -928,6 +928,27 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).not.toContain('const report = await runSchemaV2Conformance(options);');
   });
 
+  test('runs the Tauri metadata probe from the dependency-installed producer workspace', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const collectorStart = source.indexOf('async function collectToolchainMetadata');
+    const collectorSource = source.slice(collectorStart, source.indexOf('\nfunction sha256Tree'));
+    const runStart = source.indexOf('export async function runSchemaV2Conformance');
+    const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
+
+    expect(collectorStart).toBeGreaterThan(-1);
+    expect(collectorSource).toContain(
+      'collectToolchainMetadata(artifactRoot, environment, expected, toolchainRoot)',
+    );
+    expect(collectorSource).toContain("['--ignore-workspace', 'exec', 'tauri', '--version']");
+    expect(collectorSource).toContain('cwd: toolchainRoot');
+    expect(runSource).toContain(
+      'collectToolchainMetadata(\n        executionRoot,\n        environment,\n        sdkContract.frozenLock.toolchain,\n        options.chatSourceRoot,\n      )',
+    );
+  });
+
   test('reuses the frozen packed-consumer verifier without rebuilding SDK tarballs', () => {
     expect(verifyFrozenPackedConsumer).toBeTypeOf('function');
     const source = readFileSync(
