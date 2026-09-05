@@ -123,8 +123,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'ba098fdc6629012785d317705f0168a1a85a3954',
-      sha256: '06845d517c55f197df6ebc25b8f17e652b6a813024ed9f630ab82e15f0befcf4',
+      blob: 'e8a268d668bee378cbc0449b753d7777d9c4b2df',
+      sha256: 'f9b3fadc9372119b517f55f113b6578bb4ccc722acc01e40af5a00ed32d08005',
     },
   ],
 } as const;
