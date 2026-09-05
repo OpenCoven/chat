@@ -1839,9 +1839,9 @@ async function packageLockedArtifacts(
     );
   }
 
+  onStage('phase1.packaging.chat-native-build.failed');
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
-  onStage('phase1.packaging.chat-native-build.failed');
   await runCommand(
     artifactRoot,
     'Chat native RPC package',
@@ -1863,9 +1863,9 @@ async function packageLockedArtifacts(
     },
   );
 
+  onStage('phase1.packaging.coven-build.failed');
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
   mkdirSync(covenTarget, { recursive: true, mode: 0o700 });
-  onStage('phase1.packaging.coven-build.failed');
   await runCommand(
     artifactRoot,
     'Coven CLI package',

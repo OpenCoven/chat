@@ -1058,6 +1058,12 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(source).toContain(
       ['      onStage(stage) {', '        activeStage = stage;', '      },'].join('\n'),
     );
+    expect(source.indexOf("onStage('phase1.packaging.chat-native-build.failed')")).toBeLessThan(
+      source.indexOf('mkdirSync(chatTarget'),
+    );
+    expect(source.indexOf("onStage('phase1.packaging.coven-build.failed')")).toBeLessThan(
+      source.indexOf('mkdirSync(covenTarget'),
+    );
   });
 
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
