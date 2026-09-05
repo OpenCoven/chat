@@ -1479,7 +1479,6 @@ export async function cloneExactCheckout({
       {
         cwd: projectRoot,
         env: {
-          ...environment,
           ...checkoutEnvironment,
           GIT_ALLOW_PROTOCOL: 'file',
         },
@@ -1494,10 +1493,7 @@ export async function cloneExactCheckout({
       ['-c', `core.hooksPath=${devNull}`, 'init', '--quiet'],
       {
         cwd: destinationRoot,
-        env: {
-          ...environment,
-          ...checkoutEnvironment,
-        },
+        env: checkoutEnvironment,
       },
     );
     await runCommand(
@@ -1507,10 +1503,7 @@ export async function cloneExactCheckout({
       ['-c', `core.hooksPath=${devNull}`, 'remote', 'add', 'origin', source],
       {
         cwd: destinationRoot,
-        env: {
-          ...environment,
-          ...checkoutEnvironment,
-        },
+        env: checkoutEnvironment,
       },
     );
     await runCommand(
@@ -1534,7 +1527,6 @@ export async function cloneExactCheckout({
       {
         cwd: destinationRoot,
         env: {
-          ...environment,
           ...checkoutEnvironment,
           GIT_ALLOW_PROTOCOL: 'https',
         },
@@ -1553,7 +1545,7 @@ export async function cloneExactCheckout({
       '--force',
       localSource === undefined ? 'FETCH_HEAD' : revision,
     ],
-    { cwd: destinationRoot, env: { ...environment, ...checkoutEnvironment } },
+    { cwd: destinationRoot, env: checkoutEnvironment },
   );
 }
 

@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "9198890a35bf8bd0623e6f82e0ee2e2f34634881"
+    "revision": "737cd8e869bdaaa4765d66f8156b71007636c6ff"
   },
   "harnessAuthority": {
-    "revision": "9198890a35bf8bd0623e6f82e0ee2e2f34634881",
-    "tree": "dec009143f9bf5f34cc8c76103133536bda09cc0",
+    "revision": "737cd8e869bdaaa4765d66f8156b71007636c6ff",
+    "tree": "deb10b9229ffbc344b17b94f12dfbdf3f89cdee4",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "89cb49abef1749f6002ae1258272893523e854a4",
-        "sha256": "663d0259e359fe87e57792617ba7c8e990ef4aff0cdeddbb0ff85c441688efb0"
+        "blob": "5af16544b69fde72d92d33b9901234adcb0e6a6a",
+        "sha256": "2ad57742d68388492ed8f8e1fbee6c8d6fe2d25dfb5c3d4de4f424b0e2f0feed"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "212f4f2abb045e990622f9eaf877ea45227125e0",
-        "sha256": "40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337"
+        "blob": "50d245d7349b837bec1a7caf38d18c8245870b71",
+        "sha256": "16aa63fecee0639d9d141cce77d81f349b78ffee464e9b39b01d139ba27d8c56"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -111,8 +111,8 @@
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "976b178bf338a5edc0097235d0821c8446faaefd",
-        "sha256": "141c2cc95f2a73a70df70536ca83e825b0bd043f5cdab6ca0f7a92ee2f4b8dff"
+        "blob": "81362103449bb6cdfb97330fe7c67932a965982f",
+        "sha256": "d14f65fa32c82b33ecee6224dc79c86857c2d8d28965e3fb259578baf41d7a0d"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "b83f671d65c462772490f16b5d74969f4f57b2b9",
-        "sha256": "256441056fabb6668875f56e1e1aa7a38300e254f4cd6e70946a37937d46f00a"
+        "blob": "8d836f2a7ef7021c731e57069a3a7339e673a759",
+        "sha256": "d6115401e1880049972e1a1b04d75a6df34fb27a974f4253462c65902addb4e2"
       }
     ],
     "productionDeltas": [
