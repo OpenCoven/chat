@@ -108,20 +108,20 @@ describe('contract canary pnpm invocation', () => {
       return 'pnpm-ok';
     };
 
-    expect(runPnpm(['install'], '/workspace', {}, { execute })).toBe('pnpm-ok');
+    expect(runPnpm(['install'], '/workspace', {}, { execute, environment: {} })).toBe('pnpm-ok');
     expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
   });
 
-  test('falls back to the active pnpm CLI when its shim is unavailable', () => {
+  test('prefers the active pnpm CLI over an ambient pnpm shim', () => {
     const invocations: Array<{ command: string; args: string[] }> = [];
     const execute = (command: string, args: string[]) => {
       invocations.push({ command, args });
 
       if (command === 'pnpm') {
-        throw Object.assign(new Error('spawnSync pnpm ENOENT'), { code: 'ENOENT' });
+        return 'ambient-pnpm';
       }
 
-      return 'corepack-ok';
+      return 'active-pnpm';
     };
 
     expect(
@@ -135,9 +135,8 @@ describe('contract canary pnpm invocation', () => {
           nodeExecutable: '/usr/bin/node',
         },
       ),
-    ).toBe('corepack-ok');
+    ).toBe('active-pnpm');
     expect(invocations).toEqual([
-      { command: 'pnpm', args: ['install'] },
       { command: '/usr/bin/node', args: ['/corepack/pnpm.cjs', 'install'] },
     ]);
   });
@@ -152,20 +151,24 @@ describe('contract canary pnpm invocation', () => {
       throw new Error('unexpected fallback');
     };
 
-    expect(() => runPnpm(['install'], '/workspace', {}, { execute })).toThrow(failure);
+    expect(() => runPnpm(['install'], '/workspace', {}, { execute, environment: {} })).toThrow(
+      failure,
+    );
   });
 
-  test('fails closed when pnpm is unavailable in a restricted producer', () => {
-    const failure = Object.assign(new Error('spawnSync pnpm ENOENT'), { code: 'ENOENT' });
-    const execute = (command: string) => {
+  test('ignores the active pnpm CLI in a restricted producer', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+
       if (command === 'pnpm') {
-        throw failure;
+        return 'restricted-pnpm';
       }
 
       throw new Error('unexpected fallback');
     };
 
-    expect(() =>
+    expect(
       runPnpm(
         ['install'],
         '/workspace',
@@ -178,7 +181,8 @@ describe('contract canary pnpm invocation', () => {
           },
         },
       ),
-    ).toThrow(failure);
+    ).toBe('restricted-pnpm');
+    expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
   });
 });
 
