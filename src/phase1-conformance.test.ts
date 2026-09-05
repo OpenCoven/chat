@@ -3264,7 +3264,9 @@ describe('Phase 1 real-authority conformance harness', () => {
         }
         expect(failure).toMatchObject({ stderr: expect.any(String) });
         const stderr = String((failure as { stderr: string }).stderr);
-        expect(stderr).toMatch(/phase1\.stage\.(?:native-provider|checkouts)\.failed/u);
+        expect(stderr).toMatch(
+          /phase1\.stage\.(?:native-provider|harness-authority|checkouts)\.failed/u,
+        );
         expect(stderr).not.toContain('phase1.environment.rust-toolchain.failed');
       } finally {
         rmSync(root, { force: true, recursive: true });
