@@ -513,6 +513,7 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
     expect(childEnvironment).not.toContain('OPENCOVEN_WINDOWS_GITHUB_TOKEN');
     expect(childEnvironment).not.toContain('github.token');
+    expect(bootstrap).toContain(childNodeRoot);
     expect(bootstrap.indexOf(childNodeRoot)).toBeLessThan(childEnvironmentStart);
     expect(childEnvironment).toContain(
       'PATH = "$childNodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\\Windows\\System32;C:\\Windows"',
