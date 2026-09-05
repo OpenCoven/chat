@@ -18,6 +18,7 @@ import { devNull } from 'node:os';
 import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
+import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
@@ -290,6 +291,9 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-authority.failed',
   'phase1.stage.packaging.failed',
   'phase1.packaging.frozen-consumer.failed',
+  ...FROZEN_PACKED_CONSUMER_STAGES.map(
+    (stage) => `phase1.packaging.frozen-consumer.${stage}.failed`,
+  ),
   'phase1.packaging.cave-install.failed',
   'phase1.packaging.cave-build.failed',
   'phase1.packaging.chat-install.failed',

@@ -19,6 +19,7 @@ import { devNull, homedir } from 'node:os';
 import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import {
   APPROVED_PHASE1_DIAGNOSTIC_IDS,
   REQUIRED_PHASE1_ASSERTION_IDS,
@@ -78,6 +79,9 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.toolchain.failed',
   'phase1.stage.packaging.failed',
   'phase1.packaging.frozen-consumer.failed',
+  ...FROZEN_PACKED_CONSUMER_STAGES.map(
+    (stage) => `phase1.packaging.frozen-consumer.${stage}.failed`,
+  ),
   'phase1.packaging.cave-install.failed',
   'phase1.packaging.cave-build.failed',
   'phase1.packaging.chat-install.failed',
@@ -1725,34 +1729,73 @@ async function packageLockedArtifacts(
     onStage('phase1.packaging.frozen-consumer.failed');
     const verifierPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer.mjs');
     const verifierResultPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer-result.json');
+    const verifierFailurePath = resolve(
+      artifactRoot.rootPath,
+      'verify-frozen-consumer-failure.json',
+    );
     writeFileSync(
       verifierPath,
       [
         `import { writeFileSync } from 'node:fs';`,
-        `import { verifyFrozenPackedConsumer } from ${JSON.stringify(
+        `import { FROZEN_PACKED_CONSUMER_STAGES, verifyFrozenPackedConsumer } from ${JSON.stringify(
           pathToFileURL(resolve(projectRoot, 'scripts', 'contract-canary.mjs')).href,
         )};`,
-        `const result = verifyFrozenPackedConsumer(${JSON.stringify({
+        `let activeStage = FROZEN_PACKED_CONSUMER_STAGES[0];`,
+        `try {`,
+        `  const result = verifyFrozenPackedConsumer({`,
+        `    ...${JSON.stringify({
           chatRoot: roots.producerRoot,
           sdkRoot: roots.sdkRoot,
           caveRoot: roots.caveRoot,
-        })});`,
-        `writeFileSync(${JSON.stringify(verifierResultPath)}, JSON.stringify(result));`,
+        })},`,
+        `    onStage(stage) {`,
+        `      if (!FROZEN_PACKED_CONSUMER_STAGES.includes(stage)) {`,
+        `        throw new Error('Frozen packed consumer reported an unknown stage.');`,
+        `      }`,
+        `      activeStage = stage;`,
+        `    },`,
+        `  });`,
+        `  writeFileSync(${JSON.stringify(verifierResultPath)}, JSON.stringify(result));`,
+        `} catch (error) {`,
+        `  writeFileSync(${JSON.stringify(
+          verifierFailurePath,
+        )}, JSON.stringify({ stage: activeStage }));`,
+        `  throw error;`,
+        `}`,
         '',
       ].join('\n'),
       { mode: 0o600 },
     );
-    await runCommand(
-      artifactRoot,
-      'Frozen packed SDK consumer verification',
-      process.execPath,
-      [verifierPath],
-      {
-        cwd: projectRoot,
-        env: environment,
-        timeoutMs: commandTimeoutMs,
-      },
-    );
+    try {
+      await runCommand(
+        artifactRoot,
+        'Frozen packed SDK consumer verification',
+        process.execPath,
+        [verifierPath],
+        {
+          cwd: projectRoot,
+          env: environment,
+          timeoutMs: commandTimeoutMs,
+        },
+      );
+    } catch (cause) {
+      let failure;
+      try {
+        failure = JSON.parse(readFileSync(verifierFailurePath, 'utf8'));
+      } catch {
+        throw cause;
+      }
+      if (
+        failure === null ||
+        typeof failure !== 'object' ||
+        Array.isArray(failure) ||
+        Object.keys(failure).length !== 1 ||
+        !FROZEN_PACKED_CONSUMER_STAGES.includes(failure.stage)
+      ) {
+        throw cause;
+      }
+      throw new Error(`phase1.packaging.frozen-consumer.${failure.stage}.failed`, { cause });
+    }
     packedConsumerObservations = JSON.parse(
       readFileSync(verifierResultPath, 'utf8'),
     ).observedAssertions;

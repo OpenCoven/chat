@@ -23,6 +23,17 @@ const defaultLockPath = resolve(root, 'contract-canary.lock.json');
 const reviewedRevisionPattern = /^[0-9a-f]{40}$/i;
 const sha256Pattern = /^[0-9a-f]{64}$/i;
 const packageVersionPattern = /^\d+\.\d+\.\d+$/;
+export const FROZEN_PACKED_CONSUMER_STAGES = Object.freeze([
+  'authority',
+  'artifacts',
+  'harness',
+  'install',
+  'isolation',
+  'fixture',
+  'build',
+  'verify',
+  'cleanup',
+]);
 const SDK_ARTIFACTS = Object.freeze({
   core: {
     packageName: '@opencoven/sdk-core',
@@ -493,7 +504,13 @@ function frozenTarballs(lock, chatRoot = root) {
   return tarballs;
 }
 
-export function verifyFrozenPackedConsumer({ chatRoot = root, sdkRoot, caveRoot }) {
+export function verifyFrozenPackedConsumer({
+  chatRoot = root,
+  sdkRoot,
+  caveRoot,
+  onStage = () => {},
+}) {
+  onStage('authority');
   requirePath(chatRoot, 'Chat root');
   requirePath(sdkRoot, 'SDK root');
   requirePath(caveRoot, 'Cave root');
@@ -503,16 +520,24 @@ export function verifyFrozenPackedConsumer({ chatRoot = root, sdkRoot, caveRoot 
 
   let artifactContext;
   try {
+    onStage('harness');
     artifactContext = createOwnedTempDirectory({
       prefix: 'opencoven-chat-frozen-consumer',
     });
     const harnessRoot = resolve(artifactContext.rootPath, 'chat-harness');
+    onStage('artifacts');
     const frozen = frozenTarballs(lock, chatRoot);
+    onStage('harness');
     createHarness(harnessRoot, frozen);
+    onStage('install');
     installHarnessOfflineAfterWarming(harnessRoot);
+    onStage('isolation');
     assertIsolatedPackedInstall(harnessRoot);
+    onStage('fixture');
     assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot);
+    onStage('build');
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
+    onStage('verify');
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
     return Object.freeze({
       releaseManifest: lock.sdk.releaseManifest,
@@ -537,7 +562,12 @@ export function verifyFrozenPackedConsumer({ chatRoot = root, sdkRoot, caveRoot 
     });
   } finally {
     if (artifactContext !== undefined) {
-      cleanupOwnedTempRoot(artifactContext);
+      try {
+        cleanupOwnedTempRoot(artifactContext);
+      } catch (error) {
+        onStage('cleanup');
+        throw error;
+      }
     }
   }
 }
