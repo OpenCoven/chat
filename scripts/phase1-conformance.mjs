@@ -361,6 +361,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.credential-cleanup-result',
   'phase1.native-scenarios.stale-discovery',
   'phase1.native-scenarios.cleanup',
+  'phase1.native-scenarios.cleanup-grant',
+  'phase1.native-scenarios.cleanup-custody',
+  'phase1.native-scenarios.cleanup-rpc',
+  'phase1.native-scenarios.cleanup-fixture-daemon',
   'phase1.native-scenarios.missing-keychain',
   'phase1.native-scenarios.missing-keychain-timeout',
   'phase1.native-scenarios.missing-keychain-output-limit',
@@ -573,6 +577,16 @@ export function publicPhase1FailureDiagnostic(error) {
   return undefined;
 }
 
+export function throwCombinedPhase1Failures(primaryFailure, cleanupFailure, message) {
+  const failures = [primaryFailure, cleanupFailure].filter((failure) => failure !== undefined);
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, message);
+  }
+}
+
 export function runnerCheckoutFailureDiagnostic(error) {
   if (
     error instanceof CommandExecutionError &&
@@ -631,9 +645,9 @@ export function classifyPackagingCommandFailure(baseId, error) {
         `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
       ).replaceAll('\r\n', '\n');
       let phase = 'unknown';
-      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild$/mu.test(output)) {
+      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'postbuild';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server$/mu.test(output)) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server(?:\s+.+)?$/mu.test(output)) {
         phase = 'server-bundle';
       } else if (output.includes('Creating an optimized production build')) {
         phase = /\bEAGAIN\b/u.test(output)
@@ -653,7 +667,7 @@ export function classifyPackagingCommandFailure(baseId, error) {
                       : output.includes('Compiled successfully')
                         ? 'next-build.typescript'
                         : 'next-build.compile';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild$/mu.test(output)) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
       }
       return `${baseId}.phase.${phase}`;
@@ -1261,6 +1275,7 @@ async function bootstrapVerifiedRunner(options) {
     return locked;
   });
   const bootstrapRoot = createProcessOwnedArtifactRoot({ prefix: 'p1boot', shortPath: true });
+  let primaryFailure;
   try {
     const harnessRoot = resolve(bootstrapRoot.rootPath, 'harness');
     const environment = {
@@ -1366,9 +1381,20 @@ async function bootstrapVerifiedRunner(options) {
       },
     );
     process.stdout.write(result.stdout);
-  } finally {
-    await bootstrapRoot.cleanup();
+  } catch (error) {
+    primaryFailure = error;
   }
+  let cleanupFailure;
+  try {
+    await bootstrapRoot.cleanup();
+  } catch (error) {
+    cleanupFailure = new Error('phase1.stage.runner-bootstrap.failed', { cause: error });
+  }
+  throwCombinedPhase1Failures(
+    primaryFailure,
+    cleanupFailure,
+    'Verified runner execution and cleanup both failed.',
+  );
 }
 
 function runCommand(
