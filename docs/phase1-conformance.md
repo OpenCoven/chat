@@ -1054,13 +1054,13 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,200 | `06401e461e3850fcf61882cba7031a3a72828cdb4a8c96c127955e62e743024e` |
+| `.github/workflows/client-v1-conformance.yml` | 462,200 | `b4be44b71e5689955ae2bb190fa91085846a265a8ac5ecf74cddb86efc62290c` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
-| `scripts/phase1-conformance.mjs` | 188,812 | `7a800f34bcdb8f14e58a091f7450f72e103265ff3f58be0dca7ba805a05cb5cc` |
+| `scripts/phase1-conformance.mjs` | 188,859 | `491fb1b70b030d69a88f72c413c6d42e99d163951deeeb563c2210e39fb32a18` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
@@ -1095,6 +1095,17 @@ invariant: the pinned revision stops being an ancestor of `main`, and the
 authority checkout keeps resolving only for as long as the now-orphaned
 source branch survives. A follow-up repin to the real merge commit is the
 only fix once that happens.
+
+The two-step converges in exactly two commits only when every digest update —
+the harness digest, both workflow pin tables, every affected row in the table
+above, and every affected `harnessAuthority.files` entry (the workflow's own
+self-referential one included) — lands in the code commit itself. The repin
+commit that follows must touch nothing but `harness.revision`,
+`harnessAuthority.revision`/`.tree`, and the test's literal copy of them. Move
+any digest into the repin commit instead and it invalidates the digests
+recorded against the commit `harness.revision` still names, forcing a third
+commit to advance the pin again — the exact shape of #102's first attempt and
+#110's first attempt.
 
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
