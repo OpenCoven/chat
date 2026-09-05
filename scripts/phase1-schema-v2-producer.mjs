@@ -77,6 +77,14 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.evidence-authority.failed',
   'phase1.stage.toolchain.failed',
   'phase1.stage.packaging.failed',
+  'phase1.packaging.frozen-consumer.failed',
+  'phase1.packaging.cave-install.failed',
+  'phase1.packaging.cave-build.failed',
+  'phase1.packaging.chat-install.failed',
+  'phase1.packaging.chat-web-build.failed',
+  'phase1.packaging.chat-native-build.failed',
+  'phase1.packaging.coven-build.failed',
+  'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
@@ -1706,9 +1714,15 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   );
 }
 
-async function packageLockedArtifacts(artifactRoot, roots, environment, { schemaV2 = false } = {}) {
+async function packageLockedArtifacts(
+  artifactRoot,
+  roots,
+  environment,
+  { schemaV2 = false, onStage = () => {} } = {},
+) {
   let packedConsumerObservations;
   if (schemaV2) {
+    onStage('phase1.packaging.frozen-consumer.failed');
     const verifierPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer.mjs');
     const verifierResultPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer-result.json');
     writeFileSync(
@@ -1743,13 +1757,17 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
       readFileSync(verifierResultPath, 'utf8'),
     ).observedAssertions;
   }
+  onStage('phase1.packaging.cave-install.failed');
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
+  onStage('phase1.packaging.cave-build.failed');
   await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build:conformance'], {
     cwd: roots.caveRoot,
     env: environment,
   });
 
+  onStage('phase1.packaging.chat-install.failed');
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
+  onStage('phase1.packaging.chat-web-build.failed');
   await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
     cwd: roots.chatRoot,
     env: environment,
@@ -1823,6 +1841,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
 
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
+  onStage('phase1.packaging.chat-native-build.failed');
   await runCommand(
     artifactRoot,
     'Chat native RPC package',
@@ -1846,6 +1865,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
 
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
   mkdirSync(covenTarget, { recursive: true, mode: 0o700 });
+  onStage('phase1.packaging.coven-build.failed');
   await runCommand(
     artifactRoot,
     'Coven CLI package',
@@ -1861,6 +1881,7 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
   const executableSuffix = process.platform === 'win32' ? '.exe' : '';
   const nativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
   const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],
     ['Coven CLI', covenBinaryPath],
@@ -4035,6 +4056,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     activeStage = 'phase1.stage.packaging.failed';
     const packaged = await packageLockedArtifacts(executionRoot, roots, environment, {
       schemaV2,
+      onStage(stage) {
+        activeStage = stage;
+      },
     });
     artifactDigests = packaged.artifactDigests;
     packageObservations = packaged.packedConsumerObservations;

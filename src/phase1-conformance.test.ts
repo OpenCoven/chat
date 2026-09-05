@@ -1017,6 +1017,49 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
   });
 
+  test.each([
+    'phase1.packaging.frozen-consumer.failed',
+    'phase1.packaging.cave-install.failed',
+    'phase1.packaging.cave-build.failed',
+    'phase1.packaging.chat-install.failed',
+    'phase1.packaging.chat-web-build.failed',
+    'phase1.packaging.chat-native-build.failed',
+    'phase1.packaging.coven-build.failed',
+    'phase1.packaging.outputs.failed',
+  ])('publishes bounded schema-v2 packaging diagnostic %s', (diagnostic) => {
+    const wrapped = wrapInfrastructureFailure(
+      new Error(diagnostic, { cause: new Error('/private/operator/path') }),
+      { status: 'failed' },
+    );
+
+    expect(wrapped.message).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
+    expect(JSON.stringify(wrapped.result)).not.toContain('/private/operator/path');
+  });
+
+  test('tracks the active schema-v2 packaging substage before each bounded operation', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    for (const diagnostic of [
+      'phase1.packaging.frozen-consumer.failed',
+      'phase1.packaging.cave-install.failed',
+      'phase1.packaging.cave-build.failed',
+      'phase1.packaging.chat-install.failed',
+      'phase1.packaging.chat-web-build.failed',
+      'phase1.packaging.chat-native-build.failed',
+      'phase1.packaging.coven-build.failed',
+      'phase1.packaging.outputs.failed',
+    ]) {
+      expect(source).toContain(`onStage('${diagnostic}')`);
+    }
+    expect(source).toContain(
+      ['      onStage(stage) {', '        activeStage = stage;', '      },'].join('\n'),
+    );
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
