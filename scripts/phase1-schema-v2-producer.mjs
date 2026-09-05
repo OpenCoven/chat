@@ -752,7 +752,7 @@ function classifyCaveBuildFailureDiagnostic(error) {
                     : 'next-build.compile';
   } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
     phase = 'prebuild';
-  } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ build(?::conformance)?(?:\s+.+)?$/mu.test(output)) {
     phase = 'conformance-wrapper';
   }
   return `phase1.packaging.cave-build.phase.${phase}`;

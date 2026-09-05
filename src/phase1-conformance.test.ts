@@ -2453,38 +2453,41 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
-  test('classifies a Cave conformance wrapper failure before a lifecycle stage starts', async () => {
-    // @ts-expect-error The executable script intentionally has no declaration file.
-    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
-      string,
-      unknown
-    >;
-    const diagnose = producer.schemaV2FailureDiagnostic;
-    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
-      label: string,
-      result: {
-        code: number;
-        signal: null;
-        stdout: string;
-        stderr: string;
-      },
-    ) => Error;
-    expect(diagnose).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
-      return;
-    }
-    const failure = new SchemaV2CommandExecutionError('private command', {
-      code: 1,
-      signal: null,
-      stdout: '> coven-cave@0.3.12 build:conformance /private/coven-cave',
-      stderr: 'private operator path',
-    });
+  test.each(['build', 'build:conformance'])(
+    'classifies a Cave conformance wrapper failure before a lifecycle stage starts for %s',
+    async (lifecycleCommand) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const diagnose = producer.schemaV2FailureDiagnostic;
+      const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+        label: string,
+        result: {
+          code: number;
+          signal: null;
+          stdout: string;
+          stderr: string;
+        },
+      ) => Error;
+      expect(diagnose).toBeTypeOf('function');
+      if (typeof diagnose !== 'function') {
+        return;
+      }
+      const failure = new SchemaV2CommandExecutionError('private command', {
+        code: 1,
+        signal: null,
+        stdout: `> coven-cave@0.3.12 ${lifecycleCommand} /private/coven-cave`,
+        stderr: 'private operator path',
+      });
 
-    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+      const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
-    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.conformance-wrapper');
-    expect(diagnostic).not.toContain('private');
-  });
+      expect(diagnostic).toBe('phase1.packaging.cave-build.phase.conformance-wrapper');
+      expect(diagnostic).not.toContain('private');
+    },
+  );
 
   test.each([
     ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
