@@ -1131,6 +1131,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(nativeScenarios).toContain(
       'throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });',
     );
+    expect(
+      nativeScenarios.match(
+        /scenarioFailure = retainSchemaV2NativeFailure\(/gu,
+      ),
+    ).toHaveLength(8);
     expect(nativeScenarios).not.toContain('cause.message');
   });
 
@@ -2410,6 +2415,48 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
+  test.each([
+    ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
+    ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
+    ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
+    ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
+    ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
+    ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
+    ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
+    ['disk-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource'],
+  ])('preserves the classified Cave build %s reason without raw output', async (reason, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        reason: string;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const failure = new SchemaV2CommandExecutionError('private command', {
+      code: 1,
+      reason,
+      stdout: 'private output without a phase banner',
+      stderr: 'private operator path',
+    });
+
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe(expected);
+    expect(diagnostic).not.toContain('private');
+  });
+
   test('publishes only an allowlisted schema-v2 native failure stage', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
     const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
@@ -2424,6 +2471,25 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(diagnose('restart-health')).toBe('phase1.native-scenarios.restart-health');
     expect(diagnose('private operator path')).toBe('phase1.stage.native-scenarios.failed');
+  });
+
+  test('retains the first caught schema-v2 native assertion failure', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const retain = producer.retainSchemaV2NativeFailure;
+    expect(retain).toBeTypeOf('function');
+    if (typeof retain !== 'function') {
+      return;
+    }
+    const first = retain(undefined, 'launch', new Error('private launch failure')) as Error;
+    const retained = retain(first, 'reads', new Error('private read failure')) as Error;
+
+    expect(first.message).toBe('phase1.native-scenarios.launch');
+    expect(first.cause).toEqual(new Error('private launch failure'));
+    expect(retained).toBe(first);
   });
 
   test('classifies Coven verification failures without exposing command output', () => {
@@ -2815,6 +2881,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
     expect(
       publicPhase1FailureDiagnostic(new Error('phase1.native-scenarios.restart-discovery')),
+    ).toBe('phase1.native-scenarios.restart-discovery');
+    expect(
+      publicPhase1FailureDiagnostic(
+        new Error('private outer wrapper', {
+          cause: new Error('phase1.native-scenarios.restart-discovery'),
+        }),
+      ),
     ).toBe('phase1.native-scenarios.restart-discovery');
     expect(publicPhase1FailureDiagnostic(new Error('private operator path'))).toBeUndefined();
   });
