@@ -1145,9 +1145,8 @@ async function runVitestObservationSuite({
   await runCommand(
     artifactRoot,
     label,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'exec',
       'vitest',
@@ -1377,17 +1376,11 @@ function resolveOperatorHomes() {
 }
 
 async function collectToolchainMetadata(artifactRoot, environment, expected) {
-  const pnpm = await runCommand(
-    artifactRoot,
-    'pnpm version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--version'],
-    {
-      cwd: projectRoot,
-      env: environment,
-      timeoutMs: 30_000,
-    },
-  );
+  const pnpm = await runCommand(artifactRoot, 'pnpm version verification', 'pnpm', ['--version'], {
+    cwd: projectRoot,
+    env: environment,
+    timeoutMs: 30_000,
+  });
   const rust = await runCommand(artifactRoot, 'Rust version verification', 'rustc', ['--version'], {
     cwd: projectRoot,
     env: environment,
@@ -1396,8 +1389,8 @@ async function collectToolchainMetadata(artifactRoot, environment, expected) {
   const tauri = await runCommand(
     artifactRoot,
     'Tauri version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--ignore-workspace', 'exec', 'tauri', '--version'],
+    'pnpm',
+    ['--ignore-workspace', 'exec', 'tauri', '--version'],
     {
       cwd: projectRoot,
       env: environment,
@@ -1707,13 +1700,8 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   await runCommand(
     artifactRoot,
     `${label} dependency install`,
-    'corepack',
-    [
-      'pnpm@10.34.0',
-      'install',
-      '--frozen-lockfile',
-      `--config.store-dir=${environment.PNPM_STORE_DIR}`,
-    ],
+    'pnpm',
+    ['install', '--frozen-lockfile', `--config.store-dir=${environment.PNPM_STORE_DIR}`],
     { cwd: rootPath, env: environment },
   );
 }
@@ -1756,19 +1744,13 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     ).observedAssertions;
   }
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await runCommand(
-    artifactRoot,
-    'Cave conformance package',
-    'corepack',
-    ['pnpm@10.34.0', 'build:conformance'],
-    {
-      cwd: roots.caveRoot,
-      env: environment,
-    },
-  );
+  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build:conformance'], {
+    cwd: roots.caveRoot,
+    env: environment,
+  });
 
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
-  await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
+  await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
     cwd: roots.chatRoot,
     env: environment,
   });
