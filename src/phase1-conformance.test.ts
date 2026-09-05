@@ -3524,6 +3524,46 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('does not swallow undefined schema-v2 action or owned-root cleanup failures', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const withSchemaV2OwnedRoot = producer.withOwnedArtifactRoot;
+    expect(withSchemaV2OwnedRoot).toBeTypeOf('function');
+    if (typeof withSchemaV2OwnedRoot !== 'function') {
+      return;
+    }
+
+    let actionRejected = false;
+    try {
+      await withSchemaV2OwnedRoot({ cleanup: async () => undefined }, async () => {
+        throw undefined;
+      });
+    } catch (error) {
+      actionRejected = true;
+      expect(error).toBeUndefined();
+    }
+    expect(actionRejected).toBe(true);
+
+    let cleanupRejected = false;
+    try {
+      await withSchemaV2OwnedRoot(
+        {
+          cleanup: async () => {
+            throw undefined;
+          },
+        },
+        async () => 'result',
+      );
+    } catch (error) {
+      cleanupRejected = true;
+      expect(error).toBeUndefined();
+    }
+    expect(cleanupRejected).toBe(true);
+  });
+
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-safe-environment-'));
     try {

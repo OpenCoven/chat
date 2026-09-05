@@ -2650,23 +2650,32 @@ export async function withFixtureDaemon(fixtureDaemon, action) {
 export async function withOwnedArtifactRoot(ownedRoot, action) {
   let result;
   let actionFailure;
+  let actionFailed = false;
   try {
     result = await action();
   } catch (error) {
     actionFailure = error;
+    actionFailed = true;
   }
   let cleanupFailure;
+  let cleanupFailed = false;
   try {
     await ownedRoot.cleanup();
   } catch (error) {
     cleanupFailure = error;
+    cleanupFailed = true;
   }
-  const failures = [actionFailure, cleanupFailure].filter((failure) => failure !== undefined);
-  if (failures.length === 1) {
-    throw failures[0];
+  if (actionFailed && cleanupFailed) {
+    throw new AggregateError(
+      [actionFailure, cleanupFailure],
+      'Owned artifact action and cleanup both failed.',
+    );
   }
-  if (failures.length > 1) {
-    throw new AggregateError(failures, 'Owned artifact action and cleanup both failed.');
+  if (actionFailed) {
+    throw actionFailure;
+  }
+  if (cleanupFailed) {
+    throw cleanupFailure;
   }
   return result;
 }
