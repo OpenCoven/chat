@@ -3602,6 +3602,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     if (typeof schemaV2CaveBuildEnvironment !== 'function') {
       return;
     }
+    expect(schemaV2CaveBuildEnvironment()).toMatchObject({
+      NODE_OPTIONS: '--max-old-space-size=6144',
+      CIRCLE_NODE_TOTAL: '3',
+      COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+    });
     expect(
       schemaV2CaveBuildEnvironment({
         PATH: '/safe/bin',
@@ -3619,10 +3624,11 @@ describe('Phase 1 real-authority conformance harness', () => {
       resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs'),
       'utf8',
     );
-    const packaging = source.slice(
-      source.indexOf('async function packageLockedArtifacts('),
-      source.indexOf('function environmentValue('),
-    );
+    const packagingStart = source.indexOf('async function packageLockedArtifacts(');
+    const packagingEnd = source.indexOf('async function runCaveAuthorityMatrix(', packagingStart);
+    expect(packagingStart).toBeGreaterThan(-1);
+    expect(packagingEnd).toBeGreaterThan(packagingStart);
+    const packaging = source.slice(packagingStart, packagingEnd);
     expect(packaging).toContain(
       "await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
     );

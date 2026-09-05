@@ -186,7 +186,7 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
   return environment;
 }
 
-export function schemaV2CaveBuildEnvironment(environment) {
+export function schemaV2CaveBuildEnvironment(environment = process.env) {
   return {
     ...environment,
     NODE_OPTIONS: caveBuildNodeOptions,
