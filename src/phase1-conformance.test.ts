@@ -2453,6 +2453,39 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
+  test('classifies a Cave conformance wrapper failure before a lifecycle stage starts', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const failure = new SchemaV2CommandExecutionError('private command', {
+      code: 1,
+      signal: null,
+      stdout: '> coven-cave@0.3.12 build:conformance /private/coven-cave',
+      stderr: 'private operator path',
+    });
+
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.conformance-wrapper');
+    expect(diagnostic).not.toContain('private');
+  });
+
   test.each([
     ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
     ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
@@ -3457,6 +3490,38 @@ describe('Phase 1 real-authority conformance harness', () => {
         guardedSetup,
       ),
     ).toBeGreaterThan(guardedSetup);
+  });
+
+  test('retains a schema-v2 action failure when owned-root cleanup also fails', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const withSchemaV2OwnedRoot = producer.withOwnedArtifactRoot;
+    expect(withSchemaV2OwnedRoot).toBeTypeOf('function');
+    if (typeof withSchemaV2OwnedRoot !== 'function') {
+      return;
+    }
+    const ownedRoot = {
+      cleanup: async () => {
+        throw new Error('private cleanup path');
+      },
+    };
+
+    let failure: unknown;
+    try {
+      await withSchemaV2OwnedRoot(ownedRoot, async () => {
+        throw new Error('phase1.packaging.cave-build.phase.conformance-wrapper');
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(publicPhase1FailureDiagnostic(failure)).toBe(
+      'phase1.packaging.cave-build.phase.conformance-wrapper',
+    );
   });
 
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {

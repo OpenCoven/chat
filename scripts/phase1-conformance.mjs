@@ -431,6 +431,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.spawn',
   'phase1.packaging.cave-build.supervisor',
   'phase1.packaging.cave-build.phase.prebuild',
+  'phase1.packaging.cave-build.phase.conformance-wrapper',
   'phase1.packaging.cave-build.phase.next-build',
   'phase1.packaging.cave-build.phase.next-build.resource',
   'phase1.packaging.cave-build.phase.next-build.resource.spawn',
@@ -669,6 +670,8 @@ export function classifyPackagingCommandFailure(baseId, error) {
                         : 'next-build.compile';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
+        phase = 'conformance-wrapper';
       }
       return `${baseId}.phase.${phase}`;
     }
