@@ -1067,6 +1067,20 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
 | `scripts/windows-job-supervisor.test.ps1` | 171,179 | `55e9cf065e2dc7cc656c6aa8cc9ea53542259d3d7eee55c368c6cf0fc6356ab9` |
 
+The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
+`harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
+not appear here. Editing ordinary CI config still dirties that entry and
+requires the same file-hash repin as touching the harness itself — this is
+not discoverable until a test fails on it.
+
+A PR that repins `harnessAuthority.revision`/`.tree` to a commit within its
+own branch (rather than to something already merged) must be merged with an
+actual merge commit, never squash or rebase. Squashing silently breaks the
+invariant: the pinned revision stops being an ancestor of `main`, and the
+authority checkout keeps resolving only for as long as the now-orphaned
+source branch survives. A follow-up repin to the real merge commit is the
+only fix once that happens.
+
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
 `sha256`, and independently recomputes each committed blob ID over the exact
