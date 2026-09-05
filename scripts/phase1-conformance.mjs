@@ -400,6 +400,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.cave-authority.record.invalid',
   'phase1.cave-authority.record.incomplete',
   'phase1.packaging.authority.failed',
+  'phase1.packaging.production-adapter.failed',
   'phase1.packaging.chat-install.failed',
   'phase1.packaging.chat-web-build.failed',
   'phase1.packaging.chat-native-build.failed',
@@ -1879,7 +1880,9 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
   );
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
-  assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock);
+  runPublicPhase1Stage('phase1.packaging.production-adapter.failed', () =>
+    assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock),
+  );
   await runPublicPhase1StageAsync('phase1.packaging.chat-native-build.failed', () =>
     runCommand(
       artifactRoot,
