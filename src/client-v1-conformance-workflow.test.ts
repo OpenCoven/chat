@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
+const contractCanaryPath = resolve(projectRoot, 'scripts', 'contract-canary.mjs');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
 const schemaV2ProducerPath = resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs');
 const windowsSupervisorBuildPath = resolve(
@@ -2373,12 +2374,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
-  test('routes the governed Unix harness through the copied pnpm executable', () => {
+  test('routes the governed schema-v2 module graph through the copied pnpm executable', () => {
+    const contractCanary = readFileSync(contractCanaryPath, 'utf8');
     const harness = readFileSync(harnessPath, 'utf8');
     const schemaV2Producer = readFileSync(schemaV2ProducerPath, 'utf8');
 
+    expect(contractCanary).not.toMatch(/['"`]corepack['"`]/u);
     expect(harness).not.toMatch(/['"`]corepack['"`]/u);
     expect(schemaV2Producer).not.toMatch(/['"`]corepack['"`]/u);
+    expect(contractCanary).toContain("return run('pnpm', args, cwd, options);");
     expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
     expect(schemaV2Producer).toMatch(/'pnpm',\s*\['--version'\]/u);
     expect(schemaV2Producer).toMatch(
