@@ -66,6 +66,21 @@ export function assertCleanContractCanaryCheckouts(options: {
   sdk: { staged: number; unstaged: number; untracked: number };
   cave: { staged: number; unstaged: number; untracked: number };
 };
+export function runPnpm(
+  args: string[],
+  cwd: string,
+  options?: Record<string, unknown>,
+  runtime?: {
+    execute?: (
+      command: string,
+      args: string[],
+      cwd: string,
+      options: Record<string, unknown>,
+    ) => unknown;
+    environment?: NodeJS.ProcessEnv;
+    nodeExecutable?: string;
+  },
+): unknown;
 export function createContractCanaryVerifier(): string;
 export function assertPackedPackageContentsMatch(
   reviewedTarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,

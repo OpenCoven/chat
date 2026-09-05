@@ -384,8 +384,35 @@ function run(command, args, cwd, options = {}) {
   });
 }
 
-function runPnpm(args, cwd, options = {}) {
-  return run('corepack', ['pnpm@10.34.0', ...args], cwd, options);
+export function runPnpm(
+  args,
+  cwd,
+  options = {},
+  { execute = run, environment = process.env, nodeExecutable = process.execPath } = {},
+) {
+  try {
+    return execute('pnpm', args, cwd, options);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+
+    const restrictedProducer =
+      environment.OPENCOVEN_UNIX_PRODUCER_REQUIRED === '1' ||
+      environment.OPENCOVEN_WINDOWS_JOB_REQUIRED === '1';
+    const pnpmExecPath = environment.npm_execpath;
+
+    if (
+      restrictedProducer ||
+      typeof pnpmExecPath !== 'string' ||
+      !isAbsolute(pnpmExecPath) ||
+      !/(?:^|[\\/])pnpm(?:\.c?js)?$/iu.test(pnpmExecPath)
+    ) {
+      throw error;
+    }
+
+    return execute(nodeExecutable, [pnpmExecPath, ...args], cwd, options);
+  }
 }
 
 function isolatedInstallArgs({ offline }) {

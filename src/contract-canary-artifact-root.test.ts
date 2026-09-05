@@ -27,6 +27,7 @@ import {
   createContractCanaryVerifier,
   parseArgs,
   readContractCanaryLock,
+  runPnpm,
 } from '../scripts/contract-canary.mjs';
 import {
   cleanupOwnedTempRoot,
@@ -98,6 +99,88 @@ function createGitWorktreeFixture(prefix: string) {
     worktreeRoot,
   };
 }
+
+describe('contract canary pnpm invocation', () => {
+  test('uses the supervised pnpm executable when it is available', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+      return 'pnpm-ok';
+    };
+
+    expect(runPnpm(['install'], '/workspace', {}, { execute })).toBe('pnpm-ok');
+    expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
+  });
+
+  test('falls back to the active pnpm CLI when its shim is unavailable', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+
+      if (command === 'pnpm') {
+        throw Object.assign(new Error('spawnSync pnpm ENOENT'), { code: 'ENOENT' });
+      }
+
+      return 'corepack-ok';
+    };
+
+    expect(
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: { npm_execpath: '/corepack/pnpm.cjs' },
+          nodeExecutable: '/usr/bin/node',
+        },
+      ),
+    ).toBe('corepack-ok');
+    expect(invocations).toEqual([
+      { command: 'pnpm', args: ['install'] },
+      { command: '/usr/bin/node', args: ['/corepack/pnpm.cjs', 'install'] },
+    ]);
+  });
+
+  test('does not mask failures from an available pnpm executable', () => {
+    const failure = Object.assign(new Error('pnpm failed'), { status: 1 });
+    const execute = (command: string) => {
+      if (command === 'pnpm') {
+        throw failure;
+      }
+
+      throw new Error('unexpected fallback');
+    };
+
+    expect(() => runPnpm(['install'], '/workspace', {}, { execute })).toThrow(failure);
+  });
+
+  test('fails closed when pnpm is unavailable in a restricted producer', () => {
+    const failure = Object.assign(new Error('spawnSync pnpm ENOENT'), { code: 'ENOENT' });
+    const execute = (command: string) => {
+      if (command === 'pnpm') {
+        throw failure;
+      }
+
+      throw new Error('unexpected fallback');
+    };
+
+    expect(() =>
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: {
+            npm_execpath: '/corepack/pnpm.cjs',
+            OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+          },
+        },
+      ),
+    ).toThrow(failure);
+  });
+});
 
 function sha256(bytes: Buffer | string) {
   return createHash('sha256').update(bytes).digest('hex');
