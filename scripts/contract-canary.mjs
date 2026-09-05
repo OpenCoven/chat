@@ -385,7 +385,7 @@ function run(command, args, cwd, options = {}) {
 }
 
 function runPnpm(args, cwd, options = {}) {
-  return run('corepack', ['pnpm@10.34.0', ...args], cwd, options);
+  return run('pnpm', args, cwd, options);
 }
 
 function isolatedInstallArgs({ offline }) {

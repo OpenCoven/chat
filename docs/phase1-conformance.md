@@ -327,6 +327,10 @@ non-writable sibling of that producer root. It receives an allowlisted
 environment with no GitHub token, OIDC request value, credential helper,
 operator home, ambient package cache, or proxy setting.
 
+The restricted harness and its transitive packed-consumer canary invoke the
+reviewed copied `pnpm` executable directly. `corepack` is not exposed after the
+identity transition.
+
 Dependency installation, the isolated Rust toolchain installation, all
 candidate/validator/Chat/Cave/Coven checkouts and builds, native RPC work,
 authority execution, schema-v2 construction, scanning, and the producer-side
@@ -1039,8 +1043,8 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,200 | `b1c48729634a3ae4222a4f62d3f245af46acc00de721a322a7233642a5bd577c` |
-| `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
+| `.github/workflows/client-v1-conformance.yml` | 462,200 | `0b85485b541d25fffaa6bf3050d3e4dde4cb9faea8306c3fa8fd1a3d90d9ee1b` |
+| `scripts/contract-canary.mjs` | 38,166 | `2fc9ef940ae015a9b5c5fac86b531c08efaeb3d2861dc609c19eb5f40e205a51` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
