@@ -1045,7 +1045,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
-| `scripts/phase1-conformance.mjs` | 187,737 | `42ad940646399de7b89e25cb73abfd59308d5db5284e1c5cbdb57d56737dbfa6` |
+| `scripts/phase1-conformance.mjs` | 188,291 | `0684a3622804ab664336145837a75d98bc6bfef1eee6b533a9fdcbab73e6b110` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
