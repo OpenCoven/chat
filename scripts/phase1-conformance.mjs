@@ -274,6 +274,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.verified-runner.exit-nonzero',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
+  'phase1.stage.schema-v2-production.failed',
   'phase1.stage.native-provider.failed',
   'phase1.stage.execution-root.failed',
   'phase1.stage.environment.failed',
@@ -874,7 +875,9 @@ export function parseArgs(argv, runtime = {}) {
 }
 
 export function observeReleaseToolVersions() {
-  const toolchain = resolveRustToolchain();
+  const toolchain = runPublicPhase1Stage('phase1.environment.rust-toolchain.failed', () =>
+    resolveRustToolchain(),
+  );
   return validateObservedToolVersions({
     nodeVersion: process.version,
     pnpmVersion: runSupervisedSync('pnpm', ['--version'], {
@@ -974,14 +977,14 @@ function resolveRustToolchain() {
     throw new Error('phase1.environment.rust-toolchain-mismatch');
   }
   const bin = resolve(rustupHome, 'toolchains', `1.95.0-${triple}`, 'bin');
-  const cargoPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo'),
+  const cargoPath = runPublicPhase1Stage('phase1.environment.rustup-cargo.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo')),
   );
-  const rustcPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'rustc.exe' : 'rustc'),
+  const rustcPath = runPublicPhase1Stage('phase1.environment.rustup-rustc.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'rustc.exe' : 'rustc')),
   );
-  const rustdocPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'rustdoc.exe' : 'rustdoc'),
+  const rustdocPath = runPublicPhase1Stage('phase1.environment.rustup-rustdoc.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'rustdoc.exe' : 'rustdoc')),
   );
   for (const path of [cargoPath, rustcPath, rustdocPath]) {
     if (!statSync(path).isFile() || dirname(path) !== bin) {
@@ -5174,7 +5177,9 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     () => assertExecutingHarnessAuthority(lock),
   );
   if (options.platform !== undefined) {
-    return runSchemaV2Conformance(options, lock, harnessAuthorityVerification);
+    return runPublicPhase1StageAsync('phase1.stage.schema-v2-production.failed', () =>
+      runSchemaV2Conformance(options, lock, harnessAuthorityVerification),
+    );
   }
   runPublicPhase1Stage('phase1.stage.native-provider.failed', () =>
     assertNativeCredentialProviderIsolated(),
