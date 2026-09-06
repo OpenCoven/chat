@@ -275,6 +275,17 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.verified-runner.exit-nonzero',
   'phase1.stage.runtime-integrity.failed',
   'phase1.stage.invocation.failed',
+  'phase1.stage.invocation.windows-job-required',
+  'phase1.stage.invocation.windows-job-identity',
+  'phase1.stage.invocation.windows-powershell',
+  'phase1.stage.invocation.windows-toolchain-path',
+  'phase1.stage.invocation.windows-path',
+  'phase1.stage.invocation.windows-artifact-binding',
+  'phase1.stage.invocation.windows-os-environment',
+  'phase1.stage.invocation.windows-executable',
+  'phase1.stage.invocation.windows-output-binding',
+  'phase1.stage.invocation.unix-output-binding',
+  'phase1.stage.invocation.platform-mismatch',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
   'phase1.stage.schema-v2-production.failed',
@@ -395,6 +406,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.cleanup-grant.random-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-directory-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-create-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-open-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-metadata-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-trust-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-sync-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
@@ -933,7 +948,7 @@ export function parseArgs(argv, runtime = {}) {
       );
     }
     if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
-      throw new Error('schema-v2 --platform must match the supervised native host.');
+      throw new Error('phase1.stage.invocation.platform-mismatch');
     }
     const supervisorEnvironment = schemaV2SupervisorEnvironment(
       runtimeEnvironment,
@@ -944,7 +959,11 @@ export function parseArgs(argv, runtime = {}) {
     );
     const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the supervisor artifact path.');
+      throw new Error(
+        runtimePlatform === 'win32'
+          ? 'phase1.stage.invocation.windows-output-binding'
+          : 'phase1.stage.invocation.unix-output-binding',
+      );
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');

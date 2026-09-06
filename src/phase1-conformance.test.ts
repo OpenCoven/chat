@@ -514,13 +514,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(windowsJobBindingEnvironment(binding, 'linux')).toEqual({});
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, OPENCOVEN_WINDOWS_JOB_REQUIRED: '0' }, 'win32'),
-    ).toThrow(/required/u);
+    ).toThrow('phase1.stage.invocation.windows-job-required');
     expect(() =>
       windowsJobBindingEnvironment(
         { ...binding, OPENCOVEN_WINDOWS_JOB_NAME: 'Local\\OpenCoven.Chat.Conformance.other' },
         'win32',
       ),
-    ).toThrow(/nonce-bound/u);
+    ).toThrow('phase1.stage.invocation.windows-job-identity');
     expect(() =>
       windowsJobBindingEnvironment(
         {
@@ -529,7 +529,16 @@ describe('Phase 1 real-authority conformance harness', () => {
         },
         'win32',
       ),
-    ).toThrow(/system PowerShell/u);
+    ).toThrow('phase1.stage.invocation.windows-powershell');
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          LIB: 'C:\\untrusted\\library',
+        },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-toolchain-path');
     expect(() =>
       windowsJobBindingEnvironment(
         {
@@ -538,10 +547,16 @@ describe('Phase 1 real-authority conformance harness', () => {
         },
         'win32',
       ),
-    ).toThrow(/artifact/u);
+    ).toThrow('phase1.stage.invocation.windows-artifact-binding');
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, TEMP: 'C:\\ambient\\temp' }, 'win32'),
-    ).toThrow(/temporary/u);
+    ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+    expect(() =>
+      windowsJobBindingEnvironment({ ...binding, COMSPEC: 'C:\\untrusted\\cmd.exe' }, 'win32'),
+    ).toThrow('phase1.stage.invocation.windows-os-environment');
+    expect(() => windowsJobBindingEnvironment({ ...binding, PATHEXT: '.EXE' }, 'win32')).toThrow(
+      'phase1.stage.invocation.windows-executable',
+    );
   });
 
   test('requires a distinct Unix producer UID and native containment binding', () => {
@@ -739,6 +754,19 @@ describe('Phase 1 real-authority conformance harness', () => {
       ],
       { environment, ...runtime },
     );
+    expect(() =>
+      parseArgs(
+        [
+          '--validator-revision',
+          'd'.repeat(40),
+          '--platform',
+          'win32-x64',
+          '--output',
+          `${artifactDirectory}\\client-v1-conformance-other.json`,
+        ],
+        { environment, ...runtime },
+      ),
+    ).toThrow('phase1.stage.invocation.windows-output-binding');
     const projected = createVerifiedRunnerEnvironment(
       options,
       'C:\\OpenCoven\\bootstrap\\harness',
@@ -772,7 +800,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         { ...environment, OPENCOVEN_WINDOWS_JOB_NONCE: '0'.repeat(32) },
         runtime,
       ),
-    ).toThrow(/nonce-bound/u);
+    ).toThrow('phase1.stage.invocation.windows-job-identity');
   });
 
   test.skipIf(process.platform !== 'darwin')(
@@ -1073,6 +1101,17 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test.each([
+    'phase1.stage.invocation.windows-job-required',
+    'phase1.stage.invocation.windows-job-identity',
+    'phase1.stage.invocation.windows-powershell',
+    'phase1.stage.invocation.windows-toolchain-path',
+    'phase1.stage.invocation.windows-path',
+    'phase1.stage.invocation.windows-artifact-binding',
+    'phase1.stage.invocation.windows-os-environment',
+    'phase1.stage.invocation.windows-executable',
+    'phase1.stage.invocation.windows-output-binding',
+    'phase1.stage.invocation.unix-output-binding',
+    'phase1.stage.invocation.platform-mismatch',
     'phase1.packaging.frozen-consumer.failed',
     'phase1.packaging.cave-install.failed',
     'phase1.packaging.cave-build.failed',
@@ -1221,8 +1260,20 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
     ],
     [
-      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_unavailable',
-      'phase1.native-scenarios.cleanup-grant.marker-directory-unavailable',
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_create_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-directory-create-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_open_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-directory-open-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_metadata_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-directory-metadata-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_trust_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-directory-trust-unavailable',
     ],
     [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_sync_unavailable',
@@ -1274,6 +1325,27 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(diagnostic).toBe(expected);
     expect(diagnostic).not.toContain('private');
+  });
+
+  test.each([
+    'marker-directory-create-unavailable',
+    'marker-directory-open-unavailable',
+    'marker-directory-metadata-unavailable',
+    'marker-directory-trust-unavailable',
+  ])('preserves cleanup-grant %s through schema-v2 stage wrapping', async (category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const expected = `phase1.native-scenarios.cleanup-grant.${category}`;
+
+    expect(diagnose(new Error(expected), 'phase1.stage.native-scenarios.failed')).toBe(expected);
   });
 
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
@@ -2042,7 +2114,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           ],
           runtime,
         ),
-      ).toThrow(/artifact/u);
+      ).toThrow('phase1.stage.invocation.unix-output-binding');
       expect(() =>
         parseArgs(
           [

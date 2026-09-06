@@ -32,10 +32,13 @@ const MAX_MARKER_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 enum MarkerIdentityError {
-    HomeUnavailable,
-    DirectoryUnavailable,
-    SyncUnavailable,
-    IdentityUnavailable,
+    Home,
+    DirectoryCreate,
+    DirectoryOpen,
+    DirectoryMetadata,
+    DirectoryTrust,
+    Sync,
+    Identity,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -92,14 +95,21 @@ pub(crate) fn issue(
     })?;
     validate_conformance_cleanup_accounts(accounts)?;
     let storage_identity = marker_io::identity().map_err(|error| match error {
-        MarkerIdentityError::HomeUnavailable => KeyringError::CleanupGrantMarkerHomeUnavailable,
-        MarkerIdentityError::DirectoryUnavailable => {
-            KeyringError::CleanupGrantMarkerDirectoryUnavailable
+        MarkerIdentityError::Home => KeyringError::CleanupGrantMarkerHomeUnavailable,
+        MarkerIdentityError::DirectoryCreate => {
+            KeyringError::CleanupGrantMarkerDirectoryCreateUnavailable
         }
-        MarkerIdentityError::SyncUnavailable => KeyringError::CleanupGrantMarkerSyncUnavailable,
-        MarkerIdentityError::IdentityUnavailable => {
-            KeyringError::CleanupGrantMarkerIdentityUnavailable
+        MarkerIdentityError::DirectoryOpen => {
+            KeyringError::CleanupGrantMarkerDirectoryOpenUnavailable
         }
+        MarkerIdentityError::DirectoryMetadata => {
+            KeyringError::CleanupGrantMarkerDirectoryMetadataUnavailable
+        }
+        MarkerIdentityError::DirectoryTrust => {
+            KeyringError::CleanupGrantMarkerDirectoryTrustUnavailable
+        }
+        MarkerIdentityError::Sync => KeyringError::CleanupGrantMarkerSyncUnavailable,
+        MarkerIdentityError::Identity => KeyringError::CleanupGrantMarkerIdentityUnavailable,
     })?;
     #[cfg(windows)]
     marker_io::test_hook("issue-storage-identity").map_err(|_| KeyringError::Unavailable)?;
@@ -356,7 +366,7 @@ mod marker_io {
 
     impl MarkerDirectory {
         fn open() -> Result<Self, MarkerIdentityError> {
-            let home = env::var_os("HOME").ok_or(MarkerIdentityError::HomeUnavailable)?;
+            let home = env::var_os("HOME").ok_or(MarkerIdentityError::Home)?;
             Self::open_at(PathBuf::from(home))
         }
 
@@ -366,33 +376,29 @@ mod marker_io {
                     .components()
                     .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
             {
-                return Err(MarkerIdentityError::HomeUnavailable);
+                return Err(MarkerIdentityError::Home);
             }
-            let initial =
-                fs::symlink_metadata(&home).map_err(|_| MarkerIdentityError::HomeUnavailable)?;
+            let initial = fs::symlink_metadata(&home).map_err(|_| MarkerIdentityError::Home)?;
             validate_home_directory(&initial)?;
             let mut current = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
                 .open(&home)
-                .map_err(|_| MarkerIdentityError::HomeUnavailable)?;
-            let opened = current
-                .metadata()
-                .map_err(|_| MarkerIdentityError::HomeUnavailable)?;
+                .map_err(|_| MarkerIdentityError::Home)?;
+            let opened = current.metadata().map_err(|_| MarkerIdentityError::Home)?;
             validate_home_directory(&opened)?;
             if initial.dev() != opened.dev() || initial.ino() != opened.ino() {
-                return Err(MarkerIdentityError::HomeUnavailable);
+                return Err(MarkerIdentityError::Home);
             }
 
             for name in DIRECTORY_NAMES {
-                let name =
-                    CString::new(name).map_err(|_| MarkerIdentityError::DirectoryUnavailable)?;
+                let name = CString::new(name).map_err(|_| MarkerIdentityError::DirectoryCreate)?;
                 let created =
                     unsafe { libc::mkdirat(current.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
                 if !created {
                     let error = std::io::Error::last_os_error();
                     if error.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(MarkerIdentityError::DirectoryUnavailable);
+                        return Err(MarkerIdentityError::DirectoryCreate);
                     }
                 }
                 let descriptor = unsafe {
@@ -403,27 +409,22 @@ mod marker_io {
                     )
                 };
                 if descriptor < 0 {
-                    return Err(MarkerIdentityError::DirectoryUnavailable);
+                    return Err(MarkerIdentityError::DirectoryOpen);
                 }
                 let next = unsafe { File::from_raw_fd(descriptor) };
-                validate_directory(
-                    &next
-                        .metadata()
-                        .map_err(|_| MarkerIdentityError::DirectoryUnavailable)?,
-                )
-                .map_err(|_| MarkerIdentityError::DirectoryUnavailable)?;
+                let metadata = next
+                    .metadata()
+                    .map_err(|_| MarkerIdentityError::DirectoryMetadata)?;
+                validate_directory(&metadata).map_err(|_| MarkerIdentityError::DirectoryTrust)?;
                 if created {
-                    next.sync_all()
-                        .map_err(|_| MarkerIdentityError::SyncUnavailable)?;
-                    current
-                        .sync_all()
-                        .map_err(|_| MarkerIdentityError::SyncUnavailable)?;
+                    next.sync_all().map_err(|_| MarkerIdentityError::Sync)?;
+                    current.sync_all().map_err(|_| MarkerIdentityError::Sync)?;
                 }
                 current = next;
             }
             let metadata = current
                 .metadata()
-                .map_err(|_| MarkerIdentityError::IdentityUnavailable)?;
+                .map_err(|_| MarkerIdentityError::Identity)?;
             Ok(Self {
                 file: current,
                 identity: format!("{:x}:{:x}", metadata.dev(), metadata.ino()),
@@ -649,7 +650,7 @@ mod marker_io {
             || metadata.uid() != unsafe { libc::geteuid() }
             || metadata.mode() & 0o022 != 0
         {
-            return Err(MarkerIdentityError::HomeUnavailable);
+            return Err(MarkerIdentityError::Home);
         }
         Ok(())
     }
@@ -842,7 +843,7 @@ mod marker_io {
     pub(super) fn identity() -> Result<String, MarkerIdentityError> {
         MarkerDirectory::open()
             .map(|directory| directory.identity)
-            .map_err(|_| MarkerIdentityError::IdentityUnavailable)
+            .map_err(|_| MarkerIdentityError::Identity)
     }
 
     pub(super) fn publish(
@@ -1184,7 +1185,7 @@ mod marker_io {
     }
 
     pub(super) fn identity() -> Result<String, MarkerIdentityError> {
-        Err(MarkerIdentityError::IdentityUnavailable)
+        Err(MarkerIdentityError::Identity)
     }
 
     pub(super) fn publish(
@@ -1252,7 +1253,7 @@ mod tests {
 
         assert_eq!(
             marker_io::identity_at(&home.0),
-            Err(MarkerIdentityError::HomeUnavailable)
+            Err(MarkerIdentityError::Home)
         );
     }
 
@@ -1266,7 +1267,19 @@ mod tests {
 
         assert_eq!(
             marker_io::identity_at(&home.0),
-            Err(MarkerIdentityError::DirectoryUnavailable)
+            Err(MarkerIdentityError::DirectoryTrust)
+        );
+    }
+
+    #[test]
+    fn marker_identity_classifies_an_existing_marker_file() {
+        let home = TestHome::new(0o700);
+        fs::write(home.0.join(".coven"), b"not a directory")
+            .expect("marker parent file must be created");
+
+        assert_eq!(
+            marker_io::identity_at(&home.0),
+            Err(MarkerIdentityError::DirectoryOpen)
         );
     }
 }
