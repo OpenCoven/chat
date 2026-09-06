@@ -253,6 +253,7 @@ chmod 711 "$isolated_root"
 chmod 711 "$temp_root"
 temp_root_relaxed=1
 producer_root="$isolated_root/producer"
+native_lock_root="$producer_root/native-credential-lock"
 workspace="$isolated_root/source"
 artifact_workspace="$producer_root/workspace"
 trusted_root="$isolated_root/trusted"
@@ -534,7 +535,8 @@ mkdir -p -m 700 \
   "$producer_root/rustup" \
   "$producer_root/corepack" \
   "$producer_root/pnpm-home" \
-  "$producer_root/pnpm-store"
+  "$producer_root/pnpm-store" \
+  "$native_lock_root"
 mkdir -m 755 "$workspace"
 mkdir -m 555 "$trusted_root"
 cp -a "$source_path/." "$workspace/"
@@ -589,9 +591,14 @@ chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/corepack" \
   "$producer_root/pnpm-home" \
   "$producer_root/pnpm-store" \
+  "$native_lock_root" \
   "$artifact_workspace"
 chown "$producer_uid:$producer_gid" "$producer_root"
-chmod 700 "$producer_root" "$artifact_workspace" "$artifact_workspace/.artifacts"
+chmod 700 \
+  "$producer_root" \
+  "$native_lock_root" \
+  "$artifact_workspace" \
+  "$artifact_workspace/.artifacts"
 chown -R -h root:0 "$workspace"
 chmod -R a+rX "$workspace"
 chmod -R a-w "$workspace"
@@ -621,6 +628,7 @@ restricted_environment=(
   "COREPACK_HOME=$producer_root/corepack"
   "PNPM_HOME=$producer_root/pnpm-home"
   "PNPM_STORE_DIR=$producer_root/pnpm-store"
+  "OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT=$native_lock_root"
   "PATH=$trusted_root:$producer_root/cargo/bin:$tool_path"
   "LANG=C"
   "LC_ALL=C"
