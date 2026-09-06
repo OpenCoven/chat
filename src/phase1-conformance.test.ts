@@ -18,7 +18,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
@@ -458,13 +458,28 @@ describe('Phase 1 real-authority conformance harness', () => {
           lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
           windowsSupervisorPath: 'C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe',
         });
+        const gitPath = execFileSync('where.exe', ['git'], { encoding: 'utf8' })
+          .split(/\r?\n/u)
+          .find(Boolean);
+        if (gitPath === undefined) {
+          throw new Error('Windows Git executable is unavailable.');
+        }
+        const systemRoot = process.env.SYSTEMROOT ?? process.env.WINDIR;
+        if (systemRoot === undefined) {
+          throw new Error('Windows system root is unavailable.');
+        }
         await cloneExactCheckout({
           artifactRoot: owned,
           sourceRoot: source,
           destinationRoot: destination,
           repository: 'OpenCoven/chat',
           revision,
-          environment: process.env,
+          environment: {
+            ...process.env,
+            PATH: [dirname(gitPath), dirname(process.execPath), resolve(systemRoot, 'System32')].join(
+              ';',
+            ),
+          },
           label: 'Windows shallow exact revision fixture',
           sourceRef: 'refs/tags/opencoven-phase1-harness',
         });
