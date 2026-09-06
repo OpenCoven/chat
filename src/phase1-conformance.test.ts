@@ -1572,6 +1572,22 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.native-scenarios.cleanup-custody.cleanup-grant-rejected',
     ],
     [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_backend_unavailable',
+      'phase1.native-scenarios.cleanup-custody.backend-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_lock_unavailable',
+      'phase1.native-scenarios.cleanup-custody.lock-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_installation_delete_unavailable',
+      'phase1.native-scenarios.cleanup-custody.installation-delete-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_credential_delete_unavailable',
+      'phase1.native-scenarios.cleanup-custody.credential-delete-unavailable',
+    ],
+    [
       'native RPC conformance_cleanup_native_custody failed with invalid_native_input',
       'phase1.native-scenarios.cleanup-custody.invalid-native-input',
     ],

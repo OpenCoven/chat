@@ -107,6 +107,14 @@ pub(crate) enum KeyringError {
     CleanupGrantMarkerPublishUnavailable,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantCollisionExhausted,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupBackendUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupInstallationDeleteUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupCredentialDeleteUnavailable,
 }
 
 impl KeyringError {
@@ -164,6 +172,20 @@ impl KeyringError {
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantCollisionExhausted => {
                 NativeDiagnostic::new("cleanup_grant_collision_exhausted", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupBackendUnavailable => {
+                NativeDiagnostic::new("cleanup_backend_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockUnavailable => NativeDiagnostic::new("cleanup_lock_unavailable", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupInstallationDeleteUnavailable => {
+                NativeDiagnostic::new("cleanup_installation_delete_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupCredentialDeleteUnavailable => {
+                NativeDiagnostic::new("cleanup_credential_delete_unavailable", true)
             }
         }
     }
@@ -728,7 +750,8 @@ impl NativeKeyring {
         }
         let grant_identity = crate::cleanup_grant::grant_identity(grant)?;
         let process_secret = self.cleanup_process_secret(false)?;
-        let mut backend = NativeCleanupBackend::new()?;
+        let mut backend =
+            NativeCleanupBackend::new().map_err(|_| KeyringError::CleanupBackendUnavailable)?;
         run_cleanup_transaction(
             &self.issued_cleanup_grants,
             &grant_identity,
@@ -935,7 +958,7 @@ where
     Redemption: CleanupGrantRedemption,
     Backend: CleanupBackend,
 {
-    let _mutation_guard = acquire_lock()?;
+    let _mutation_guard = acquire_lock().map_err(|_| KeyringError::CleanupLockUnavailable)?;
     let mut issued = issued_cleanup_grants
         .lock()
         .map_err(|_| KeyringError::CleanupGrantRejected)?;
@@ -947,7 +970,13 @@ where
     let scope = redemption.scope();
     validate_conformance_cleanup_accounts(&scope.accounts)?;
     for account in &scope.accounts {
-        backend.delete(&scope.service, account)?;
+        backend.delete(&scope.service, account).map_err(|_| {
+            if account == INSTALLATION_ID_ACCOUNT {
+                KeyringError::CleanupInstallationDeleteUnavailable
+            } else {
+                KeyringError::CleanupCredentialDeleteUnavailable
+            }
+        })?;
     }
 
     let digest = Sha256::digest(b"phase1-native-custody-empty-v1");
@@ -2399,6 +2428,31 @@ mod tests {
 
     #[cfg(feature = "phase1-conformance")]
     #[test]
+    fn cleanup_runtime_failures_identify_the_failed_boundary() {
+        for (error, expected) in [
+            (
+                KeyringError::CleanupBackendUnavailable,
+                "cleanup_backend_unavailable",
+            ),
+            (
+                KeyringError::CleanupLockUnavailable,
+                "cleanup_lock_unavailable",
+            ),
+            (
+                KeyringError::CleanupInstallationDeleteUnavailable,
+                "cleanup_installation_delete_unavailable",
+            ),
+            (
+                KeyringError::CleanupCredentialDeleteUnavailable,
+                "cleanup_credential_delete_unavailable",
+            ),
+        ] {
+            assert_eq!(error.diagnostic().code, expected);
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
     fn cleanup_lock_failure_preserves_the_same_authenticated_retry() {
         let scope = cleanup_test_scope();
         let identity = "grant-id".to_owned();
@@ -2421,7 +2475,7 @@ mod tests {
                 },
                 &mut backend,
             ),
-            Err(KeyringError::Unavailable)
+            Err(KeyringError::CleanupLockUnavailable)
         ));
         assert_eq!(prepared.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));
@@ -2496,7 +2550,7 @@ mod tests {
                 }),
                 &mut backend,
             ),
-            Err(KeyringError::Unavailable)
+            Err(KeyringError::CleanupCredentialDeleteUnavailable)
         ));
         assert_eq!(consumed.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));

@@ -149,6 +149,10 @@ const cleanupCustodyFailureCategories = [
   'secure-store-unavailable',
   'keychain-failure',
   'cleanup-grant-rejected',
+  'backend-unavailable',
+  'lock-unavailable',
+  'installation-delete-unavailable',
+  'credential-delete-unavailable',
   'invalid-native-input',
   'timeout',
   'process',
@@ -994,6 +998,13 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
       typeof error.message === 'string'
         ? error.message
         : '';
+    const cleanupBoundaryFailure =
+      /^native RPC conformance_cleanup_native_custody failed with cleanup_(backend_unavailable|lock_unavailable|installation_delete_unavailable|credential_delete_unavailable)$/u.exec(
+        message,
+      );
+    if (cleanupBoundaryFailure !== null) {
+      return `phase1.native-scenarios.cleanup-custody.${cleanupBoundaryFailure[1].replaceAll('_', '-')}`;
+    }
     const rpcFailure =
       /^native RPC conformance_cleanup_native_custody failed with (secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
         message,
