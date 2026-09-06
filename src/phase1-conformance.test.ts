@@ -500,12 +500,12 @@ describe('Phase 1 real-authority conformance harness', () => {
       PATH: 'C:\\trusted\\node;C:\\trusted\\cargo',
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
       LIB: [
-        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64',
       ].join(';'),
       INCLUDE: [
-        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include',
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
       ].join(';'),
     };
@@ -714,11 +714,11 @@ describe('Phase 1 real-authority conformance harness', () => {
       TMP: `${bootstrapRoot}\\temp`,
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
       LIB: [
-        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
       ].join(';'),
       INCLUDE: [
-        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include',
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
       ].join(';'),
       GITHUB_TOKEN: 'must-not-propagate',
@@ -1215,6 +1215,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_identity_unavailable',
       'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_home_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_directory_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-directory-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_sync_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-sync-unavailable',
     ],
     [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_publish_unavailable',

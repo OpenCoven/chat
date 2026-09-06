@@ -126,6 +126,9 @@ const cleanupGrantFailureCategories = [
   'service-unavailable',
   'process-secret-unavailable',
   'random-unavailable',
+  'marker-home-unavailable',
+  'marker-directory-unavailable',
+  'marker-sync-unavailable',
   'marker-identity-unavailable',
   'marker-publish-unavailable',
   'collision-exhausted',
@@ -291,7 +294,7 @@ export function windowsJobBindingEnvironment(
           !/^[a-z]:\\/u.test(lower) ||
           lower.includes('\\..\\') ||
           (!lower.startsWith(
-            'c:\\program files\\microsoft visual studio\\2022\\enterprise\\vc\\tools\\msvc\\14.',
+            'c:\\program files\\microsoft visual studio\\18\\enterprise\\vc\\tools\\msvc\\14.',
           ) &&
             !lower.startsWith('c:\\program files (x86)\\windows kits\\10\\'))
         );
@@ -905,7 +908,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         ? error.message
         : '';
     const rpcFailure =
-      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_home_unavailable|cleanup_grant_marker_directory_unavailable|cleanup_grant_marker_sync_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
         message,
       );
     if (rpcFailure !== null) {
