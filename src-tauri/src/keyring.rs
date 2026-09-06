@@ -801,6 +801,7 @@ impl CleanupBackend for NativeCleanupBackend {
     }
 
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        NativeKeyring::ensure_store_initialized()?;
         #[cfg(target_os = "macos")]
         let search = std::collections::HashMap::from([("service", service), ("user", account)]);
         #[cfg(all(unix, not(target_os = "macos")))]
@@ -1785,13 +1786,18 @@ pub(crate) fn validate_credential_origin(origin: &str) -> Result<(), KeyringErro
 }
 
 impl NativeKeyring {
-    fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
+    fn ensure_store_initialized() -> Result<(), KeyringError> {
         if STORE_INITIALIZED.get().is_none() {
             if !initialize_store() {
                 return Err(KeyringError::Unavailable);
             }
             let _ = STORE_INITIALIZED.set(());
         }
+        Ok(())
+    }
+
+    fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
+        Self::ensure_store_initialized()?;
         #[cfg(windows)]
         {
             return Entry::new_with_modifiers(

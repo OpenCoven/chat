@@ -616,6 +616,13 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         stdout,
     };
 
+    let cold_start_grant = rpc.issue(&[TARGET_A]);
+    let cold_start_cleanup = rpc.cleanup(&cold_start_grant);
+    assert_eq!(
+        cold_start_cleanup["ok"], true,
+        "cleanup must initialize the native store before checking absent accounts: {cold_start_cleanup}"
+    );
+
     let before = rpc.request(json!({
         "id": "state",
         "command": "conformance_native_custody_state",
