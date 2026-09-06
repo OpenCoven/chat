@@ -1347,6 +1347,7 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
   const data = resolve(rootPath, 'data');
   const pnpmStore = resolve(rootPath, 'pnpm-store');
   const cargoHome = resolve(rootPath, 'cargo-home');
+  const nativeLockRoot = resolve(rootPath, 'native-credential-lock');
   const cargoPath = realpathSync(
     resolvedCargoPath ??
       execFileSync('rustup', ['which', 'cargo'], {
@@ -1355,7 +1356,7 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
       }).trim(),
   );
   const rustToolchainBin = dirname(cargoPath);
-  for (const path of [home, temp, cache, config, data, pnpmStore, cargoHome]) {
+  for (const path of [home, temp, cache, config, data, pnpmStore, cargoHome, nativeLockRoot]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
     chmodSync(path, 0o700);
   }
@@ -1377,6 +1378,7 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     NPM_CONFIG_HTTPS_PROXY: '',
     PNPM_STORE_DIR: pnpmStore,
     CARGO_HOME: cargoHome,
+    OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: nativeLockRoot,
     RUSTC: resolve(rustToolchainBin, 'rustc'),
     RUSTDOC: resolve(rustToolchainBin, 'rustdoc'),
     CI: '1',
