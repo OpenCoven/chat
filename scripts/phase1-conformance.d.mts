@@ -117,6 +117,7 @@ export function cloneExactCheckout(options: {
   destinationRoot: string;
   repository?: string;
   revision: string;
+  sourceRef?: string;
   environment: NodeJS.ProcessEnv;
   label: string;
 }): Promise<void>;
