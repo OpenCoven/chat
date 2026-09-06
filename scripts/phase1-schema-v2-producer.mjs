@@ -147,6 +147,8 @@ const cleanupGrantFailureCategories = [
 ];
 const publicFailureDiagnosticSet = new Set([
   ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
+  'phase1.stage.invocation.windows-executable-path',
+  'phase1.stage.invocation.windows-path-extensions',
   'phase1.operator-fingerprint.failed',
   'phase1.stage.schema-v2-production.failed',
   'phase1.stage.execution-root.failed',
@@ -176,6 +178,10 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.packaging.cave-build.phase.next-build.resource.memory.allocation',
   'phase1.packaging.cave-build.phase.next-build.resource.killed',
   'phase1.packaging.cave-build.phase.next-build.compile',
+  'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin',
   'phase1.packaging.cave-build.phase.next-build.typescript',
   'phase1.packaging.cave-build.phase.next-build.page-data',
   'phase1.packaging.cave-build.phase.next-build.static-pages',
@@ -205,6 +211,10 @@ const publicFailureDiagnosticSet = new Set([
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
   'compile-failed',
+  'compile-module-resolution',
+  'compile-native-module',
+  'compile-permission',
+  'compile-plugin',
   'compiler-crash',
   'disk-exhausted',
   'memory-exhausted',
@@ -372,10 +382,12 @@ export function windowsJobBindingEnvironment(
     executablePath.length === 0 ||
     executablePath.includes('\0') ||
     executablePath.includes('\n') ||
-    executablePath.includes('\r') ||
-    pathExtensions !== '.COM;.EXE;.BAT;.CMD'
+    executablePath.includes('\r')
   ) {
-    throw new Error('phase1.stage.invocation.windows-executable');
+    throw new Error('phase1.stage.invocation.windows-executable-path');
+  }
+  if (pathExtensions !== '.COM;.EXE;.BAT;.CMD') {
+    throw new Error('phase1.stage.invocation.windows-path-extensions');
   }
   return {
     OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
@@ -728,6 +740,13 @@ export function classifyCavePackageFailure(result) {
     [/\b(?:TurbopackInternalError|panic|segmentation fault|bus error)\b/iu, 'compiler-crash'],
     [/\b(?:static|build) worker exited\b/iu, 'worker-exited'],
     [/failed to collect page data/iu, 'page-data-failed'],
+    [/\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu, 'compile-permission'],
+    [/module not found|can't resolve|cannot find module/iu, 'compile-module-resolution'],
+    [
+      /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu,
+      'compile-native-module',
+    ],
+    [/error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu, 'compile-plugin'],
     [/failed to compile/iu, 'compile-failed'],
   ];
   return classifications.find(([pattern]) => pattern.test(output))?.[1];
@@ -738,6 +757,13 @@ const caveBuildDiagnosticByFailureReason = new Map([
   ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
   ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
   ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['compile-permission', 'phase1.packaging.cave-build.phase.next-build.compile.permission'],
+  [
+    'compile-module-resolution',
+    'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  ],
+  ['compile-native-module', 'phase1.packaging.cave-build.phase.next-build.compile.native-module'],
+  ['compile-plugin', 'phase1.packaging.cave-build.phase.next-build.compile.plugin'],
   ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
   ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
   ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
@@ -3212,6 +3238,7 @@ async function runNativeScenarios({
     const adminToken = `phase1-${randomUUID()}`;
     const rpcEnvironment = {
       ...environment,
+      HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),

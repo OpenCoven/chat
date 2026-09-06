@@ -282,7 +282,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.invocation.windows-path',
   'phase1.stage.invocation.windows-artifact-binding',
   'phase1.stage.invocation.windows-os-environment',
-  'phase1.stage.invocation.windows-executable',
+  'phase1.stage.invocation.windows-executable-path',
+  'phase1.stage.invocation.windows-path-extensions',
   'phase1.stage.invocation.windows-output-binding',
   'phase1.stage.invocation.unix-output-binding',
   'phase1.stage.invocation.platform-mismatch',
@@ -500,6 +501,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.phase.next-build.resource.memory.allocation',
   'phase1.packaging.cave-build.phase.next-build.resource.killed',
   'phase1.packaging.cave-build.phase.next-build.compile',
+  'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin',
   'phase1.packaging.cave-build.phase.next-build.typescript',
   'phase1.packaging.cave-build.phase.next-build.page-data',
   'phase1.packaging.cave-build.phase.next-build.static-pages',
@@ -719,15 +724,27 @@ export function classifyPackagingCommandFailure(baseId, error) {
               ? 'next-build.resource.memory.allocation'
               : /\b(?:Killed(?:: 9)?|SIGKILL)\b/u.test(output)
                 ? 'next-build.resource.killed'
-                : output.includes('Finalizing page optimization')
-                  ? 'next-build.finalization'
-                  : output.includes('Generating static pages')
-                    ? 'next-build.static-pages'
-                    : output.includes('Collecting page data')
-                      ? 'next-build.page-data'
-                      : output.includes('Compiled successfully')
-                        ? 'next-build.typescript'
-                        : 'next-build.compile';
+                : /\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu.test(output)
+                  ? 'next-build.compile.permission'
+                  : /module not found|can't resolve|cannot find module/iu.test(output)
+                    ? 'next-build.compile.module-resolution'
+                    : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
+                          output,
+                        )
+                      ? 'next-build.compile.native-module'
+                      : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
+                            output,
+                          )
+                        ? 'next-build.compile.plugin'
+                        : output.includes('Finalizing page optimization')
+                          ? 'next-build.finalization'
+                          : output.includes('Generating static pages')
+                            ? 'next-build.static-pages'
+                            : output.includes('Collecting page data')
+                              ? 'next-build.page-data'
+                              : output.includes('Compiled successfully')
+                                ? 'next-build.typescript'
+                                : 'next-build.compile';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
@@ -3318,6 +3335,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     const adminToken = `phase1-${randomUUID()}`;
     rpcEnvironment = {
       ...nativeAdapterTestEnvironment(environment),
+      HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),
