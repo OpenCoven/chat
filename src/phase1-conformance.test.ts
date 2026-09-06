@@ -673,19 +673,6 @@ describe('Phase 1 real-authority conformance harness', () => {
         ],
         { environment, ...runtime },
       );
-      expect(() =>
-        parseArgs(
-          [
-            '--validator-revision',
-            'd'.repeat(40),
-            '--platform',
-            'win32-x64',
-            '--output',
-            `${artifactDirectory}\\client-v1-conformance-other.json`,
-          ],
-          { environment, ...runtime },
-        ),
-      ).toThrow('phase1.stage.invocation.windows-output-binding');
       const projected = createVerifiedRunnerEnvironment(
         options,
         resolve(fixture.root, 'relocated-harness'),
@@ -767,6 +754,19 @@ describe('Phase 1 real-authority conformance harness', () => {
       ],
       { environment, ...runtime },
     );
+    expect(() =>
+      parseArgs(
+        [
+          '--validator-revision',
+          'd'.repeat(40),
+          '--platform',
+          'win32-x64',
+          '--output',
+          `${artifactDirectory}\\client-v1-conformance-other.json`,
+        ],
+        { environment, ...runtime },
+      ),
+    ).toThrow('phase1.stage.invocation.windows-output-binding');
     const projected = createVerifiedRunnerEnvironment(
       options,
       'C:\\OpenCoven\\bootstrap\\harness',
