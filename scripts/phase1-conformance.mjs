@@ -89,6 +89,7 @@ const approvedCommandFailureReasons = new Set([
 ]);
 const verifiedRunnerEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER';
 const verifiedRunnerRootEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT';
+const protectedHarnessTagRef = 'refs/tags/opencoven-phase1-harness';
 const evidenceAuthorizationVariables = new Set([
   'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
   'ACTIONS_ID_TOKEN_REQUEST_URL',
@@ -1383,7 +1384,7 @@ async function bootstrapVerifiedRunner(options) {
           sourceRoot: options.chatSourceRoot,
           destinationRoot: harnessRoot,
           revision: lock.harness.revision,
-          sourceRef: process.platform === 'win32' ? 'opencoven-phase1-harness' : undefined,
+          sourceRef: process.platform === 'win32' ? protectedHarnessTagRef : undefined,
           environment,
           label: 'Verified Chat conformance harness',
         });
@@ -1741,6 +1742,58 @@ export async function cloneExactCheckout({
   }
   const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
+  let cloneSourceArguments = [];
+  if (sourceRef !== undefined) {
+    if (sourceRef !== protectedHarnessTagRef) {
+      throw new Error(`${label} source reference is not approved.`);
+    }
+    const tagName = sourceRef.slice('refs/tags/'.length);
+    const headRef = `refs/heads/${tagName}`;
+    const sourceRefs = (
+      await runCommand(
+        artifactRoot,
+        `${label} source reference`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          '-c',
+          `safe.directory=${sourceGitDirectory}`,
+          'for-each-ref',
+          '--format=%(refname)',
+          sourceRef,
+          headRef,
+        ],
+        { cwd: sourceRoot, env: checkoutEnvironment },
+      )
+    ).stdout
+      .split(/\r?\n/u)
+      .filter(Boolean);
+    if (!sourceRefs.includes(sourceRef) || sourceRefs.includes(headRef)) {
+      throw new Error(`${label} source tag is unavailable or ambiguous.`);
+    }
+    const sourceCommit = (
+      await runCommand(
+        artifactRoot,
+        `${label} source revision`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          '-c',
+          `safe.directory=${sourceGitDirectory}`,
+          'rev-parse',
+          '--verify',
+          `${sourceRef}^{commit}`,
+        ],
+        { cwd: sourceRoot, env: checkoutEnvironment },
+      )
+    ).stdout.trim();
+    if (sourceCommit !== revision) {
+      throw new Error(`${label} source tag does not match the immutable revision.`);
+    }
+    cloneSourceArguments = ['--branch', tagName];
+  }
   await runCommand(
     artifactRoot,
     `${label} clone`,
@@ -1757,7 +1810,7 @@ export async function cloneExactCheckout({
       '--no-hardlinks',
       '--no-checkout',
       '--quiet',
-      ...(sourceRef === undefined ? [] : ['--branch', sourceRef]),
+      ...cloneSourceArguments,
       sourceRoot,
       destinationRoot,
     ],

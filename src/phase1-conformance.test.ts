@@ -352,7 +352,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
           },
           label: 'shallow exact revision fixture',
-          sourceRef: 'opencoven-phase1-harness',
+          sourceRef: 'refs/tags/opencoven-phase1-harness',
         });
 
         expect(
@@ -361,6 +361,32 @@ describe('Phase 1 real-authority conformance harness', () => {
             encoding: 'utf8',
           }).trim(),
         ).toBe(revision);
+        expect(
+          execFileSync(
+            'git',
+            ['show-ref', '--verify', '--hash', 'refs/tags/opencoven-phase1-harness'],
+            {
+              cwd: destination,
+              encoding: 'utf8',
+            },
+          ).trim(),
+        ).toBe(revision);
+
+        execFileSync('git', ['branch', 'opencoven-phase1-harness', head], { cwd: source });
+        await expect(
+          cloneExactCheckout({
+            artifactRoot: owned,
+            sourceRoot: source,
+            destinationRoot: join(owned.rootPath, 'ambiguous-checkout'),
+            revision,
+            environment: {
+              ...process.env,
+              PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+            },
+            label: 'ambiguous shallow exact revision fixture',
+            sourceRef: 'refs/tags/opencoven-phase1-harness',
+          }),
+        ).rejects.toThrow('source tag is unavailable or ambiguous');
       } finally {
         await owned.cleanup();
         rmSync(source, { recursive: true, force: true });
@@ -372,13 +398,16 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('selects the protected historical harness tag for the Windows verified-runner clone', () => {
     const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    expect(source).toContain(
+      "const protectedHarnessTagRef = 'refs/tags/opencoven-phase1-harness';",
+    );
     const bootstrap = source.slice(
       source.indexOf('async function bootstrapVerifiedRunner'),
       source.indexOf("runPublicPhase1Stage('phase1.stage.runner-checkout-verification.failed'"),
     );
 
     expect(bootstrap).toContain(
-      "sourceRef: process.platform === 'win32' ? 'opencoven-phase1-harness' : undefined,",
+      "sourceRef: process.platform === 'win32' ? protectedHarnessTagRef : undefined,",
     );
   });
 
