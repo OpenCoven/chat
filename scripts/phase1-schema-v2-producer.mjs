@@ -283,10 +283,7 @@ export function windowsJobBindingEnvironment(
   ) {
     throw new Error('phase1.stage.invocation.windows-powershell');
   }
-  for (const [label, value] of [
-    ['library', compilerLibraryPath],
-    ['include', compilerIncludePath],
-  ]) {
+  for (const value of [compilerLibraryPath, compilerIncludePath]) {
     if (
       typeof value !== 'string' ||
       value.length === 0 ||
@@ -307,7 +304,7 @@ export function windowsJobBindingEnvironment(
       throw new Error('phase1.stage.invocation.windows-toolchain-path');
     }
   }
-  const requireCanonicalWindowsPath = (value, label) => {
+  const requireCanonicalWindowsPath = (value) => {
     if (
       typeof value !== 'string' ||
       value.length === 0 ||
@@ -321,7 +318,7 @@ export function windowsJobBindingEnvironment(
     }
     return value;
   };
-  const requireDescendant = (root, candidate, label) => {
+  const requireDescendant = (root, candidate) => {
     const relativePath = windowsPath.relative(root, candidate);
     if (
       relativePath.length === 0 ||
@@ -332,20 +329,16 @@ export function windowsJobBindingEnvironment(
       throw new Error('phase1.stage.invocation.windows-artifact-binding');
     }
   };
-  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot, 'bootstrap root');
-  const canonicalWorkspace = requireCanonicalWindowsPath(workspace, 'workspace');
-  const canonicalArtifactDirectory = requireCanonicalWindowsPath(
-    artifactDirectory,
-    'artifact directory',
-  );
-  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord, 'artifact record');
-  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory, 'temporary');
+  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot);
+  const canonicalWorkspace = requireCanonicalWindowsPath(workspace);
+  const canonicalArtifactDirectory = requireCanonicalWindowsPath(artifactDirectory);
+  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord);
+  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory);
   const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
     secondaryTemporaryDirectory,
-    'secondary temporary',
   );
-  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace, 'workspace');
-  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory, 'temporary');
+  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
+  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
   if (
     windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
     canonicalWorkspace.toLowerCase() !==
@@ -372,7 +365,7 @@ export function windowsJobBindingEnvironment(
     typeof commandProcessor !== 'string' ||
     commandProcessor.toLowerCase() !== 'c:\\windows\\system32\\cmd.exe'
   ) {
-    throw new Error('phase1.stage.invocation.windows-system');
+    throw new Error('phase1.stage.invocation.windows-os-environment');
   }
   if (
     typeof executablePath !== 'string' ||

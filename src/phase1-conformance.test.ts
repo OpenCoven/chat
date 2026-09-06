@@ -553,10 +553,10 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow('phase1.stage.invocation.windows-artifact-binding');
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, COMSPEC: 'C:\\untrusted\\cmd.exe' }, 'win32'),
-    ).toThrow('phase1.stage.invocation.windows-system');
-    expect(() =>
-      windowsJobBindingEnvironment({ ...binding, PATHEXT: '.EXE' }, 'win32'),
-    ).toThrow('phase1.stage.invocation.windows-executable');
+    ).toThrow('phase1.stage.invocation.windows-os-environment');
+    expect(() => windowsJobBindingEnvironment({ ...binding, PATHEXT: '.EXE' }, 'win32')).toThrow(
+      'phase1.stage.invocation.windows-executable',
+    );
   });
 
   test('requires a distinct Unix producer UID and native containment binding', () => {
@@ -1107,7 +1107,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.stage.invocation.windows-toolchain-path',
     'phase1.stage.invocation.windows-path',
     'phase1.stage.invocation.windows-artifact-binding',
-    'phase1.stage.invocation.windows-system',
+    'phase1.stage.invocation.windows-os-environment',
     'phase1.stage.invocation.windows-executable',
     'phase1.stage.invocation.windows-output-binding',
     'phase1.stage.invocation.unix-output-binding',

@@ -281,7 +281,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.invocation.windows-toolchain-path',
   'phase1.stage.invocation.windows-path',
   'phase1.stage.invocation.windows-artifact-binding',
-  'phase1.stage.invocation.windows-system',
+  'phase1.stage.invocation.windows-os-environment',
   'phase1.stage.invocation.windows-executable',
   'phase1.stage.invocation.windows-output-binding',
   'phase1.stage.invocation.unix-output-binding',
