@@ -393,6 +393,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.cleanup-grant.service-unavailable',
   'phase1.native-scenarios.cleanup-grant.process-secret-unavailable',
   'phase1.native-scenarios.cleanup-grant.random-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
   'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
   'phase1.native-scenarios.cleanup-grant.collision-exhausted',

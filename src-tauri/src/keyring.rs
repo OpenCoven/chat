@@ -84,6 +84,8 @@ pub(crate) enum KeyringError {
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRandomUnavailable,
     #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerHomeUnavailable,
+    #[cfg(feature = "phase1-conformance")]
     CleanupGrantMarkerIdentityUnavailable,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantMarkerPublishUnavailable,
@@ -110,6 +112,10 @@ impl KeyringError {
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRandomUnavailable => {
                 NativeDiagnostic::new("cleanup_grant_random_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerHomeUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_home_unavailable", true)
             }
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantMarkerIdentityUnavailable => {
@@ -2017,6 +2023,10 @@ mod tests {
             (
                 KeyringError::CleanupGrantRandomUnavailable,
                 "cleanup_grant_random_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerHomeUnavailable,
+                "cleanup_grant_marker_home_unavailable",
             ),
             (
                 KeyringError::CleanupGrantMarkerIdentityUnavailable,

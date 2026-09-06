@@ -1213,6 +1213,10 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.native-scenarios.cleanup-grant.random-unavailable',
     ],
     [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_home_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
+    ],
+    [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_identity_unavailable',
       'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
     ],

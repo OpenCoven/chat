@@ -30,6 +30,16 @@ const PROCESS_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-process
 const MARKER_VERSION: u32 = 1;
 const MAX_MARKER_BYTES: usize = 16 * 1024;
 
+/// Bounds the storage-identity failure to which validation step tripped,
+/// without carrying any path, owner, or mode detail into the diagnostic.
+enum StorageIdentityError {
+    /// `$HOME` itself is missing, malformed, or fails ownership/mode validation.
+    Home,
+    /// The nested marker-directory chain under `$HOME` fails to create, open,
+    /// or validate.
+    Directory,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CleanupGrantPayload {
@@ -83,8 +93,10 @@ pub(crate) fn issue(
         other => other,
     })?;
     validate_conformance_cleanup_accounts(accounts)?;
-    let storage_identity =
-        marker_io::identity().map_err(|_| KeyringError::CleanupGrantMarkerIdentityUnavailable)?;
+    let storage_identity = marker_io::identity().map_err(|error| match error {
+        StorageIdentityError::Home => KeyringError::CleanupGrantMarkerHomeUnavailable,
+        StorageIdentityError::Directory => KeyringError::CleanupGrantMarkerIdentityUnavailable,
+    })?;
     #[cfg(windows)]
     marker_io::test_hook("issue-storage-identity").map_err(|_| KeyringError::Unavailable)?;
 
@@ -339,37 +351,39 @@ mod marker_io {
     }
 
     impl MarkerDirectory {
-        fn open() -> Result<Self, ()> {
-            let home = env::var_os("HOME").ok_or(())?;
+        fn open() -> Result<Self, super::StorageIdentityError> {
+            use super::StorageIdentityError::{Directory, Home};
+
+            let home = env::var_os("HOME").ok_or(Home)?;
             let home = PathBuf::from(home);
             if !home.is_absolute()
                 || home
                     .components()
                     .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
             {
-                return Err(());
+                return Err(Home);
             }
-            let initial = fs::symlink_metadata(&home).map_err(|_| ())?;
-            validate_directory(&initial)?;
+            let initial = fs::symlink_metadata(&home).map_err(|_| Home)?;
+            validate_directory(&initial).map_err(|_| Home)?;
             let mut current = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
                 .open(&home)
-                .map_err(|_| ())?;
-            let opened = current.metadata().map_err(|_| ())?;
-            validate_directory(&opened)?;
+                .map_err(|_| Home)?;
+            let opened = current.metadata().map_err(|_| Home)?;
+            validate_directory(&opened).map_err(|_| Home)?;
             if initial.dev() != opened.dev() || initial.ino() != opened.ino() {
-                return Err(());
+                return Err(Home);
             }
 
             for name in DIRECTORY_NAMES {
-                let name = CString::new(name).map_err(|_| ())?;
+                let name = CString::new(name).map_err(|_| Directory)?;
                 let created =
                     unsafe { libc::mkdirat(current.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
                 if !created {
                     let error = std::io::Error::last_os_error();
                     if error.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(());
+                        return Err(Directory);
                     }
                 }
                 let descriptor = unsafe {
@@ -380,17 +394,18 @@ mod marker_io {
                     )
                 };
                 if descriptor < 0 {
-                    return Err(());
+                    return Err(Directory);
                 }
                 let next = unsafe { File::from_raw_fd(descriptor) };
-                validate_directory(&next.metadata().map_err(|_| ())?)?;
+                validate_directory(&next.metadata().map_err(|_| Directory)?)
+                    .map_err(|_| Directory)?;
                 if created {
-                    next.sync_all().map_err(|_| ())?;
-                    current.sync_all().map_err(|_| ())?;
+                    next.sync_all().map_err(|_| Directory)?;
+                    current.sync_all().map_err(|_| Directory)?;
                 }
                 current = next;
             }
-            let metadata = current.metadata().map_err(|_| ())?;
+            let metadata = current.metadata().map_err(|_| Directory)?;
             Ok(Self {
                 file: current,
                 identity: format!("{:x}:{:x}", metadata.dev(), metadata.ino()),
@@ -489,10 +504,8 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
-        MarkerDirectory::open()
-            .map(|directory| directory.identity)
-            .map_err(|_| PublishError::Unavailable)
+    pub(super) fn identity() -> Result<String, super::StorageIdentityError> {
+        MarkerDirectory::open().map(|directory| directory.identity)
     }
 
     pub(super) fn publish(
@@ -792,10 +805,10 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
+    pub(super) fn identity() -> Result<String, super::StorageIdentityError> {
         MarkerDirectory::open()
             .map(|directory| directory.identity)
-            .map_err(|_| PublishError::Unavailable)
+            .map_err(|_| super::StorageIdentityError::Directory)
     }
 
     pub(super) fn publish(
@@ -1134,8 +1147,8 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
-        Err(PublishError::Unavailable)
+    pub(super) fn identity() -> Result<String, super::StorageIdentityError> {
+        Err(super::StorageIdentityError::Directory)
     }
 
     pub(super) fn publish(
