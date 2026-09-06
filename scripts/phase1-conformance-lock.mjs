@@ -103,7 +103,7 @@ const expectedRepositories = Object.freeze({
   coven: 'OpenCoven/coven',
   harness: 'OpenCoven/chat',
 });
-const gitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
+export const gitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const gitConfigurationOverrides = [
   '-c',
   'core.excludesFile=',

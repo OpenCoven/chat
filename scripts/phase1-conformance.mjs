@@ -28,6 +28,7 @@ import {
   assertPhase1ProducerAuthority,
   createGitCheckoutEnvironment,
   createGitEnvironment,
+  gitNullDevice,
   readPhase1ConformanceLock,
   resolveLocalGitDirectory,
 } from './phase1-conformance-lock.mjs';
@@ -1195,7 +1196,7 @@ export function safeEnvironment(rootPath, extra = {}) {
     CI: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_NO_LAZY_FETCH: '1',
