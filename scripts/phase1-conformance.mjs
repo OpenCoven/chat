@@ -1839,9 +1839,9 @@ export async function cloneExactCheckout({
       .split(/\r?\n/u)
       .filter(Boolean);
     if (
-      !sourceRefs.includes(protectedSourceReference.tagRef)
-      || sourceRefs.includes(protectedSourceReference.localHeadRef)
-      || sourceRefs.includes(protectedSourceReference.remoteHeadRef)
+      !sourceRefs.includes(protectedSourceReference.tagRef) ||
+      sourceRefs.includes(protectedSourceReference.localHeadRef) ||
+      sourceRefs.includes(protectedSourceReference.remoteHeadRef)
     ) {
       throw new Error(`${label} source tag is unavailable or ambiguous.`);
     }
