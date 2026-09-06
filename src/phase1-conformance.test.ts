@@ -880,6 +880,61 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(runSource).toContain("OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1'");
   });
 
+  test('classifies schema-v2 setup failures before protected production begins', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const runPreflight = producer.runSchemaV2PreflightStage;
+    expect(runPreflight).toBeTypeOf('function');
+    if (typeof runPreflight !== 'function') {
+      return;
+    }
+
+    for (const stage of [
+      'phase1.stage.schema-v2-production.failed',
+      'phase1.stage.evidence-authority.failed',
+      'phase1.stage.checkouts.failed',
+      'phase1.operator-fingerprint.failed',
+      'phase1.stage.execution-root.failed',
+      'phase1.stage.environment.failed',
+    ]) {
+      let failure: unknown;
+      try {
+        runPreflight(stage, () => {
+          throw new Error('private protected-run setup detail');
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe(stage);
+      expect((failure as Error).cause).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain('private');
+    }
+
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const runStart = source.indexOf('export async function runSchemaV2Conformance');
+    const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
+    for (const stage of [
+      'phase1.stage.schema-v2-production.failed',
+      'phase1.stage.evidence-authority.failed',
+      'phase1.stage.checkouts.failed',
+      'phase1.operator-fingerprint.failed',
+      'phase1.stage.execution-root.failed',
+      'phase1.stage.environment.failed',
+    ]) {
+      expect(runSource).toContain(`runSchemaV2PreflightStage('${stage}'`);
+    }
+    expect(runSource).toContain(
+      "const linuxSessionEnvironment = runSchemaV2PreflightStage(\n    'phase1.stage.environment.failed'",
+    );
+  });
+
   test('authenticates the executing harness before schema-v2 dispatch', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'scripts', 'phase1-conformance.mjs'),
@@ -1133,7 +1188,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(nativeScenarios).toContain(`'${stage}'`);
     }
     expect(nativeScenarios).toContain(
-      'throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });',
+      'throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });',
     );
     expect(nativeScenarios.match(/scenarioFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
       8,
@@ -1142,6 +1197,47 @@ describe('Phase 1 real-authority conformance harness', () => {
       4,
     );
     expect(nativeScenarios).not.toContain('cause.message');
+  });
+
+  test.each([
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with secure_store_unavailable',
+      'phase1.native-scenarios.cleanup-grant.secure-store-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with keychain_failure',
+      'phase1.native-scenarios.cleanup-grant.keychain-failure',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_rejected',
+      'phase1.native-scenarios.cleanup-grant.cleanup-grant-rejected',
+    ],
+    [
+      'native RPC timed out for conformance_issue_native_custody_cleanup',
+      'phase1.native-scenarios.cleanup-grant.timeout',
+    ],
+    ['native RPC closed before responding', 'phase1.native-scenarios.cleanup-grant.process'],
+    [
+      'Native custody cleanup grant was not canonical.',
+      'phase1.native-scenarios.cleanup-grant.response',
+    ],
+    ['private protected-run failure', 'phase1.native-scenarios.cleanup-grant.unknown'],
+  ])('classifies cleanup-grant failure without exposing detail', async (message, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2NativeFailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    const diagnostic = diagnose('cleanup-grant', new Error(message));
+
+    expect(diagnostic).toBe(expected);
+    expect(diagnostic).not.toContain('private');
   });
 
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
@@ -2419,6 +2515,85 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).toBe('phase1.packaging.cave-build.phase.next-build.resource.spawn');
     expect(diagnostic).not.toContain('private');
   });
+
+  test.each([
+    [
+      'missing system package',
+      'The system library `javascriptcoregtk-4.1` required by crate `javascriptcore-rs-sys` was not found.\nThe file `javascriptcoregtk-4.1.pc` needs to be installed.',
+      'phase1.packaging.chat-native-build.native-dependency',
+    ],
+    [
+      'dependency download',
+      'error: failed to get `coven-client` as a dependency\nCaused by: failed to clone into: /private/cache',
+      'phase1.packaging.chat-native-build.dependency-fetch',
+    ],
+    [
+      'linker failure',
+      'error: linking with `cc` failed: exit status: 1\n/private/object.o',
+      'phase1.packaging.chat-native-build.linker',
+    ],
+    [
+      'compiler failure',
+      'error[E0308]: mismatched types\nerror: could not compile `opencoven-chat`',
+      'phase1.packaging.chat-native-build.compile',
+    ],
+    [
+      'unrecognized Cargo failure',
+      'error: the lock file /private/Cargo.lock needs to be updated but --locked was passed',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+    [
+      'non-Rust bracketed error',
+      'error[lockfile]: private non-compiler failure',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+    [
+      'embedded Rust error code',
+      'noterror[E0308]: private non-compiler failure',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+    [
+      'embedded compile phrase',
+      'note: helper could not compile private component',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+  ])(
+    'classifies bounded Cargo %s failures without exposing output',
+    async (_, stderr, expected) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const diagnose = producer.schemaV2FailureDiagnostic;
+      const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+        label: string,
+        result: {
+          code: number;
+          signal: null;
+          stdout: string;
+          stderr: string;
+        },
+      ) => Error;
+      expect(diagnose).toBeTypeOf('function');
+      if (typeof diagnose !== 'function') {
+        return;
+      }
+
+      const diagnostic = diagnose(
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: 1,
+          signal: null,
+          stdout: '',
+          stderr,
+        }),
+        'phase1.packaging.chat-native-build.failed',
+      );
+
+      expect(diagnostic).toBe(expected);
+      expect(diagnostic).not.toContain('private');
+    },
+  );
 
   test('classifies an actual pnpm Cave prebuild header with its workspace path', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.

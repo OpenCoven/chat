@@ -107,8 +107,37 @@ const schemaV2NativeFailureStages = new Set([
   'missing-keychain',
   'isolation-proof',
 ]);
+const cargoBuildFailureCategories = [
+  'timeout',
+  'output-limit',
+  'spawn',
+  'supervisor',
+  'native-dependency',
+  'dependency-fetch',
+  'resource.memory',
+  'resource.disk',
+  'resource.killed',
+  'linker',
+  'build-script',
+  'compile',
+  'unknown',
+];
+const cleanupGrantFailureCategories = [
+  'secure-store-unavailable',
+  'keychain-failure',
+  'cleanup-grant-rejected',
+  'invalid-native-input',
+  'timeout',
+  'process',
+  'response',
+  'unknown',
+];
 const publicFailureDiagnosticSet = new Set([
   ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
+  'phase1.operator-fingerprint.failed',
+  'phase1.stage.schema-v2-production.failed',
+  'phase1.stage.execution-root.failed',
+  'phase1.stage.environment.failed',
   'phase1.stage.checkouts.failed',
   'phase1.stage.evidence-authority.failed',
   'phase1.stage.toolchain.failed',
@@ -145,11 +174,17 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.packaging.chat-web-build.failed',
   'phase1.packaging.chat-native-build.failed',
   'phase1.packaging.coven-build.failed',
+  ...['phase1.packaging.chat-native-build', 'phase1.packaging.coven-build'].flatMap((base) =>
+    cargoBuildFailureCategories.map((category) => `${base}.${category}`),
+  ),
   'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+  ...cleanupGrantFailureCategories.map(
+    (category) => `phase1.native-scenarios.cleanup-grant.${category}`,
+  ),
   'phase1.stage.coven-identity.failed',
   'phase1.stage.isolation.failed',
   'phase1.stage.execution-root-cleanup.failed',
@@ -758,6 +793,69 @@ function classifyCaveBuildFailureDiagnostic(error) {
   return `phase1.packaging.cave-build.phase.${phase}`;
 }
 
+export function classifyCargoBuildFailureDiagnostic(baseId, error) {
+  if (!(error instanceof CommandExecutionError)) {
+    return `${baseId}.unknown`;
+  }
+  const reason = error.result?.reason;
+  if (reason === 'timeout') {
+    return `${baseId}.timeout`;
+  }
+  if (reason === 'stdout-limit' || reason === 'stderr-limit') {
+    return `${baseId}.output-limit`;
+  }
+  if (reason === 'spawn' || reason === 'tracking') {
+    return `${baseId}.spawn`;
+  }
+  if (reason === 'supervisor-termination' || reason === 'termination') {
+    return `${baseId}.supervisor`;
+  }
+
+  const output = stripVTControlCharacters(
+    `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
+  ).toLowerCase();
+  if (
+    /system library .* required by crate .* was not found/u.test(output) ||
+    output.includes('pkg-config exited with status code') ||
+    /\.pc\b.*(?:not found|needs to be installed)/u.test(output)
+  ) {
+    return `${baseId}.native-dependency`;
+  }
+  if (
+    /failed to get .* as a dependency/u.test(output) ||
+    output.includes('failed to download') ||
+    output.includes('download of ') ||
+    output.includes('failed to fetch') ||
+    output.includes('could not resolve host')
+  ) {
+    return `${baseId}.dependency-fetch`;
+  }
+  if (
+    output.includes('out of memory') ||
+    output.includes('failed to allocate memory') ||
+    output.includes('cannot allocate memory') ||
+    output.includes('enomem')
+  ) {
+    return `${baseId}.resource.memory`;
+  }
+  if (output.includes('no space left on device') || output.includes('enospc')) {
+    return `${baseId}.resource.disk`;
+  }
+  if (output.includes('killed: 9') || /signal: 9\b/u.test(output)) {
+    return `${baseId}.resource.killed`;
+  }
+  if (/linking with .* failed/u.test(output) || output.includes('linker command failed')) {
+    return `${baseId}.linker`;
+  }
+  if (output.includes('failed to run custom build command for')) {
+    return `${baseId}.build-script`;
+  }
+  if (/^error\[e\d{4}\]:/mu.test(output) || /^error: could not compile(?:\s|$)/mu.test(output)) {
+    return `${baseId}.compile`;
+  }
+  return `${baseId}.unknown`;
+}
+
 export function schemaV2FailureDiagnostic(error, activeStage) {
   if (
     error !== null &&
@@ -771,10 +869,53 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
   if (activeStage === 'phase1.packaging.cave-build.failed') {
     return classifyCaveBuildFailureDiagnostic(error);
   }
+  if (
+    activeStage === 'phase1.packaging.chat-native-build.failed' ||
+    activeStage === 'phase1.packaging.coven-build.failed'
+  ) {
+    return classifyCargoBuildFailureDiagnostic(activeStage.slice(0, -'.failed'.length), error);
+  }
   return activeStage;
 }
 
-export function schemaV2NativeFailureDiagnostic(stage) {
+export function runSchemaV2PreflightStage(stage, action) {
+  try {
+    return action();
+  } catch (error) {
+    throw new Error(schemaV2FailureDiagnostic(error, stage), { cause: error });
+  }
+}
+
+export function schemaV2NativeFailureDiagnostic(stage, error) {
+  if (stage === 'cleanup-grant') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.cleanup-grant';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const rpcFailure =
+      /^native RPC conformance_issue_native_custody_cleanup failed with (secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+        message,
+      );
+    if (rpcFailure !== null) {
+      return `phase1.native-scenarios.cleanup-grant.${rpcFailure[1].replaceAll('_', '-')}`;
+    }
+    if (message === 'native RPC timed out for conformance_issue_native_custody_cleanup') {
+      return 'phase1.native-scenarios.cleanup-grant.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.cleanup-grant.process';
+    }
+    if (message === 'Native custody cleanup grant was not canonical.') {
+      return 'phase1.native-scenarios.cleanup-grant.response';
+    }
+    return 'phase1.native-scenarios.cleanup-grant.unknown';
+  }
   return schemaV2NativeFailureStages.has(stage)
     ? `phase1.native-scenarios.${stage}`
     : 'phase1.stage.native-scenarios.failed';
@@ -783,7 +924,7 @@ export function schemaV2NativeFailureDiagnostic(stage) {
 export function retainSchemaV2NativeFailure(existingFailure, stage, error) {
   return (
     existingFailure ??
-    new Error(schemaV2NativeFailureDiagnostic(stage), {
+    new Error(schemaV2NativeFailureDiagnostic(stage, error), {
       cause: error,
     })
   );
@@ -2998,7 +3139,7 @@ async function runNativeScenarios({
       },
     ]);
   } catch (error) {
-    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });
+    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
   }
   let rpc;
   let handle;
@@ -3632,7 +3773,7 @@ async function runNativeScenarios({
   try {
     await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
   } catch (error) {
-    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage), { cause: error });
+    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
   }
   observations.keychainUnavailable = true;
   if (platformEnvironment === undefined) {
@@ -4251,47 +4392,71 @@ function fillMissingAssertions(results, status, diagnosticId) {
 }
 
 export async function runSchemaV2Conformance(options, lock, harnessAuthorityVerification) {
-  scrubEvidenceAuthorizationEnvironment();
-  requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot);
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.failed', () =>
+    scrubEvidenceAuthorizationEnvironment(),
+  );
+  runSchemaV2PreflightStage('phase1.stage.evidence-authority.failed', () =>
+    requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot),
+  );
   const schemaV2 = options.platform !== undefined;
-  if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
-    throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
-  }
-  if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
-    throw new Error(
-      `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
-    );
-  }
-  const supervisorEnvironment = schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {};
-  if (
-    schemaV2 &&
-    options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
-  ) {
-    throw new Error('Schema-v2 evidence output changed after supervisor validation.');
-  }
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.failed', () => {
+    if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
+      throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
+    }
+    if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
+      throw new Error(
+        `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
+      );
+    }
+  });
+  const supervisorEnvironment = runSchemaV2PreflightStage('phase1.stage.environment.failed', () =>
+    schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {},
+  );
   const windowsJobBinding = schemaV2 && process.platform === 'win32' ? supervisorEnvironment : {};
   const unixProducerBinding = schemaV2 && process.platform !== 'win32' ? supervisorEnvironment : {};
-  assertWindowsJobMembership(windowsJobBinding);
-  options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
-  const startedAt = new Date().toISOString();
-  const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
-  const operatorBefore =
-    operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes);
-  const linuxSessionEnvironment =
-    schemaV2 && process.platform === 'linux'
-      ? curateLinuxSecretServiceEnvironment(
-          process.env,
-          process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
-        )
-      : {};
-  const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
-  const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
-  const environment = safeEnvironment(executionRoot.rootPath, {
-    ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
-    ...linuxSessionEnvironment,
-    ...unixProducerBinding,
-    ...windowsJobBinding,
+  runSchemaV2PreflightStage('phase1.stage.environment.failed', () => {
+    if (
+      schemaV2 &&
+      options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
+    ) {
+      throw new Error('Schema-v2 evidence output changed after supervisor validation.');
+    }
+    assertWindowsJobMembership(windowsJobBinding);
   });
+  options = runSchemaV2PreflightStage('phase1.stage.checkouts.failed', () =>
+    resolveDefaultSourceRoots(options, resolveRepositoryLayout()),
+  );
+  const startedAt = new Date().toISOString();
+  const operatorHomes = runSchemaV2PreflightStage('phase1.operator-fingerprint.failed', () =>
+    schemaV2 ? resolveOperatorHomes() : undefined,
+  );
+  const operatorBefore = runSchemaV2PreflightStage('phase1.operator-fingerprint.failed', () =>
+    operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes),
+  );
+  const linuxSessionEnvironment = runSchemaV2PreflightStage(
+    'phase1.stage.environment.failed',
+    () =>
+      schemaV2 && process.platform === 'linux'
+        ? curateLinuxSecretServiceEnvironment(
+            process.env,
+            process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+          )
+        : {},
+  );
+  const executionRoot = runSchemaV2PreflightStage('phase1.stage.execution-root.failed', () =>
+    createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' }),
+  );
+  const reportRoot = runSchemaV2PreflightStage('phase1.stage.execution-root.failed', () =>
+    createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' }),
+  );
+  const environment = runSchemaV2PreflightStage('phase1.stage.environment.failed', () =>
+    safeEnvironment(executionRoot.rootPath, {
+      ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
+      ...linuxSessionEnvironment,
+      ...unixProducerBinding,
+      ...windowsJobBinding,
+    }),
+  );
   const results = new Map();
   let artifactDigests = {};
   let infrastructureFailure;
