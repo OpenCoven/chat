@@ -1358,7 +1358,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
     ['native RPC closed before responding', 'phase1.native-scenarios.cleanup-custody.process'],
     [
-      'Native custody cleanup did not prove an empty available macos-keychain backend.',
+      'Native custody cleanup did not prove an empty available macos-keychain backend',
       'phase1.native-scenarios.cleanup-custody.proof',
     ],
     ['private protected-run failure', 'phase1.native-scenarios.cleanup-custody.unknown'],
