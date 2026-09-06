@@ -807,14 +807,16 @@ impl CleanupBackend for NativeCleanupBackend {
         let search = std::collections::HashMap::from([("service", service), ("username", account)]);
         #[cfg(unix)]
         {
-            return match Entry::search(&search).map_err(map_keyring_error)?.len() {
+            match Entry::search(&search).map_err(map_keyring_error)?.len() {
                 0 => Ok(false),
                 1 => Ok(true),
                 _ => Err(KeyringError::Failure),
-            };
+            }
         }
         #[cfg(not(unix))]
-        NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
+        {
+            NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
+        }
     }
 }
 
