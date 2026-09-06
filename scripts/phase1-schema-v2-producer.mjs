@@ -850,7 +850,7 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   if (output.includes('failed to run custom build command for')) {
     return `${baseId}.build-script`;
   }
-  if (output.includes('could not compile') || /error\[[a-z0-9]+\]:/u.test(output)) {
+  if (output.includes('could not compile') || /error\[e\d{4}\]:/u.test(output)) {
     return `${baseId}.compile`;
   }
   return `${baseId}.unknown`;
