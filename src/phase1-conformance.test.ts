@@ -901,6 +901,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
       GITHUB_TOKEN: 'must-not-propagate',
     };
     const runtime = {
@@ -939,6 +940,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
         OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
         OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+        OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
         OPENCOVEN_PHASE1_VERIFIED_RUNNER: '1',
         OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT: resolve(fixture.root, 'relocated-harness'),
       });
@@ -1097,6 +1099,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
             OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
             OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+            OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
           },
         },
       );
@@ -2419,6 +2422,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
     const runtime = {
       environment,
@@ -2521,6 +2525,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
     try {
       const parsed = parseArgs(
