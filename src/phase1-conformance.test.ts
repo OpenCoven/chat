@@ -1313,6 +1313,27 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).not.toContain('private');
   });
 
+  test.each([
+    'marker-directory-create-unavailable',
+    'marker-directory-open-unavailable',
+    'marker-directory-metadata-unavailable',
+    'marker-directory-trust-unavailable',
+  ])('preserves cleanup-grant %s through schema-v2 stage wrapping', async (category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const expected = `phase1.native-scenarios.cleanup-grant.${category}`;
+
+    expect(diagnose(new Error(expected), 'phase1.stage.native-scenarios.failed')).toBe(expected);
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
