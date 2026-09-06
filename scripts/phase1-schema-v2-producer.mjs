@@ -513,11 +513,7 @@ export function unixProducerBindingEnvironment(
     'workspace',
     '.artifacts',
   );
-  const expectedNativeLockRoot = resolve(
-    dirname(workspace),
-    'producer',
-    'native-credential-lock',
-  );
+  const expectedNativeLockRoot = resolve(dirname(workspace), 'producer', 'native-credential-lock');
   const expectedSourceRecord = resolve(
     artifactDirectory,
     `client-v1-conformance-${evidencePlatform}.json`,
