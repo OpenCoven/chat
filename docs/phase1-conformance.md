@@ -222,9 +222,12 @@ acquires the credential mutation lock, verifies that the in-process grant is
 still issued, opens and validates the exact marker without removing it, and
 holds its file identity for the transaction. Linux initializes the native store
 and searches exact Secret Service metadata without reading secrets. macOS opens
-the private keychain file created for the isolated producer identity and uses
-exact service/account native item queries and deletes against that file. Both
-paths delete only entries that are present, confirm every scoped entry is
+the exact `HOME/Library/Keychains/phase1.keychain-db` file created for the
+isolated producer identity only when the isolation marker is present, every
+parent is private, owned, and not a symlink, and the file identity remains
+stable while opening it. One retained native keychain handle serves every exact
+service/account query and delete in the transaction without reading secrets.
+Both paths delete only entries that are present, confirm every scoped entry is
 absent, atomically move the same held marker out of the redeemable name, and
 finally remove the in-process grant. Replay, concurrent use, marker tampering,
 service/account substitution, links, and path swaps therefore fail closed. A

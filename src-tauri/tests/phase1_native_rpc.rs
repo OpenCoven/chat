@@ -548,7 +548,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
             .expect("isolated keychain directory must be private");
     }
-    let keychain = keychains.join("phase1-test.keychain-db");
+    let keychain = keychains.join("phase1.keychain-db");
     let password = format!("{:064x}", nonce ^ u128::from(std::process::id()));
     for arguments in [
         vec![
