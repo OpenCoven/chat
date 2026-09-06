@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "db5b8134389ec7c03dadb743fe455d490fb1c199"
+    "revision": "172781d3168790a9e196155f21cccdd3c1e41076"
   },
   "harnessAuthority": {
-    "revision": "db5b8134389ec7c03dadb743fe455d490fb1c199",
-    "tree": "235cdbc1ef1c50a64f268991b34689b9c8a14529",
+    "revision": "172781d3168790a9e196155f21cccdd3c1e41076",
+    "tree": "da291a2c46ef205f478ad1ff5dccd4465e838309",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "a9b7e68b9b6c6b98963b9a7fde0681ed9258cb3b",
-        "sha256": "f98b60ba0ce0374c98cc2b59bb30d177686f02772f36bd185a6c48312ea5e477"
+        "blob": "e32bbbbb9e214a8270b0f7a09b68d4542266b812",
+        "sha256": "603555a8c8bcfe08ff82180d381ad52e053553f025de91a53af20cf40937fd90"
       }
     ],
     "productionDeltas": [
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "b0cfc0ac3113189364e0a378d1ee3b8107a5c038",
-        "sha256": "d0de39f78d8486b0541082e91afd033271b833260e4916ff6f4e82a4b1a40cfb"
+        "blob": "3b2dd6bc44fcc5ba082ebf2ac586515876f535de",
+        "sha256": "b4b5446c9fad262d52ca903edacddaf42c4453b002b21f62aedbb51ab2382e8e"
       },
       {
         "path": "src-tauri/src/lib.rs",
