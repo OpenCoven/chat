@@ -823,11 +823,9 @@ fn validate_conformance_macos_keychain_path(
         return Err(KeyringError::Unavailable);
     }
     let effective_uid = unsafe { libc::geteuid() };
-    for directory in [
-        home.as_path(),
-        home.join("Library").as_path(),
-        home.join("Library").join("Keychains").as_path(),
-    ] {
+    let library = home.join("Library");
+    let keychains = library.join("Keychains");
+    for directory in [&home, &library, &keychains] {
         let metadata = fs::symlink_metadata(directory).map_err(|_| KeyringError::Unavailable)?;
         if !metadata.file_type().is_dir()
             || metadata.file_type().is_symlink()
@@ -923,7 +921,11 @@ fn delete_conformance_macos_entry(
         .class(item::ItemClass::generic_password())
         .service(service)
         .account(account);
-    options.delete().map_err(|_| KeyringError::Unavailable)
+    match options.delete() {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == -25300 => Ok(()),
+        Err(_) => Err(KeyringError::Unavailable),
+    }
 }
 
 #[cfg(feature = "phase1-conformance")]
@@ -2051,8 +2053,6 @@ fn map_keyring_error(error: KeyringBackendError) -> KeyringError {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
-    use super::validate_conformance_macos_keychain_path;
     #[cfg(unix)]
     use super::{acquire_mutation_lock_with_timeout_at, default_credential_lock_root};
     use super::{
@@ -2060,6 +2060,11 @@ mod tests {
         parse_stored_credential, validate_installation_id, windows_mutex_name,
         windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
         WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+    };
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    use super::{
+        conformance_macos_keychain, delete_conformance_macos_entry,
+        validate_conformance_macos_keychain_path,
     };
     #[cfg(feature = "phase1-conformance")]
     use super::{
@@ -2230,6 +2235,23 @@ mod tests {
             .expect("exact isolated keychain path must be accepted"),
             fixture.keychain
         );
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_delete_is_idempotent_for_an_absent_entry() {
+        if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+            eprintln!("skipped: isolated Phase 1 keychain is not configured");
+            return;
+        }
+        let keychain = conformance_macos_keychain().expect("isolated keychain must open");
+        let account = uuid::Uuid::new_v4().to_string();
+        assert!(delete_conformance_macos_entry(
+            &keychain,
+            "ai.opencoven.chat.phase1.absent-delete",
+            &account,
+        )
+        .is_ok());
     }
 
     #[cfg(feature = "phase1-conformance")]

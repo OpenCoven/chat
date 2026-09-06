@@ -228,9 +228,10 @@ parent is private, owned, and not a symlink, and the file identity remains
 stable and single-linked while opening it. One retained native keychain handle
 serves every exact service/account query and delete in the transaction without
 reading secrets. Both paths delete only entries that are present, confirm every
-scoped entry is absent, atomically move the same held marker out of the
-redeemable name, and finally remove the in-process grant. Replay, concurrent
-use, marker tampering,
+scoped entry is absent, and treat an item that disappears between the exact
+presence check and delete as already absent. They atomically move the same held
+marker out of the redeemable name and finally remove the in-process grant.
+Replay, concurrent use, marker tampering,
 service/account substitution, links, and path swaps therefore fail closed. A
 lock, backend, or partial-delete failure leaves the marker and issued grant
 available for an authenticated retry with the same immutable service/account
