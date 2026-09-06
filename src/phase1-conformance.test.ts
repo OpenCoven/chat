@@ -476,9 +476,11 @@ describe('Phase 1 real-authority conformance harness', () => {
           revision,
           environment: {
             ...process.env,
-            PATH: [dirname(gitPath), dirname(process.execPath), resolve(systemRoot, 'System32')].join(
-              ';',
-            ),
+            PATH: [
+              dirname(gitPath),
+              dirname(process.execPath),
+              resolve(systemRoot, 'System32'),
+            ].join(';'),
           },
           label: 'Windows shallow exact revision fixture',
           sourceRef: 'refs/tags/opencoven-phase1-harness',
