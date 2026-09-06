@@ -289,7 +289,7 @@ describe('Phase 1 real-authority conformance harness', () => {
   );
 
   test.skipIf(process.platform === 'win32')(
-    'requests an exact authority ref when shallow local cloning omits unselected tags',
+    'clones an exact authority ref before inspecting the protected tag',
     async () => {
       const source = mkdtempSync(join(tmpdir(), 'phase1-shallow-source-'));
       const bin = mkdtempSync(join(tmpdir(), 'phase1-shallow-git-'));
@@ -317,10 +317,16 @@ describe('Phase 1 real-authority conformance harness', () => {
         writeFileSync(join(source, '.git', 'shallow'), `${head}\n${revision}\n`);
         const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
         const gitWrapper = join(bin, 'git');
+        const cloneStarted = join(bin, 'clone-started');
         writeFileSync(
           gitWrapper,
           [
             '#!/bin/sh',
+            `if [ ! -e ${JSON.stringify(cloneStarted)} ]; then`,
+            '  case " $* " in',
+            '    *" for-each-ref "*|*" rev-parse "*) exit 91 ;;',
+            '  esac',
+            'fi',
             'is_clone=0',
             'has_branch=0',
             'previous=',
@@ -333,6 +339,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             '  destination="$argument"',
             '  previous="$argument"',
             'done',
+            `[ "$is_clone" = 1 ] && : > ${JSON.stringify(cloneStarted)}`,
             'if [ "$is_clone" = 1 ] && [ "$has_branch" = 0 ]; then',
             `  exec ${JSON.stringify(realGit)} clone --no-tags --no-checkout --quiet "$source" "$destination"`,
             'fi',
@@ -3801,29 +3808,6 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(diagnostic).toBe('phase1.stage.runner-checkout.unsafe-source-owner');
     expect(diagnostic).not.toContain('/private/operator/repository');
-  });
-
-  test('trusts the local checkout worktree instead of its Git metadata directory', async () => {
-    const sourceRoot = mkdtempSync(join(tmpdir(), 'phase1-safe-directory-'));
-    try {
-      execFileSync('git', ['init', '--quiet', sourceRoot]);
-      const harness = (await import('../scripts/phase1-conformance.mjs')) as Record<
-        string,
-        unknown
-      >;
-      const safeDirectory = harness.localCheckoutSafeDirectory;
-      expect(safeDirectory).toBeTypeOf('function');
-      if (typeof safeDirectory !== 'function') {
-        return;
-      }
-
-      const trustedPath = safeDirectory(sourceRoot);
-
-      expect(trustedPath).toBe(realpathSync(sourceRoot));
-      expect(trustedPath).not.toBe(realpathSync(join(sourceRoot, '.git')));
-    } finally {
-      rmSync(sourceRoot, { recursive: true, force: true });
-    }
   });
 
   test.each([

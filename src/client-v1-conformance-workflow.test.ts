@@ -2338,6 +2338,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'chown -R -h root:0 "$workspace"',
       'chmod -R a-w "$workspace"',
       '"$workspace/node_modules"',
+      'native_lock_root="$producer_root/native-credential-lock"',
+      '"OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT=$native_lock_root"',
     ]) {
       expect(supervisor).toContain(required);
     }

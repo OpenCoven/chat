@@ -1774,58 +1774,20 @@ export async function cloneExactCheckout({
     throw new Error(`${label} source root is unavailable.`);
   }
   const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
-  const safeDirectory = localCheckoutSafeDirectory(sourceRoot);
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   let cloneSourceArguments = [];
+  let protectedSourceReference;
   if (sourceRef !== undefined) {
     if (sourceRef !== protectedHarnessTagRef) {
       throw new Error(`${label} source reference is not approved.`);
     }
     const tagName = sourceRef.slice('refs/tags/'.length);
-    const headRef = `refs/heads/${tagName}`;
-    const sourceRefs = (
-      await runCommand(
-        artifactRoot,
-        `${label} source reference`,
-        'git',
-        [
-          '-c',
-          `core.hooksPath=${devNull}`,
-          '-c',
-          `safe.directory=${safeDirectory}`,
-          'for-each-ref',
-          '--format=%(refname)',
-          sourceRef,
-          headRef,
-        ],
-        { cwd: sourceRoot, env: checkoutEnvironment },
-      )
-    ).stdout
-      .split(/\r?\n/u)
-      .filter(Boolean);
-    if (!sourceRefs.includes(sourceRef) || sourceRefs.includes(headRef)) {
-      throw new Error(`${label} source tag is unavailable or ambiguous.`);
-    }
-    const sourceCommit = (
-      await runCommand(
-        artifactRoot,
-        `${label} source revision`,
-        'git',
-        [
-          '-c',
-          `core.hooksPath=${devNull}`,
-          '-c',
-          `safe.directory=${safeDirectory}`,
-          'rev-parse',
-          '--verify',
-          `${sourceRef}^{commit}`,
-        ],
-        { cwd: sourceRoot, env: checkoutEnvironment },
-      )
-    ).stdout.trim();
-    if (sourceCommit !== revision) {
-      throw new Error(`${label} source tag does not match the immutable revision.`);
-    }
+    protectedSourceReference = {
+      tagName,
+      tagRef: sourceRef,
+      localHeadRef: `refs/heads/${tagName}`,
+      remoteHeadRef: `refs/remotes/origin/${tagName}`,
+    };
     cloneSourceArguments = ['--branch', tagName];
   }
   await runCommand(
@@ -1856,6 +1818,52 @@ export async function cloneExactCheckout({
       },
     },
   );
+  if (protectedSourceReference !== undefined) {
+    const sourceRefs = (
+      await runCommand(
+        artifactRoot,
+        `${label} source reference`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          'for-each-ref',
+          '--format=%(refname)',
+          protectedSourceReference.tagRef,
+          protectedSourceReference.localHeadRef,
+          protectedSourceReference.remoteHeadRef,
+        ],
+        { cwd: destinationRoot, env: checkoutEnvironment },
+      )
+    ).stdout
+      .split(/\r?\n/u)
+      .filter(Boolean);
+    if (
+      !sourceRefs.includes(protectedSourceReference.tagRef) ||
+      sourceRefs.includes(protectedSourceReference.localHeadRef) ||
+      sourceRefs.includes(protectedSourceReference.remoteHeadRef)
+    ) {
+      throw new Error(`${label} source tag is unavailable or ambiguous.`);
+    }
+    const sourceCommit = (
+      await runCommand(
+        artifactRoot,
+        `${label} source revision`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          'rev-parse',
+          '--verify',
+          `${protectedSourceReference.tagRef}^{commit}`,
+        ],
+        { cwd: destinationRoot, env: checkoutEnvironment },
+      )
+    ).stdout.trim();
+    if (sourceCommit !== revision) {
+      throw new Error(`${label} source tag does not match the immutable revision.`);
+    }
+  }
   await runCommand(
     artifactRoot,
     `${label} checkout`,
@@ -1863,10 +1871,6 @@ export async function cloneExactCheckout({
     ['-c', `core.hooksPath=${devNull}`, 'checkout', '--detach', '--force', revision],
     { cwd: destinationRoot, env: checkoutEnvironment },
   );
-}
-
-export function localCheckoutSafeDirectory(sourceRoot) {
-  return realpathSync(sourceRoot);
 }
 
 async function createExactCheckouts(artifactRoot, options, lock, environment) {
