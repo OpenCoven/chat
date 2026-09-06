@@ -440,6 +440,16 @@ describe('Phase 1 real-authority conformance harness', () => {
           { stdio: 'pipe' },
         );
         expect(existsSync(join(source, '.git', 'shallow'))).toBe(true);
+        expect(
+          execFileSync(
+            'git',
+            ['show-ref', '--verify', '--hash', 'refs/tags/opencoven-phase1-harness'],
+            {
+              cwd: source,
+              encoding: 'utf8',
+            },
+          ).trim(),
+        ).toBe(revision);
 
         execFileSync(
           'git',
