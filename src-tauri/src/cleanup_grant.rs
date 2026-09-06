@@ -1,4 +1,4 @@
-use std::process;
+use std::{ffi::OsString, process};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
@@ -29,6 +29,18 @@ const GRANT_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-id-v1\0";
 const PROCESS_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-process-v1\0";
 const MARKER_VERSION: u32 = 1;
 const MAX_MARKER_BYTES: usize = 16 * 1024;
+const CLEANUP_HOME_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME";
+
+fn marker_home_from(
+    cleanup_home: Option<OsString>,
+    ambient_home: Option<OsString>,
+) -> Option<OsString> {
+    cleanup_home.or(ambient_home)
+}
+
+fn marker_home() -> Option<OsString> {
+    marker_home_from(std::env::var_os(CLEANUP_HOME_ENV), std::env::var_os("HOME"))
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum MarkerIdentityError {
@@ -286,7 +298,6 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(unix)]
 mod marker_io {
     use std::{
-        env,
         ffi::CString,
         fs::{self, File, OpenOptions},
         io::{Read, Write},
@@ -366,7 +377,7 @@ mod marker_io {
 
     impl MarkerDirectory {
         fn open() -> Result<Self, MarkerIdentityError> {
-            let home = env::var_os("HOME").ok_or(MarkerIdentityError::Home)?;
+            let home = super::marker_home().ok_or(MarkerIdentityError::Home)?;
             Self::open_at(PathBuf::from(home))
         }
 
@@ -790,7 +801,7 @@ mod marker_io {
 
     impl MarkerDirectory {
         fn open() -> Result<Self, ()> {
-            let home = env::var_os("HOME").ok_or(())?;
+            let home = super::marker_home().ok_or(())?;
             let home = PathBuf::from(home);
             if !home.is_absolute()
                 || home
@@ -1211,7 +1222,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{marker_io, MarkerIdentityError};
+    use super::{marker_home_from, marker_io, MarkerIdentityError};
 
     struct TestHome(PathBuf);
 
@@ -1238,6 +1249,17 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn conformance_cleanup_home_overrides_the_ambient_home() {
+        let isolated = std::ffi::OsString::from("/isolated");
+        let ambient = std::ffi::OsString::from("/ambient");
+
+        assert_eq!(
+            marker_home_from(Some(isolated.clone()), Some(ambient)),
+            Some(isolated)
+        );
     }
 
     #[test]

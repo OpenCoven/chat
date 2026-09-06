@@ -554,8 +554,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, COMSPEC: 'C:\\untrusted\\cmd.exe' }, 'win32'),
     ).toThrow('phase1.stage.invocation.windows-os-environment');
+    expect(() => windowsJobBindingEnvironment({ ...binding, PATH: '' }, 'win32')).toThrow(
+      'phase1.stage.invocation.windows-executable-path',
+    );
     expect(() => windowsJobBindingEnvironment({ ...binding, PATHEXT: '.EXE' }, 'win32')).toThrow(
-      'phase1.stage.invocation.windows-executable',
+      'phase1.stage.invocation.windows-path-extensions',
     );
   });
 
@@ -1108,13 +1111,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.stage.invocation.windows-path',
     'phase1.stage.invocation.windows-artifact-binding',
     'phase1.stage.invocation.windows-os-environment',
-    'phase1.stage.invocation.windows-executable',
+    'phase1.stage.invocation.windows-executable-path',
+    'phase1.stage.invocation.windows-path-extensions',
     'phase1.stage.invocation.windows-output-binding',
     'phase1.stage.invocation.unix-output-binding',
     'phase1.stage.invocation.platform-mismatch',
     'phase1.packaging.frozen-consumer.failed',
     'phase1.packaging.cave-install.failed',
     'phase1.packaging.cave-build.failed',
+    'phase1.packaging.cave-build.phase.next-build.compile.permission',
+    'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+    'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+    'phase1.packaging.cave-build.phase.next-build.compile.plugin',
     'phase1.packaging.chat-install.failed',
     'phase1.packaging.chat-web-build.failed',
     'phase1.packaging.chat-native-build.failed',
@@ -1694,6 +1702,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('export function resolveLockedCovenDaemonCommand'),
     );
     expect(nativeScenario).toContain('...nativeAdapterTestEnvironment(environment)');
+    expect(nativeScenario).toContain('OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome');
+    expect(nativeScenario).not.toMatch(/^\s+HOME: isolatedHome,/mu);
     const emergencyCleanupBoundary = source.slice(
       source.indexOf('async function runEmergencyNativeCredentialCleanup'),
       source.indexOf('const cleanupCapabilityPattern'),
@@ -2620,6 +2630,82 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toBe('phase1.packaging.cave-build.phase.next-build.resource.killed');
   });
 
+  test.each([
+    [
+      'permission failure',
+      "Creating an optimized production build\nFailed to compile\nError: EACCES: permission denied, mkdir '/private/path'",
+      'compile-permission',
+      'phase1.packaging.cave-build.phase.next-build.compile.permission',
+    ],
+    [
+      'module resolution failure',
+      "Creating an optimized production build\nModule not found: Can't resolve 'private-module'",
+      'compile-module-resolution',
+      'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+    ],
+    [
+      'native module failure',
+      'Creating an optimized production build\nFailed to load external module private.node\nError: dlopen(private.node): image not found',
+      'compile-native-module',
+      'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+    ],
+    [
+      'plugin evaluation failure',
+      'Creating an optimized production build\nError evaluating Node.js code\nprivate plugin detail',
+      'compile-plugin',
+      'phase1.packaging.cave-build.phase.next-build.compile.plugin',
+    ],
+  ])(
+    'classifies a bounded Cave %s without exposing output',
+    async (_, output, expectedReason, expectedDiagnostic) => {
+      const schemaV2Producer = '../scripts/phase1-schema-v2-producer.mjs';
+      const { classifyCavePackageFailure: classifySchemaV2CavePackageFailure } = await import(
+        schemaV2Producer
+      );
+      const result = { code: 1, stdout: output, stderr: 'private stderr' };
+
+      expect(classifySchemaV2CavePackageFailure(result)).toBe(expectedReason);
+      expect(
+        classifyPackagingCommandFailure(
+          'phase1.packaging.cave-build',
+          new CommandExecutionError('private command', result),
+        ),
+      ).toBe(expectedDiagnostic);
+    },
+  );
+
+  test.each([
+    ['Compiled successfully', 'typescript'],
+    ['Collecting page data', 'page-data'],
+    ['Generating static pages', 'static-pages'],
+    ['Finalizing page optimization', 'finalization'],
+  ])(
+    'does not classify module-resolution output after the Next.js %s phase as a compile failure',
+    async (phaseMarker, expectedPhase) => {
+      const schemaV2Producer = '../scripts/phase1-schema-v2-producer.mjs';
+      const { classifyCavePackageFailure: classifySchemaV2CavePackageFailure } = await import(
+        schemaV2Producer
+      );
+      const result = {
+        code: 1,
+        stdout: [
+          'Creating an optimized production build',
+          phaseMarker,
+          "Module not found: Can't resolve 'private-module'",
+        ].join('\n'),
+        stderr: 'private stderr',
+      };
+
+      expect(classifySchemaV2CavePackageFailure(result)).toBeUndefined();
+      expect(
+        classifyPackagingCommandFailure(
+          'phase1.packaging.cave-build',
+          new CommandExecutionError('private command', result),
+        ),
+      ).toBe(`phase1.packaging.cave-build.phase.next-build.${expectedPhase}`);
+    },
+  );
+
   test('preserves a bounded Cave build diagnostic through schema-v2 stage wrapping', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
     const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
@@ -2739,6 +2825,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       unknown
     >;
     const diagnose = producer.schemaV2FailureDiagnostic;
+    const classifyCaveFailure = producer.classifyCavePackageFailure;
     const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
       label: string,
       result: {
@@ -2749,20 +2836,64 @@ describe('Phase 1 real-authority conformance harness', () => {
       },
     ) => Error;
     expect(diagnose).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
+    expect(classifyCaveFailure).toBeTypeOf('function');
+    if (typeof diagnose !== 'function' || typeof classifyCaveFailure !== 'function') {
       return;
     }
-    const failure = new SchemaV2CommandExecutionError('private command', {
+    const result = {
       code: 1,
-      signal: null,
+      signal: null as null,
       stdout: '> coven-cave@0.3.12 prebuild /private/coven-cave\nprivate generator failure',
-      stderr: 'private operator path',
-    });
+      stderr: 'private operator path: EACCES',
+    };
+    const failure = new SchemaV2CommandExecutionError('private command', result);
 
+    expect(classifyCaveFailure(result)).toBeUndefined();
     const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
     expect(diagnostic).toBe('phase1.packaging.cave-build.phase.prebuild');
     expect(diagnostic).not.toContain('private');
+  });
+
+  test('keeps a server bundle module-resolution failure in the server-bundle phase', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const classifyCaveFailure = producer.classifyCavePackageFailure;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    expect(classifyCaveFailure).toBeTypeOf('function');
+    if (typeof diagnose !== 'function' || typeof classifyCaveFailure !== 'function') {
+      return;
+    }
+    const result = {
+      code: 1,
+      signal: null as null,
+      stdout: [
+        '> coven-cave@0.3.12 build /private/coven-cave',
+        'Creating an optimized production build',
+        'Compiled successfully',
+        '> coven-cave@0.3.12 build:server /private/coven-cave',
+      ].join('\n'),
+      stderr: "Module not found: Can't resolve 'private-module'",
+    };
+    const failure = new SchemaV2CommandExecutionError('private command', result);
+
+    expect(classifyCaveFailure(result)).toBeUndefined();
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.server-bundle');
   });
 
   test.each(['build', 'build:conformance'])(
@@ -2806,6 +2937,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
     ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
     ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
+    ['compile-permission', 'phase1.packaging.cave-build.phase.next-build.compile.permission'],
+    [
+      'compile-module-resolution',
+      'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+    ],
+    ['compile-native-module', 'phase1.packaging.cave-build.phase.next-build.compile.native-module'],
+    ['compile-plugin', 'phase1.packaging.cave-build.phase.next-build.compile.plugin'],
     ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
     ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
     ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
