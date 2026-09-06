@@ -3335,7 +3335,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     const adminToken = `phase1-${randomUUID()}`;
     rpcEnvironment = {
       ...nativeAdapterTestEnvironment(environment),
-      HOME: isolatedHome,
+      OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),

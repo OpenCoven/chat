@@ -1702,7 +1702,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('export function resolveLockedCovenDaemonCommand'),
     );
     expect(nativeScenario).toContain('...nativeAdapterTestEnvironment(environment)');
-    expect(nativeScenario).toContain('HOME: isolatedHome');
+    expect(nativeScenario).toContain('OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome');
+    expect(nativeScenario).not.toMatch(/^\s+HOME: isolatedHome,/mu);
     const emergencyCleanupBoundary = source.slice(
       source.indexOf('async function runEmergencyNativeCredentialCleanup'),
       source.indexOf('const cleanupCapabilityPattern'),
@@ -2792,6 +2793,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       unknown
     >;
     const diagnose = producer.schemaV2FailureDiagnostic;
+    const classifyCaveFailure = producer.classifyCavePackageFailure;
     const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
       label: string,
       result: {
@@ -2802,6 +2804,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       },
     ) => Error;
     expect(diagnose).toBeTypeOf('function');
+    expect(classifyCaveFailure).toBeTypeOf('function');
     if (typeof diagnose !== 'function') {
       return;
     }
@@ -2809,13 +2812,54 @@ describe('Phase 1 real-authority conformance harness', () => {
       code: 1,
       signal: null,
       stdout: '> coven-cave@0.3.12 prebuild /private/coven-cave\nprivate generator failure',
-      stderr: 'private operator path',
+      stderr: 'private operator path: EACCES',
     });
 
+    expect(classifyCaveFailure(failure.result)).toBeUndefined();
     const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
     expect(diagnostic).toBe('phase1.packaging.cave-build.phase.prebuild');
     expect(diagnostic).not.toContain('private');
+  });
+
+  test('keeps a server bundle module-resolution failure in the server-bundle phase', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const classifyCaveFailure = producer.classifyCavePackageFailure;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    expect(classifyCaveFailure).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const failure = new SchemaV2CommandExecutionError('private command', {
+      code: 1,
+      signal: null,
+      stdout: [
+        '> coven-cave@0.3.12 build /private/coven-cave',
+        'Creating an optimized production build',
+        'Compiled successfully',
+        '> coven-cave@0.3.12 build:server /private/coven-cave',
+      ].join('\n'),
+      stderr: "Module not found: Can't resolve 'private-module'",
+    });
+
+    expect(classifyCaveFailure(failure.result)).toBeUndefined();
+    const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
+
+    expect(diagnostic).toBe('phase1.packaging.cave-build.phase.server-bundle');
   });
 
   test.each(['build', 'build:conformance'])(

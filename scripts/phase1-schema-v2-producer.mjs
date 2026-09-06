@@ -729,6 +729,12 @@ export class CommandExecutionError extends Error {
 
 export function classifyCavePackageFailure(result) {
   const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+  if (
+    !output.includes('Creating an optimized production build') ||
+    /^> coven-cave@\d+\.\d+\.\d+ (?:build:server|postbuild)(?:\s+.+)?$/mu.test(output)
+  ) {
+    return undefined;
+  }
   const classifications = [
     [/timeout while receiving message from process/iu, 'turbopack-plugin-timeout'],
     [
@@ -3238,7 +3244,7 @@ async function runNativeScenarios({
     const adminToken = `phase1-${randomUUID()}`;
     const rpcEnvironment = {
       ...environment,
-      HOME: isolatedHome,
+      OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),
