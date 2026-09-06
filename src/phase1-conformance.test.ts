@@ -370,6 +370,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     30_000,
   );
 
+  test('selects the protected historical harness tag for the Windows verified-runner clone', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');
+    const bootstrap = source.slice(
+      source.indexOf('async function bootstrapVerifiedRunner'),
+      source.indexOf("runPublicPhase1Stage('phase1.stage.runner-checkout-verification.failed'"),
+    );
+
+    expect(bootstrap).toContain(
+      "sourceRef: process.platform === 'win32' ? 'opencoven-phase1-harness' : undefined,",
+    );
+  });
+
   test.skipIf(process.platform === 'win32')(
     'scrubs the checkout-only Git attribute source before cloning',
     async () => {
