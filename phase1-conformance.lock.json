@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "23eb8f2e5c8cba0620b2f1ad90751d6b80b759f5"
+    "revision": "f639701189327bda93eb9bc5ab009584cd3df230"
   },
   "harnessAuthority": {
-    "revision": "23eb8f2e5c8cba0620b2f1ad90751d6b80b759f5",
-    "tree": "e08fe0829ec4d9eb5001ea04e2eaf7044e99d541",
+    "revision": "f639701189327bda93eb9bc5ab009584cd3df230",
+    "tree": "e846956fc8f753ed44052474a5c01c631c514d03",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "73ac67b4e618960b96ec763305d21eb4e6732b12",
-        "sha256": "49c3dcabb52059cdd384ede05076e691a4149ccf9334d715e659f1e85e18fe0a"
+        "blob": "4fe66b9c6e848dce2dd851ad85f0cbde1212f102",
+        "sha256": "6dacae9bb6704d6081e388d7038e1f3a3510d67c4cea9b12f76d4bbcdbe763dc"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "c5d7950e36595b7b36d80283d316c66232d4647f",
-        "sha256": "6bd5389e727f44875f8fd92ae651a56bc69ca8f342ed32d478db34d7097f7c65"
+        "blob": "623b94f553103c456c9e480a90bbbbcc0fe4336b",
+        "sha256": "92067e70319fdeb847fddd91a59d6c995678a219caed8f430fd8d8867174fcf2"
       },
       {
         "path": "src-tauri/src/lib.rs",
