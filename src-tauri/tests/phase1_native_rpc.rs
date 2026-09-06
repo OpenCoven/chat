@@ -616,6 +616,13 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         stdout,
     };
 
+    let cold_start_grant = rpc.issue(&[TARGET_A]);
+    let cold_start_cleanup = rpc.cleanup(&cold_start_grant);
+    assert_eq!(
+        cold_start_cleanup["ok"], true,
+        "cleanup must initialize the native store before checking absent accounts: {cold_start_cleanup}"
+    );
+
     let before = rpc.request(json!({
         "id": "state",
         "command": "conformance_native_custody_state",
@@ -641,13 +648,6 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &keychain,
         &service,
         &credential_account(TARGET_A),
-        credential,
-    );
-    set_entry(
-        &home,
-        &keychain,
-        &service,
-        &credential_account(TARGET_B),
         credential,
     );
     set_entry(
@@ -689,12 +689,10 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &service,
         &credential_account(TARGET_A)
     ));
-    assert!(entry_present(
-        &home,
-        &keychain,
-        &service,
-        &credential_account(TARGET_B)
-    ));
+    assert!(
+        !entry_present(&home, &keychain, &service, &credential_account(TARGET_B)),
+        "cleanup scope must include an account that is already absent"
+    );
     assert!(entry_present(
         &home,
         &keychain,
@@ -747,7 +745,9 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
     let cleaned = concurrent
         .iter()
         .find(|response| response["ok"] == true)
-        .expect("one concurrent cleanup redemption must succeed");
+        .unwrap_or_else(|| {
+            panic!("one concurrent cleanup redemption must succeed: {concurrent:?}")
+        });
     let rejected = concurrent
         .iter()
         .find(|response| response["ok"] == false)
