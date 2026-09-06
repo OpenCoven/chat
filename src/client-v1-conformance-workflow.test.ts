@@ -554,10 +554,18 @@ describe('client-v1 conformance workflow bootstrap', () => {
   test('retains the locked harness authority under a branch ref copied by the isolated clone', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const authorityFetch = childBootstrap.slice(
-      childBootstrap.indexOf("-Label 'Chat harness exact-SHA fetch'") - 700,
-      childBootstrap.indexOf("-Label 'Chat harness authority ref'") + 45,
-    );
+    const fetchLabel = "-Label 'Chat harness exact-SHA fetch'";
+    const authorityLabel = "-Label 'Chat harness authority ref'";
+    const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
+    const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
+    const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
+    const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
+
+    expect(fetchLabelIndex).toBeGreaterThan(-1);
+    expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
+    expect(authorityStart).toBeGreaterThan(-1);
+    expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
+    const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
 
     expect(authorityFetch).toContain("'refs/heads/opencoven-phase1-harness'");
     expect(authorityFetch).not.toContain("'refs/opencoven/phase1-harness'");
