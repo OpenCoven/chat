@@ -78,8 +78,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: 'd111104482bfd37e7b6dc3dc28de2bb92dbafae3',
-  tree: 'b3babd0e67f4f539601023989bccdaf7c4c16fa1',
+  revision: '992b32412855fc7a4333d6d13071502f3a14a548',
+  tree: '815437fb7e354f1dce7c825c390ce4c5272999ea',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -98,8 +98,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'f43138781b8fb5fa23f64012f2f20a8b98d54937',
-      sha256: 'c3212471e89d18091c1162a50164bc71c80792c15a3e64fb19ea8ec38ccb5394',
+      blob: 'd9c57ead102c6afbfd42b536dc6004dd37890f82',
+      sha256: '26e9ac029d0542a453f92c2b6dadd8bf55994254481b1ddd93a71bae98735149',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
