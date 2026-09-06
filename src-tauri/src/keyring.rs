@@ -2240,7 +2240,15 @@ mod tests {
     #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
     #[test]
     fn macos_cleanup_delete_is_idempotent_for_an_absent_entry() {
-        if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1") {
+        let configured_home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let configured_keychain =
+            std::env::var_os("PHASE1_TEST_KEYCHAIN").map(std::path::PathBuf::from);
+        let canonical_keychain = configured_home
+            .as_ref()
+            .map(|home| home.join("Library/Keychains/phase1.keychain-db"));
+        if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1")
+            || configured_keychain != canonical_keychain
+        {
             eprintln!("skipped: isolated Phase 1 keychain is not configured");
             return;
         }
