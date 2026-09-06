@@ -848,7 +848,7 @@ impl CleanupBackend for NativeCleanupBackend {
     fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
         #[cfg(target_os = "macos")]
         {
-            return delete_conformance_macos_entry(service, account);
+            delete_conformance_macos_entry(service, account)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -863,7 +863,7 @@ impl CleanupBackend for NativeCleanupBackend {
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
         #[cfg(target_os = "macos")]
         {
-            return conformance_macos_entry_present(service, account);
+            conformance_macos_entry_present(service, account)
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
