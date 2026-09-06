@@ -550,6 +550,18 @@ describe('client-v1 conformance workflow bootstrap', () => {
       childBootstrap.indexOf('function Assert-NoReparsePath'),
     );
   });
+
+  test('retains the locked harness authority under a branch ref copied by the isolated clone', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const authorityFetch = childBootstrap.slice(
+      childBootstrap.indexOf("-Label 'Chat harness exact-SHA fetch'") - 700,
+      childBootstrap.indexOf("-Label 'Chat harness authority ref'") + 45,
+    );
+
+    expect(authorityFetch).toContain("'refs/heads/opencoven-phase1-harness'");
+    expect(authorityFetch).not.toContain("'refs/opencoven/phase1-harness'");
+  });
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {

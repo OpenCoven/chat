@@ -8893,7 +8893,7 @@ jobs:
               '-C',
               $workspace,
               'update-ref',
-              'refs/opencoven/phase1-harness',
+              'refs/heads/opencoven-phase1-harness',
               $phase1Lock.harness.revision
             ) `
             -Label 'Chat harness authority ref'

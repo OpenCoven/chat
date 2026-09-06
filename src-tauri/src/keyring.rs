@@ -801,6 +801,19 @@ impl CleanupBackend for NativeCleanupBackend {
     }
 
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        #[cfg(target_os = "macos")]
+        let search = std::collections::HashMap::from([("service", service), ("user", account)]);
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let search = std::collections::HashMap::from([("service", service), ("username", account)]);
+        #[cfg(unix)]
+        {
+            return match Entry::search(&search).map_err(map_keyring_error)?.len() {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(KeyringError::Failure),
+            };
+        }
+        #[cfg(not(unix))]
         NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
     }
 }
@@ -831,7 +844,9 @@ where
     let scope = redemption.scope();
     validate_conformance_cleanup_accounts(&scope.accounts)?;
     for account in &scope.accounts {
-        backend.delete(&scope.service, account)?;
+        if backend.present(&scope.service, account)? {
+            backend.delete(&scope.service, account)?;
+        }
     }
     for account in &scope.accounts {
         if backend.present(&scope.service, account)? {
@@ -1912,6 +1927,7 @@ mod tests {
         entries: Arc<Mutex<HashMap<String, bool>>>,
         delete_calls: Arc<AtomicUsize>,
         fail_delete_call: Arc<Mutex<Option<usize>>>,
+        fail_absent_delete: bool,
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -1927,7 +1943,17 @@ mod tests {
                 )),
                 delete_calls: Arc::new(AtomicUsize::new(0)),
                 fail_delete_call: Arc::new(Mutex::new(fail_delete_call)),
+                fail_absent_delete: false,
             }
+        }
+
+        fn with_absent_delete_failure(mut self, account: &str) -> Self {
+            self.entries
+                .lock()
+                .expect("fake entries")
+                .insert(account.to_owned(), false);
+            self.fail_absent_delete = true;
+            self
         }
 
         fn all_absent(&self) -> bool {
@@ -1948,7 +1974,11 @@ mod tests {
                 *failure = None;
                 return Err(KeyringError::Unavailable);
             }
-            if let Some(present) = self.entries.lock().expect("fake entries").get_mut(account) {
+            let mut entries = self.entries.lock().expect("fake entries");
+            if self.fail_absent_delete && !entries.get(account).copied().unwrap_or(false) {
+                return Err(KeyringError::Unavailable);
+            }
+            if let Some(present) = entries.get_mut(account) {
                 *present = false;
             }
             Ok(())
@@ -2140,6 +2170,34 @@ mod tests {
         .is_ok());
         assert!(backend.all_absent());
         assert_eq!(consumed.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_skips_backend_delete_for_accounts_that_are_already_absent() {
+        let scope = cleanup_test_scope();
+        let identity = "grant-id".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let absent_account = scope.accounts[1].clone();
+        let mut backend = FakeCleanupBackend::new(&scope.accounts, None)
+            .with_absent_delete_failure(&absent_account);
+
+        assert!(run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || Ok(FakeCleanupRedemption {
+                scope,
+                consumed: Arc::clone(&consumed),
+            }),
+            &mut backend,
+        )
+        .is_ok());
+        assert!(backend.all_absent());
+        assert_eq!(backend.delete_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
+        assert!(!issued.lock().unwrap().contains(&identity));
     }
 
     #[cfg(feature = "phase1-conformance")]
