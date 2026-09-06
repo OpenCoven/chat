@@ -2517,7 +2517,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     [
       'missing system package',
       'The system library `javascriptcoregtk-4.1` required by crate `javascriptcore-rs-sys` was not found.\nThe file `javascriptcoregtk-4.1.pc` needs to be installed.',
-      'phase1.packaging.chat-native-build.system-dependency',
+      'phase1.packaging.chat-native-build.native-dependency',
     ],
     [
       'dependency download',

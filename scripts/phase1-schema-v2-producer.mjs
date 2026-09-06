@@ -112,7 +112,7 @@ const cargoBuildFailureCategories = [
   'output-limit',
   'spawn',
   'supervisor',
-  'system-dependency',
+  'native-dependency',
   'dependency-fetch',
   'resource.memory',
   'resource.disk',
@@ -819,7 +819,7 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     output.includes('pkg-config exited with status code') ||
     /\.pc\b.*(?:not found|needs to be installed)/u.test(output)
   ) {
-    return `${baseId}.system-dependency`;
+    return `${baseId}.native-dependency`;
   }
   if (
     /failed to get .* as a dependency/u.test(output) ||
