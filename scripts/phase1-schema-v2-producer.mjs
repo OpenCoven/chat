@@ -1002,9 +1002,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
       return 'phase1.native-scenarios.cleanup-custody.process';
     }
     if (
-      /^Native custody cleanup did not prove an empty available [a-z0-9-]+ backend$/u.test(
-        message,
-      )
+      /^Native custody cleanup did not prove an empty available [a-z0-9-]+ backend$/u.test(message)
     ) {
       return 'phase1.native-scenarios.cleanup-custody.proof';
     }
