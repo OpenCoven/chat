@@ -220,16 +220,16 @@ native-only per-process MAC key without storing the raw grant.
 The producer immediately redeems and drops the grant. Redemption first
 acquires the credential mutation lock, verifies that the in-process grant is
 still issued, opens and validates the exact marker without removing it, and
-holds its file identity for the transaction. It then searches for each exact
-marker-bound account without reading its secret, deletes only entries that
-are present, confirms every scoped entry is absent, atomically moves the same
-held marker out of the redeemable name, and finally removes the in-process
-grant. Replay, concurrent use, marker tampering, service/account substitution,
-links, and path swaps therefore fail closed. A lock, backend, or partial-delete
-failure leaves the marker and issued grant available for an authenticated
-retry with the same immutable service/account scope; already-absent entries
-make that retry idempotent. The run requires the same empty-state digest
-afterward and preserves unrelated entries. A missing,
+holds its file identity for the transaction. It initializes the native store,
+then searches for each exact marker-bound account without reading its secret,
+deletes only entries that are present, confirms every scoped entry is absent,
+atomically moves the same held marker out of the redeemable name, and finally
+removes the in-process grant. Replay, concurrent use, marker tampering,
+service/account substitution, links, and path swaps therefore fail closed. A
+lock, backend, or partial-delete failure leaves the marker and issued grant
+available for an authenticated retry with the same immutable service/account
+scope; already-absent entries make that retry idempotent. The run requires the
+same empty-state digest afterward and preserves unrelated entries. A missing,
 malformed, or production keyring service is rejected before native custody
 access or grant issuance; missing or locked native services also fail the run.
 The separate reservation/adoption protocol for production-keyring credential
