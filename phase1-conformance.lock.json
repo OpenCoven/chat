@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "cfe6cf2324f08c9b929a55cb2f3916fde82e2b5c"
+    "revision": "61c5e2f2ee8f2461c053b3cc4f72949a7e6f3efc"
   },
   "harnessAuthority": {
-    "revision": "cfe6cf2324f08c9b929a55cb2f3916fde82e2b5c",
-    "tree": "a7ddf094f69010dc924679f7c83cea0934f2c125",
+    "revision": "61c5e2f2ee8f2461c053b3cc4f72949a7e6f3efc",
+    "tree": "c436dfd56af17e3cae26a7be6d16e44aff9adaff",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "ece453a3f94c29811c2f0e1680638068da2d3ad0",
-        "sha256": "862976439317b132c3ace9311ae2e90126fc8752b852b3d9a789deca6321cbe0"
+        "blob": "3fee44cf43222837e87b7fc3f6b27c965e675dd1",
+        "sha256": "370b0037112430ebdf231db1df896e36e5646bbdf552e8c698ffbcc4a0ef2fe2"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "7b4fd90e9b642980a485fa92d755051c0855957e",
-        "sha256": "e119f3e0cf0fdb470b262e00d252f75468574752adc0f0f089aec249181d2d46"
+        "blob": "172b017f355a57bc5aedceedfe4b30a7bd590a03",
+        "sha256": "5abeb57b18959f6ff4c7c5e63f334551bba0301d64e817362aba761043a9058c"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -173,8 +173,8 @@
       },
       {
         "path": "src-tauri/src/cleanup_grant.rs",
-        "blob": "7e2c638976b98de1e22f99892ee9d86c6a431447",
-        "sha256": "2bb726cf20ee0e674f1cf3aa543a50586d2158c0e62fd25069678cbc12c20f55"
+        "blob": "0c9978ca505e67884224cbbbb0291ec12ee71d21",
+        "sha256": "1eeb32ed79c2c40e82c87824bbf440eec940e1903215752328651dc2e895eaaa"
       },
       {
         "path": "src-tauri/src/conformance.rs",
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "565ba4c5f8e203558c38573f055ca5b473502257",
-        "sha256": "6902bc559158302328cab2aa7a40eb1edb8ea63c47fa722ad37a6cab2a88f2d4"
+        "blob": "39926042de9ccc04793f0b09cf8d33d86aba87a8",
+        "sha256": "8d47c8f0be1ba114e1586f6897b3c5bda8434ebfe5be8ee50d28eb66fc5f8271"
       },
       {
         "path": "src-tauri/src/lib.rs",
