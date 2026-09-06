@@ -124,13 +124,16 @@ function createSupervisorArtifactFixture(platform: string) {
   const workspace = resolve(root, 'source');
   const artifactWorkspace = resolve(root, 'producer', 'workspace');
   const artifactDirectory = resolve(artifactWorkspace, '.artifacts');
+  const nativeLockRoot = resolve(root, 'producer', 'native-credential-lock');
   const sourceRecord = resolve(artifactDirectory, `client-v1-conformance-${platform}.json`);
   mkdirSync(workspace, { recursive: true, mode: 0o555 });
   mkdirSync(artifactDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(nativeLockRoot, { recursive: true, mode: 0o700 });
   chmodSync(workspace, 0o555);
   chmodSync(artifactWorkspace, 0o700);
   chmodSync(artifactDirectory, 0o700);
-  return { root, workspace, artifactDirectory, sourceRecord };
+  chmodSync(nativeLockRoot, 0o700);
+  return { root, workspace, artifactDirectory, nativeLockRoot, sourceRecord };
 }
 
 function processIsLive(pid: number) {
@@ -814,6 +817,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
 
     try {
@@ -836,6 +840,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           OPENCOVEN_UNIX_WORKSPACE: darwinFixture.workspace,
           OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: darwinFixture.artifactDirectory,
           OPENCOVEN_UNIX_SOURCE_RECORD: darwinFixture.sourceRecord,
+          OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: darwinFixture.nativeLockRoot,
         };
         expect(unixProducerBindingEnvironment(darwin, 'darwin', 'arm64', currentUid, '')).toEqual(
           darwin,
@@ -856,6 +861,11 @@ describe('Phase 1 real-authority conformance harness', () => {
         {
           ...common,
           OPENCOVEN_UNIX_SOURCE_RECORD: resolve(fixture.artifactDirectory, 'replacement.json'),
+        },
+        { ...common, OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: undefined },
+        {
+          ...common,
+          OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: resolve(fixture.root, 'other-lock-root'),
         },
       ]) {
         expect(() =>
