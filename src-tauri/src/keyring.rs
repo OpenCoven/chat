@@ -11,6 +11,8 @@ use std::marker::PhantomData;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+use security_framework::{item, os::macos::keychain::SecKeychain};
 #[cfg(any(windows, test, feature = "phase1-conformance"))]
 use sha2::{Digest, Sha256};
 
@@ -40,6 +42,10 @@ const CONFORMANCE_CLEANUP_SERVICE: &str = "ai.opencoven.chat.conformance-cleanup
 const CONFORMANCE_CLEANUP_ACCOUNT_PREFIX: &str = "cleanup-reservation-v1";
 #[cfg(feature = "phase1-conformance")]
 const CONFORMANCE_HARNESS_IDENTITY: &str = "phase1-native-rpc-v1";
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+const CONFORMANCE_TEST_KEYCHAIN_ENV: &str = "PHASE1_TEST_KEYCHAIN";
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+const CONFORMANCE_TEST_KEYCHAIN_ISOLATED_ENV: &str = "OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED";
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -722,12 +728,13 @@ impl NativeKeyring {
         }
         let grant_identity = crate::cleanup_grant::grant_identity(grant)?;
         let process_secret = self.cleanup_process_secret(false)?;
+        let mut backend = NativeCleanupBackend::new()?;
         run_cleanup_transaction(
             &self.issued_cleanup_grants,
             &grant_identity,
             acquire_mutation_lock,
             || crate::cleanup_grant::prepare(grant, service, process_secret),
-            &mut NativeCleanupBackend,
+            &mut backend,
         )
     }
 
@@ -788,31 +795,171 @@ trait CleanupBackend {
 }
 
 #[cfg(feature = "phase1-conformance")]
-struct NativeCleanupBackend;
+struct NativeCleanupBackend {
+    #[cfg(target_os = "macos")]
+    keychain: SecKeychain,
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn validate_conformance_macos_keychain_path(
+    isolated: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<std::path::PathBuf, KeyringError> {
+    use std::os::unix::fs::MetadataExt;
+
+    if isolated != Some(std::ffi::OsStr::new("1")) {
+        return Err(KeyringError::Unavailable);
+    }
+    let home = std::path::PathBuf::from(home.ok_or(KeyringError::Unavailable)?);
+    let path = std::path::PathBuf::from(path.ok_or(KeyringError::Unavailable)?);
+    if !home.is_absolute()
+        || path
+            != home
+                .join("Library")
+                .join("Keychains")
+                .join("phase1.keychain-db")
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    let effective_uid = unsafe { libc::geteuid() };
+    let library = home.join("Library");
+    let keychains = library.join("Keychains");
+    for directory in [&home, &library, &keychains] {
+        let metadata = fs::symlink_metadata(directory).map_err(|_| KeyringError::Unavailable)?;
+        if !metadata.file_type().is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.mode() & 0o077 != 0
+            || metadata.uid() != effective_uid
+        {
+            return Err(KeyringError::Unavailable);
+        }
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o077 != 0
+        || metadata.uid() != effective_uid
+        || metadata.nlink() != 1
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    Ok(path)
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn conformance_macos_keychain() -> Result<SecKeychain, KeyringError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = validate_conformance_macos_keychain_path(
+        env::var_os(CONFORMANCE_TEST_KEYCHAIN_ISOLATED_ENV).as_deref(),
+        env::var_os("HOME").as_deref(),
+        env::var_os(CONFORMANCE_TEST_KEYCHAIN_ENV).as_deref(),
+    )?;
+    let before = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    let keychain = SecKeychain::open(&path).map_err(|_| KeyringError::Unavailable)?;
+    let after = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    if before.dev() != after.dev()
+        || before.ino() != after.ino()
+        || before.nlink() != 1
+        || after.nlink() != 1
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    Ok(keychain)
+}
+
+#[cfg(feature = "phase1-conformance")]
+impl NativeCleanupBackend {
+    fn new() -> Result<Self, KeyringError> {
+        #[cfg(target_os = "macos")]
+        {
+            Ok(Self {
+                keychain: conformance_macos_keychain()?,
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(Self {})
+        }
+    }
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn conformance_macos_entry_present(
+    keychain: &SecKeychain,
+    service: &str,
+    account: &str,
+) -> Result<bool, KeyringError> {
+    let mut options = item::ItemSearchOptions::new();
+    options
+        .keychains(std::slice::from_ref(keychain))
+        .class(item::ItemClass::generic_password())
+        .service(service)
+        .account(account)
+        .limit(item::Limit::All);
+    match options.search() {
+        Ok(entries) => match entries.len() {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(KeyringError::Failure),
+        },
+        Err(error) if error.code() == -25300 => Ok(false),
+        Err(_) => Err(KeyringError::Unavailable),
+    }
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn delete_conformance_macos_entry(
+    keychain: &SecKeychain,
+    service: &str,
+    account: &str,
+) -> Result<(), KeyringError> {
+    let mut options = item::ItemSearchOptions::new();
+    options
+        .keychains(std::slice::from_ref(keychain))
+        .class(item::ItemClass::generic_password())
+        .service(service)
+        .account(account);
+    match options.delete() {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == -25300 => Ok(()),
+        Err(_) => Err(KeyringError::Unavailable),
+    }
+}
 
 #[cfg(feature = "phase1-conformance")]
 impl CleanupBackend for NativeCleanupBackend {
     fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
-        let entry = NativeKeyring::entry_for(service, account)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
-            Err(error) => Err(map_keyring_error(error)),
+        #[cfg(target_os = "macos")]
+        {
+            delete_conformance_macos_entry(&self.keychain, service, account)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let entry = NativeKeyring::entry_for(service, account)?;
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+                Err(error) => Err(map_keyring_error(error)),
+            }
         }
     }
 
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
-        NativeKeyring::ensure_store_initialized()?;
         #[cfg(target_os = "macos")]
-        let search = std::collections::HashMap::from([("service", service), ("user", account)]);
-        #[cfg(all(unix, not(target_os = "macos")))]
-        let search = std::collections::HashMap::from([("service", service), ("username", account)]);
-        #[cfg(unix)]
         {
-            match Entry::search(&search).map_err(map_keyring_error)?.len() {
+            conformance_macos_entry_present(&self.keychain, service, account)
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            NativeKeyring::ensure_store_initialized()?;
+            let search =
+                std::collections::HashMap::from([("service", service), ("username", account)]);
+            return match Entry::search(&search).map_err(map_keyring_error)?.len() {
                 0 => Ok(false),
                 1 => Ok(true),
                 _ => Err(KeyringError::Failure),
-            }
+            };
         }
         #[cfg(not(unix))]
         {
@@ -1914,12 +2061,19 @@ mod tests {
         windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
         WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
     };
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    use super::{
+        conformance_macos_keychain, delete_conformance_macos_entry,
+        validate_conformance_macos_keychain_path,
+    };
     #[cfg(feature = "phase1-conformance")]
     use super::{
         run_cleanup_transaction, CleanupBackend, CleanupGrantRedemption, INSTALLATION_ID_ACCOUNT,
     };
     #[cfg(feature = "phase1-conformance")]
     use crate::cleanup_grant::CleanupGrantScope;
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    use std::ffi::OsStr;
     #[cfg(feature = "phase1-conformance")]
     use std::{
         collections::{HashMap, HashSet},
@@ -1928,6 +2082,185 @@ mod tests {
             Arc, Mutex,
         },
     };
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    struct MacosKeychainPathFixture {
+        root: std::path::PathBuf,
+        home: std::path::PathBuf,
+        keychain: std::path::PathBuf,
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    impl MacosKeychainPathFixture {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join("keyring-path-tests")
+                .join(uuid::Uuid::new_v4().to_string());
+            let home = root.join("home");
+            let keychains = home.join("Library").join("Keychains");
+            std::fs::create_dir_all(&keychains).expect("private keychain tree must be created");
+            for directory in [&home, &home.join("Library"), &keychains] {
+                std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+                    .expect("private keychain directory mode must be set");
+            }
+            let keychain = keychains.join("phase1.keychain-db");
+            std::fs::write(&keychain, b"test keychain").expect("keychain fixture must be created");
+            std::fs::set_permissions(&keychain, std::fs::Permissions::from_mode(0o600))
+                .expect("private keychain mode must be set");
+            Self {
+                root,
+                home,
+                keychain,
+            }
+        }
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    impl Drop for MacosKeychainPathFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_requires_the_isolation_marker() {
+        let fixture = MacosKeychainPathFixture::new();
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                None,
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_requires_the_exact_isolated_location() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = MacosKeychainPathFixture::new();
+        let alternate = fixture
+            .home
+            .join("Library")
+            .join("Keychains")
+            .join("alternate.keychain-db");
+        std::fs::write(&alternate, b"alternate keychain")
+            .expect("alternate keychain fixture must be created");
+        std::fs::set_permissions(&alternate, std::fs::Permissions::from_mode(0o600))
+            .expect("alternate keychain mode must be set");
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(alternate.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let fixture = MacosKeychainPathFixture::new();
+        let real_keychains = fixture.root.join("real-keychains");
+        std::fs::create_dir(&real_keychains).expect("real keychains directory must be created");
+        std::fs::set_permissions(&real_keychains, std::fs::Permissions::from_mode(0o700))
+            .expect("real keychains directory mode must be set");
+        let linked_keychain = real_keychains.join("phase1.keychain-db");
+        std::fs::write(&linked_keychain, b"linked keychain")
+            .expect("linked keychain fixture must be created");
+        std::fs::set_permissions(&linked_keychain, std::fs::Permissions::from_mode(0o600))
+            .expect("linked keychain mode must be set");
+        std::fs::remove_dir_all(fixture.home.join("Library").join("Keychains"))
+            .expect("original keychains directory must be removed");
+        symlink(
+            &real_keychains,
+            fixture.home.join("Library").join("Keychains"),
+        )
+        .expect("keychains symlink must be created");
+
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_rejects_a_hard_linked_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = MacosKeychainPathFixture::new();
+        let alternate = fixture.root.join("operator.keychain-db");
+        std::fs::write(&alternate, b"operator keychain")
+            .expect("alternate keychain fixture must be created");
+        std::fs::set_permissions(&alternate, std::fs::Permissions::from_mode(0o600))
+            .expect("alternate keychain mode must be set");
+        std::fs::remove_file(&fixture.keychain).expect("original keychain must be removed");
+        std::fs::hard_link(&alternate, &fixture.keychain)
+            .expect("hard-linked keychain fixture must be created");
+
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_accepts_the_exact_private_tree() {
+        let fixture = MacosKeychainPathFixture::new();
+        assert_eq!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            )
+            .expect("exact isolated keychain path must be accepted"),
+            fixture.keychain
+        );
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_delete_is_idempotent_for_an_absent_entry() {
+        let configured_home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let configured_keychain =
+            std::env::var_os("PHASE1_TEST_KEYCHAIN").map(std::path::PathBuf::from);
+        let canonical_keychain = configured_home
+            .as_ref()
+            .map(|home| home.join("Library/Keychains/phase1.keychain-db"));
+        if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1")
+            || configured_keychain != canonical_keychain
+        {
+            eprintln!("skipped: isolated Phase 1 keychain is not configured");
+            return;
+        }
+        let keychain = conformance_macos_keychain().expect("isolated keychain must open");
+        let account = uuid::Uuid::new_v4().to_string();
+        assert!(delete_conformance_macos_entry(
+            &keychain,
+            "ai.opencoven.chat.phase1.absent-delete",
+            &account,
+        )
+        .is_ok());
+    }
 
     #[cfg(feature = "phase1-conformance")]
     #[derive(Clone)]

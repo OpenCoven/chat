@@ -220,11 +220,18 @@ native-only per-process MAC key without storing the raw grant.
 The producer immediately redeems and drops the grant. Redemption first
 acquires the credential mutation lock, verifies that the in-process grant is
 still issued, opens and validates the exact marker without removing it, and
-holds its file identity for the transaction. It initializes the native store,
-then searches for each exact marker-bound account without reading its secret,
-deletes only entries that are present, confirms every scoped entry is absent,
-atomically moves the same held marker out of the redeemable name, and finally
-removes the in-process grant. Replay, concurrent use, marker tampering,
+holds its file identity for the transaction. Linux initializes the native store
+and searches exact Secret Service metadata without reading secrets. macOS opens
+the exact `HOME/Library/Keychains/phase1.keychain-db` file created for the
+isolated producer identity only when the isolation marker is present, every
+parent is private, owned, and not a symlink, and the file identity remains
+stable and single-linked while opening it. One retained native keychain handle
+serves every exact service/account query and delete in the transaction without
+reading secrets. Both paths delete only entries that are present, confirm every
+scoped entry is absent, and treat an item that disappears between the exact
+presence check and delete as already absent. They atomically move the same held
+marker out of the redeemable name and finally remove the in-process grant.
+Replay, concurrent use, marker tampering,
 service/account substitution, links, and path swaps therefore fail closed. A
 lock, backend, or partial-delete failure leaves the marker and issued grant
 available for an authenticated retry with the same immutable service/account
@@ -350,12 +357,13 @@ On Darwin and Linux, pinned official actions fetch the exact SDK candidate,
 SDK evidence authority, selected validator, Cave, and Coven revisions beneath
 the workflow checkout before restricted execution. The root supervisor copies
 that complete checkout into its immutable source tree, and the restricted
-command passes those exact `.phase1-counterparts` roots explicitly. On Windows,
-the trusted child reads only lowercase commit IDs and repository allowlist
-entries from the verified lock, fetches the historical harness commit plus all
-five counterpart checkouts with pinned Git inside the Job, and then passes
-those roots to the relocated runner. Producer identity is always recomputed
-from the supplied workflow Chat checkout rather than the runner module path.
+command passes those exact `.phase1-counterparts` roots explicitly. On Windows, the trusted child reads only lowercase commit IDs and repository
+allowlist entries from the verified lock, fetches the historical harness commit,
+retains it under a tag copied through both isolated local-clone generations,
+fetches all five counterpart checkouts with pinned Git inside the Job, and then
+passes those roots to the relocated runner. Producer identity is always
+recomputed from the supplied workflow Chat checkout rather than the runner
+module path.
 
 On Linux, the trusted supervisor requires a writable unified cgroup v2 mount.
 It creates a dedicated child cgroup, starts only a trusted UID-dropping wrapper
@@ -1076,7 +1084,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,747 | `603555a8c8bcfe08ff82180d381ad52e053553f025de91a53af20cf40937fd90` |
+| `.github/workflows/client-v1-conformance.yml` | 462,746 | `01a88c77d1007fe3e8ac753739e36315f42706be575cf436252006375877b0ab` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1089,7 +1097,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 163,431 | `bb22407fc13d71938a350e49e8e080638f7ddee8f7b1c9c753f43b6462f24cb5` |
+| `scripts/phase1-schema-v2-producer.mjs` | 163,730 | `89837b498b4d1fad900f96fe6d8d56c0aa9d6d4d1c612b70aacb534b5d763de7` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
