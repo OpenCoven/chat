@@ -109,8 +109,16 @@ pub(crate) enum KeyringError {
     CleanupGrantCollisionExhausted,
     #[cfg(feature = "phase1-conformance")]
     CleanupBackendUnavailable,
-    #[cfg(feature = "phase1-conformance")]
+    #[cfg(all(feature = "phase1-conformance", not(unix)))]
     CleanupLockUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockProcessUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockPathUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockFileUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockContended,
     #[cfg(feature = "phase1-conformance")]
     CleanupInstallationDeleteUnavailable,
     #[cfg(feature = "phase1-conformance")]
@@ -177,8 +185,22 @@ impl KeyringError {
             Self::CleanupBackendUnavailable => {
                 NativeDiagnostic::new("cleanup_backend_unavailable", true)
             }
-            #[cfg(feature = "phase1-conformance")]
+            #[cfg(all(feature = "phase1-conformance", not(unix)))]
             Self::CleanupLockUnavailable => NativeDiagnostic::new("cleanup_lock_unavailable", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockProcessUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_process_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockPathUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_path_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockFileUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_file_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockContended => NativeDiagnostic::new("cleanup_lock_contended", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupInstallationDeleteUnavailable => {
                 NativeDiagnostic::new("cleanup_installation_delete_unavailable", true)
@@ -755,7 +777,7 @@ impl NativeKeyring {
         run_cleanup_transaction(
             &self.issued_cleanup_grants,
             &grant_identity,
-            acquire_mutation_lock,
+            acquire_cleanup_mutation_lock,
             || crate::cleanup_grant::prepare(grant, service, process_secret),
             &mut backend,
         )
@@ -958,7 +980,7 @@ where
     Redemption: CleanupGrantRedemption,
     Backend: CleanupBackend,
 {
-    let _mutation_guard = acquire_lock().map_err(|_| KeyringError::CleanupLockUnavailable)?;
+    let _mutation_guard = acquire_lock()?;
     let mut issued = issued_cleanup_grants
         .lock()
         .map_err(|_| KeyringError::CleanupGrantRejected)?;
@@ -1040,6 +1062,27 @@ struct CredentialMutationGuard {
     _file: fs::File,
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MutationLockFailure {
+    ProcessUnavailable,
+    PathUnavailable,
+    FileUnavailable,
+    Contended,
+}
+
+#[cfg(unix)]
+impl From<MutationLockFailure> for KeyringError {
+    fn from(error: MutationLockFailure) -> Self {
+        match error {
+            MutationLockFailure::ProcessUnavailable => Self::Failure,
+            MutationLockFailure::PathUnavailable
+            | MutationLockFailure::FileUnavailable
+            | MutationLockFailure::Contended => Self::Unavailable,
+        }
+    }
+}
+
 #[cfg(all(unix, any(not(feature = "phase1-conformance"), test)))]
 fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".coven").join("chat")
@@ -1048,28 +1091,28 @@ fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
 #[cfg(unix)]
 fn credential_lock_path_for_root(
     root: &std::path::Path,
-) -> Result<std::path::PathBuf, KeyringError> {
+) -> Result<std::path::PathBuf, MutationLockFailure> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     if !root.is_absolute() {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::PathUnavailable);
     }
-    fs::create_dir_all(root).map_err(|_| KeyringError::Unavailable)?;
+    fs::create_dir_all(root).map_err(|_| MutationLockFailure::PathUnavailable)?;
     fs::set_permissions(root, fs::Permissions::from_mode(0o700))
-        .map_err(|_| KeyringError::Unavailable)?;
-    let metadata = fs::symlink_metadata(root).map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::PathUnavailable)?;
+    let metadata = fs::symlink_metadata(root).map_err(|_| MutationLockFailure::PathUnavailable)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::PathUnavailable);
     }
     Ok(root.join("credential-mutation.lock"))
 }
 
 #[cfg(unix)]
-fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+fn credential_lock_path() -> Result<std::path::PathBuf, MutationLockFailure> {
     #[cfg(all(feature = "phase1-conformance", not(test)))]
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -1077,34 +1120,36 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
     if let Some(path) = env::var_os("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT") {
         return credential_lock_path_for_root(&std::path::PathBuf::from(path));
     }
-    let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
+    let home = env::var_os("HOME").ok_or(MutationLockFailure::PathUnavailable)?;
     let home = std::path::PathBuf::from(home);
     #[cfg(all(feature = "phase1-conformance", not(test)))]
     {
-        let home_metadata = fs::symlink_metadata(&home).map_err(|_| KeyringError::Unavailable)?;
+        let home_metadata =
+            fs::symlink_metadata(&home).map_err(|_| MutationLockFailure::PathUnavailable)?;
         if home_metadata.file_type().is_symlink()
             || !home_metadata.is_dir()
             || home_metadata.uid() != unsafe { libc::geteuid() }
             || home_metadata.mode() & 0o777 != 0o700
         {
-            return Err(KeyringError::Unavailable);
+            return Err(MutationLockFailure::PathUnavailable);
         }
         let mut current = home;
         for component in [".coven", "chat"] {
             current.push(component);
             match fs::create_dir(&current) {
                 Ok(()) => fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
-                    .map_err(|_| KeyringError::Unavailable)?,
+                    .map_err(|_| MutationLockFailure::PathUnavailable)?,
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err(KeyringError::Unavailable),
+                Err(_) => return Err(MutationLockFailure::PathUnavailable),
             }
-            let metadata = fs::symlink_metadata(&current).map_err(|_| KeyringError::Unavailable)?;
+            let metadata =
+                fs::symlink_metadata(&current).map_err(|_| MutationLockFailure::PathUnavailable)?;
             if metadata.file_type().is_symlink()
                 || !metadata.is_dir()
                 || metadata.uid() != unsafe { libc::geteuid() }
                 || metadata.mode() & 0o777 != 0o700
             {
-                return Err(KeyringError::Unavailable);
+                return Err(MutationLockFailure::PathUnavailable);
             }
         }
         Ok(current.join("credential-mutation.lock"))
@@ -1116,6 +1161,18 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
 #[cfg(unix)]
 fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
     acquire_mutation_lock_with_timeout(CREDENTIAL_LOCK_TIMEOUT)
+}
+
+#[cfg(all(unix, feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock_detailed_with_timeout_at(CREDENTIAL_LOCK_TIMEOUT, None).map_err(|error| {
+        match error {
+            MutationLockFailure::ProcessUnavailable => KeyringError::CleanupLockProcessUnavailable,
+            MutationLockFailure::PathUnavailable => KeyringError::CleanupLockPathUnavailable,
+            MutationLockFailure::FileUnavailable => KeyringError::CleanupLockFileUnavailable,
+            MutationLockFailure::Contended => KeyringError::CleanupLockContended,
+        }
+    })
 }
 
 #[cfg(unix)]
@@ -1130,17 +1187,29 @@ fn acquire_mutation_lock_with_timeout_at(
     timeout: Duration,
     explicit_root: Option<&std::path::Path>,
 ) -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock_detailed_with_timeout_at(timeout, explicit_root).map_err(Into::into)
+}
+
+#[cfg(unix)]
+fn acquire_mutation_lock_detailed_with_timeout_at(
+    timeout: Duration,
+    explicit_root: Option<&std::path::Path>,
+) -> Result<CredentialMutationGuard, MutationLockFailure> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
     let deadline = Instant::now() + timeout;
     let process = loop {
         match mutation_lock().try_lock() {
             Ok(guard) => break guard,
-            Err(std::sync::TryLockError::Poisoned(_)) => return Err(KeyringError::Failure),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(MutationLockFailure::ProcessUnavailable);
+            }
             Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(std::sync::TryLockError::WouldBlock) => return Err(KeyringError::Unavailable),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(MutationLockFailure::Contended);
+            }
         }
     };
     let path = match explicit_root {
@@ -1154,16 +1223,18 @@ fn acquire_mutation_lock_with_timeout_at(
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(&path)
-        .map_err(|_| KeyringError::Unavailable)?;
-    let metadata = file.metadata().map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
     if !metadata.is_file()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::FileUnavailable);
     }
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-        .map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => break,
@@ -1175,7 +1246,15 @@ fn acquire_mutation_lock_with_timeout_at(
             {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(_) => return Err(KeyringError::Unavailable),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                return Err(MutationLockFailure::Contended);
+            }
+            Err(_) => return Err(MutationLockFailure::FileUnavailable),
         }
     }
     Ok(CredentialMutationGuard {
@@ -1512,6 +1591,11 @@ fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
     })
 }
 
+#[cfg(all(windows, feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock().map_err(|_| KeyringError::CleanupLockUnavailable)
+}
+
 #[cfg(any(windows, test))]
 fn windows_mutex_name(identity: &str) -> String {
     let scope = format!("{SERVICE}:{CREDENTIAL_ACCOUNT_PREFIX}:{identity}");
@@ -1529,6 +1613,11 @@ fn legacy_windows_mutex_name(identity: &str) -> String {
 #[cfg(all(not(unix), not(windows)))]
 fn acquire_mutation_lock() -> Result<(), KeyringError> {
     Err(KeyringError::Unavailable)
+}
+
+#[cfg(all(not(unix), not(windows), feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<(), KeyringError> {
+    Err(KeyringError::CleanupLockUnavailable)
 }
 
 #[cfg(any(windows, test))]
@@ -2029,7 +2118,10 @@ fn map_keyring_error(error: KeyringBackendError) -> KeyringError {
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
-    use super::{acquire_mutation_lock_with_timeout_at, default_credential_lock_root};
+    use super::{
+        acquire_mutation_lock_detailed_with_timeout_at, acquire_mutation_lock_with_timeout_at,
+        default_credential_lock_root, MutationLockFailure,
+    };
     use super::{
         acquire_windows_mutex, decode_legacy_windows_password, legacy_windows_mutex_name,
         parse_stored_credential, validate_installation_id, windows_mutex_name,
@@ -2435,9 +2527,18 @@ mod tests {
                 "cleanup_backend_unavailable",
             ),
             (
-                KeyringError::CleanupLockUnavailable,
-                "cleanup_lock_unavailable",
+                KeyringError::CleanupLockProcessUnavailable,
+                "cleanup_lock_process_unavailable",
             ),
+            (
+                KeyringError::CleanupLockPathUnavailable,
+                "cleanup_lock_path_unavailable",
+            ),
+            (
+                KeyringError::CleanupLockFileUnavailable,
+                "cleanup_lock_file_unavailable",
+            ),
+            (KeyringError::CleanupLockContended, "cleanup_lock_contended"),
             (
                 KeyringError::CleanupInstallationDeleteUnavailable,
                 "cleanup_installation_delete_unavailable",
@@ -2449,6 +2550,11 @@ mod tests {
         ] {
             assert_eq!(error.diagnostic().code, expected);
         }
+        #[cfg(not(unix))]
+        assert_eq!(
+            KeyringError::CleanupLockUnavailable.diagnostic().code,
+            "cleanup_lock_unavailable"
+        );
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -2465,7 +2571,7 @@ mod tests {
             run_cleanup_transaction(
                 &issued,
                 &identity,
-                || Err::<(), _>(KeyringError::Unavailable),
+                || Err::<(), _>(KeyringError::CleanupLockPathUnavailable),
                 || {
                     prepared.fetch_add(1, Ordering::SeqCst);
                     Ok(FakeCleanupRedemption {
@@ -2475,7 +2581,7 @@ mod tests {
                 },
                 &mut backend,
             ),
-            Err(KeyringError::CleanupLockUnavailable)
+            Err(KeyringError::CleanupLockPathUnavailable)
         ));
         assert_eq!(prepared.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));
@@ -2724,6 +2830,58 @@ mod tests {
             default_credential_lock_root(Path::new("/operator/home")),
             Path::new("/operator/home").join(".coven").join("chat")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_lock_failures_identify_path_file_and_contention_boundaries() {
+        use std::{fs, path::Path, time::Duration};
+
+        assert!(matches!(
+            acquire_mutation_lock_detailed_with_timeout_at(
+                Duration::from_secs(1),
+                Some(Path::new("relative-lock-root"))
+            ),
+            Err(MutationLockFailure::PathUnavailable)
+        ));
+
+        let file_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("keyring-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(file_root.join("credential-mutation.lock"))
+            .expect("conflicting lock directory");
+        assert!(matches!(
+            acquire_mutation_lock_detailed_with_timeout_at(
+                Duration::from_secs(1),
+                Some(&file_root)
+            ),
+            Err(MutationLockFailure::FileUnavailable)
+        ));
+        fs::remove_dir_all(&file_root).expect("file failure root cleanup");
+
+        let contention_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("keyring-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        let first = acquire_mutation_lock_detailed_with_timeout_at(
+            Duration::from_secs(1),
+            Some(&contention_root),
+        )
+        .expect("first detailed credential lock");
+        let contender_root = contention_root.clone();
+        let contender = std::thread::spawn(move || {
+            matches!(
+                acquire_mutation_lock_detailed_with_timeout_at(
+                    Duration::from_millis(50),
+                    Some(&contender_root),
+                ),
+                Err(MutationLockFailure::Contended)
+            )
+        });
+        assert!(contender.join().expect("detailed contender thread"));
+        drop(first);
+        fs::remove_dir_all(contention_root).expect("contention root cleanup");
     }
 
     #[test]

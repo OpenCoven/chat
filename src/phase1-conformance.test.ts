@@ -1580,6 +1580,22 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.native-scenarios.cleanup-custody.lock-unavailable',
     ],
     [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_lock_process_unavailable',
+      'phase1.native-scenarios.cleanup-custody.lock-process-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_lock_path_unavailable',
+      'phase1.native-scenarios.cleanup-custody.lock-path-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_lock_file_unavailable',
+      'phase1.native-scenarios.cleanup-custody.lock-file-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_lock_contended',
+      'phase1.native-scenarios.cleanup-custody.lock-contended',
+    ],
+    [
       'native RPC conformance_cleanup_native_custody failed with cleanup_installation_delete_unavailable',
       'phase1.native-scenarios.cleanup-custody.installation-delete-unavailable',
     ],
@@ -1644,6 +1660,10 @@ describe('Phase 1 real-authority conformance harness', () => {
     'secure-store-unavailable',
     'keychain-failure',
     'cleanup-grant-rejected',
+    'lock-process-unavailable',
+    'lock-path-unavailable',
+    'lock-file-unavailable',
+    'lock-contended',
     'invalid-native-input',
     'timeout',
     'process',
@@ -3781,6 +3801,29 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(diagnostic).toBe('phase1.stage.runner-checkout.unsafe-source-owner');
     expect(diagnostic).not.toContain('/private/operator/repository');
+  });
+
+  test('trusts the local checkout worktree instead of its Git metadata directory', async () => {
+    const sourceRoot = mkdtempSync(join(tmpdir(), 'phase1-safe-directory-'));
+    try {
+      execFileSync('git', ['init', '--quiet', sourceRoot]);
+      const harness = (await import('../scripts/phase1-conformance.mjs')) as Record<
+        string,
+        unknown
+      >;
+      const safeDirectory = harness.localCheckoutSafeDirectory;
+      expect(safeDirectory).toBeTypeOf('function');
+      if (typeof safeDirectory !== 'function') {
+        return;
+      }
+
+      const trustedPath = safeDirectory(sourceRoot);
+
+      expect(trustedPath).toBe(realpathSync(sourceRoot));
+      expect(trustedPath).not.toBe(realpathSync(join(sourceRoot, '.git')));
+    } finally {
+      rmSync(sourceRoot, { recursive: true, force: true });
+    }
   });
 
   test.each([
