@@ -109,7 +109,7 @@ pub(crate) enum KeyringError {
     CleanupGrantCollisionExhausted,
     #[cfg(feature = "phase1-conformance")]
     CleanupBackendUnavailable,
-    #[cfg(feature = "phase1-conformance")]
+    #[cfg(all(feature = "phase1-conformance", not(unix)))]
     CleanupLockUnavailable,
     #[cfg(feature = "phase1-conformance")]
     CleanupLockProcessUnavailable,
@@ -185,7 +185,7 @@ impl KeyringError {
             Self::CleanupBackendUnavailable => {
                 NativeDiagnostic::new("cleanup_backend_unavailable", true)
             }
-            #[cfg(feature = "phase1-conformance")]
+            #[cfg(all(feature = "phase1-conformance", not(unix)))]
             Self::CleanupLockUnavailable => NativeDiagnostic::new("cleanup_lock_unavailable", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupLockProcessUnavailable => {
@@ -980,7 +980,7 @@ where
     Redemption: CleanupGrantRedemption,
     Backend: CleanupBackend,
 {
-    let _mutation_guard = acquire_lock().map_err(|_| KeyringError::CleanupLockUnavailable)?;
+    let _mutation_guard = acquire_lock()?;
     let mut issued = issued_cleanup_grants
         .lock()
         .map_err(|_| KeyringError::CleanupGrantRejected)?;
@@ -2527,10 +2527,6 @@ mod tests {
                 "cleanup_backend_unavailable",
             ),
             (
-                KeyringError::CleanupLockUnavailable,
-                "cleanup_lock_unavailable",
-            ),
-            (
                 KeyringError::CleanupLockProcessUnavailable,
                 "cleanup_lock_process_unavailable",
             ),
@@ -2554,6 +2550,11 @@ mod tests {
         ] {
             assert_eq!(error.diagnostic().code, expected);
         }
+        #[cfg(not(unix))]
+        assert_eq!(
+            KeyringError::CleanupLockUnavailable.diagnostic().code,
+            "cleanup_lock_unavailable"
+        );
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -2570,7 +2571,7 @@ mod tests {
             run_cleanup_transaction(
                 &issued,
                 &identity,
-                || Err::<(), _>(KeyringError::Unavailable),
+                || Err::<(), _>(KeyringError::CleanupLockPathUnavailable),
                 || {
                     prepared.fetch_add(1, Ordering::SeqCst);
                     Ok(FakeCleanupRedemption {
@@ -2580,7 +2581,7 @@ mod tests {
                 },
                 &mut backend,
             ),
-            Err(KeyringError::CleanupLockUnavailable)
+            Err(KeyringError::CleanupLockPathUnavailable)
         ));
         assert_eq!(prepared.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));
