@@ -8284,6 +8284,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
           $ProgressPreference = 'SilentlyContinue'
+          $env:PATHEXT = ".COM;.EXE;.BAT;.CMD"
 
             function Assert-NoReparsePath {
               param(

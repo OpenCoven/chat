@@ -1336,6 +1336,51 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test.each([
+    [
+      'native RPC conformance_cleanup_native_custody failed with secure_store_unavailable',
+      'phase1.native-scenarios.cleanup-custody.secure-store-unavailable',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with keychain_failure',
+      'phase1.native-scenarios.cleanup-custody.keychain-failure',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with cleanup_grant_rejected',
+      'phase1.native-scenarios.cleanup-custody.cleanup-grant-rejected',
+    ],
+    [
+      'native RPC conformance_cleanup_native_custody failed with invalid_native_input',
+      'phase1.native-scenarios.cleanup-custody.invalid-native-input',
+    ],
+    [
+      'native RPC timed out for conformance_cleanup_native_custody',
+      'phase1.native-scenarios.cleanup-custody.timeout',
+    ],
+    ['native RPC closed before responding', 'phase1.native-scenarios.cleanup-custody.process'],
+    [
+      'Native custody cleanup did not prove an empty available macos-keychain backend.',
+      'phase1.native-scenarios.cleanup-custody.proof',
+    ],
+    ['private protected-run failure', 'phase1.native-scenarios.cleanup-custody.unknown'],
+  ])('classifies cleanup-custody failure without exposing detail', async (message, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2NativeFailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    const diagnostic = diagnose('cleanup-custody', new Error(message));
+
+    expect(diagnostic).toBe(expected);
+    expect(diagnostic).not.toContain('private');
+  });
+
+  test.each([
     'marker-directory-create-unavailable',
     'marker-directory-open-unavailable',
     'marker-directory-metadata-unavailable',
@@ -1352,6 +1397,31 @@ describe('Phase 1 real-authority conformance harness', () => {
       return;
     }
     const expected = `phase1.native-scenarios.cleanup-grant.${category}`;
+
+    expect(diagnose(new Error(expected), 'phase1.stage.native-scenarios.failed')).toBe(expected);
+  });
+
+  test.each([
+    'secure-store-unavailable',
+    'keychain-failure',
+    'cleanup-grant-rejected',
+    'invalid-native-input',
+    'timeout',
+    'process',
+    'proof',
+    'unknown',
+  ])('preserves cleanup-custody %s through schema-v2 stage wrapping', async (category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const expected = `phase1.native-scenarios.cleanup-custody.${category}`;
 
     expect(diagnose(new Error(expected), 'phase1.stage.native-scenarios.failed')).toBe(expected);
   });

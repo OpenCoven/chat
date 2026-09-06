@@ -539,6 +539,17 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
     expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');
   });
+
+  test('restores the exact PATHEXT policy inside the isolated Windows profile', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const assignment = '$env:PATHEXT = ".COM;.EXE;.BAT;.CMD"';
+
+    expect(countOccurrences(childBootstrap, assignment)).toBe(1);
+    expect(childBootstrap.indexOf(assignment)).toBeLessThan(
+      childBootstrap.indexOf('function Assert-NoReparsePath'),
+    );
+  });
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
