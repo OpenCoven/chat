@@ -6,6 +6,7 @@ export type Phase1LockEntry = {
 export function createGitEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export const gitNullDevice: string;
 export function createGitCheckoutEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;

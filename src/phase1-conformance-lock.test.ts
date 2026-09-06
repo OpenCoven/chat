@@ -30,6 +30,7 @@ const {
 } = phase1ConformanceLock;
 
 const projectRoot = resolve(import.meta.dirname, '..');
+const expectedGitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const scratchRoots: string[] = [];
 const gitIntegrationTestTimeout = 60_000;
 const gitTestCommandTimeout = 45_000;
@@ -765,18 +766,18 @@ describe('Phase 1 checkout verification', () => {
     expect(environment).not.toHaveProperty('Git_Work_Tree');
     expect(environment).not.toHaveProperty('git_index_file');
     expect(environment.GIT_ALLOW_PROTOCOL).toBe('');
-    expect(environment.GIT_ASKPASS).toBe(devNull);
+    expect(environment.GIT_ASKPASS).toBe(expectedGitNullDevice);
     expect(environment.GIT_ATTR_NOSYSTEM).toBe('1');
     expect(environment.GIT_ATTR_SOURCE).toBe('HEAD');
-    expect(environment.GIT_CONFIG_GLOBAL).toBe(devNull);
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(expectedGitNullDevice);
     expect(environment.GIT_CONFIG_NOSYSTEM).toBe('1');
     expect(environment.GIT_NO_LAZY_FETCH).toBe('1');
     expect(environment.GIT_NO_REPLACE_OBJECTS).toBe('1');
     expect(environment.GIT_OPTIONAL_LOCKS).toBe('0');
-    expect(environment.GIT_SSH).toBe(devNull);
-    expect(environment.GIT_SSH_COMMAND).toBe(devNull);
+    expect(environment.GIT_SSH).toBe(expectedGitNullDevice);
+    expect(environment.GIT_SSH_COMMAND).toBe(expectedGitNullDevice);
     expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
-    expect(environment.SSH_ASKPASS).toBe(devNull);
+    expect(environment.SSH_ASKPASS).toBe(expectedGitNullDevice);
   });
 
   gitTest('accepts four clean checkouts at their locked revisions', () => {

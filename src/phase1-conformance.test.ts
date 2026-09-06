@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
@@ -34,6 +34,7 @@ import {
   assertNoNodeRuntimeInjection,
   assertPairingStatus,
   assertProductionAdapterAtRevision,
+  bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
   caveBuildEnvironment,
@@ -416,11 +417,12 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.runIf(process.platform === 'win32')(
     'clones an exact protected tag from a shallow Windows source',
-    () => {
+    async () => {
       const root = mkdtempSync(join(tmpdir(), 'phase1-windows-shallow-clone-'));
       const remote = join(root, 'remote');
       const source = join(root, 'source');
-      const destination = join(root, 'destination');
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-windows-shallow-clone' });
+      const destination = join(owned.rootPath, 'destination');
       try {
         execFileSync('git', ['init', '--initial-branch=main', remote]);
         execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: remote });
@@ -468,21 +470,37 @@ describe('Phase 1 real-authority conformance harness', () => {
           ).trim(),
         ).toBe(revision);
 
-        execFileSync(
-          'git',
-          [
-            'clone',
-            '--local',
-            '--no-hardlinks',
-            '--no-checkout',
-            '--quiet',
-            '--branch',
-            'opencoven-phase1-harness',
-            source,
-            destination,
-          ],
-          { stdio: 'pipe' },
-        );
+        bootstrapWindowsSupervisor({
+          lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
+          windowsSupervisorPath: 'C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe',
+        });
+        const gitPath = execFileSync('where.exe', ['git'], { encoding: 'utf8' })
+          .split(/\r?\n/u)
+          .find(Boolean);
+        if (gitPath === undefined) {
+          throw new Error('Windows Git executable is unavailable.');
+        }
+        const systemRoot = process.env.SYSTEMROOT ?? process.env.WINDIR;
+        if (systemRoot === undefined) {
+          throw new Error('Windows system root is unavailable.');
+        }
+        await cloneExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: source,
+          destinationRoot: destination,
+          repository: 'OpenCoven/chat',
+          revision,
+          environment: {
+            ...process.env,
+            PATH: [
+              dirname(gitPath),
+              dirname(process.execPath),
+              resolve(systemRoot, 'System32'),
+            ].join(';'),
+          },
+          label: 'Windows shallow exact revision fixture',
+          sourceRef: 'refs/tags/opencoven-phase1-harness',
+        });
         expect(
           execFileSync('git', ['rev-parse', 'HEAD'], {
             cwd: destination,
@@ -490,6 +508,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           }).trim(),
         ).toBe(revision);
       } finally {
+        await owned.cleanup();
         rmSync(root, { recursive: true, force: true });
       }
     },
