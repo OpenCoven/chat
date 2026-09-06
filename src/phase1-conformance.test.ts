@@ -2534,6 +2534,11 @@ describe('Phase 1 real-authority conformance harness', () => {
       'error[E0308]: mismatched types\nerror: could not compile `opencoven-chat`',
       'phase1.packaging.chat-native-build.compile',
     ],
+    [
+      'unrecognized Cargo failure',
+      'error: the lock file /private/Cargo.lock needs to be updated but --locked was passed',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
   ])(
     'classifies bounded Cargo %s failures without exposing output',
     async (_, stderr, expected) => {
