@@ -79,18 +79,18 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '1188343cb57d983dbe2249f95709fa8d46b541f3',
-  tree: 'a016e7bf3aece27dca9faebb708df0bd3450938c',
+  revision: 'd4678466efd19fd55fa45035e2d0d35b0318a534',
+  tree: 'c06dc750199b45cd4925a306f2c03f075fab15be',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '6e62d211b7a8727c3cb67cbc6bd191db986965ce',
-      sha256: '29cac3e7c37ff240174570b924abf51624ae1da070a1412f0d6fab2c7f058804',
+      blob: 'c69fb54d0a4123b315d9fcc005c609410347ddd5',
+      sha256: 'fc232db10c270ec92fcd700ad44e213c04abee01492c9804f82643b4513b2199',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
-      blob: '4a9f6f79b6610617661452a6a3918f2da6290b95',
-      sha256: 'dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd',
+      blob: '57cede8f6c10a0c6c0abd47c7ed658eb340e8f49',
+      sha256: '2d8db4e5442fe2f585c0b005d2b059832b27d88047441e0e7dbc26dc22a00e99',
     },
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -99,8 +99,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '39b071a26a6cd0c5fe5a316421d0320955044de7',
-      sha256: '949227d29f81b3d4269b3087673ae67ee8ec40971a36e1163f8839e9fa32c779',
+      blob: '25f79d5606e30b86b7036a27456dc1f0dff09fd6',
+      sha256: 'e34e3987ea1e2957fc879a4903ee8470f655273a1847eb0dbe166993414a9709',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -124,8 +124,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '2cb3edbfbaa14675c636c0b9e9bb333daf70dc22',
-      sha256: '06738491a233590e19b66b520886454aa829df03a6aa6d2626ac196a71660506',
+      blob: 'c45d84b7cff03a496567df65e6481586274fcb71',
+      sha256: '5b0128410851ee26ce11f7cd3cf246373c049968a5c6cb0d754faa2ddb51926f',
     },
   ],
 } as const;
