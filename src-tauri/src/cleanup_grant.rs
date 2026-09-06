@@ -1206,6 +1206,7 @@ mod tests {
         fs,
         os::unix::fs::PermissionsExt,
         path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -1215,12 +1216,14 @@ mod tests {
 
     impl TestHome {
         fn new(mode: u32) -> Self {
+            static NEXT_HOME: AtomicU64 = AtomicU64::new(0);
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("clock must follow Unix epoch")
                 .as_nanos();
+            let sequence = NEXT_HOME.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "opencoven-cleanup-marker-home-{}-{nonce}",
+                "opencoven-cleanup-marker-home-{}-{nonce}-{sequence}",
                 std::process::id()
             ));
             fs::create_dir(&path).expect("test home must be created");
