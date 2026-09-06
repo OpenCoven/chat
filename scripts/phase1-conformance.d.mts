@@ -117,6 +117,7 @@ export function cloneExactCheckout(options: {
   destinationRoot: string;
   repository?: string;
   revision: string;
+  sourceRef?: 'refs/tags/opencoven-phase1-harness';
   environment: NodeJS.ProcessEnv;
   label: string;
 }): Promise<void>;

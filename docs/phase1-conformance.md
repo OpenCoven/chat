@@ -220,17 +220,18 @@ native-only per-process MAC key without storing the raw grant.
 The producer immediately redeems and drops the grant. Redemption first
 acquires the credential mutation lock, verifies that the in-process grant is
 still issued, opens and validates the exact marker without removing it, and
-holds its file identity for the transaction. Linux initializes the native store
-and searches exact Secret Service metadata without reading secrets. macOS opens
-the exact `HOME/Library/Keychains/phase1.keychain-db` file created for the
+holds its file identity for the transaction. Linux initializes the native
+store. macOS opens the exact `HOME/Library/Keychains/phase1.keychain-db` file
+created for the
 isolated producer identity only when the isolation marker is present, every
 parent is private, owned, and not a symlink, and the file identity remains
 stable and single-linked while opening it. One retained native keychain handle
-serves every exact service/account query and delete in the transaction without
-reading secrets. Both paths delete only entries that are present, confirm every
-scoped entry is absent, and treat an item that disappears between the exact
-presence check and delete as already absent. They atomically move the same held
-marker out of the redeemable name and finally remove the in-process grant.
+serves every exact service/account deletion in the transaction without reading
+secrets. Both paths invoke exact idempotent deletion for every authenticated
+scoped account, so an already-absent item succeeds without a separate metadata
+presence query. They confirm every scoped entry is absent, atomically move the
+same held marker out of the redeemable name, and finally remove the in-process
+grant.
 Replay, concurrent use, marker tampering,
 service/account substitution, links, and path swaps therefore fail closed. A
 lock, backend, or partial-delete failure leaves the marker and issued grant
@@ -357,13 +358,17 @@ On Darwin and Linux, pinned official actions fetch the exact SDK candidate,
 SDK evidence authority, selected validator, Cave, and Coven revisions beneath
 the workflow checkout before restricted execution. The root supervisor copies
 that complete checkout into its immutable source tree, and the restricted
-command passes those exact `.phase1-counterparts` roots explicitly. On Windows, the trusted child reads only lowercase commit IDs and repository
-allowlist entries from the verified lock, fetches the historical harness commit,
-retains it under a tag copied through both isolated local-clone generations,
-fetches all five counterpart checkouts with pinned Git inside the Job, and then
-passes those roots to the relocated runner. Producer identity is always
-recomputed from the supplied workflow Chat checkout rather than the runner
-module path.
+command passes those exact `.phase1-counterparts` roots explicitly. On Windows,
+the trusted child reads only lowercase commit IDs and repository allowlist
+entries from the verified lock, fetches the historical harness commit, retains
+it under `refs/tags/opencoven-phase1-harness`, and explicitly selects that tag
+when creating the verified-runner shallow clone. The selected authority ref
+must resolve to the locked revision and cannot have a same-named branch, so it
+crosses both isolated local-clone generations without an ambiguous short ref.
+The child then fetches all five counterpart checkouts with pinned Git inside
+the Job and passes those roots to the relocated runner. Producer identity is
+always recomputed from the supplied workflow Chat checkout rather than the
+runner module path.
 
 On Linux, the trusted supervisor requires a writable unified cgroup v2 mount.
 It creates a dedicated child cgroup, starts only a trusted UID-dropping wrapper
@@ -1084,13 +1089,13 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,746 | `01a88c77d1007fe3e8ac753739e36315f42706be575cf436252006375877b0ab` |
+| `.github/workflows/client-v1-conformance.yml` | 462,746 | `2c6cc8403c7d6d30736fe430eb1e9a16b69bcd89fa227288aa2b46863c935729` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,419 | `dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd` |
-| `scripts/phase1-conformance.mjs` | 195,443 | `49c3dcabb52059cdd384ede05076e691a4149ccf9334d715e659f1e85e18fe0a` |
+| `scripts/phase1-conformance.mjs` | 197,191 | `59febcfa2e68e0bb42bff191a4a3b5408bbfea6e43d5c437c7be709547579d55` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
