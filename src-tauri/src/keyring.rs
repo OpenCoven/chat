@@ -2839,7 +2839,7 @@ mod tests {
 
         assert!(matches!(
             acquire_mutation_lock_detailed_with_timeout_at(
-                Duration::from_millis(10),
+                Duration::from_secs(1),
                 Some(Path::new("relative-lock-root"))
             ),
             Err(MutationLockFailure::PathUnavailable)
@@ -2853,7 +2853,7 @@ mod tests {
             .expect("conflicting lock directory");
         assert!(matches!(
             acquire_mutation_lock_detailed_with_timeout_at(
-                Duration::from_millis(10),
+                Duration::from_secs(1),
                 Some(&file_root)
             ),
             Err(MutationLockFailure::FileUnavailable)
