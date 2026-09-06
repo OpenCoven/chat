@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "172781d3168790a9e196155f21cccdd3c1e41076"
+    "revision": "75d2bfce8301f56f947ec63225451df98571b97d"
   },
   "harnessAuthority": {
-    "revision": "172781d3168790a9e196155f21cccdd3c1e41076",
-    "tree": "da291a2c46ef205f478ad1ff5dccd4465e838309",
+    "revision": "75d2bfce8301f56f947ec63225451df98571b97d",
+    "tree": "30de1d5c0ff85d2b86c95c7d73bf7bf2abf98cd0",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "3b2dd6bc44fcc5ba082ebf2ac586515876f535de",
-        "sha256": "b4b5446c9fad262d52ca903edacddaf42c4453b002b21f62aedbb51ab2382e8e"
+        "blob": "5add45fd8d177e4b1d503e2ec6c7a6df1c0ff5d4",
+        "sha256": "9502ce02714224e7411063545d1318691c3012131513d66ef6f6c9532a14a8f7"
       },
       {
         "path": "src-tauri/src/lib.rs",
