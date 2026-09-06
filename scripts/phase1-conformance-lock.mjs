@@ -103,11 +103,12 @@ const expectedRepositories = Object.freeze({
   coven: 'OpenCoven/coven',
   harness: 'OpenCoven/chat',
 });
+const gitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const gitConfigurationOverrides = [
   '-c',
   'core.excludesFile=',
   '-c',
-  `core.attributesFile=${devNull}`,
+  `core.attributesFile=${gitNullDevice}`,
   '-c',
   'core.fsmonitor=false',
   '-c',
@@ -115,9 +116,9 @@ const gitConfigurationOverrides = [
   '-c',
   'credential.helper=',
   '-c',
-  `core.askPass=${devNull}`,
+  `core.askPass=${gitNullDevice}`,
   '-c',
-  `core.sshCommand=${devNull}`,
+  `core.sshCommand=${gitNullDevice}`,
   '-c',
   'http.proxy=',
   '-c',
@@ -153,16 +154,16 @@ export function createGitEnvironment(inheritedEnvironment = process.env) {
   environment.GIT_ATTR_NOSYSTEM = '1';
   environment.GIT_ATTR_SOURCE = 'HEAD';
   environment.GIT_ALLOW_PROTOCOL = '';
-  environment.GIT_ASKPASS = devNull;
-  environment.GIT_CONFIG_GLOBAL = devNull;
+  environment.GIT_ASKPASS = gitNullDevice;
+  environment.GIT_CONFIG_GLOBAL = gitNullDevice;
   environment.GIT_CONFIG_NOSYSTEM = '1';
   environment.GIT_NO_LAZY_FETCH = '1';
   environment.GIT_NO_REPLACE_OBJECTS = '1';
   environment.GIT_OPTIONAL_LOCKS = '0';
-  environment.GIT_SSH = devNull;
-  environment.GIT_SSH_COMMAND = devNull;
+  environment.GIT_SSH = gitNullDevice;
+  environment.GIT_SSH_COMMAND = gitNullDevice;
   environment.GIT_TERMINAL_PROMPT = '0';
-  environment.SSH_ASKPASS = devNull;
+  environment.SSH_ASKPASS = gitNullDevice;
   return environment;
 }
 
