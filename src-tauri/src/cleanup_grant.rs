@@ -78,15 +78,19 @@ pub(crate) fn issue(
     accounts: &[String],
     process_secret: &[u8; GRANT_BYTES],
 ) -> Result<String, KeyringError> {
-    validate_service(service)?;
+    validate_service(service).map_err(|error| match error {
+        KeyringError::Unavailable => KeyringError::CleanupGrantServiceUnavailable,
+        other => other,
+    })?;
     validate_conformance_cleanup_accounts(accounts)?;
-    let storage_identity = marker_io::identity().map_err(|_| KeyringError::Unavailable)?;
+    let storage_identity =
+        marker_io::identity().map_err(|_| KeyringError::CleanupGrantMarkerIdentityUnavailable)?;
     #[cfg(windows)]
     marker_io::test_hook("issue-storage-identity").map_err(|_| KeyringError::Unavailable)?;
 
     for _ in 0..4 {
         let mut grant = Zeroizing::new([0_u8; GRANT_BYTES]);
-        getrandom::fill(grant.as_mut()).map_err(|_| KeyringError::Unavailable)?;
+        getrandom::fill(grant.as_mut()).map_err(|_| KeyringError::CleanupGrantRandomUnavailable)?;
         let grant_id = grant_id(grant.as_ref());
         let payload = CleanupGrantPayload {
             version: MARKER_VERSION,
@@ -110,10 +114,12 @@ pub(crate) fn issue(
         match marker_io::publish(&grant_id, &marker_bytes, &storage_identity) {
             Ok(()) => return Ok(URL_SAFE_NO_PAD.encode(grant.as_ref())),
             Err(marker_io::PublishError::Collision) => continue,
-            Err(marker_io::PublishError::Unavailable) => return Err(KeyringError::Unavailable),
+            Err(marker_io::PublishError::Unavailable) => {
+                return Err(KeyringError::CleanupGrantMarkerPublishUnavailable);
+            }
         }
     }
-    Err(KeyringError::Unavailable)
+    Err(KeyringError::CleanupGrantCollisionExhausted)
 }
 
 pub(crate) fn prepare(

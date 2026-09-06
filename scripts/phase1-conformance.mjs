@@ -273,6 +273,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.verified-runner.spawn',
   'phase1.stage.verified-runner.supervisor',
   'phase1.stage.verified-runner.exit-nonzero',
+  'phase1.stage.runtime-integrity.failed',
+  'phase1.stage.invocation.failed',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
   'phase1.stage.schema-v2-production.failed',
@@ -388,6 +390,12 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.stale-discovery',
   'phase1.native-scenarios.cleanup',
   'phase1.native-scenarios.cleanup-grant',
+  'phase1.native-scenarios.cleanup-grant.service-unavailable',
+  'phase1.native-scenarios.cleanup-grant.process-secret-unavailable',
+  'phase1.native-scenarios.cleanup-grant.random-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
+  'phase1.native-scenarios.cleanup-grant.collision-exhausted',
   'phase1.native-scenarios.cleanup-grant.secure-store-unavailable',
   'phase1.native-scenarios.cleanup-grant.keychain-failure',
   'phase1.native-scenarios.cleanup-grant.cleanup-grant-rejected',
@@ -5249,8 +5257,12 @@ export function buildObservedSchemaV2Assertions({
   };
 }
 
-export async function runPhase1Conformance(options = parseArgs([])) {
-  assertNoNodeRuntimeInjection();
+export async function runPhase1Conformance(
+  options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs([])),
+) {
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );
@@ -5606,8 +5618,10 @@ export async function runPhase1Conformance(options = parseArgs([])) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  assertNoNodeRuntimeInjection();
-  const options = parseArgs(argv);
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
+  const options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs(argv));
   if (process.env[verifiedRunnerEnvironment] !== '1') {
     await runPublicPhase1StageAsync('phase1.stage.runner-bootstrap.failed', () =>
       bootstrapVerifiedRunner(options),

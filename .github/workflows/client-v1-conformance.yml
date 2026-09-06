@@ -9456,7 +9456,7 @@ jobs:
         if: matrix.platform != 'win32-x64'
         with:
           version: 10.34.0
-      - name: Install frozen Linux Secret Service
+      - name: Install Linux native dependencies
         if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'
         shell: bash
         run: |
@@ -9476,10 +9476,19 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             dbus-daemon=1.14.10-4ubuntu4.1 \
             gnome-keyring=46.1-2ubuntu0.2 \
-            libsecret-tools=0.21.4-1build3
+            libsecret-tools=0.21.4-1build3 \
+            build-essential \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            file
           [[ "$(dpkg-query -W -f='${Version}' dbus-daemon)" == "1.14.10-4ubuntu4.1" ]]
           [[ "$(dpkg-query -W -f='${Version}' gnome-keyring)" == "46.1-2ubuntu0.2" ]]
           [[ "$(dpkg-query -W -f='${Version}' libsecret-tools)" == "0.21.4-1build3" ]]
+          pkg-config --exists webkit2gtk-4.1 gtk+-3.0 ayatana-appindicator3-0.1
       - name: Install frozen Unix Rust
         if: matrix.platform != 'win32-x64'
         run: 'node --input-type=module --eval "import { execFileSync } from ''node:child_process''; import { resolveExecutableInvocation } from ''./scripts/executable-resolution.mjs''; const command = ''rustup''; const invocation = resolveExecutableInvocation(command, process.env, process.platform, [''toolchain'', ''install'', ''1.95.0'', ''--profile'', ''minimal'']); execFileSync(invocation.executable, invocation.args, { argv0: command, stdio: ''inherit'' });"'
