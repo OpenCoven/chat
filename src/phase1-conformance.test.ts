@@ -2805,17 +2805,18 @@ describe('Phase 1 real-authority conformance harness', () => {
     ) => Error;
     expect(diagnose).toBeTypeOf('function');
     expect(classifyCaveFailure).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
+    if (typeof diagnose !== 'function' || typeof classifyCaveFailure !== 'function') {
       return;
     }
-    const failure = new SchemaV2CommandExecutionError('private command', {
+    const result = {
       code: 1,
-      signal: null,
+      signal: null as null,
       stdout: '> coven-cave@0.3.12 prebuild /private/coven-cave\nprivate generator failure',
       stderr: 'private operator path: EACCES',
-    });
+    };
+    const failure = new SchemaV2CommandExecutionError('private command', result);
 
-    expect(classifyCaveFailure(failure.result)).toBeUndefined();
+    expect(classifyCaveFailure(result)).toBeUndefined();
     const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
     expect(diagnostic).toBe('phase1.packaging.cave-build.phase.prebuild');
@@ -2841,12 +2842,12 @@ describe('Phase 1 real-authority conformance harness', () => {
     ) => Error;
     expect(diagnose).toBeTypeOf('function');
     expect(classifyCaveFailure).toBeTypeOf('function');
-    if (typeof diagnose !== 'function') {
+    if (typeof diagnose !== 'function' || typeof classifyCaveFailure !== 'function') {
       return;
     }
-    const failure = new SchemaV2CommandExecutionError('private command', {
+    const result = {
       code: 1,
-      signal: null,
+      signal: null as null,
       stdout: [
         '> coven-cave@0.3.12 build /private/coven-cave',
         'Creating an optimized production build',
@@ -2854,9 +2855,10 @@ describe('Phase 1 real-authority conformance harness', () => {
         '> coven-cave@0.3.12 build:server /private/coven-cave',
       ].join('\n'),
       stderr: "Module not found: Can't resolve 'private-module'",
-    });
+    };
+    const failure = new SchemaV2CommandExecutionError('private command', result);
 
-    expect(classifyCaveFailure(failure.result)).toBeUndefined();
+    expect(classifyCaveFailure(result)).toBeUndefined();
     const diagnostic = diagnose(failure, 'phase1.packaging.cave-build.failed');
 
     expect(diagnostic).toBe('phase1.packaging.cave-build.phase.server-bundle');
