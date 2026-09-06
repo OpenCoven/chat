@@ -1383,6 +1383,7 @@ async function bootstrapVerifiedRunner(options) {
           sourceRoot: options.chatSourceRoot,
           destinationRoot: harnessRoot,
           revision: lock.harness.revision,
+          sourceRef: process.platform === 'win32' ? 'opencoven-phase1-harness' : undefined,
           environment,
           label: 'Verified Chat conformance harness',
         });
@@ -1731,6 +1732,7 @@ export async function cloneExactCheckout({
   sourceRoot,
   destinationRoot,
   revision,
+  sourceRef,
   environment,
   label,
 }) {
@@ -1755,6 +1757,7 @@ export async function cloneExactCheckout({
       '--no-hardlinks',
       '--no-checkout',
       '--quiet',
+      ...(sourceRef === undefined ? [] : ['--branch', sourceRef]),
       sourceRoot,
       destinationRoot,
     ],

@@ -288,6 +288,89 @@ describe('Phase 1 real-authority conformance harness', () => {
   );
 
   test.skipIf(process.platform === 'win32')(
+    'requests an exact authority ref when shallow local cloning omits unselected tags',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-shallow-source-'));
+      const bin = mkdtempSync(join(tmpdir(), 'phase1-shallow-git-'));
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-shallow-clone-test' });
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'historical\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'historical'], { cwd: source });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        writeFileSync(join(source, 'tracked.txt'), 'current\n');
+        execFileSync('git', ['commit', '-am', 'current'], { cwd: source });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['tag', 'opencoven-phase1-harness', revision], { cwd: source });
+        writeFileSync(join(source, '.git', 'shallow'), `${head}\n${revision}\n`);
+        const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+        const gitWrapper = join(bin, 'git');
+        writeFileSync(
+          gitWrapper,
+          [
+            '#!/bin/sh',
+            'is_clone=0',
+            'has_branch=0',
+            'previous=',
+            'source=',
+            'destination=',
+            'for argument in "$@"; do',
+            '  [ "$argument" = clone ] && is_clone=1',
+            '  [ "$argument" = --branch ] && has_branch=1',
+            '  source="$previous"',
+            '  destination="$argument"',
+            '  previous="$argument"',
+            'done',
+            'if [ "$is_clone" = 1 ] && [ "$has_branch" = 0 ]; then',
+            `  exec ${JSON.stringify(realGit)} clone --no-tags --no-checkout --quiet "$source" "$destination"`,
+            'fi',
+            `exec ${JSON.stringify(realGit)} "$@"`,
+            '',
+          ].join('\n'),
+        );
+        chmodSync(gitWrapper, 0o755);
+        const destination = join(owned.rootPath, 'checkout');
+
+        await cloneExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: source,
+          destinationRoot: destination,
+          revision,
+          environment: {
+            ...process.env,
+            PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+          },
+          label: 'shallow exact revision fixture',
+          sourceRef: 'opencoven-phase1-harness',
+        });
+
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: destination,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(revision);
+      } finally {
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === 'win32')(
     'scrubs the checkout-only Git attribute source before cloning',
     async () => {
       const source = mkdtempSync(join(tmpdir(), 'phase1-local-source-'));
