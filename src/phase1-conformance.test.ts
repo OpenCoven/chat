@@ -86,10 +86,8 @@ import {
 import * as schemaV2Producer from '../scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
-const {
-  bindMacosKeychainSessionEnvironment,
-  cloneExactCheckout: cloneSchemaV2ExactCheckout,
-} = schemaV2Producer;
+const { bindMacosKeychainSessionEnvironment, cloneExactCheckout: cloneSchemaV2ExactCheckout } =
+  schemaV2Producer;
 const projectRoot = resolve(import.meta.dirname, '..');
 
 function resolvePowerShellPath() {
