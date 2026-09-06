@@ -19,6 +19,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
@@ -391,6 +392,78 @@ describe('Phase 1 real-authority conformance harness', () => {
         await owned.cleanup();
         rmSync(source, { recursive: true, force: true });
         rmSync(bin, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test.runIf(process.platform === 'win32')(
+    'clones an exact protected tag from a shallow Windows source',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'phase1-windows-shallow-clone-'));
+      const remote = join(root, 'remote');
+      const source = join(root, 'source');
+      const destination = join(root, 'destination');
+      try {
+        execFileSync('git', ['init', '--initial-branch=main', remote]);
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: remote });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: remote,
+        });
+        writeFileSync(join(remote, 'tracked.txt'), 'historical\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: remote });
+        execFileSync('git', ['commit', '-m', 'historical'], { cwd: remote });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: remote,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['tag', 'opencoven-phase1-harness', revision], { cwd: remote });
+        writeFileSync(join(remote, 'tracked.txt'), 'current\n');
+        execFileSync('git', ['commit', '-am', 'current'], { cwd: remote });
+
+        execFileSync(
+          'git',
+          ['clone', '--depth', '1', '--no-tags', pathToFileURL(remote).href, source],
+          { stdio: 'pipe' },
+        );
+        execFileSync(
+          'git',
+          [
+            '-C',
+            source,
+            'fetch',
+            '--depth',
+            '1',
+            'origin',
+            'refs/tags/opencoven-phase1-harness:refs/tags/opencoven-phase1-harness',
+          ],
+          { stdio: 'pipe' },
+        );
+        expect(existsSync(join(source, '.git', 'shallow'))).toBe(true);
+
+        execFileSync(
+          'git',
+          [
+            'clone',
+            '--local',
+            '--no-hardlinks',
+            '--no-checkout',
+            '--quiet',
+            '--branch',
+            'opencoven-phase1-harness',
+            source,
+            destination,
+          ],
+          { stdio: 'pipe' },
+        );
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: destination,
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(revision);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
       }
     },
     30_000,
@@ -3683,6 +3756,64 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnostic).toBe('phase1.stage.runner-checkout.unsafe-source-owner');
     expect(diagnostic).not.toContain('/private/operator/repository');
   });
+
+  test.each([
+    [
+      new CommandExecutionError('Verified Chat conformance harness source reference', {
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: 'private source reference failure',
+      }),
+      'phase1.stage.runner-checkout.source-reference',
+    ],
+    [
+      new CommandExecutionError('Verified Chat conformance harness source revision', {
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: 'private source revision failure',
+      }),
+      'phase1.stage.runner-checkout.source-revision',
+    ],
+    [
+      new Error('Verified Chat conformance harness source tag is unavailable or ambiguous.'),
+      'phase1.stage.runner-checkout.source-tag',
+    ],
+    [
+      new Error(
+        'Verified Chat conformance harness source tag does not match the immutable revision.',
+      ),
+      'phase1.stage.runner-checkout.source-tag',
+    ],
+    [
+      new CommandExecutionError('Verified Chat conformance harness clone', {
+        code: 128,
+        signal: null,
+        stdout: '',
+        stderr: 'private clone failure',
+      }),
+      'phase1.stage.runner-checkout.clone',
+    ],
+    [
+      new CommandExecutionError('Verified Chat conformance harness checkout', {
+        code: 128,
+        signal: null,
+        stdout: '',
+        stderr: 'private checkout failure',
+      }),
+      'phase1.stage.runner-checkout.checkout',
+    ],
+  ])(
+    'classifies fixed runner checkout stages without exposing private output',
+    (failure, expected) => {
+      const diagnostic = runnerCheckoutFailureDiagnostic(failure);
+
+      expect(diagnostic).toBe(expected);
+      expect(diagnostic).not.toContain('private');
+      expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(expected);
+    },
+  );
 
   test.each([
     'phase1.stage.isolation-proof.failed',
