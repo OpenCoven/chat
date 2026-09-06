@@ -842,6 +842,7 @@ fn validate_conformance_macos_keychain_path(
         || metadata.file_type().is_symlink()
         || metadata.mode() & 0o077 != 0
         || metadata.uid() != effective_uid
+        || metadata.nlink() != 1
     {
         return Err(KeyringError::Unavailable);
     }
@@ -860,7 +861,11 @@ fn conformance_macos_keychain() -> Result<SecKeychain, KeyringError> {
     let before = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
     let keychain = SecKeychain::open(&path).map_err(|_| KeyringError::Unavailable)?;
     let after = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
-    if before.dev() != after.dev() || before.ino() != after.ino() {
+    if before.dev() != after.dev()
+        || before.ino() != after.ino()
+        || before.nlink() != 1
+        || after.nlink() != 1
+    {
         return Err(KeyringError::Unavailable);
     }
     Ok(keychain)
@@ -2176,6 +2181,31 @@ mod tests {
             fixture.home.join("Library").join("Keychains"),
         )
         .expect("keychains symlink must be created");
+
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_rejects_a_hard_linked_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = MacosKeychainPathFixture::new();
+        let alternate = fixture.root.join("operator.keychain-db");
+        std::fs::write(&alternate, b"operator keychain")
+            .expect("alternate keychain fixture must be created");
+        std::fs::set_permissions(&alternate, std::fs::Permissions::from_mode(0o600))
+            .expect("alternate keychain mode must be set");
+        std::fs::remove_file(&fixture.keychain).expect("original keychain must be removed");
+        std::fs::hard_link(&alternate, &fixture.keychain)
+            .expect("hard-linked keychain fixture must be created");
 
         assert!(matches!(
             validate_conformance_macos_keychain_path(
