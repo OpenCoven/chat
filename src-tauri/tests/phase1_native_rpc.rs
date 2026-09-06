@@ -527,10 +527,20 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
             "phase1-cleanup-grant-home-{}-{nonce}",
             std::process::id()
         ));
+    let cleanup_home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "phase1-cleanup-grant-marker-home-{}-{nonce}",
+            std::process::id()
+        ));
     fs::create_dir_all(&home).expect("isolated home must be created");
     fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
         .expect("isolated home must be private");
+    fs::create_dir_all(&cleanup_home).expect("isolated cleanup home must be created");
+    fs::set_permissions(&cleanup_home, fs::Permissions::from_mode(0o700))
+        .expect("isolated cleanup home must be private");
     let _home_cleanup = HomeCleanup(home.clone());
+    let _cleanup_home_cleanup = HomeCleanup(cleanup_home.clone());
     let preferences = home.join("Library").join("Preferences");
     let keychains = home.join("Library").join("Keychains");
     for directory in [home.join("Library"), preferences, keychains.clone()] {
@@ -592,6 +602,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
         .env(CONFORMANCE_SERVICE_ENV, &service)
         .env("HOME", &home)
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME", &cleanup_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -647,7 +658,8 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         credential,
     );
 
-    let (grant, marker) = issue_with_marker(&mut rpc, &home, &[TARGET_B, TARGET_A, TARGET_B]);
+    let (grant, marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_B, TARGET_A, TARGET_B]);
     let marker_text = fs::read_to_string(&marker).expect("marker must be readable");
     assert!(
         !marker_text.contains(&grant),
@@ -787,7 +799,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A),
         credential,
     );
-    let (account_grant, account_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (account_grant, account_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     rewrite_marker(&account_marker, |marker| {
         marker["payload"]["accounts"][1] = Value::String(credential_account(UNRELATED));
     });
@@ -806,7 +818,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
     ));
     rpc.reject_cleanup(&account_grant);
 
-    let (service_grant, service_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (service_grant, service_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     rewrite_marker(&service_marker, |marker| {
         marker["payload"]["service"] =
             Value::String("ai.opencoven.chat.phase1.ffffffffffffffffffffffffffffffff".to_owned());
@@ -825,7 +837,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (symlink_grant, symlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (symlink_grant, symlink_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let saved_marker = symlink_marker.with_extension("saved");
     fs::rename(&symlink_marker, &saved_marker).expect("marker must move aside");
     std::os::unix::fs::symlink(
@@ -849,7 +861,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (hardlink_grant, hardlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (hardlink_grant, hardlink_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let hardlink_alias = hardlink_marker.with_extension("alias");
     fs::hard_link(&hardlink_marker, &hardlink_alias).expect("marker hard link must be created");
     rpc.reject_cleanup(&hardlink_grant);
@@ -866,8 +878,9 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (replaced_grant, replaced_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
-    let (_substitute_grant, substitute_marker) = issue_with_marker(&mut rpc, &home, &[UNRELATED]);
+    let (replaced_grant, replaced_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
+    let (_substitute_grant, substitute_marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[UNRELATED]);
     fs::remove_file(&replaced_marker).expect("original marker must be removed");
     fs::rename(&substitute_marker, &replaced_marker).expect("substitute marker must be installed");
     rpc.reject_cleanup(&replaced_grant);
@@ -884,7 +897,8 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (directory_grant, directory_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (directory_grant, directory_marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let marker_directory = directory_marker
         .parent()
         .expect("marker must have a parent")

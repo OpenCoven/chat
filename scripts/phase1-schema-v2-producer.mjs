@@ -145,6 +145,16 @@ const cleanupGrantFailureCategories = [
   'response',
   'unknown',
 ];
+const cleanupCustodyFailureCategories = [
+  'secure-store-unavailable',
+  'keychain-failure',
+  'cleanup-grant-rejected',
+  'invalid-native-input',
+  'timeout',
+  'process',
+  'proof',
+  'unknown',
+];
 const publicFailureDiagnosticSet = new Set([
   ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
   'phase1.stage.invocation.windows-executable-path',
@@ -203,6 +213,9 @@ const publicFailureDiagnosticSet = new Set([
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
   ...cleanupGrantFailureCategories.map(
     (category) => `phase1.native-scenarios.cleanup-grant.${category}`,
+  ),
+  ...cleanupCustodyFailureCategories.map(
+    (category) => `phase1.native-scenarios.cleanup-custody.${category}`,
   ),
   'phase1.stage.coven-identity.failed',
   'phase1.stage.isolation.failed',
@@ -963,6 +976,37 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
       return 'phase1.native-scenarios.cleanup-grant.response';
     }
     return 'phase1.native-scenarios.cleanup-grant.unknown';
+  }
+  if (stage === 'cleanup-custody') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.cleanup-custody';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const rpcFailure =
+      /^native RPC conformance_cleanup_native_custody failed with (secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+        message,
+      );
+    if (rpcFailure !== null) {
+      return `phase1.native-scenarios.cleanup-custody.${rpcFailure[1].replaceAll('_', '-')}`;
+    }
+    if (message === 'native RPC timed out for conformance_cleanup_native_custody') {
+      return 'phase1.native-scenarios.cleanup-custody.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.cleanup-custody.process';
+    }
+    if (
+      /^Native custody cleanup did not prove an empty available [a-z0-9-]+ backend$/u.test(message)
+    ) {
+      return 'phase1.native-scenarios.cleanup-custody.proof';
+    }
+    return 'phase1.native-scenarios.cleanup-custody.unknown';
   }
   return schemaV2NativeFailureStages.has(stage)
     ? `phase1.native-scenarios.${stage}`
