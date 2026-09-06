@@ -1773,6 +1773,7 @@ export async function cloneExactCheckout({
   if (!statSync(sourceRoot).isDirectory()) {
     throw new Error(`${label} source root is unavailable.`);
   }
+  const sourceSafeDirectory = realpathSync(sourceRoot);
   const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   let cloneSourceArguments = [];
@@ -1799,6 +1800,8 @@ export async function cloneExactCheckout({
       'credential.helper=',
       '-c',
       `core.hooksPath=${devNull}`,
+      '-c',
+      `safe.directory=${sourceSafeDirectory}`,
       '-c',
       `safe.directory=${sourceGitDirectory}`,
       'clone',

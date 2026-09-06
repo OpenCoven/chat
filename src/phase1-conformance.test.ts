@@ -318,6 +318,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
         const gitWrapper = join(bin, 'git');
         const cloneStarted = join(bin, 'clone-started');
+        const cloneArguments = join(bin, 'clone-arguments');
         writeFileSync(
           gitWrapper,
           [
@@ -339,6 +340,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             '  destination="$argument"',
             '  previous="$argument"',
             'done',
+            `[ "$is_clone" = 1 ] && printf '%s\\n' "$@" > ${JSON.stringify(cloneArguments)}`,
             `[ "$is_clone" = 1 ] && : > ${JSON.stringify(cloneStarted)}`,
             'if [ "$is_clone" = 1 ] && [ "$has_branch" = 0 ]; then',
             `  exec ${JSON.stringify(realGit)} clone --no-tags --no-checkout --quiet "$source" "$destination"`,
@@ -379,6 +381,11 @@ describe('Phase 1 real-authority conformance harness', () => {
             },
           ).trim(),
         ).toBe(revision);
+        const recordedCloneArguments = readFileSync(cloneArguments, 'utf8').trim().split('\n');
+        expect(recordedCloneArguments).toContain(`safe.directory=${realpathSync(source)}`);
+        expect(recordedCloneArguments).toContain(
+          `safe.directory=${realpathSync(join(source, '.git'))}`,
+        );
 
         execFileSync('git', ['branch', 'opencoven-phase1-harness', head], { cwd: source });
         await expect(
