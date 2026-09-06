@@ -939,7 +939,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
 
     for (const name of [
-      'Install frozen Linux Secret Service',
+      'Install Linux native dependencies',
       'Prepare trusted Unix supervisor',
       'Run supervised Unix production and handoff',
       'Validate broker-owned Unix platform record',
@@ -1149,6 +1149,33 @@ describe('Chat-local protected Windows conformance workflow', () => {
         expect(source).toContain(failure);
       }
     }
+  });
+
+  test('installs and verifies the Linux native build dependency surface before Rust setup', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const producer = workflowJob(workflow, 'platform-conformance');
+    const dependencyStep = workflowStep(workflow, 'Install Linux native dependencies');
+    const rustStep = workflowStep(workflow, 'Install frozen Unix Rust');
+
+    expect(dependencyStep).toContain(
+      "if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'",
+    );
+    for (const dependency of [
+      'build-essential',
+      'libayatana-appindicator3-dev',
+      'libgtk-3-dev',
+      'libssl-dev',
+      'libwebkit2gtk-4.1-dev',
+      'librsvg2-dev',
+      'patchelf',
+      'file',
+    ]) {
+      expect(dependencyStep).toContain(dependency);
+    }
+    expect(dependencyStep).toContain(
+      'pkg-config --exists webkit2gtk-4.1 gtk+-3.0 ayatana-appindicator3-0.1',
+    );
+    expect(producer.indexOf(dependencyStep)).toBeLessThan(producer.indexOf(rustStep));
   });
 
   test('pins the complete harness module graph before Windows or Unix executes it', () => {

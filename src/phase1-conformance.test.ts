@@ -1201,6 +1201,30 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.each([
     [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_service_unavailable',
+      'phase1.native-scenarios.cleanup-grant.service-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_process_secret_unavailable',
+      'phase1.native-scenarios.cleanup-grant.process-secret-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_random_unavailable',
+      'phase1.native-scenarios.cleanup-grant.random-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_identity_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_marker_publish_unavailable',
+      'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
+    ],
+    [
+      'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_collision_exhausted',
+      'phase1.native-scenarios.cleanup-grant.collision-exhausted',
+    ],
+    [
       'native RPC conformance_issue_native_custody_cleanup failed with secure_store_unavailable',
       'phase1.native-scenarios.cleanup-grant.secure-store-unavailable',
     ],
@@ -2103,6 +2127,35 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(() =>
       assertNoNodeRuntimeInjection({ NODE_OPTIONS: '--require module.cjs' }, []),
     ).toThrow('Node runtime injection is forbidden for Phase 1 conformance.');
+  });
+
+  test('emits fixed public diagnostics for entrypoint preflight failures', () => {
+    const harness = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
+    const baseEnvironment = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      TMPDIR: process.env.TMPDIR,
+    };
+    const runtimeInjection = spawnSync(process.execPath, [harness], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      env: {
+        ...baseEnvironment,
+        NODE_OPTIONS: '--no-warnings',
+      },
+    });
+    expect(runtimeInjection.status).toBe(1);
+    expect(runtimeInjection.stderr).toContain('phase1.stage.runtime-integrity.failed');
+    expect(runtimeInjection.stderr).not.toContain('Node runtime injection is forbidden');
+
+    const invalidInvocation = spawnSync(process.execPath, [harness, '--invalid-option'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      env: baseEnvironment,
+    });
+    expect(invalidInvocation.status).toBe(1);
+    expect(invalidInvocation.stderr).toContain('phase1.stage.invocation.failed');
+    expect(invalidInvocation.stderr).not.toContain('--invalid-option');
   });
 
   test.skipIf(process.platform === 'win32')(

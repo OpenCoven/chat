@@ -123,6 +123,12 @@ const cargoBuildFailureCategories = [
   'unknown',
 ];
 const cleanupGrantFailureCategories = [
+  'service-unavailable',
+  'process-secret-unavailable',
+  'random-unavailable',
+  'marker-identity-unavailable',
+  'marker-publish-unavailable',
+  'collision-exhausted',
   'secure-store-unavailable',
   'keychain-failure',
   'cleanup-grant-rejected',
@@ -899,11 +905,15 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         ? error.message
         : '';
     const rpcFailure =
-      /^native RPC conformance_issue_native_custody_cleanup failed with (secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
         message,
       );
     if (rpcFailure !== null) {
-      return `phase1.native-scenarios.cleanup-grant.${rpcFailure[1].replaceAll('_', '-')}`;
+      const category =
+        rpcFailure[1] === 'cleanup_grant_rejected'
+          ? rpcFailure[1]
+          : rpcFailure[1].replace(/^cleanup_grant_/u, '');
+      return `phase1.native-scenarios.cleanup-grant.${category.replaceAll('_', '-')}`;
     }
     if (message === 'native RPC timed out for conformance_issue_native_custody_cleanup') {
       return 'phase1.native-scenarios.cleanup-grant.timeout';

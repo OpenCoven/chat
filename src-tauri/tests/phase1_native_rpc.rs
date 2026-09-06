@@ -1461,7 +1461,7 @@ mod windows_cleanup {
         release_hook(&hook_directory, "issue-storage-identity");
         assert_eq!(
             rpc.receive()["error"],
-            json!({"code": "secure_store_unavailable", "retryable": true}),
+            json!({"code": "cleanup_grant_marker_publish_unavailable", "retryable": true}),
             "publication must reject a replaced parent chain even when the marker directory identity is retained",
         );
         rpc.shutdown();
