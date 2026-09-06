@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "25ed2350942c84925c42e12e74529abdc0320f5c"
+    "revision": "0daf81d885d57951d6a64d5e00a3f87775340c04"
   },
   "harnessAuthority": {
-    "revision": "25ed2350942c84925c42e12e74529abdc0320f5c",
-    "tree": "43bc5815d53263f9a74b25b44cca0d648c1ade4f",
+    "revision": "0daf81d885d57951d6a64d5e00a3f87775340c04",
+    "tree": "ac450c2c978171b178a207e3caaf60125902fed4",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -111,8 +111,8 @@
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "81362103449bb6cdfb97330fe7c67932a965982f",
-        "sha256": "d14f65fa32c82b33ecee6224dc79c86857c2d8d28965e3fb259578baf41d7a0d"
+        "blob": "8d060a0ddc5dd27ef7378db63322e44169855dc9",
+        "sha256": "1a83eb8495b671a9d490a26a8ce23745cdded680aa2b896142883acfde19064a"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "24053dd7a3290cc68b6c663ac42757532cfd2057",
-        "sha256": "4c346d112ab2714d6721f1ec27d35b0f53c67474162ac4d6cad38be4ed4a6d8f"
+        "blob": "7121f8883d9856c44ae6be412892a2f18809d678",
+        "sha256": "fa36fdea730232b7b8bb13ebd402a34702b6dbbb9fd38e3420bdcd385b3b66a0"
       }
     ],
     "productionDeltas": [
