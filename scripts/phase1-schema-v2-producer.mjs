@@ -850,7 +850,7 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   if (output.includes('failed to run custom build command for')) {
     return `${baseId}.build-script`;
   }
-  if (output.includes('could not compile') || /error\[e\d{4}\]:/u.test(output)) {
+  if (/^error\[e\d{4}\]:/mu.test(output) || /^error: could not compile(?:\s|$)/mu.test(output)) {
     return `${baseId}.compile`;
   }
   return `${baseId}.unknown`;
@@ -4433,13 +4433,16 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
   const operatorBefore = runSchemaV2PreflightStage('phase1.operator-fingerprint.failed', () =>
     operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes),
   );
-  const linuxSessionEnvironment =
-    schemaV2 && process.platform === 'linux'
-      ? curateLinuxSecretServiceEnvironment(
-          process.env,
-          process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
-        )
-      : {};
+  const linuxSessionEnvironment = runSchemaV2PreflightStage(
+    'phase1.stage.environment.failed',
+    () =>
+      schemaV2 && process.platform === 'linux'
+        ? curateLinuxSecretServiceEnvironment(
+            process.env,
+            process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+          )
+        : {},
+  );
   const executionRoot = runSchemaV2PreflightStage('phase1.stage.execution-root.failed', () =>
     createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' }),
   );

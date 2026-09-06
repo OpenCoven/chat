@@ -930,6 +930,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     ]) {
       expect(runSource).toContain(`runSchemaV2PreflightStage('${stage}'`);
     }
+    expect(runSource).toContain(
+      "const linuxSessionEnvironment = runSchemaV2PreflightStage(\n    'phase1.stage.environment.failed'",
+    );
   });
 
   test('authenticates the executing harness before schema-v2 dispatch', () => {
@@ -2542,6 +2545,16 @@ describe('Phase 1 real-authority conformance harness', () => {
     [
       'non-Rust bracketed error',
       'error[lockfile]: private non-compiler failure',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+    [
+      'embedded Rust error code',
+      'noterror[E0308]: private non-compiler failure',
+      'phase1.packaging.chat-native-build.unknown',
+    ],
+    [
+      'embedded compile phrase',
+      'note: helper could not compile private component',
       'phase1.packaging.chat-native-build.unknown',
     ],
   ])(
