@@ -273,6 +273,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.verified-runner.spawn',
   'phase1.stage.verified-runner.supervisor',
   'phase1.stage.verified-runner.exit-nonzero',
+  'phase1.stage.runtime-integrity.failed',
+  'phase1.stage.invocation.failed',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
   'phase1.stage.schema-v2-production.failed',
@@ -299,7 +301,33 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.chat-install.failed',
   'phase1.packaging.chat-web-build.failed',
   'phase1.packaging.chat-native-build.failed',
+  'phase1.packaging.chat-native-build.timeout',
+  'phase1.packaging.chat-native-build.output-limit',
+  'phase1.packaging.chat-native-build.spawn',
+  'phase1.packaging.chat-native-build.supervisor',
+  'phase1.packaging.chat-native-build.native-dependency',
+  'phase1.packaging.chat-native-build.dependency-fetch',
+  'phase1.packaging.chat-native-build.resource.memory',
+  'phase1.packaging.chat-native-build.resource.disk',
+  'phase1.packaging.chat-native-build.resource.killed',
+  'phase1.packaging.chat-native-build.linker',
+  'phase1.packaging.chat-native-build.build-script',
+  'phase1.packaging.chat-native-build.compile',
+  'phase1.packaging.chat-native-build.unknown',
   'phase1.packaging.coven-build.failed',
+  'phase1.packaging.coven-build.timeout',
+  'phase1.packaging.coven-build.output-limit',
+  'phase1.packaging.coven-build.spawn',
+  'phase1.packaging.coven-build.supervisor',
+  'phase1.packaging.coven-build.native-dependency',
+  'phase1.packaging.coven-build.dependency-fetch',
+  'phase1.packaging.coven-build.resource.memory',
+  'phase1.packaging.coven-build.resource.disk',
+  'phase1.packaging.coven-build.resource.killed',
+  'phase1.packaging.coven-build.linker',
+  'phase1.packaging.coven-build.build-script',
+  'phase1.packaging.coven-build.compile',
+  'phase1.packaging.coven-build.unknown',
   'phase1.packaging.outputs.failed',
   'phase1.stage.packaging-proof.failed',
   'phase1.stage.cave-authority.failed',
@@ -361,6 +389,24 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.credential-cleanup-result',
   'phase1.native-scenarios.stale-discovery',
   'phase1.native-scenarios.cleanup',
+  'phase1.native-scenarios.cleanup-grant',
+  'phase1.native-scenarios.cleanup-grant.service-unavailable',
+  'phase1.native-scenarios.cleanup-grant.process-secret-unavailable',
+  'phase1.native-scenarios.cleanup-grant.random-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
+  'phase1.native-scenarios.cleanup-grant.collision-exhausted',
+  'phase1.native-scenarios.cleanup-grant.secure-store-unavailable',
+  'phase1.native-scenarios.cleanup-grant.keychain-failure',
+  'phase1.native-scenarios.cleanup-grant.cleanup-grant-rejected',
+  'phase1.native-scenarios.cleanup-grant.invalid-native-input',
+  'phase1.native-scenarios.cleanup-grant.timeout',
+  'phase1.native-scenarios.cleanup-grant.process',
+  'phase1.native-scenarios.cleanup-grant.response',
+  'phase1.native-scenarios.cleanup-grant.unknown',
+  'phase1.native-scenarios.cleanup-custody',
+  'phase1.native-scenarios.cleanup-rpc',
+  'phase1.native-scenarios.cleanup-fixture-daemon',
   'phase1.native-scenarios.missing-keychain',
   'phase1.native-scenarios.missing-keychain-timeout',
   'phase1.native-scenarios.missing-keychain-output-limit',
@@ -427,6 +473,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.spawn',
   'phase1.packaging.cave-build.supervisor',
   'phase1.packaging.cave-build.phase.prebuild',
+  'phase1.packaging.cave-build.phase.conformance-wrapper',
   'phase1.packaging.cave-build.phase.next-build',
   'phase1.packaging.cave-build.phase.next-build.resource',
   'phase1.packaging.cave-build.phase.next-build.resource.spawn',
@@ -554,6 +601,9 @@ export function publicPhase1FailureDiagnostic(error) {
     if ('errors' in current && Array.isArray(current.errors)) {
       pending.push(...current.errors.slice(0, 16));
     }
+    if ('cause' in current) {
+      pending.push(current.cause);
+    }
     if (
       'result' in current &&
       current.result !== null &&
@@ -568,6 +618,16 @@ export function publicPhase1FailureDiagnostic(error) {
     }
   }
   return undefined;
+}
+
+export function throwCombinedPhase1Failures(primaryFailure, cleanupFailure, message) {
+  const failures = [primaryFailure, cleanupFailure].filter((failure) => failure !== undefined);
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, message);
+  }
 }
 
 export function runnerCheckoutFailureDiagnostic(error) {
@@ -628,9 +688,9 @@ export function classifyPackagingCommandFailure(baseId, error) {
         `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
       ).replaceAll('\r\n', '\n');
       let phase = 'unknown';
-      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild$/mu.test(output)) {
+      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'postbuild';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server$/mu.test(output)) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server(?:\s+.+)?$/mu.test(output)) {
         phase = 'server-bundle';
       } else if (output.includes('Creating an optimized production build')) {
         phase = /\bEAGAIN\b/u.test(output)
@@ -650,8 +710,10 @@ export function classifyPackagingCommandFailure(baseId, error) {
                       : output.includes('Compiled successfully')
                         ? 'next-build.typescript'
                         : 'next-build.compile';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild$/mu.test(output)) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
+        phase = 'conformance-wrapper';
       }
       return `${baseId}.phase.${phase}`;
     }
@@ -1258,6 +1320,7 @@ async function bootstrapVerifiedRunner(options) {
     return locked;
   });
   const bootstrapRoot = createProcessOwnedArtifactRoot({ prefix: 'p1boot', shortPath: true });
+  let primaryFailure;
   try {
     const harnessRoot = resolve(bootstrapRoot.rootPath, 'harness');
     const environment = {
@@ -1363,9 +1426,20 @@ async function bootstrapVerifiedRunner(options) {
       },
     );
     process.stdout.write(result.stdout);
-  } finally {
-    await bootstrapRoot.cleanup();
+  } catch (error) {
+    primaryFailure = error;
   }
+  let cleanupFailure;
+  try {
+    await bootstrapRoot.cleanup();
+  } catch (error) {
+    cleanupFailure = new Error('phase1.stage.runner-bootstrap.failed', { cause: error });
+  }
+  throwCombinedPhase1Failures(
+    primaryFailure,
+    cleanupFailure,
+    'Verified runner execution and cleanup both failed.',
+  );
 }
 
 function runCommand(
@@ -5183,8 +5257,12 @@ export function buildObservedSchemaV2Assertions({
   };
 }
 
-export async function runPhase1Conformance(options = parseArgs([])) {
-  assertNoNodeRuntimeInjection();
+export async function runPhase1Conformance(
+  options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs([])),
+) {
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );
@@ -5540,8 +5618,10 @@ export async function runPhase1Conformance(options = parseArgs([])) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  assertNoNodeRuntimeInjection();
-  const options = parseArgs(argv);
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
+  const options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs(argv));
   if (process.env[verifiedRunnerEnvironment] !== '1') {
     await runPublicPhase1StageAsync('phase1.stage.runner-bootstrap.failed', () =>
       bootstrapVerifiedRunner(options),

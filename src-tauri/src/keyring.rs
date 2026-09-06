@@ -77,6 +77,18 @@ pub(crate) enum KeyringError {
     Failure,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRejected,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantServiceUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantProcessSecretUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantRandomUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerIdentityUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerPublishUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantCollisionExhausted,
 }
 
 impl KeyringError {
@@ -87,6 +99,30 @@ impl KeyringError {
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantServiceUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_service_unavailable", false)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantProcessSecretUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_process_secret_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantRandomUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_random_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerIdentityUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_identity_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerPublishUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_publish_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantCollisionExhausted => {
+                NativeDiagnostic::new("cleanup_grant_collision_exhausted", true)
+            }
         }
     }
 }
@@ -267,7 +303,8 @@ impl NativeKeyring {
     fn cleanup_process_secret(&self, create: bool) -> Result<&[u8; 32], KeyringError> {
         if self.cleanup_process_secret.get().is_none() && create {
             let mut secret = Zeroizing::new([0_u8; 32]);
-            getrandom::fill(secret.as_mut()).map_err(|_| KeyringError::Unavailable)?;
+            getrandom::fill(secret.as_mut())
+                .map_err(|_| KeyringError::CleanupGrantProcessSecretUnavailable)?;
             let _ = self.cleanup_process_secret.set(secret);
         }
         self.cleanup_process_secret
@@ -622,7 +659,7 @@ impl NativeKeyring {
         let service = self.service_name();
         self.reject_provider_if_configured()?;
         if service == SERVICE {
-            return Err(KeyringError::Unavailable);
+            return Err(KeyringError::CleanupGrantServiceUnavailable);
         }
         let accounts = canonical_conformance_cleanup_accounts(instance_ids)?;
         let grant =
@@ -1963,6 +2000,39 @@ mod tests {
             .unwrap(),
             "ai.opencoven.chat.phase1.0123456789abcdef0123456789abcdef"
         );
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_grant_issue_failures_have_bounded_native_diagnostics() {
+        for (error, expected) in [
+            (
+                KeyringError::CleanupGrantServiceUnavailable,
+                "cleanup_grant_service_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantProcessSecretUnavailable,
+                "cleanup_grant_process_secret_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantRandomUnavailable,
+                "cleanup_grant_random_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerIdentityUnavailable,
+                "cleanup_grant_marker_identity_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerPublishUnavailable,
+                "cleanup_grant_marker_publish_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantCollisionExhausted,
+                "cleanup_grant_collision_exhausted",
+            ),
+        ] {
+            assert_eq!(error.diagnostic().code, expected);
+        }
     }
 
     #[cfg(feature = "phase1-conformance")]
