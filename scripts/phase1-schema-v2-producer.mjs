@@ -999,7 +999,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         ? error.message
         : '';
     const cleanupBoundaryFailure =
-      /^native RPC conformance_cleanup_native_custody failed with cleanup_(backend_unavailable|lock_unavailable|installation_delete_unavailable|credential_delete_unavailable)$/u.exec(
+      /^native RPC conformance_cleanup_native_custody failed with cleanup_(backend_unavailable|lock_unavailable|lock_process_unavailable|lock_path_unavailable|lock_file_unavailable|lock_contended|installation_delete_unavailable|credential_delete_unavailable)$/u.exec(
         message,
       );
     if (cleanupBoundaryFailure !== null) {

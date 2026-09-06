@@ -435,6 +435,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.cleanup-custody.cleanup-grant-rejected',
   'phase1.native-scenarios.cleanup-custody.backend-unavailable',
   'phase1.native-scenarios.cleanup-custody.lock-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-process-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-path-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-file-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-contended',
   'phase1.native-scenarios.cleanup-custody.installation-delete-unavailable',
   'phase1.native-scenarios.cleanup-custody.credential-delete-unavailable',
   'phase1.native-scenarios.cleanup-custody.invalid-native-input',
@@ -1770,6 +1774,7 @@ export async function cloneExactCheckout({
     throw new Error(`${label} source root is unavailable.`);
   }
   const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
+  const safeDirectory = localCheckoutSafeDirectory(sourceRoot);
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   let cloneSourceArguments = [];
   if (sourceRef !== undefined) {
@@ -1787,7 +1792,7 @@ export async function cloneExactCheckout({
           '-c',
           `core.hooksPath=${devNull}`,
           '-c',
-          `safe.directory=${sourceGitDirectory}`,
+          `safe.directory=${safeDirectory}`,
           'for-each-ref',
           '--format=%(refname)',
           sourceRef,
@@ -1810,7 +1815,7 @@ export async function cloneExactCheckout({
           '-c',
           `core.hooksPath=${devNull}`,
           '-c',
-          `safe.directory=${sourceGitDirectory}`,
+          `safe.directory=${safeDirectory}`,
           'rev-parse',
           '--verify',
           `${sourceRef}^{commit}`,
@@ -1858,6 +1863,10 @@ export async function cloneExactCheckout({
     ['-c', `core.hooksPath=${devNull}`, 'checkout', '--detach', '--force', revision],
     { cwd: destinationRoot, env: checkoutEnvironment },
   );
+}
+
+export function localCheckoutSafeDirectory(sourceRoot) {
+  return realpathSync(sourceRoot);
 }
 
 async function createExactCheckouts(artifactRoot, options, lock, environment) {
