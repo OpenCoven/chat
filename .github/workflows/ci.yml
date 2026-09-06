@@ -680,6 +680,11 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Reproduce shallow Windows authority checkout
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance.test.ts
+          -t "clones an exact protected tag from a shallow Windows source"
       - name: Run real Windows supervisor behavior
         shell: pwsh
         env:

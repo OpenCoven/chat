@@ -267,6 +267,11 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.runner-lock.failed',
   'phase1.stage.runner-checkout.failed',
   'phase1.stage.runner-checkout.unsafe-source-owner',
+  'phase1.stage.runner-checkout.source-reference',
+  'phase1.stage.runner-checkout.source-revision',
+  'phase1.stage.runner-checkout.source-tag',
+  'phase1.stage.runner-checkout.clone',
+  'phase1.stage.runner-checkout.checkout',
   'phase1.stage.runner-checkout-verification.failed',
   'phase1.stage.verified-runner.failed',
   'phase1.stage.verified-runner.timeout',
@@ -428,6 +433,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.cleanup-custody.secure-store-unavailable',
   'phase1.native-scenarios.cleanup-custody.keychain-failure',
   'phase1.native-scenarios.cleanup-custody.cleanup-grant-rejected',
+  'phase1.native-scenarios.cleanup-custody.backend-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-unavailable',
+  'phase1.native-scenarios.cleanup-custody.installation-delete-unavailable',
+  'phase1.native-scenarios.cleanup-custody.credential-delete-unavailable',
   'phase1.native-scenarios.cleanup-custody.invalid-native-input',
   'phase1.native-scenarios.cleanup-custody.timeout',
   'phase1.native-scenarios.cleanup-custody.process',
@@ -671,6 +680,26 @@ export function runnerCheckoutFailureDiagnostic(error) {
     )
   ) {
     return 'phase1.stage.runner-checkout.unsafe-source-owner';
+  }
+  if (error instanceof CommandExecutionError) {
+    const suffixDiagnostics = [
+      [' source reference', 'phase1.stage.runner-checkout.source-reference'],
+      [' source revision', 'phase1.stage.runner-checkout.source-revision'],
+      [' clone', 'phase1.stage.runner-checkout.clone'],
+      [' checkout', 'phase1.stage.runner-checkout.checkout'],
+    ];
+    for (const [suffix, diagnostic] of suffixDiagnostics) {
+      if (error.label.endsWith(suffix)) {
+        return diagnostic;
+      }
+    }
+  }
+  if (
+    error instanceof Error &&
+    (error.message.endsWith(' source tag is unavailable or ambiguous.') ||
+      error.message.endsWith(' source tag does not match the immutable revision.'))
+  ) {
+    return 'phase1.stage.runner-checkout.source-tag';
   }
   return 'phase1.stage.runner-checkout.failed';
 }
