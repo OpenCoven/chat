@@ -266,6 +266,12 @@ export function schemaV2CaveBuildEnvironment(environment = process.env) {
   };
 }
 
+export function bindMacosKeychainSessionEnvironment(environment, session) {
+  environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED = '1';
+  environment.PHASE1_TEST_KEYCHAIN = session.keychainPath;
+  return environment;
+}
+
 export function windowsJobBindingEnvironment(
   environment = process.env,
   platform = process.platform,
@@ -4655,6 +4661,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     if (schemaV2 && process.platform === 'darwin') {
       activeStage = 'phase1.stage.native-scenarios.failed';
       macosKeychainSession = prepareMacosKeychainSession({ home: environment.HOME });
+      bindMacosKeychainSessionEnvironment(environment, macosKeychainSession);
     }
     activeStage = 'phase1.stage.native-scenarios.failed';
     nativeProof = await runNativeScenarios({

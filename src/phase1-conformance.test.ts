@@ -83,7 +83,10 @@ import {
   readPhase1ConformanceLock,
 } from '../scripts/phase1-conformance-lock.mjs';
 // @ts-expect-error The executable script intentionally has no declaration file.
-import { cloneExactCheckout as cloneSchemaV2ExactCheckout } from '../scripts/phase1-schema-v2-producer.mjs';
+import {
+  bindMacosKeychainSessionEnvironment,
+  cloneExactCheckout as cloneSchemaV2ExactCheckout,
+} from '../scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -101,6 +104,20 @@ function resolvePowerShellPath() {
 }
 
 const powerShellPath = resolvePowerShellPath();
+
+test('binds the explicit macOS keychain path into native cleanup children', () => {
+  const environment: Record<string, string> = { HOME: '/isolated/home' };
+
+  expect(
+    bindMacosKeychainSessionEnvironment(environment, {
+      keychainPath: '/isolated/home/Library/Keychains/phase1.keychain-db',
+    }),
+  ).toBe(environment);
+  expect(environment).toMatchObject({
+    OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED: '1',
+    PHASE1_TEST_KEYCHAIN: '/isolated/home/Library/Keychains/phase1.keychain-db',
+  });
+});
 
 function createSupervisorArtifactFixture(platform: string) {
   const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'phase1-supervisor-artifact-')));

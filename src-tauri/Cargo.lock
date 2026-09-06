@@ -2737,6 +2737,7 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "reqwest",
+ "security-framework",
  "serde",
  "serde_jcs",
  "serde_json",

@@ -11,6 +11,8 @@ use std::marker::PhantomData;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+use security_framework::{item, os::macos::keychain::SecKeychain};
 #[cfg(any(windows, test, feature = "phase1-conformance"))]
 use sha2::{Digest, Sha256};
 
@@ -40,6 +42,8 @@ const CONFORMANCE_CLEANUP_SERVICE: &str = "ai.opencoven.chat.conformance-cleanup
 const CONFORMANCE_CLEANUP_ACCOUNT_PREFIX: &str = "cleanup-reservation-v1";
 #[cfg(feature = "phase1-conformance")]
 const CONFORMANCE_HARNESS_IDENTITY: &str = "phase1-native-rpc-v1";
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+const CONFORMANCE_TEST_KEYCHAIN_ENV: &str = "PHASE1_TEST_KEYCHAIN";
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -790,29 +794,87 @@ trait CleanupBackend {
 #[cfg(feature = "phase1-conformance")]
 struct NativeCleanupBackend;
 
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn conformance_macos_keychain() -> Result<SecKeychain, KeyringError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = env::var_os(CONFORMANCE_TEST_KEYCHAIN_ENV).ok_or(KeyringError::Unavailable)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o077 != 0
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    SecKeychain::open(path).map_err(|_| KeyringError::Unavailable)
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn conformance_macos_entry_present(service: &str, account: &str) -> Result<bool, KeyringError> {
+    let keychains = [conformance_macos_keychain()?];
+    let mut options = item::ItemSearchOptions::new();
+    options
+        .keychains(&keychains)
+        .class(item::ItemClass::generic_password())
+        .service(service)
+        .account(account)
+        .limit(item::Limit::All);
+    match options.search() {
+        Ok(entries) => match entries.len() {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(KeyringError::Failure),
+        },
+        Err(error) if error.code() == -25300 => Ok(false),
+        Err(_) => Err(KeyringError::Unavailable),
+    }
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn delete_conformance_macos_entry(service: &str, account: &str) -> Result<(), KeyringError> {
+    let keychains = [conformance_macos_keychain()?];
+    let mut options = item::ItemSearchOptions::new();
+    options
+        .keychains(&keychains)
+        .class(item::ItemClass::generic_password())
+        .service(service)
+        .account(account);
+    options.delete().map_err(|_| KeyringError::Unavailable)
+}
+
 #[cfg(feature = "phase1-conformance")]
 impl CleanupBackend for NativeCleanupBackend {
     fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
-        let entry = NativeKeyring::entry_for(service, account)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
-            Err(error) => Err(map_keyring_error(error)),
+        #[cfg(target_os = "macos")]
+        {
+            return delete_conformance_macos_entry(service, account);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let entry = NativeKeyring::entry_for(service, account)?;
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+                Err(error) => Err(map_keyring_error(error)),
+            }
         }
     }
 
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
-        NativeKeyring::ensure_store_initialized()?;
         #[cfg(target_os = "macos")]
-        let search = std::collections::HashMap::from([("service", service), ("user", account)]);
-        #[cfg(all(unix, not(target_os = "macos")))]
-        let search = std::collections::HashMap::from([("service", service), ("username", account)]);
-        #[cfg(unix)]
         {
-            match Entry::search(&search).map_err(map_keyring_error)?.len() {
+            return conformance_macos_entry_present(service, account);
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            NativeKeyring::ensure_store_initialized()?;
+            let search =
+                std::collections::HashMap::from([("service", service), ("username", account)]);
+            return match Entry::search(&search).map_err(map_keyring_error)?.len() {
                 0 => Ok(false),
                 1 => Ok(true),
                 _ => Err(KeyringError::Failure),
-            }
+            };
         }
         #[cfg(not(unix))]
         {
