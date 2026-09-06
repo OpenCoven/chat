@@ -86,7 +86,13 @@ pub(crate) enum KeyringError {
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantMarkerHomeUnavailable,
     #[cfg(feature = "phase1-conformance")]
-    CleanupGrantMarkerDirectoryUnavailable,
+    CleanupGrantMarkerDirectoryCreateUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryOpenUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryMetadataUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryTrustUnavailable,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantMarkerSyncUnavailable,
     #[cfg(feature = "phase1-conformance")]
@@ -122,8 +128,20 @@ impl KeyringError {
                 NativeDiagnostic::new("cleanup_grant_marker_home_unavailable", true)
             }
             #[cfg(feature = "phase1-conformance")]
-            Self::CleanupGrantMarkerDirectoryUnavailable => {
-                NativeDiagnostic::new("cleanup_grant_marker_directory_unavailable", true)
+            Self::CleanupGrantMarkerDirectoryCreateUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_create_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryOpenUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_open_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryMetadataUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_metadata_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryTrustUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_trust_unavailable", true)
             }
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantMarkerSyncUnavailable => {
@@ -2045,8 +2063,20 @@ mod tests {
                 "cleanup_grant_marker_home_unavailable",
             ),
             (
-                KeyringError::CleanupGrantMarkerDirectoryUnavailable,
-                "cleanup_grant_marker_directory_unavailable",
+                KeyringError::CleanupGrantMarkerDirectoryCreateUnavailable,
+                "cleanup_grant_marker_directory_create_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryOpenUnavailable,
+                "cleanup_grant_marker_directory_open_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryMetadataUnavailable,
+                "cleanup_grant_marker_directory_metadata_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryTrustUnavailable,
+                "cleanup_grant_marker_directory_trust_unavailable",
             ),
             (
                 KeyringError::CleanupGrantMarkerSyncUnavailable,

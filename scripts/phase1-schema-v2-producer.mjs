@@ -264,20 +264,20 @@ export function windowsJobBindingEnvironment(
   const compilerLibraryPath = environment.LIB;
   const compilerIncludePath = environment.INCLUDE;
   if (required !== '1') {
-    throw new Error('Windows schema-v2 evidence Job Object supervision is required.');
+    throw new Error('phase1.stage.invocation.windows-job-required');
   }
   if (
     typeof nonce !== 'string' ||
     !/^[0-9a-f]{32}$/u.test(nonce) ||
     name !== `Local\\OpenCoven.Chat.Conformance.${nonce}`
   ) {
-    throw new Error('Windows Job Object supervision is not nonce-bound.');
+    throw new Error('phase1.stage.invocation.windows-job-identity');
   }
   if (
     typeof systemPwsh !== 'string' ||
     systemPwsh.toLowerCase() !== 'c:\\program files\\powershell\\7\\pwsh.exe'
   ) {
-    throw new Error('Windows Job Object membership requires trusted system PowerShell.');
+    throw new Error('phase1.stage.invocation.windows-powershell');
   }
   for (const [label, value] of [
     ['library', compilerLibraryPath],
@@ -300,7 +300,7 @@ export function windowsJobBindingEnvironment(
         );
       })
     ) {
-      throw new Error(`Windows Job Object ${label} path is outside trusted toolchain roots.`);
+      throw new Error('phase1.stage.invocation.windows-toolchain-path');
     }
   }
   const requireCanonicalWindowsPath = (value, label) => {
@@ -313,7 +313,7 @@ export function windowsJobBindingEnvironment(
       !windowsPath.isAbsolute(value) ||
       windowsPath.normalize(value) !== value
     ) {
-      throw new Error(`Windows Job Object ${label} path is invalid.`);
+      throw new Error('phase1.stage.invocation.windows-path');
     }
     return value;
   };
@@ -325,7 +325,7 @@ export function windowsJobBindingEnvironment(
       relativePath.startsWith(`..${windowsPath.sep}`) ||
       windowsPath.isAbsolute(relativePath)
     ) {
-      throw new Error(`Windows Job Object ${label} path is outside the bootstrap root.`);
+      throw new Error('phase1.stage.invocation.windows-artifact-binding');
     }
   };
   const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot, 'bootstrap root');
@@ -358,7 +358,7 @@ export function windowsJobBindingEnvironment(
         .toLowerCase() ||
     existsSync(canonicalSourceRecord)
   ) {
-    throw new Error('Windows Job Object artifact or temporary binding is invalid.');
+    throw new Error('phase1.stage.invocation.windows-artifact-binding');
   }
   if (
     typeof systemRoot !== 'string' ||
@@ -368,7 +368,7 @@ export function windowsJobBindingEnvironment(
     typeof commandProcessor !== 'string' ||
     commandProcessor.toLowerCase() !== 'c:\\windows\\system32\\cmd.exe'
   ) {
-    throw new Error('Windows Job Object base system environment is invalid.');
+    throw new Error('phase1.stage.invocation.windows-system');
   }
   if (
     typeof executablePath !== 'string' ||
@@ -378,7 +378,7 @@ export function windowsJobBindingEnvironment(
     executablePath.includes('\r') ||
     pathExtensions !== '.COM;.EXE;.BAT;.CMD'
   ) {
-    throw new Error('Windows Job Object executable environment is invalid.');
+    throw new Error('phase1.stage.invocation.windows-executable');
   }
   return {
     OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
@@ -908,7 +908,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         ? error.message
         : '';
     const rpcFailure =
-      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_home_unavailable|cleanup_grant_marker_directory_unavailable|cleanup_grant_marker_sync_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_home_unavailable|cleanup_grant_marker_directory_unavailable|cleanup_grant_marker_directory_create_unavailable|cleanup_grant_marker_directory_open_unavailable|cleanup_grant_marker_directory_metadata_unavailable|cleanup_grant_marker_directory_trust_unavailable|cleanup_grant_marker_sync_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
         message,
       );
     if (rpcFailure !== null) {

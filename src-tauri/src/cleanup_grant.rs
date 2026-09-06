@@ -33,7 +33,10 @@ const MAX_MARKER_BYTES: usize = 16 * 1024;
 #[derive(Debug, PartialEq, Eq)]
 enum MarkerIdentityError {
     HomeUnavailable,
-    DirectoryUnavailable,
+    DirectoryCreateUnavailable,
+    DirectoryOpenUnavailable,
+    DirectoryMetadataUnavailable,
+    DirectoryTrustUnavailable,
     SyncUnavailable,
     IdentityUnavailable,
 }
@@ -93,8 +96,17 @@ pub(crate) fn issue(
     validate_conformance_cleanup_accounts(accounts)?;
     let storage_identity = marker_io::identity().map_err(|error| match error {
         MarkerIdentityError::HomeUnavailable => KeyringError::CleanupGrantMarkerHomeUnavailable,
-        MarkerIdentityError::DirectoryUnavailable => {
-            KeyringError::CleanupGrantMarkerDirectoryUnavailable
+        MarkerIdentityError::DirectoryCreateUnavailable => {
+            KeyringError::CleanupGrantMarkerDirectoryCreateUnavailable
+        }
+        MarkerIdentityError::DirectoryOpenUnavailable => {
+            KeyringError::CleanupGrantMarkerDirectoryOpenUnavailable
+        }
+        MarkerIdentityError::DirectoryMetadataUnavailable => {
+            KeyringError::CleanupGrantMarkerDirectoryMetadataUnavailable
+        }
+        MarkerIdentityError::DirectoryTrustUnavailable => {
+            KeyringError::CleanupGrantMarkerDirectoryTrustUnavailable
         }
         MarkerIdentityError::SyncUnavailable => KeyringError::CleanupGrantMarkerSyncUnavailable,
         MarkerIdentityError::IdentityUnavailable => {
@@ -385,14 +397,14 @@ mod marker_io {
             }
 
             for name in DIRECTORY_NAMES {
-                let name =
-                    CString::new(name).map_err(|_| MarkerIdentityError::DirectoryUnavailable)?;
+                let name = CString::new(name)
+                    .map_err(|_| MarkerIdentityError::DirectoryCreateUnavailable)?;
                 let created =
                     unsafe { libc::mkdirat(current.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
                 if !created {
                     let error = std::io::Error::last_os_error();
                     if error.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(MarkerIdentityError::DirectoryUnavailable);
+                        return Err(MarkerIdentityError::DirectoryCreateUnavailable);
                     }
                 }
                 let descriptor = unsafe {
@@ -403,15 +415,14 @@ mod marker_io {
                     )
                 };
                 if descriptor < 0 {
-                    return Err(MarkerIdentityError::DirectoryUnavailable);
+                    return Err(MarkerIdentityError::DirectoryOpenUnavailable);
                 }
                 let next = unsafe { File::from_raw_fd(descriptor) };
-                validate_directory(
-                    &next
-                        .metadata()
-                        .map_err(|_| MarkerIdentityError::DirectoryUnavailable)?,
-                )
-                .map_err(|_| MarkerIdentityError::DirectoryUnavailable)?;
+                let metadata = next
+                    .metadata()
+                    .map_err(|_| MarkerIdentityError::DirectoryMetadataUnavailable)?;
+                validate_directory(&metadata)
+                    .map_err(|_| MarkerIdentityError::DirectoryTrustUnavailable)?;
                 if created {
                     next.sync_all()
                         .map_err(|_| MarkerIdentityError::SyncUnavailable)?;
@@ -1266,7 +1277,19 @@ mod tests {
 
         assert_eq!(
             marker_io::identity_at(&home.0),
-            Err(MarkerIdentityError::DirectoryUnavailable)
+            Err(MarkerIdentityError::DirectoryTrustUnavailable)
+        );
+    }
+
+    #[test]
+    fn marker_identity_classifies_an_existing_marker_file() {
+        let home = TestHome::new(0o700);
+        fs::write(home.0.join(".coven"), b"not a directory")
+            .expect("marker parent file must be created");
+
+        assert_eq!(
+            marker_io::identity_at(&home.0),
+            Err(MarkerIdentityError::DirectoryOpenUnavailable)
         );
     }
 }
