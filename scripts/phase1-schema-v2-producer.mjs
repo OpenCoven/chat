@@ -731,7 +731,13 @@ export function classifyCavePackageFailure(result) {
   const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
   if (
     !output.includes('Creating an optimized production build') ||
-    /^> coven-cave@\d+\.\d+\.\d+ (?:build:server|postbuild)(?:\s+.+)?$/mu.test(output)
+    /^> coven-cave@\d+\.\d+\.\d+ (?:build:server|postbuild)(?:\s+.+)?$/mu.test(output) ||
+    [
+      'Compiled successfully',
+      'Collecting page data',
+      'Generating static pages',
+      'Finalizing page optimization',
+    ].some((marker) => output.includes(marker))
   ) {
     return undefined;
   }

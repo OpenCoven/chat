@@ -2674,6 +2674,38 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
   );
 
+  test.each([
+    ['Compiled successfully', 'typescript'],
+    ['Collecting page data', 'page-data'],
+    ['Generating static pages', 'static-pages'],
+    ['Finalizing page optimization', 'finalization'],
+  ])(
+    'does not classify module-resolution output after the Next.js %s phase as a compile failure',
+    async (phaseMarker, expectedPhase) => {
+      const schemaV2Producer = '../scripts/phase1-schema-v2-producer.mjs';
+      const { classifyCavePackageFailure: classifySchemaV2CavePackageFailure } = await import(
+        schemaV2Producer
+      );
+      const result = {
+        code: 1,
+        stdout: [
+          'Creating an optimized production build',
+          phaseMarker,
+          "Module not found: Can't resolve 'private-module'",
+        ].join('\n'),
+        stderr: 'private stderr',
+      };
+
+      expect(classifySchemaV2CavePackageFailure(result)).toBeUndefined();
+      expect(
+        classifyPackagingCommandFailure(
+          'phase1.packaging.cave-build',
+          new CommandExecutionError('private command', result),
+        ),
+      ).toBe(`phase1.packaging.cave-build.phase.next-build.${expectedPhase}`);
+    },
+  );
+
   test('preserves a bounded Cave build diagnostic through schema-v2 stage wrapping', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
     const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<

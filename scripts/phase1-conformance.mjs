@@ -724,26 +724,28 @@ export function classifyPackagingCommandFailure(baseId, error) {
               ? 'next-build.resource.memory.allocation'
               : /\b(?:Killed(?:: 9)?|SIGKILL)\b/u.test(output)
                 ? 'next-build.resource.killed'
-                : /\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu.test(output)
-                  ? 'next-build.compile.permission'
-                  : /module not found|can't resolve|cannot find module/iu.test(output)
-                    ? 'next-build.compile.module-resolution'
-                    : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
-                          output,
-                        )
-                      ? 'next-build.compile.native-module'
-                      : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
-                            output,
-                          )
-                        ? 'next-build.compile.plugin'
-                        : output.includes('Finalizing page optimization')
-                          ? 'next-build.finalization'
-                          : output.includes('Generating static pages')
-                            ? 'next-build.static-pages'
-                            : output.includes('Collecting page data')
-                              ? 'next-build.page-data'
-                              : output.includes('Compiled successfully')
-                                ? 'next-build.typescript'
+                : output.includes('Finalizing page optimization')
+                  ? 'next-build.finalization'
+                  : output.includes('Generating static pages')
+                    ? 'next-build.static-pages'
+                    : output.includes('Collecting page data')
+                      ? 'next-build.page-data'
+                      : output.includes('Compiled successfully')
+                        ? 'next-build.typescript'
+                        : /\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu.test(
+                              output,
+                            )
+                          ? 'next-build.compile.permission'
+                          : /module not found|can't resolve|cannot find module/iu.test(output)
+                            ? 'next-build.compile.module-resolution'
+                            : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
+                                  output,
+                                )
+                              ? 'next-build.compile.native-module'
+                              : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
+                                    output,
+                                  )
+                                ? 'next-build.compile.plugin'
                                 : 'next-build.compile';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
