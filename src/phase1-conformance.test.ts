@@ -673,6 +673,19 @@ describe('Phase 1 real-authority conformance harness', () => {
         ],
         { environment, ...runtime },
       );
+      expect(() =>
+        parseArgs(
+          [
+            '--validator-revision',
+            'd'.repeat(40),
+            '--platform',
+            'win32-x64',
+            '--output',
+            `${artifactDirectory}\\client-v1-conformance-other.json`,
+          ],
+          { environment, ...runtime },
+        ),
+      ).toThrow('phase1.stage.invocation.windows-output-binding');
       const projected = createVerifiedRunnerEnvironment(
         options,
         resolve(fixture.root, 'relocated-harness'),
@@ -1097,6 +1110,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.stage.invocation.windows-system',
     'phase1.stage.invocation.windows-executable',
     'phase1.stage.invocation.windows-output-binding',
+    'phase1.stage.invocation.unix-output-binding',
     'phase1.stage.invocation.platform-mismatch',
     'phase1.packaging.frozen-consumer.failed',
     'phase1.packaging.cave-install.failed',
@@ -2100,7 +2114,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           ],
           runtime,
         ),
-      ).toThrow('phase1.stage.invocation.windows-output-binding');
+      ).toThrow('phase1.stage.invocation.unix-output-binding');
       expect(() =>
         parseArgs(
           [

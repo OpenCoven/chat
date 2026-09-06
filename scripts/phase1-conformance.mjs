@@ -284,6 +284,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.invocation.windows-system',
   'phase1.stage.invocation.windows-executable',
   'phase1.stage.invocation.windows-output-binding',
+  'phase1.stage.invocation.unix-output-binding',
   'phase1.stage.invocation.platform-mismatch',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
@@ -958,7 +959,11 @@ export function parseArgs(argv, runtime = {}) {
     );
     const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('phase1.stage.invocation.windows-output-binding');
+      throw new Error(
+        runtimePlatform === 'win32'
+          ? 'phase1.stage.invocation.windows-output-binding'
+          : 'phase1.stage.invocation.unix-output-binding',
+      );
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
