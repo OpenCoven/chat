@@ -428,7 +428,7 @@ describe('contract canary temp directory safety', () => {
       sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
+    expect(lock.cave.revision).toBe('bc310e9753783678014086ed6f7ef7d3fb797967');
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
@@ -540,12 +540,12 @@ describe('contract canary temp directory safety', () => {
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
-        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+        revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
       },
     } satisfies CheckoutHeadsInput;
     const packedFixtureInput = {
       cave: {
-        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+        revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
         artifacts: {
           contractFixture: {
             path: 'src/lib/server/client-v1/contract-fixture.json',
@@ -575,7 +575,7 @@ describe('contract canary temp directory safety', () => {
     const missingFixtureRevision: PackedFixtureInput = { cave: {} };
 
     expect(checkoutHeadsInput.sdk.repository).toBe('OpenCoven/sdk');
-    expect(packedFixtureInput.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
+    expect(packedFixtureInput.cave.revision).toBe('bc310e9753783678014086ed6f7ef7d3fb797967');
     expect(missingCheckoutRevision).toBeDefined();
     expect(missingFixtureRevision).toBeDefined();
   });

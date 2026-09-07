@@ -21,8 +21,8 @@ the final bytes.
   `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
   authority;
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `6325fc4c1154c7d7398074a9760a2e2dc323b424`, tree
-  `9144939792d3dbdd91c208d7e2abc5ecc0eac089`, release `0.3.12`;
+- Cave authority `bc310e9753783678014086ed6f7ef7d3fb797967`, tree
+  `8a9882f45c7b9f55a2d9bb6cbd16d3ead3c489e6`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support at the exact `harness.revision` and
   `harnessAuthority.tree` generated from the preceding code/integration
