@@ -80,16 +80,16 @@ remain: the primary checkout, PR #86, PR #138, and active v15 work.
 | `fix/issue-90-disconnected-copy` | Preserve for PR #138 until delivered. |
 | `fix/protected-cleanup-diagnostics-v10` | Equivalent patch landed as `1b3021a`; main retains the cleanup categories and adds finer Unix lock diagnostics. Clean checkout removed; original branch retained. |
 | `fix/rebind-merged-conformance-authority` | Complete checkout tree equals merged replacement `cfde9e8`; redundant checkout removed. Original local branch retained because its tip is not an ancestor of main. |
-| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`); main also normalizes Git null paths. Clean checkout removed; original branch retained for historical test and authority bindings. |
+| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`); main also normalizes Git null paths. Clean checkout and local/remote branches retired; exact tip `977e016` is preserved in the verified warning/root bundle for historical test and authority bindings. |
 | `fix/protected-conformance-runtime-followup` | Main retains the curated checkout environment and adds source-directory trust and protected tag handling. Supervisor and producer merge results add no changes to main. Clean checkout removed; original branch retained. |
 | `fix/phase1-diagnostic-collapse` | Functional changes already incorporated in main; clean checkout removed. Original branch retained because obsolete authority bindings prevent an ancestry-based deletion. |
 | `fix/direct-protected-cave-build` | No checkout; three patches lack equivalents in main. Compare with delivered PR #119 before retirement. |
 | `fix/direct-protected-cave-build-final` | No checkout; one patch lacks an equivalent in main. Review the authority pin before retirement. |
-| `chore/clean-release-warnings` | Local branch deleted with `git branch -d`: its clean merge result equals main tree `49d85359d73f00a3dad46c31187b0cb8f096ff6f`. Original tip `5f4b99a` remains in `origin/chore/clean-release-warnings`. |
+| `chore/clean-release-warnings` | Local branch deleted with `git branch -d`: its clean merge result equals main tree `49d85359d73f00a3dad46c31187b0cb8f096ff6f`. Original tip `5f4b99a` is preserved in the verified warning/root bundle; the redundant remote branch was retired. |
 
 Patch equivalence is a triage signal, not proof that later main changes retain
-the behavior. No dirty checkout, unique commit, or remote branch was deleted. The warning
-branch deletion preserved its exact tip in its upstream remote ref.
+the behavior. No dirty checkout or unique commit was discarded. Retired divergent remote
+refs were preserved in verified complete-history bundles before deletion.
 The documentation branch for this audit uses the primary checkout and adds no
 worktree. The minimum remaining checkout set is not yet proven: active and
 unreconciled work must be resolved first.
@@ -107,3 +107,44 @@ unreconciled work must be resolved first.
   draft cards from their source records.
 - Keep roadmap links, phase plans, PR descriptions, and workflow evidence
   consistent as each item lands. Do not close a gate from unit tests alone.
+
+## Remote branch closeout
+
+The roadmap audit landed through [PR #139](https://github.com/OpenCoven/chat/pull/139)
+at `ded69f2`, after Web checks and Contract canary passed in
+[run 34088141426](https://github.com/OpenCoven/chat/actions/runs/34088141426).
+
+The follow-up cleanup removed 21 remote branches whose exact tips were already
+reachable from main, plus five superseded branches after preserving their full
+histories in verified bundles. The roadmap PR branch was also removed. Every
+remote deletion was verified against a fresh remote listing; batch deletions
+used exact-tip leases to reject concurrent changes.
+
+Remaining remote branches:
+
+- `main`.
+- `feat/familiars-source-stage1`: draft PR #86, blocked on the SDK release.
+- `fix/issue-90-disconnected-copy`: draft PR #138; focused tests, typecheck,
+  formatting, and applicable CI passed at `f3962b4`.
+- `fix/protected-matrix-v15`: [draft PR #140](https://github.com/OpenCoven/chat/pull/140),
+  active conformance work; preserve its checkout and revalidate terminal CI.
+- `archive/sdk-integration-1140717`: an existing archive, retained deliberately.
+
+Recoverable local history is under
+`/Users/buns/worktree-backups/chat-consolidation-20260907/`:
+
+- `retired-authority-branches.bundle`: quarantine-authority, CI-gating, and
+  Windows-supervisor histories.
+- `retired-warning-and-root-branches.bundle`: release-warning and protected-root
+  histories, including their exact remote tips.
+- Matching JSON manifests, bundle verification receipts, and `audit/` inventories.
+
+Use `git bundle list-heads <bundle>` to inspect preserved refs, then fetch the
+chosen ref into a new `restored/` branch. Keep these archives until the historical
+work and retention requirements are explicitly resolved. Remaining local
+conformance refs have no checkout and preserve divergent authority history;
+they were not force-deleted to satisfy a branch-count target.
+
+Delivery remains incomplete: draft PR readiness, Teamwork mirror synchronization,
+a compatible Beads write path, protected release conformance, and the SDK release
+must still be resolved. Local cleanup is not proof of program completion.
