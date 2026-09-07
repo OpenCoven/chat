@@ -7,13 +7,13 @@ refresh GitHub runs and branch heads before acting on it.
 The [program register](superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md)
 remains the Beads dependency index. Its initial counts and ready lanes describe
 program creation, not verified current completion. No phase gate is closed by
-this audit. GitHub Projects membership and current Beads state remain unverified.
+this audit. Current Beads and Project reconciliation findings appear below.
 
 ## Delivery order
 
 | Priority | Work | Current evidence | Completion requirement |
 | --- | --- | --- | --- |
-| 1 | Protected Phase 1 conformance | [Main run 34074618490](https://github.com/OpenCoven/chat/actions/runs/34074618490): macOS succeeded; Linux and Windows failed; validation, attestation, and aggregation skipped | Successful frozen three-platform real-authority records, validation, attestation, and aggregation; record exact revisions in the phase gate |
+| 1 | Protected three-platform conformance | [Main run 34074618490](https://github.com/OpenCoven/chat/actions/runs/34074618490): macOS succeeded; Linux and Windows failed; validation, attestation, and aggregation skipped | Successful frozen three-platform real-authority records, validation, attestation, and aggregation; record exact revisions in the applicable release gate |
 | 2 | Disconnected familiar reads | [PR #138](https://github.com/OpenCoven/chat/pull/138), draft at `f3962b4`; [CI passed](https://github.com/OpenCoven/chat/actions/runs/34074123879); [issue #90](https://github.com/OpenCoven/chat/issues/90) remains open | Review regression coverage, finish PR review and delivery, verify issue closure after merge |
 | 3 | Familiar contract and analytics source | [PR #86](https://github.com/OpenCoven/chat/pull/86), parked draft at `e5aeec8`; PR reports SDK release and lock re-pin dependencies | Verify current producer release readiness, consume verified packed artifacts, re-pin canaries, pass native and real-authority checks before delivery |
 | 4 | Tracking reconciliation | [Familiars plan](superpowers/plans/2026-09-02-familiars-integration.md) and program register contain unchecked/historical work | Reconcile each deliverable with merged code and acceptance evidence; update Beads and the actual linked GitHub Project without inventing completion |
@@ -23,6 +23,37 @@ passed at the audited revision. It does not establish protected conformance or
 release readiness. The applicable workflow is
 [client-v1-conformance.yml](../.github/workflows/client-v1-conformance.yml), with
 its evidence contract in [phase1-conformance.md](phase1-conformance.md).
+
+## Beads and GitHub Project reconciliation
+
+Chat program cards already live in the organization's
+[Teamwork project](https://github.com/orgs/OpenCoven/projects/9). These are Beads
+visibility mirrors, not independent GitHub issues. Preserve the draft-card
+identity and regenerate their content from the authoritative Beads records.
+
+Read-only database inspection on 2026-09-07 found:
+
+| Record | Authoritative state | Mirror / documentation follow-up |
+| --- | --- | --- |
+| `cave-k0aqq` | Blocked on final release gate `cave-ilh1h`; updated September 5 | Its next-action note still refers to Phase 1 implementation; reconcile against current dependencies before claiming work |
+| `cave-23nmv` | Closed August 29, with PRs #30/#31 and run `33250233035` recorded as historical acceptance | Teamwork item `232459304` still says blocked; synchronize from Beads |
+| `cave-0prpu` | Closed August 29 with the historical 15/15 matrix recorded | Teamwork item `232459288` still says blocked; synchronize from Beads |
+
+Historical Phase 1 closure explicitly leaves full three-OS authority evidence,
+writes, and signed installers to later work. It does not establish success of
+the current protected release matrix. Preserve historical acceptance while
+tracking today's Linux/Windows failures against the release requirements.
+
+The installed Beads executable understands schema v53 while the database is
+v66. Inspection used `bd --readonly --ignore-schema-skew show`; no database
+write or migration was attempted. Use a compatible executable for updates.
+The repository Projects REST endpoint returned 404, but the organization
+Projects V2 REST endpoint successfully located Teamwork. The 404 is not a
+tracking blocker or evidence that no project exists.
+
+The organization `.github` repository's profile was also inspected; it is a
+general organization overview rather than Chat's delivery tracker. Keep this
+roadmap and the existing Teamwork mirrors as the Chat tracking entry points.
 
 ## Local branch and worktree disposition
 
@@ -59,8 +90,8 @@ unreconciled work must be resolved first.
   workflow authority and lockfile changes. Preserve unique work before cleanup.
 - Revalidate clean status, branch identity, reachability, and process ownership
   immediately before each additional worktree removal.
-- Refresh the canonical Beads program graph and map its open work to the
-  actual GitHub Project. The repository Projects REST request returned 404;
-  that does not prove no organization Project exists.
+- Refresh the canonical Beads program graph with a compatible executable,
+  reconcile obsolete next-action notes, and synchronize the existing Teamwork
+  draft cards from their source records.
 - Keep roadmap links, phase plans, PR descriptions, and workflow evidence
   consistent as each item lands. Do not close a gate from unit tests alone.
