@@ -92,6 +92,66 @@ const { bindMacosKeychainSessionEnvironment, cloneExactCheckout: cloneSchemaV2Ex
   schemaV2Producer;
 const projectRoot = resolve(import.meta.dirname, '..');
 
+test('Windows Chat fetches retain the frozen production history for local clones', () => {
+  const workflow = readFileSync(
+    resolve(projectRoot, '.github/workflows/client-v1-conformance.yml'),
+    'utf8',
+  );
+  const fetchArguments = (label: string, revision: string) => {
+    const end = workflow.indexOf(`-Label '${label}'`);
+    expect(end).toBeGreaterThan(-1);
+    const start = workflow.lastIndexOf('-ArgumentList @(', end);
+    expect(start).toBeGreaterThan(-1);
+    return [...workflow.slice(start, end).matchAll(/^\s*'([^']*)',?\s*$/gm)]
+      .map((match) => {
+        if (match[1] === undefined) throw new Error('Missing fetch argument');
+        return match[1];
+      })
+      .concat(revision);
+  };
+  const root = mkdtempSync(join(tmpdir(), 'phase1-windows-chat-history-'));
+  const remote = join(root, 'remote');
+  const source = join(root, 'source');
+  const destination = join(root, 'consumer');
+  const git = (args: string[], cwd = root) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    }).trim();
+  try {
+    git(['init', '--initial-branch=main', remote]);
+    git(['config', 'user.name', 'OpenCoven Test'], remote);
+    git(['config', 'user.email', 'opencoven-test@example.com'], remote);
+    git(['config', 'commit.gpgsign', 'false'], remote);
+    const revisions = ['production', 'harness', 'producer'].map((name) => {
+      writeFileSync(join(remote, 'tracked.txt'), `${name}\n`);
+      git(['add', 'tracked.txt'], remote);
+      git(['commit', '-m', name], remote);
+      return git(['rev-parse', 'HEAD'], remote);
+    });
+    const [production, harness, producer] = revisions;
+    if (!production || !harness || !producer) throw new Error('Missing fixture revision');
+    git(['init', source]);
+    git(['remote', 'add', 'origin', pathToFileURL(remote).href], source);
+    git(fetchArguments('Chat exact-SHA fetch', producer), source);
+    git(['checkout', '--detach', 'FETCH_HEAD'], source);
+    // The workflow also passes -C $workspace; cwd already selects that repository.
+    const harnessFetch = fetchArguments('Chat harness exact-SHA fetch', harness);
+    expect(harnessFetch.shift()).toBe('-C');
+    git(harnessFetch, source);
+    git(['update-ref', 'refs/tags/opencoven-phase1-harness', harness], source);
+    git(['clone', '--local', '--no-hardlinks', '--no-checkout', '--quiet', source, destination]);
+    git(['checkout', '--detach', '--force', production], destination);
+    expect(git(['rev-parse', 'HEAD'], destination)).toBe(production);
+    expect(readFileSync(join(destination, 'tracked.txt'), 'utf8')).toBe('production\n');
+    expect(git(['rev-parse', '--is-shallow-repository'], source)).toBe('false');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 function resolvePowerShellPath() {
   try {
     return execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['pwsh'], {
