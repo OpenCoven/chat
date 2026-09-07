@@ -8851,6 +8851,8 @@ jobs:
             ConvertFrom-Json
           if (
             $phase1Lock.version -ne 5 -or
+            $phase1Lock.chat.repository -cne 'OpenCoven/chat' -or
+            $phase1Lock.chat.revision -cnotmatch '^[0-9a-f]{40}$' -or
             $phase1Lock.harness.repository -cne 'OpenCoven/chat' -or
             $phase1Lock.harness.revision -cnotmatch '^[0-9a-f]{40}$' -or
             $phase1Lock.sdk.repository -cne 'OpenCoven/sdk' -or
@@ -8864,6 +8866,39 @@ jobs:
           ) {
             throw 'The protected Windows source lock is invalid.'
           }
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              '-c',
+              'credential.helper=',
+              '-c',
+              'core.hooksPath=NUL',
+              '-c',
+              'fetch.fsckObjects=true',
+              '-c',
+              'transfer.fsckObjects=true',
+              '-c',
+              'protocol.https.allow=always',
+              'fetch',
+              '--quiet',
+              '--no-tags',
+              '--depth=1',
+              'origin',
+              $phase1Lock.chat.revision
+            ) `
+            -Label 'Chat locked revision fetch'
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              'update-ref',
+              'refs/tags/opencoven-phase1-chat',
+              $phase1Lock.chat.revision
+            ) `
+            -Label 'Chat locked authority ref'
           Invoke-Checked `
             -FilePath $git `
             -ArgumentList @(

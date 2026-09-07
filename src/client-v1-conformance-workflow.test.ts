@@ -2522,6 +2522,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'phase1-conformance-run-*\\cargo-home\\git',
       'phase1-conformance-run-*\\pnpm-store',
       'phase1-conformance-run-*\\build',
+      'Chat locked revision fetch',
+      'refs/tags/opencoven-phase1-chat',
     ]) {
       expect(bootstrap).toContain(required);
     }
