@@ -57,6 +57,11 @@ complete SDK #38 platform records and never substitutes mocks for missing
 release assertions. Release evidence still requires complete real-authority
 runs on the frozen three-platform matrix.
 
+## Delivery tracking
+
+See the [delivery roadmap and consolidation audit](docs/roadmap.md) for current
+PR dependencies, protected conformance evidence, and remaining branch cleanup.
+
 ## Prerequisites
 
 - Node.js `24.18.1`
