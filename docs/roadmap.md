@@ -65,8 +65,11 @@ removed after its exact tip `0215d18` was proven reachable from refreshed
 A second clean checkout, `rebind-merged-conformance-authority`, was removed
 after its complete Git tree `521e25ba538ddbbd01a8fe1f5b9a58eb90612948` matched
 merged replacement `cfde9e854486221f61f0ee7f6a7ecf180184a525` exactly. Its
-original commit `06bd063` remains preserved by its local branch. Eight
-worktrees remain after these two removals.
+original commit `06bd063` remains preserved by its local branch. The clean `phase1-diagnostic-collapse` checkout was subsequently retired after
+merge-tree inspection showed no functional changes beyond main: the remaining
+conflicts are obsolete workflow, documentation, lock, and lock-test authority
+bindings. Its original branch and commit `6b457fd` remain intact. Seven
+worktrees remain after these three removals.
 
 | Branch | Disposition and next action |
 | --- | --- |
@@ -75,15 +78,16 @@ worktrees remain after these two removals.
 | `fix/issue-90-disconnected-copy` | Preserve for PR #138 until delivered. |
 | `fix/protected-cleanup-diagnostics-v10` | All branch patches have equivalents in main according to `git cherry`; exact tip is not an ancestor. Preserve ref pending final-tree reconciliation and safe deletion eligibility. |
 | `fix/rebind-merged-conformance-authority` | Complete checkout tree equals merged replacement `cfde9e8`; redundant checkout removed. Original local branch retained because its tip is not an ancestor of main. |
-| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. Reconcile against later protected-checkout fixes before retirement. |
+| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`). Reconcile remaining Windows tests and authority bindings before retirement. |
 | `fix/protected-conformance-runtime-followup` | Three patches lack equivalents in main; missing upstream is insufficient retirement evidence. |
-| `fix/phase1-diagnostic-collapse` | Four patches lack equivalents in main; review final behavior and authority pins before retirement. |
+| `fix/phase1-diagnostic-collapse` | Functional changes already incorporated in main; clean checkout removed. Original branch retained because obsolete authority bindings prevent an ancestry-based deletion. |
 | `fix/direct-protected-cave-build` | No checkout; three patches lack equivalents in main. Compare with delivered PR #119 before retirement. |
 | `fix/direct-protected-cave-build-final` | No checkout; one patch lacks an equivalent in main. Review the authority pin before retirement. |
-| `chore/clean-release-warnings` | No checkout; three patches lack equivalents in main. Reconcile release warnings and familiar empty-state behavior before retirement. |
+| `chore/clean-release-warnings` | Local branch deleted with `git branch -d`: its clean merge result equals main tree `49d85359d73f00a3dad46c31187b0cb8f096ff6f`. Original tip `5f4b99a` remains in `origin/chore/clean-release-warnings`. |
 
 Patch equivalence is a triage signal, not proof that later main changes retain
-the behavior. No dirty checkout, unmerged branch, or remote branch was deleted.
+the behavior. No dirty checkout, unique commit, or remote branch was deleted. The warning
+branch deletion preserved its exact tip in its upstream remote ref.
 The documentation branch for this audit uses the primary checkout and adds no
 worktree. The minimum remaining checkout set is not yet proven: active and
 unreconciled work must be resolved first.
