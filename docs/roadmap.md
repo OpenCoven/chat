@@ -62,13 +62,19 @@ One clean secondary worktree, `protected-local-clone-safe-directory`, was
 removed after its exact tip `0215d18` was proven reachable from refreshed
 `origin/main`. Its local branch was deleted with `git branch -d`.
 
+A second clean checkout, `rebind-merged-conformance-authority`, was removed
+after its complete Git tree `521e25ba538ddbbd01a8fe1f5b9a58eb90612948` matched
+merged replacement `cfde9e854486221f61f0ee7f6a7ecf180184a525` exactly. Its
+original commit `06bd063` remains preserved by its local branch. Eight
+worktrees remain after these two removals.
+
 | Branch | Disposition and next action |
 | --- | --- |
 | `fix/protected-matrix-v15` | Preserve active work: five commits beyond audited main, modified documentation/test files, and a live heavy-test process observed during audit. Recover terminal test evidence and review the exact final diff before committing or publishing. |
 | `feat/familiars-source-stage1` | Preserve for PR #86 and its release dependency. |
 | `fix/issue-90-disconnected-copy` | Preserve for PR #138 until delivered. |
 | `fix/protected-cleanup-diagnostics-v10` | All branch patches have equivalents in main according to `git cherry`; exact tip is not an ancestor. Preserve ref pending final-tree reconciliation and safe deletion eligibility. |
-| `fix/rebind-merged-conformance-authority` | All branch patches have equivalents in main according to `git cherry`; exact tip is not an ancestor. Preserve ref pending final-tree reconciliation and safe deletion eligibility. |
+| `fix/rebind-merged-conformance-authority` | Complete checkout tree equals merged replacement `cfde9e8`; redundant checkout removed. Original local branch retained because its tip is not an ancestor of main. |
 | `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. Reconcile against later protected-checkout fixes before retirement. |
 | `fix/protected-conformance-runtime-followup` | Three patches lack equivalents in main; missing upstream is insufficient retirement evidence. |
 | `fix/phase1-diagnostic-collapse` | Four patches lack equivalents in main; review final behavior and authority pins before retirement. |
