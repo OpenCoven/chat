@@ -4844,7 +4844,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
             },
           }),
       );
-      runSchemaV2PreflightStage('phase1.stage.evidence-authority.report.failed', () =>
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.scan.failed', () =>
         scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`),
       );
 
