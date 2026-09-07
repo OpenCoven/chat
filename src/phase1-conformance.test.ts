@@ -1335,6 +1335,95 @@ describe('Phase 1 real-authority conformance harness', () => {
     });
   });
 
+  test('preserves bounded checkout and evidence-finalization substage diagnostics', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const runStage = producer.runSchemaV2StageAsync;
+    expect(runStage).toBeTypeOf('function');
+    if (typeof runStage !== 'function') {
+      return;
+    }
+
+    const stages = [
+      'phase1.stage.checkouts.chat.failed',
+      'phase1.stage.checkouts.sdk.failed',
+      'phase1.stage.checkouts.cave.failed',
+      'phase1.stage.checkouts.coven.failed',
+      'phase1.stage.checkouts.integrity.failed',
+      'phase1.stage.checkouts.validator.failed',
+      'phase1.stage.checkouts.producer.failed',
+      'phase1.stage.evidence-authority.report.failed',
+      'phase1.stage.evidence-authority.operator-state.failed',
+      'phase1.stage.evidence-authority.isolation.failed',
+      'phase1.stage.evidence-authority.assertions.failed',
+      'phase1.stage.evidence-authority.build.failed',
+      'phase1.stage.evidence-authority.serialize.failed',
+      'phase1.stage.evidence-authority.scan.failed',
+      'phase1.stage.evidence-authority.retain.failed',
+    ];
+    for (const stage of stages) {
+      expect(publicPhase1FailureDiagnostic(new Error(stage))).toBe(stage);
+      let stagedFailure: unknown;
+      try {
+        await runStage(stage, async () => {
+          throw new Error('private protected-run detail');
+        });
+      } catch (error) {
+        stagedFailure = error;
+      }
+      await expect(
+        runStage('phase1.stage.schema-v2-production.failed', async () => {
+          throw stagedFailure;
+        }),
+      ).rejects.toMatchObject({ message: stage });
+    }
+  });
+
+  test('assigns bounded diagnostics to checkout and evidence-finalization boundaries', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    for (const stage of [
+      'phase1.stage.checkouts.chat.failed',
+      'phase1.stage.checkouts.sdk.failed',
+      'phase1.stage.checkouts.cave.failed',
+      'phase1.stage.checkouts.coven.failed',
+      'phase1.stage.checkouts.integrity.failed',
+      'phase1.stage.checkouts.validator.failed',
+      'phase1.stage.checkouts.producer.failed',
+      'phase1.stage.evidence-authority.report.failed',
+      'phase1.stage.evidence-authority.operator-state.failed',
+      'phase1.stage.evidence-authority.isolation.failed',
+      'phase1.stage.evidence-authority.assertions.failed',
+      'phase1.stage.evidence-authority.build.failed',
+      'phase1.stage.evidence-authority.serialize.failed',
+      'phase1.stage.evidence-authority.scan.failed',
+      'phase1.stage.evidence-authority.retain.failed',
+    ]) {
+      expect(source).toContain(stage);
+    }
+  });
+
+  test('places final schema-v2 record creation inside the bounded retain stage', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const retainStage = source.indexOf(
+      "await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed'",
+    );
+    const recordWrite = source.indexOf('writeFileSync(reportPath, canonical, { mode: 0o600 });');
+    const returnEvidence = source.indexOf('return evidence;', retainStage);
+
+    expect(retainStage).toBeGreaterThan(-1);
+    expect(recordWrite).toBeGreaterThan(retainStage);
+    expect(recordWrite).toBeLessThan(returnEvidence);
+  });
+
   test('authenticates the executing harness before schema-v2 dispatch', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'scripts', 'phase1-conformance.mjs'),
@@ -4510,6 +4599,37 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(failure)).toBe(
       'phase1.packaging.cave-build.phase.conformance-wrapper',
     );
+  });
+
+  test('preserves finalization diagnostics when owned-root cleanup also fails', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const diagnostic = 'phase1.stage.evidence-authority.serialize.failed';
+    const cleanupFailure = new Error('private cleanup path');
+    const actionFailure = new Error(diagnostic);
+    let failure: unknown;
+    try {
+      await producer.runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
+        producer.withOwnedArtifactRoot(
+          {
+            cleanup: async () => {
+              throw cleanupFailure;
+            },
+          },
+          async () => {
+            throw actionFailure;
+          },
+        ),
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(publicPhase1FailureDiagnostic(failure)).toBe(diagnostic);
+    expect((failure as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((failure as Error).cause as AggregateError).errors).toEqual([
+      actionFailure,
+      cleanupFailure,
+    ]);
   });
 
   test('does not swallow undefined schema-v2 action or owned-root cleanup failures', async () => {
