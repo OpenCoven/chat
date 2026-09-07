@@ -68,18 +68,20 @@ merged replacement `cfde9e854486221f61f0ee7f6a7ecf180184a525` exactly. Its
 original commit `06bd063` remains preserved by its local branch. The clean `phase1-diagnostic-collapse` checkout was subsequently retired after
 merge-tree inspection showed no functional changes beyond main: the remaining
 conflicts are obsolete workflow, documentation, lock, and lock-test authority
-bindings. Its original branch and commit `6b457fd` remain intact. Seven
-worktrees remain after these three removals.
+bindings. Its original branch and commit `6b457fd` remain intact. The three superseded clean conformance checkouts were also removed after
+checking their replacement behavior and confirming no process had them as its
+working directory. Their exact tips remain in local branches. Four worktrees
+remain: the primary checkout, PR #86, PR #138, and active v15 work.
 
 | Branch | Disposition and next action |
 | --- | --- |
-| `fix/protected-matrix-v15` | Preserve active work: five commits beyond audited main, modified documentation/test files, and a live heavy-test process observed during audit. Recover terminal test evidence and review the exact final diff before committing or publishing. |
+| `fix/protected-matrix-v15` | Preserve active work: the branch advanced to `25b3bc6` during this audit, with test execution and further edits observed. Recover terminal test evidence and review the exact final diff before committing or publishing. |
 | `feat/familiars-source-stage1` | Preserve for PR #86 and its release dependency. |
 | `fix/issue-90-disconnected-copy` | Preserve for PR #138 until delivered. |
-| `fix/protected-cleanup-diagnostics-v10` | All branch patches have equivalents in main according to `git cherry`; exact tip is not an ancestor. Preserve ref pending final-tree reconciliation and safe deletion eligibility. |
+| `fix/protected-cleanup-diagnostics-v10` | Equivalent patch landed as `1b3021a`; main retains the cleanup categories and adds finer Unix lock diagnostics. Clean checkout removed; original branch retained. |
 | `fix/rebind-merged-conformance-authority` | Complete checkout tree equals merged replacement `cfde9e8`; redundant checkout removed. Original local branch retained because its tip is not an ancestor of main. |
-| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`). Reconcile remaining Windows tests and authority bindings before retirement. |
-| `fix/protected-conformance-runtime-followup` | Three patches lack equivalents in main; missing upstream is insufficient retirement evidence. |
+| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`); main also normalizes Git null paths. Clean checkout removed; original branch retained for historical test and authority bindings. |
+| `fix/protected-conformance-runtime-followup` | Main retains the curated checkout environment and adds source-directory trust and protected tag handling. Supervisor and producer merge results add no changes to main. Clean checkout removed; original branch retained. |
 | `fix/phase1-diagnostic-collapse` | Functional changes already incorporated in main; clean checkout removed. Original branch retained because obsolete authority bindings prevent an ancestry-based deletion. |
 | `fix/direct-protected-cave-build` | No checkout; three patches lack equivalents in main. Compare with delivered PR #119 before retirement. |
 | `fix/direct-protected-cave-build-final` | No checkout; one patch lacks an equivalent in main. Review the authority pin before retirement. |
