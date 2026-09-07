@@ -1097,20 +1097,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,033 | `0054e517a3c9a099bb7fd2cc509ddaaa206d90d60c3c677f611c991ce3a79374` |
+| `.github/workflows/client-v1-conformance.yml` | 463,033 | `6193ffb7d8a2a97d2123803bbba86c6173d8437cae201d5d3e71209347d1df72` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,544 | `2d8db4e5442fe2f585c0b005d2b059832b27d88047441e0e7dbc26dc22a00e99` |
-| `scripts/phase1-conformance.mjs` | 199,944 | `67ba91257a71c36c7d91ef01796c5a348d106e40b4a6f1ef59fde6980a5ba584` |
+| `scripts/phase1-conformance-lock.mjs` | 48,816 | `562fb96e648ae61950546128b6022278ac088f3d5759e13aaaff7154cdd163e8` |
+| `scripts/phase1-conformance.mjs` | 200,018 | `a8ee86506972638414a2d2e6044ff1d7458afa62020f6bfa3e5ac2169749da05` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 168,579 | `9a419ac1e2c91865c811d67cfe44748f3548b88fb071a05ea82cc06bdf0607ad` |
+| `scripts/phase1-schema-v2-producer.mjs` | 168,838 | `dcdf9db45b1c530e00e6e41588d0f12a12299df0779762aadac3636f72f39666` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

@@ -39,6 +39,7 @@ import {
   readPhase1CheckoutIdentity,
   requirePhase1HarnessAuthorityVerification,
   resolveLocalGitDirectory,
+  toGitSafeDirectoryPath,
 } from './phase1-conformance-lock.mjs';
 import {
   buildIsolationEvidence,
@@ -736,14 +737,23 @@ function configuredSourceRoot(environmentName) {
 function resolveRepositoryLayout() {
   const gitCommonDirectory = resolve(
     projectRoot,
-    execFileSync('git', ['-c', `safe.directory=${projectRoot}`, 'rev-parse', '--git-common-dir'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    }).trim(),
+    execFileSync(
+      'git',
+      [
+        '-c',
+        `safe.directory=${toGitSafeDirectoryPath(projectRoot)}`,
+        'rev-parse',
+        '--git-common-dir',
+      ],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+      },
+    ).trim(),
   );
   const chatRepositoryRoot = dirname(gitCommonDirectory);
   return {
@@ -1926,9 +1936,9 @@ export async function cloneExactCheckout({
         '-c',
         `core.hooksPath=${devNull}`,
         '-c',
-        `safe.directory=${localSourceSafeDirectory}`,
+        `safe.directory=${toGitSafeDirectoryPath(localSourceSafeDirectory)}`,
         '-c',
-        `safe.directory=${localGitDirectory}`,
+        `safe.directory=${toGitSafeDirectoryPath(localGitDirectory)}`,
         'clone',
         '--local',
         '--no-hardlinks',
@@ -2015,7 +2025,14 @@ export function readSchemaV2ProducerIdentity(sourceRoot) {
   const run = (value) =>
     execFileSync(
       'git',
-      ['-c', `safe.directory=${sourceRoot}`, '-C', sourceRoot, 'rev-parse', value],
+      [
+        '-c',
+        `safe.directory=${toGitSafeDirectoryPath(sourceRoot)}`,
+        '-C',
+        sourceRoot,
+        'rev-parse',
+        value,
+      ],
       {
         encoding: 'utf8',
         env: environment,
