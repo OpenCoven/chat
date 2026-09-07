@@ -39,11 +39,12 @@ export type FamiliarsReadsShellProps = Readonly<{
 type InspectorTab = 'overview' | 'access' | 'activity';
 
 const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'access', 'activity'];
-const NOT_READY: QueryResult<never> = { status: 'not_ready' };
+const LOADING: QueryResult<never> = { status: 'loading' };
 
 function statusMessage(status: QueryResult<unknown>['status']): string | null {
   switch (status) {
     case 'not_ready':
+      return 'Not connected to Cave.';
     case 'loading':
       return 'Loading…';
     case 'stale':
@@ -120,16 +121,16 @@ function formatDuration(ms: number): string {
 export function FamiliarsReadsShell({ source, initialConversationId }: FamiliarsReadsShellProps) {
   const capabilities = useMemo(() => source.capabilities(), [source]);
   const [familiarsResult, setFamiliarsResult] =
-    useState<QueryResult<Page<FamiliarSummary>>>(NOT_READY);
+    useState<QueryResult<Page<FamiliarSummary>>>(LOADING);
   const [conversationsResult, setConversationsResult] =
-    useState<QueryResult<Page<ConversationSummary>>>(NOT_READY);
+    useState<QueryResult<Page<ConversationSummary>>>(LOADING);
   const [conversationId, setConversationId] = useState<string | null>(
     initialConversationId ?? null,
   );
-  const [messagesResult, setMessagesResult] = useState<QueryResult<Page<ThreadMessage>>>(NOT_READY);
+  const [messagesResult, setMessagesResult] = useState<QueryResult<Page<ThreadMessage>>>(LOADING);
   const [tab, setTab] = useState<InspectorTab>('overview');
-  const [detailResult, setDetailResult] = useState<QueryResult<FamiliarDetail>>(NOT_READY);
-  const [activityResult, setActivityResult] = useState<QueryResult<FamiliarActivity>>(NOT_READY);
+  const [detailResult, setDetailResult] = useState<QueryResult<FamiliarDetail>>(LOADING);
+  const [activityResult, setActivityResult] = useState<QueryResult<FamiliarActivity>>(LOADING);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,7 +275,9 @@ export function FamiliarsReadsShell({ source, initialConversationId }: Familiars
           ) : null}
         </header>
         <div className="frs-transcript">
-          <ResultStatus result={messagesResult} label="messages" />
+          {conversationId === null ? null : (
+            <ResultStatus result={messagesResult} label="messages" />
+          )}
           {messagesResult.status === 'ok' ? (
             <ul className="frs-messages">
               {messagesResult.data.data.map((message) => (

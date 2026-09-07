@@ -87,6 +87,36 @@ describe('FamiliarsReadsShell', () => {
     expect(screen.queryByText(/runs completed/)).not.toBeInTheDocument();
   });
 
+  it('reports a disconnected source instead of leaving reads in a loading state', async () => {
+    const disconnectedSource: FamiliarsSource = {
+      async familiars() {
+        return { status: 'not_ready' };
+      },
+      async familiar() {
+        return { status: 'not_ready' };
+      },
+      async activity() {
+        return { status: 'not_ready' };
+      },
+      async conversations() {
+        return { status: 'not_ready' };
+      },
+      async messages() {
+        return { status: 'not_ready' };
+      },
+      capabilities(): ReadonlySet<Capability> {
+        return new Set();
+      },
+    };
+
+    render(<FamiliarsReadsShell source={disconnectedSource} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Not connected to Cave.')).toHaveLength(2);
+    });
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+  });
+
   it('renders a diagnostic error state rather than crashing when a read fails', async () => {
     const failingSource: FamiliarsSource = {
       async familiars(): Promise<QueryResult<never>> {
