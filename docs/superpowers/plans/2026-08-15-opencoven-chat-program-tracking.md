@@ -16,6 +16,12 @@ owns the established Beads/Dolt workflow. A bead's `repo:*` label and repository
 metadata identify where implementation occurs. Cross-repository ownership is not
 represented through experimental cross-database dependencies.
 
+## Current delivery audit
+
+See the [2026-09-07 delivery roadmap](../../roadmap.md) for the latest audited
+Chat PR and conformance state. The counts and initial readiness below are the
+program-creation baseline; refresh Beads before claiming work or closing gates.
+
 ## Tracker Summary
 
 | Item | Value |

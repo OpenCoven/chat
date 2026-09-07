@@ -1,0 +1,109 @@
+# Delivery roadmap and consolidation audit
+
+Audited 2026-09-07 against Chat `origin/main` at
+`c4332b07969966fbf1d5fbfb0ea7231b896a8fc6`. This is a dated delivery snapshot;
+refresh GitHub runs and branch heads before acting on it.
+
+The [program register](superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md)
+remains the Beads dependency index. Its initial counts and ready lanes describe
+program creation, not verified current completion. No phase gate is closed by
+this audit. Current Beads and Project reconciliation findings appear below.
+
+## Delivery order
+
+| Priority | Work | Current evidence | Completion requirement |
+| --- | --- | --- | --- |
+| 1 | Protected three-platform conformance | [Main run 34074618490](https://github.com/OpenCoven/chat/actions/runs/34074618490): macOS succeeded; Linux and Windows failed; validation, attestation, and aggregation skipped | Successful frozen three-platform real-authority records, validation, attestation, and aggregation; record exact revisions in the applicable release gate |
+| 2 | Disconnected familiar reads | [PR #138](https://github.com/OpenCoven/chat/pull/138), draft at `f3962b4`; [CI passed](https://github.com/OpenCoven/chat/actions/runs/34074123879); [issue #90](https://github.com/OpenCoven/chat/issues/90) remains open | Review regression coverage, finish PR review and delivery, verify issue closure after merge |
+| 3 | Familiar contract and analytics source | [PR #86](https://github.com/OpenCoven/chat/pull/86), parked draft at `e5aeec8`; PR reports SDK release and lock re-pin dependencies | Verify current producer release readiness, consume verified packed artifacts, re-pin canaries, pass native and real-authority checks before delivery |
+| 4 | Tracking reconciliation | [Familiars plan](superpowers/plans/2026-09-02-familiars-integration.md) and program register contain unchecked/historical work | Reconcile each deliverable with merged code and acceptance evidence; update Beads and the actual linked GitHub Project without inventing completion |
+
+Normal [main CI](https://github.com/OpenCoven/chat/actions/runs/34074060314)
+passed at the audited revision. It does not establish protected conformance or
+release readiness. The applicable workflow is
+[client-v1-conformance.yml](../.github/workflows/client-v1-conformance.yml), with
+its evidence contract in [phase1-conformance.md](phase1-conformance.md).
+
+## Beads and GitHub Project reconciliation
+
+Chat program cards already live in the organization's
+[Teamwork project](https://github.com/orgs/OpenCoven/projects/9). These are Beads
+visibility mirrors, not independent GitHub issues. Preserve the draft-card
+identity and regenerate their content from the authoritative Beads records.
+
+Read-only database inspection on 2026-09-07 found:
+
+| Record | Authoritative state | Mirror / documentation follow-up |
+| --- | --- | --- |
+| `cave-k0aqq` | Blocked on final release gate `cave-ilh1h`; updated September 5 | Its next-action note still refers to Phase 1 implementation; reconcile against current dependencies before claiming work |
+| `cave-23nmv` | Closed August 29, with PRs #30/#31 and run `33250233035` recorded as historical acceptance | Teamwork item `232459304` still says blocked; synchronize from Beads |
+| `cave-0prpu` | Closed August 29 with the historical 15/15 matrix recorded | Teamwork item `232459288` still says blocked; synchronize from Beads |
+
+Historical Phase 1 closure explicitly leaves full three-OS authority evidence,
+writes, and signed installers to later work. It does not establish success of
+the current protected release matrix. Preserve historical acceptance while
+tracking today's Linux/Windows failures against the release requirements.
+
+The installed Beads executable understands schema v53 while the database is
+v66. Inspection used `bd --readonly --ignore-schema-skew show`; no database
+write or migration was attempted. Use a compatible executable for updates.
+The repository Projects REST endpoint returned 404, but the organization
+Projects V2 REST endpoint successfully located Teamwork. The 404 is not a
+tracking blocker or evidence that no project exists.
+
+The organization `.github` repository's profile was also inspected; it is a
+general organization overview rather than Chat's delivery tracker. Keep this
+roadmap and the existing Teamwork mirrors as the Chat tracking entry points.
+
+## Local branch and worktree disposition
+
+The initial inventory contained 10 worktrees, including the primary checkout.
+One clean secondary worktree, `protected-local-clone-safe-directory`, was
+removed after its exact tip `0215d18` was proven reachable from refreshed
+`origin/main`. Its local branch was deleted with `git branch -d`.
+
+A second clean checkout, `rebind-merged-conformance-authority`, was removed
+after its complete Git tree `521e25ba538ddbbd01a8fe1f5b9a58eb90612948` matched
+merged replacement `cfde9e854486221f61f0ee7f6a7ecf180184a525` exactly. Its
+original commit `06bd063` remains preserved by its local branch. The clean `phase1-diagnostic-collapse` checkout was subsequently retired after
+merge-tree inspection showed no functional changes beyond main: the remaining
+conflicts are obsolete workflow, documentation, lock, and lock-test authority
+bindings. Its original branch and commit `6b457fd` remain intact. The three superseded clean conformance checkouts were also removed after
+checking their replacement behavior and confirming no process had them as its
+working directory. Their exact tips remain in local branches. Four worktrees
+remain: the primary checkout, PR #86, PR #138, and active v15 work.
+
+| Branch | Disposition and next action |
+| --- | --- |
+| `fix/protected-matrix-v15` | Preserve active work: the branch advanced to `25b3bc6` during this audit, with test execution and further edits observed. Recover terminal test evidence and review the exact final diff before committing or publishing. |
+| `feat/familiars-source-stage1` | Preserve for PR #86 and its release dependency. |
+| `fix/issue-90-disconnected-copy` | Preserve for PR #138 until delivered. |
+| `fix/protected-cleanup-diagnostics-v10` | Equivalent patch landed as `1b3021a`; main retains the cleanup categories and adds finer Unix lock diagnostics. Clean checkout removed; original branch retained. |
+| `fix/rebind-merged-conformance-authority` | Complete checkout tree equals merged replacement `cfde9e8`; redundant checkout removed. Original local branch retained because its tip is not an ancestor of main. |
+| `fix/protected-root-fixes-v12` | [PR #134](https://github.com/OpenCoven/chat/pull/134) closed without merge; seven patches lack equivalents in main. The old native-lock creation was superseded by supervisor provisioning (`b82c0ef`) and validated projection (`3f4f3a0`); main also normalizes Git null paths. Clean checkout removed; original branch retained for historical test and authority bindings. |
+| `fix/protected-conformance-runtime-followup` | Main retains the curated checkout environment and adds source-directory trust and protected tag handling. Supervisor and producer merge results add no changes to main. Clean checkout removed; original branch retained. |
+| `fix/phase1-diagnostic-collapse` | Functional changes already incorporated in main; clean checkout removed. Original branch retained because obsolete authority bindings prevent an ancestry-based deletion. |
+| `fix/direct-protected-cave-build` | No checkout; three patches lack equivalents in main. Compare with delivered PR #119 before retirement. |
+| `fix/direct-protected-cave-build-final` | No checkout; one patch lacks an equivalent in main. Review the authority pin before retirement. |
+| `chore/clean-release-warnings` | Local branch deleted with `git branch -d`: its clean merge result equals main tree `49d85359d73f00a3dad46c31187b0cb8f096ff6f`. Original tip `5f4b99a` remains in `origin/chore/clean-release-warnings`. |
+
+Patch equivalence is a triage signal, not proof that later main changes retain
+the behavior. No dirty checkout, unique commit, or remote branch was deleted. The warning
+branch deletion preserved its exact tip in its upstream remote ref.
+The documentation branch for this audit uses the primary checkout and adds no
+worktree. The minimum remaining checkout set is not yet proven: active and
+unreconciled work must be resolved first.
+
+## Audit follow-through
+
+- Recover v15 test results from the existing process; do not start another run
+  merely because its output is temporarily unavailable.
+- Review final diffs of older branches against their replacement PRs, including
+  workflow authority and lockfile changes. Preserve unique work before cleanup.
+- Revalidate clean status, branch identity, reachability, and process ownership
+  immediately before each additional worktree removal.
+- Refresh the canonical Beads program graph with a compatible executable,
+  reconcile obsolete next-action notes, and synchronize the existing Teamwork
+  draft cards from their source records.
+- Keep roadmap links, phase plans, PR descriptions, and workflow evidence
+  consistent as each item lands. Do not close a gate from unit tests alone.
