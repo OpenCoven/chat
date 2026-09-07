@@ -79,8 +79,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '0907e81a19ac6f9df8d2638fcf8bd9972b0f3d4e',
-  tree: '5344986a34cdf477114b70ab2da0bc99c92a70f2',
+  revision: '50ad59966d9ebdae3a97459bc21670e461bd6dd9',
+  tree: '0883076e180169216be4d6e339bb9f4bb225c422',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
