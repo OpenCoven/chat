@@ -1365,6 +1365,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.stage.evidence-authority.retain.failed',
     ];
     for (const stage of stages) {
+      expect(publicPhase1FailureDiagnostic(new Error(stage))).toBe(stage);
       let stagedFailure: unknown;
       try {
         await runStage(stage, async () => {
@@ -1405,6 +1406,24 @@ describe('Phase 1 real-authority conformance harness', () => {
     ]) {
       expect(source).toContain(stage);
     }
+  });
+
+  test('places final schema-v2 record creation inside the bounded retain stage', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const retainStage = source.indexOf(
+      "await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed'",
+    );
+    const recordWrite = source.indexOf(
+      "writeFileSync(reportPath, canonical, { mode: 0o600 });",
+    );
+    const returnEvidence = source.indexOf('return evidence;', retainStage);
+
+    expect(retainStage).toBeGreaterThan(-1);
+    expect(recordWrite).toBeGreaterThan(retainStage);
+    expect(recordWrite).toBeLessThan(returnEvidence);
   });
 
   test('authenticates the executing harness before schema-v2 dispatch', () => {

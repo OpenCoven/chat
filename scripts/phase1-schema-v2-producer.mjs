@@ -4963,9 +4963,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
           }),
         );
         const reportPath = resolve(reportRoot.rootPath, 'record.json');
-        writeFileSync(reportPath, canonical, { mode: 0o600 });
-        await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed', () =>
-          reportRoot.retainSanitizedJsonReport({
+        await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed', async () => {
+          writeFileSync(reportPath, canonical, { mode: 0o600 });
+          await reportRoot.retainSanitizedJsonReport({
             reportPath,
             destinationPath: options.outputPath,
             validateReport(_value, bytes) {
@@ -4987,8 +4987,8 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
                 },
               });
             },
-          }),
-        );
+          });
+        });
         return evidence;
       }
 
