@@ -1416,9 +1416,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const retainStage = source.indexOf(
       "await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed'",
     );
-    const recordWrite = source.indexOf(
-      "writeFileSync(reportPath, canonical, { mode: 0o600 });",
-    );
+    const recordWrite = source.indexOf('writeFileSync(reportPath, canonical, { mode: 0o600 });');
     const returnEvidence = source.indexOf('return evidence;', retainStage);
 
     expect(retainStage).toBeGreaterThan(-1);
@@ -4601,6 +4599,37 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(failure)).toBe(
       'phase1.packaging.cave-build.phase.conformance-wrapper',
     );
+  });
+
+  test('preserves finalization diagnostics when owned-root cleanup also fails', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const diagnostic = 'phase1.stage.evidence-authority.serialize.failed';
+    const cleanupFailure = new Error('private cleanup path');
+    const actionFailure = new Error(diagnostic);
+    let failure: unknown;
+    try {
+      await producer.runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
+        producer.withOwnedArtifactRoot(
+          {
+            cleanup: async () => {
+              throw cleanupFailure;
+            },
+          },
+          async () => {
+            throw actionFailure;
+          },
+        ),
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(publicPhase1FailureDiagnostic(failure)).toBe(diagnostic);
+    expect((failure as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((failure as Error).cause as AggregateError).errors).toEqual([
+      actionFailure,
+      cleanupFailure,
+    ]);
   });
 
   test('does not swallow undefined schema-v2 action or owned-root cleanup failures', async () => {

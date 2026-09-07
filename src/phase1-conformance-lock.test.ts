@@ -99,8 +99,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '55344664d661c17117859bea617bc1edcd6a2d94',
-      sha256: 'f1a5bbd65b19aa768cbd7fe182238a213f5f13ea57bc257be8888f980b1859b2',
+      blob: '9ecfe45795c83d1bd5a11b0053972bb912909ea5',
+      sha256: '023b65fbf2a6b29dc8a85c14e0eb002f5e10751308f5af372505ba75273a8beb',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -124,8 +124,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'e348692ea11c77f4d658043c1a71b7f847a9755b',
-      sha256: 'de1da906eaadce032302792f915adcb49bdd5b7f32f0f3a5295b3c55630da7b0',
+      blob: 'be5b78b10dc756acd370e72967f82ad79f1bf343',
+      sha256: 'e76c4361fb94c0b9525680f2aac176ca377174665b0323b5aefaf219fa452d02',
     },
   ],
 } as const;

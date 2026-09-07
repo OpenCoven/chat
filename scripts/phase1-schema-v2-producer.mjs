@@ -2985,7 +2985,7 @@ export async function withOwnedArtifactRoot(ownedRoot, action) {
   if (actionFailed && cleanupFailed) {
     throw new AggregateError(
       [actionFailure, cleanupFailure],
-      'Owned artifact action and cleanup both failed.',
+      schemaV2FailureDiagnostic(actionFailure, 'Owned artifact action and cleanup both failed.'),
     );
   }
   if (actionFailed) {
