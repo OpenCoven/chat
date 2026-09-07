@@ -8783,7 +8783,6 @@ jobs:
                 'fetch',
                 '--quiet',
                 '--no-tags',
-                '--depth=1',
                 'origin',
                 $env:OPENCOVEN_CHAT_SHA
               ) `
@@ -8882,7 +8881,6 @@ jobs:
               'fetch',
               '--quiet',
               '--no-tags',
-              '--depth=1',
               'origin',
               $phase1Lock.harness.revision
             ) `
