@@ -2279,6 +2279,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
     expect(validation).toContain('phase1-artifact-secret-scan.mjs');
     expect(validation).toContain('scanPhase1ArtifactText');
+    expect(validation).toContain(
+      '.phase1-counterparts/sdk-validator/scripts/conformance-contract.mjs',
+    );
+    expect(validation).toContain('parsePlatformEvidence');
+    expect(validation).toContain('validateReport(_value, contents)');
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
