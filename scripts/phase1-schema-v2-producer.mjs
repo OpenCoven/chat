@@ -173,7 +173,22 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.execution-root.failed',
   'phase1.stage.environment.failed',
   'phase1.stage.checkouts.failed',
+  'phase1.stage.checkouts.chat.failed',
+  'phase1.stage.checkouts.sdk.failed',
+  'phase1.stage.checkouts.cave.failed',
+  'phase1.stage.checkouts.coven.failed',
+  'phase1.stage.checkouts.integrity.failed',
+  'phase1.stage.checkouts.validator.failed',
+  'phase1.stage.checkouts.producer.failed',
   'phase1.stage.evidence-authority.failed',
+  'phase1.stage.evidence-authority.report.failed',
+  'phase1.stage.evidence-authority.operator-state.failed',
+  'phase1.stage.evidence-authority.isolation.failed',
+  'phase1.stage.evidence-authority.assertions.failed',
+  'phase1.stage.evidence-authority.build.failed',
+  'phase1.stage.evidence-authority.serialize.failed',
+  'phase1.stage.evidence-authority.scan.failed',
+  'phase1.stage.evidence-authority.retain.failed',
   'phase1.stage.toolchain.failed',
   'phase1.stage.packaging.failed',
   'phase1.packaging.frozen-consumer.failed',
@@ -2080,67 +2095,84 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     caveRoot: resolve(checkoutsRoot, 'cave'),
     covenRoot: resolve(checkoutsRoot, 'coven'),
   };
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.chatSourceRoot,
-    destinationRoot: roots.chatRoot,
-    repository: lock.chat.repository,
-    revision: lock.chat.revision,
-    environment,
-    label: 'Chat',
+  await runSchemaV2StageAsync('phase1.stage.checkouts.chat.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.chatSourceRoot,
+      destinationRoot: roots.chatRoot,
+      repository: lock.chat.repository,
+      revision: lock.chat.revision,
+      environment,
+      label: 'Chat',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.sdk.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.sdkSourceRoot,
+      destinationRoot: roots.sdkRoot,
+      repository: lock.sdk.repository,
+      revision: lock.sdk.revision,
+      environment,
+      label: 'SDK',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.cave.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.caveSourceRoot,
+      destinationRoot: roots.caveRoot,
+      repository: lock.cave.repository,
+      revision: lock.cave.revision,
+      environment,
+      label: 'Cave',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.coven.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.covenSourceRoot,
+      destinationRoot: roots.covenRoot,
+      repository: lock.coven.repository,
+      revision: lock.coven.revision,
+      environment,
+      label: 'Coven',
+    }),
+  );
+  runSchemaV2PreflightStage('phase1.stage.checkouts.integrity.failed', () => {
+    assertCleanPhase1Checkouts(roots);
+    assertPhase1CheckoutHeads(lock, roots);
   });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.sdkSourceRoot,
-    destinationRoot: roots.sdkRoot,
-    repository: lock.sdk.repository,
-    revision: lock.sdk.revision,
-    environment,
-    label: 'SDK',
-  });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.caveSourceRoot,
-    destinationRoot: roots.caveRoot,
-    repository: lock.cave.repository,
-    revision: lock.cave.revision,
-    environment,
-    label: 'Cave',
-  });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.covenSourceRoot,
-    destinationRoot: roots.covenRoot,
-    repository: lock.coven.repository,
-    revision: lock.coven.revision,
-    environment,
-    label: 'Coven',
-  });
-  assertCleanPhase1Checkouts(roots);
-  assertPhase1CheckoutHeads(lock, roots);
   if (options.platform !== undefined) {
     roots.validatorRoot = resolve(checkoutsRoot, 'validator');
-    await cloneExactCheckout({
-      artifactRoot,
-      sourceRoot: options.sdkValidatorSourceRoot,
-      destinationRoot: roots.validatorRoot,
-      repository: 'OpenCoven/sdk',
-      revision: options.validatorRevision,
-      environment,
-      label: 'SDK validator',
-    });
-    assertCleanPhase1Checkout(roots.validatorRoot, 'SDK validator checkout');
-    const validatorIdentity = readPhase1CheckoutIdentity(
-      roots.validatorRoot,
-      'SDK validator checkout',
+    roots.validatorIdentity = await runSchemaV2StageAsync(
+      'phase1.stage.checkouts.validator.failed',
+      async () => {
+        await cloneExactCheckout({
+          artifactRoot,
+          sourceRoot: options.sdkValidatorSourceRoot,
+          destinationRoot: roots.validatorRoot,
+          repository: 'OpenCoven/sdk',
+          revision: options.validatorRevision,
+          environment,
+          label: 'SDK validator',
+        });
+        assertCleanPhase1Checkout(roots.validatorRoot, 'SDK validator checkout');
+        const validatorIdentity = readPhase1CheckoutIdentity(
+          roots.validatorRoot,
+          'SDK validator checkout',
+        );
+        if (validatorIdentity.revision !== options.validatorRevision) {
+          throw new Error('SDK validator checkout does not match the selected revision.');
+        }
+        return validatorIdentity;
+      },
     );
-    if (validatorIdentity.revision !== options.validatorRevision) {
-      throw new Error('SDK validator checkout does not match the selected revision.');
-    }
-    roots.validatorIdentity = validatorIdentity;
     Object.assign(
       roots,
-      await cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
+      await runSchemaV2StageAsync('phase1.stage.checkouts.producer.failed', () =>
+        cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
+      ),
     );
   }
   return roots;
@@ -4788,27 +4820,33 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
 
   const report = await runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
     withOwnedArtifactRoot(reportRoot, async () => {
-      const completedReport = buildPhase1Report({
-        assertions: [...results.values()],
-        revisions: {
-          chat: lock.chat.revision,
-          sdk: lock.sdk.revision,
-          cave: lock.cave.revision,
-          coven: lock.coven.revision,
-        },
-        artifactDigests,
-        versions: {
-          harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
-          node: process.versions.node,
-          ...(schemaV2 && toolchain !== undefined
-            ? {
-                rust: toolchain.rustVersion,
-                tauri: toolchain.tauriVersion,
-              }
-            : {}),
-        },
-      });
-      scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`);
+      const completedReport = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.report.failed',
+        () =>
+          buildPhase1Report({
+            assertions: [...results.values()],
+            revisions: {
+              chat: lock.chat.revision,
+              sdk: lock.sdk.revision,
+              cave: lock.cave.revision,
+              coven: lock.coven.revision,
+            },
+            artifactDigests,
+            versions: {
+              harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
+              node: process.versions.node,
+              ...(schemaV2 && toolchain !== undefined
+                ? {
+                    rust: toolchain.rustVersion,
+                    tauri: toolchain.tauriVersion,
+                  }
+                : {}),
+            },
+          }),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.report.failed', () =>
+        scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`),
+      );
 
       if (schemaV2) {
         if (
@@ -4832,102 +4870,125 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
             completedReport,
           );
         }
-        const operatorAfter = captureOperatorFilesystemState(operatorHomes);
-        const isolation = buildIsolationEvidence({
-          operatorBefore,
-          operatorAfter,
-          nativeBeforeSha256: nativeProof.beforeSha256,
-          nativeAfterSha256: nativeProof.afterSha256,
-          opaqueIds: [
-            randomBytes(16).toString('hex'),
-            randomBytes(16).toString('hex'),
-            randomBytes(16).toString('hex'),
-            nativeProof.opaqueId,
-          ],
-        });
-        const observedAssertions = buildObservedSchemaV2Assertions({
-          registry: sdkContract.registry,
-          platform: options.platform,
-          packageObservations,
-          primaryReport: completedReport,
-          caveRecord,
-          native: nativeProof,
-          coven: covenProof,
-          tests: observationTests,
-          scansPassed: true,
-        });
-        const evidence = buildSchemaV2PlatformEvidence({
-          primaryReport: completedReport,
-          caveRecord,
-          platform: options.platform,
-          timing: {
-            startedAt,
-            completedAt: new Date().toISOString(),
-          },
-          sdkContract,
-          observedAssertions,
-          verified: {
-            validator: sdkContract.validator,
-            ...verifiedIdentities,
-            harness: {
-              ...producer.harness,
-              invocationId: randomUUID(),
-            },
-            artifacts: evidenceArtifacts,
-            environment: {
-              os: process.platform,
-              arch: process.arch,
-              ...toolchain,
-              nativeCustody: {
-                backend: nativeProof.backend,
-                available: true,
+        const operatorAfter = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.operator-state.failed',
+          () => captureOperatorFilesystemState(operatorHomes),
+        );
+        const isolation = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.isolation.failed',
+          () =>
+            buildIsolationEvidence({
+              operatorBefore,
+              operatorAfter,
+              nativeBeforeSha256: nativeProof.beforeSha256,
+              nativeAfterSha256: nativeProof.afterSha256,
+              opaqueIds: [
+                randomBytes(16).toString('hex'),
+                randomBytes(16).toString('hex'),
+                randomBytes(16).toString('hex'),
+                nativeProof.opaqueId,
+              ],
+            }),
+        );
+        const observedAssertions = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.assertions.failed',
+          () =>
+            buildObservedSchemaV2Assertions({
+              registry: sdkContract.registry,
+              platform: options.platform,
+              packageObservations,
+              primaryReport: completedReport,
+              caveRecord,
+              native: nativeProof,
+              coven: covenProof,
+              tests: observationTests,
+              scansPassed: true,
+            }),
+        );
+        const evidence = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.build.failed',
+          () =>
+            buildSchemaV2PlatformEvidence({
+              primaryReport: completedReport,
+              caveRecord,
+              platform: options.platform,
+              timing: {
+                startedAt,
+                completedAt: new Date().toISOString(),
               },
-              covenIdentity: {
-                backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
-                available: true,
+              sdkContract,
+              observedAssertions,
+              verified: {
+                validator: sdkContract.validator,
+                ...verifiedIdentities,
+                harness: {
+                  ...producer.harness,
+                  invocationId: randomUUID(),
+                },
+                artifacts: evidenceArtifacts,
+                environment: {
+                  os: process.platform,
+                  arch: process.arch,
+                  ...toolchain,
+                  nativeCustody: {
+                    backend: nativeProof.backend,
+                    available: true,
+                  },
+                  covenIdentity: {
+                    backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
+                    available: true,
+                  },
+                },
+                isolation,
               },
+            }),
+        );
+        const canonical = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.serialize.failed',
+          () =>
+            serializeValidatedSchemaV2PlatformEvidence(evidence, {
+              contract: sdkContract.contract,
+              schema: sdkContract.schema,
+            }),
+        );
+        runSchemaV2PreflightStage('phase1.stage.evidence-authority.scan.failed', () =>
+          scanPhase1ArtifactText(canonical, {
+            validateReport(_value, contents) {
+              sdkContract.contract.parsePlatformEvidence(
+                contents,
+                'Chat retained schema-v2 platform evidence',
+                sdkContract.schema,
+              );
             },
-            isolation,
-          },
-        });
-        const canonical = serializeValidatedSchemaV2PlatformEvidence(evidence, {
-          contract: sdkContract.contract,
-          schema: sdkContract.schema,
-        });
-        scanPhase1ArtifactText(canonical, {
-          validateReport(_value, contents) {
-            sdkContract.contract.parsePlatformEvidence(
-              contents,
-              'Chat retained schema-v2 platform evidence',
-              sdkContract.schema,
-            );
-          },
-        });
+          }),
+        );
         const reportPath = resolve(reportRoot.rootPath, 'record.json');
         writeFileSync(reportPath, canonical, { mode: 0o600 });
-        await reportRoot.retainSanitizedJsonReport({
-          reportPath,
-          destinationPath: options.outputPath,
-          validateReport(_value, bytes) {
-            sdkContract.contract.parsePlatformEvidence(
-              bytes.toString('utf8'),
-              'Chat retained schema-v2 platform evidence',
-              sdkContract.schema,
-            );
-          },
-          secretScan: ({ reportPath: scannedPath }) => {
-            const contents = readFileSync(scannedPath, 'utf8');
-            scanPhase1ArtifactText(contents, {
-              validateReport() {
-                sdkContract.contract.parsePlatformEvidence(
-                  contents,
-                  'Chat retained schema-v2 platform evidence',
-                  sdkContract.schema,
-                );
-              },
-            });
-          },
-        });
+        await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed', () =>
+          reportRoot.retainSanitizedJsonReport({
+            reportPath,
+            destinationPath: options.outputPath,
+            validateReport(_value, bytes) {
+              sdkContract.contract.parsePlatformEvidence(
+                bytes.toString('utf8'),
+                'Chat retained schema-v2 platform evidence',
+                sdkContract.schema,
+              );
+            },
+            secretScan: ({ reportPath: scannedPath }) => {
+              const contents = readFileSync(scannedPath, 'utf8');
+              scanPhase1ArtifactText(contents, {
+                validateReport() {
+                  sdkContract.contract.parsePlatformEvidence(
+                    contents,
+                    'Chat retained schema-v2 platform evidence',
+                    sdkContract.schema,
+                  );
+                },
+              });
+            },
+          }),
+        );
         return evidence;
       }
 
