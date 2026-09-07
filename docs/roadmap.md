@@ -130,8 +130,9 @@ Remaining remote branches:
   active conformance work; preserve its checkout and revalidate terminal CI.
 - `archive/sdk-integration-1140717`: an existing archive, retained deliberately.
 
-Recoverable local history is under
-`/Users/buns/worktree-backups/chat-consolidation-20260907/`:
+Maintainer-held recovery set `chat-consolidation-20260907`, stored outside the
+repository, contains the following archives. Its exact location and restore
+commands are recorded in the maintainer's local `RESTORE.md`:
 
 - `retired-authority-branches.bundle`: quarantine-authority, CI-gating, and
   Windows-supervisor histories.
