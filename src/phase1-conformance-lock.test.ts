@@ -30,6 +30,7 @@ const {
 } = phase1ConformanceLock;
 
 const projectRoot = resolve(import.meta.dirname, '..');
+const expectedGitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const scratchRoots: string[] = [];
 const gitIntegrationTestTimeout = 60_000;
 const gitTestCommandTimeout = 45_000;
@@ -78,18 +79,18 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '42a77749370e42f754e1fc69908262bb9daed2ba',
-  tree: '806b229ff50dae4121fe70098e0f8d9d06924bd5',
+  revision: 'd4678466efd19fd55fa45035e2d0d35b0318a534',
+  tree: 'c06dc750199b45cd4925a306f2c03f075fab15be',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '0b09bbc5629b117b377fc73a74389f240a79fca5',
-      sha256: 'd239fc8fcf06543064c355757422eada4c14df4a4bf94397268077de52f14dce',
+      blob: 'c69fb54d0a4123b315d9fcc005c609410347ddd5',
+      sha256: 'fc232db10c270ec92fcd700ad44e213c04abee01492c9804f82643b4513b2199',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
-      blob: '4a9f6f79b6610617661452a6a3918f2da6290b95',
-      sha256: 'dc0efc1a8f7a5434451271ad2bdbd5ec2b2a7eeb77d3fcd27bf19752bf2b5ebd',
+      blob: '57cede8f6c10a0c6c0abd47c7ed658eb340e8f49',
+      sha256: '2d8db4e5442fe2f585c0b005d2b059832b27d88047441e0e7dbc26dc22a00e99',
     },
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -98,8 +99,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'd9c57ead102c6afbfd42b536dc6004dd37890f82',
-      sha256: '26e9ac029d0542a453f92c2b6dadd8bf55994254481b1ddd93a71bae98735149',
+      blob: '25f79d5606e30b86b7036a27456dc1f0dff09fd6',
+      sha256: 'e34e3987ea1e2957fc879a4903ee8470f655273a1847eb0dbe166993414a9709',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -123,8 +124,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '65f15c84b28b06e452cc4a3e713e61f215379711',
-      sha256: '62ebc2c25e2ca996a4db109771f8b96f8f57bff2e5cbd131bf628be832644d18',
+      blob: 'c45d84b7cff03a496567df65e6481586274fcb71',
+      sha256: '5b0128410851ee26ce11f7cd3cf246373c049968a5c6cb0d754faa2ddb51926f',
     },
   ],
 } as const;
@@ -765,18 +766,18 @@ describe('Phase 1 checkout verification', () => {
     expect(environment).not.toHaveProperty('Git_Work_Tree');
     expect(environment).not.toHaveProperty('git_index_file');
     expect(environment.GIT_ALLOW_PROTOCOL).toBe('');
-    expect(environment.GIT_ASKPASS).toBe(devNull);
+    expect(environment.GIT_ASKPASS).toBe(expectedGitNullDevice);
     expect(environment.GIT_ATTR_NOSYSTEM).toBe('1');
     expect(environment.GIT_ATTR_SOURCE).toBe('HEAD');
-    expect(environment.GIT_CONFIG_GLOBAL).toBe(devNull);
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(expectedGitNullDevice);
     expect(environment.GIT_CONFIG_NOSYSTEM).toBe('1');
     expect(environment.GIT_NO_LAZY_FETCH).toBe('1');
     expect(environment.GIT_NO_REPLACE_OBJECTS).toBe('1');
     expect(environment.GIT_OPTIONAL_LOCKS).toBe('0');
-    expect(environment.GIT_SSH).toBe(devNull);
-    expect(environment.GIT_SSH_COMMAND).toBe(devNull);
+    expect(environment.GIT_SSH).toBe(expectedGitNullDevice);
+    expect(environment.GIT_SSH_COMMAND).toBe(expectedGitNullDevice);
     expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
-    expect(environment.SSH_ASKPASS).toBe(devNull);
+    expect(environment.SSH_ASKPASS).toBe(expectedGitNullDevice);
   });
 
   gitTest('accepts four clean checkouts at their locked revisions', () => {

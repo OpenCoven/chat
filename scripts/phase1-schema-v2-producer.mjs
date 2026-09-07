@@ -35,6 +35,7 @@ import {
   assertPhase1ProducerAuthority,
   createGitCheckoutEnvironment,
   createGitEnvironment,
+  gitNullDevice,
   readPhase1CheckoutIdentity,
   requirePhase1HarnessAuthorityVerification,
   resolveLocalGitDirectory,
@@ -463,6 +464,7 @@ export function unixProducerBindingEnvironment(
   const workspace = environment.OPENCOVEN_UNIX_WORKSPACE;
   const artifactDirectory = environment.OPENCOVEN_UNIX_ARTIFACT_DIRECTORY;
   const sourceRecord = environment.OPENCOVEN_UNIX_SOURCE_RECORD;
+  const nativeLockRoot = environment.OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT;
   const canonicalUid = /^(?:0|[1-9][0-9]{0,9})$/u;
   if (
     required !== '1' ||
@@ -505,22 +507,27 @@ export function unixProducerBindingEnvironment(
   };
   requireCanonicalDirectory(workspace);
   const artifactStats = requireCanonicalDirectory(artifactDirectory);
+  const nativeLockStats = requireCanonicalDirectory(nativeLockRoot);
   const expectedArtifactDirectory = resolve(
     dirname(workspace),
     'producer',
     'workspace',
     '.artifacts',
   );
+  const expectedNativeLockRoot = resolve(dirname(workspace), 'producer', 'native-credential-lock');
   const expectedSourceRecord = resolve(
     artifactDirectory,
     `client-v1-conformance-${evidencePlatform}.json`,
   );
   if (
     artifactDirectory !== expectedArtifactDirectory ||
+    nativeLockRoot !== expectedNativeLockRoot ||
     sourceRecord !== expectedSourceRecord ||
     existsSync(sourceRecord) ||
     artifactStats.uid !== currentUid ||
-    (artifactStats.mode & 0o077) !== 0
+    (artifactStats.mode & 0o077) !== 0 ||
+    nativeLockStats.uid !== currentUid ||
+    (nativeLockStats.mode & 0o777) !== 0o700
   ) {
     fail();
   }
@@ -534,6 +541,7 @@ export function unixProducerBindingEnvironment(
     OPENCOVEN_UNIX_WORKSPACE: workspace,
     OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: artifactDirectory,
     OPENCOVEN_UNIX_SOURCE_RECORD: sourceRecord,
+    OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: nativeLockRoot,
   };
   if (platform === 'linux') {
     const producerNonce = producerName.slice(3);
@@ -1382,7 +1390,7 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     CI: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_NO_LAZY_FETCH: '1',

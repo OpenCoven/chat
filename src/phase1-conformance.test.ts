@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
@@ -34,6 +34,7 @@ import {
   assertNoNodeRuntimeInjection,
   assertPairingStatus,
   assertProductionAdapterAtRevision,
+  bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
   caveBuildEnvironment,
@@ -124,13 +125,16 @@ function createSupervisorArtifactFixture(platform: string) {
   const workspace = resolve(root, 'source');
   const artifactWorkspace = resolve(root, 'producer', 'workspace');
   const artifactDirectory = resolve(artifactWorkspace, '.artifacts');
+  const nativeLockRoot = resolve(root, 'producer', 'native-credential-lock');
   const sourceRecord = resolve(artifactDirectory, `client-v1-conformance-${platform}.json`);
   mkdirSync(workspace, { recursive: true, mode: 0o555 });
   mkdirSync(artifactDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(nativeLockRoot, { recursive: true, mode: 0o700 });
   chmodSync(workspace, 0o555);
   chmodSync(artifactWorkspace, 0o700);
   chmodSync(artifactDirectory, 0o700);
-  return { root, workspace, artifactDirectory, sourceRecord };
+  chmodSync(nativeLockRoot, 0o700);
+  return { root, workspace, artifactDirectory, nativeLockRoot, sourceRecord };
 }
 
 function processIsLive(pid: number) {
@@ -318,6 +322,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
         const gitWrapper = join(bin, 'git');
         const cloneStarted = join(bin, 'clone-started');
+        const cloneArguments = join(bin, 'clone-arguments');
         writeFileSync(
           gitWrapper,
           [
@@ -339,6 +344,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             '  destination="$argument"',
             '  previous="$argument"',
             'done',
+            `[ "$is_clone" = 1 ] && printf '%s\\n' "$@" > ${JSON.stringify(cloneArguments)}`,
             `[ "$is_clone" = 1 ] && : > ${JSON.stringify(cloneStarted)}`,
             'if [ "$is_clone" = 1 ] && [ "$has_branch" = 0 ]; then',
             `  exec ${JSON.stringify(realGit)} clone --no-tags --no-checkout --quiet "$source" "$destination"`,
@@ -379,6 +385,11 @@ describe('Phase 1 real-authority conformance harness', () => {
             },
           ).trim(),
         ).toBe(revision);
+        const recordedCloneArguments = readFileSync(cloneArguments, 'utf8').trim().split('\n');
+        expect(recordedCloneArguments).toContain(`safe.directory=${realpathSync(source)}`);
+        expect(recordedCloneArguments).toContain(
+          `safe.directory=${realpathSync(join(source, '.git'))}`,
+        );
 
         execFileSync('git', ['branch', 'opencoven-phase1-harness', head], { cwd: source });
         await expect(
@@ -406,11 +417,12 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.runIf(process.platform === 'win32')(
     'clones an exact protected tag from a shallow Windows source',
-    () => {
+    async () => {
       const root = mkdtempSync(join(tmpdir(), 'phase1-windows-shallow-clone-'));
       const remote = join(root, 'remote');
       const source = join(root, 'source');
-      const destination = join(root, 'destination');
+      const owned = createProcessOwnedArtifactRoot({ prefix: 'phase1-windows-shallow-clone' });
+      const destination = join(owned.rootPath, 'destination');
       try {
         execFileSync('git', ['init', '--initial-branch=main', remote]);
         execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: remote });
@@ -458,21 +470,37 @@ describe('Phase 1 real-authority conformance harness', () => {
           ).trim(),
         ).toBe(revision);
 
-        execFileSync(
-          'git',
-          [
-            'clone',
-            '--local',
-            '--no-hardlinks',
-            '--no-checkout',
-            '--quiet',
-            '--branch',
-            'opencoven-phase1-harness',
-            source,
-            destination,
-          ],
-          { stdio: 'pipe' },
-        );
+        bootstrapWindowsSupervisor({
+          lockPath: resolve(projectRoot, 'phase1-conformance.lock.json'),
+          windowsSupervisorPath: 'C:\\OpenCoven\\conformance\\phase1-process-supervisor.exe',
+        });
+        const gitPath = execFileSync('where.exe', ['git'], { encoding: 'utf8' })
+          .split(/\r?\n/u)
+          .find(Boolean);
+        if (gitPath === undefined) {
+          throw new Error('Windows Git executable is unavailable.');
+        }
+        const systemRoot = process.env.SYSTEMROOT ?? process.env.WINDIR;
+        if (systemRoot === undefined) {
+          throw new Error('Windows system root is unavailable.');
+        }
+        await cloneExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: source,
+          destinationRoot: destination,
+          repository: 'OpenCoven/chat',
+          revision,
+          environment: {
+            ...process.env,
+            PATH: [
+              dirname(gitPath),
+              dirname(process.execPath),
+              resolve(systemRoot, 'System32'),
+            ].join(';'),
+          },
+          label: 'Windows shallow exact revision fixture',
+          sourceRef: 'refs/tags/opencoven-phase1-harness',
+        });
         expect(
           execFileSync('git', ['rev-parse', 'HEAD'], {
             cwd: destination,
@@ -480,6 +508,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           }).trim(),
         ).toBe(revision);
       } finally {
+        await owned.cleanup();
         rmSync(root, { recursive: true, force: true });
       }
     },
@@ -807,6 +836,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
 
     try {
@@ -829,6 +859,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           OPENCOVEN_UNIX_WORKSPACE: darwinFixture.workspace,
           OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: darwinFixture.artifactDirectory,
           OPENCOVEN_UNIX_SOURCE_RECORD: darwinFixture.sourceRecord,
+          OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: darwinFixture.nativeLockRoot,
         };
         expect(unixProducerBindingEnvironment(darwin, 'darwin', 'arm64', currentUid, '')).toEqual(
           darwin,
@@ -849,6 +880,11 @@ describe('Phase 1 real-authority conformance harness', () => {
         {
           ...common,
           OPENCOVEN_UNIX_SOURCE_RECORD: resolve(fixture.artifactDirectory, 'replacement.json'),
+        },
+        { ...common, OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: undefined },
+        {
+          ...common,
+          OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: resolve(fixture.root, 'other-lock-root'),
         },
       ]) {
         expect(() =>
@@ -884,6 +920,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
       GITHUB_TOKEN: 'must-not-propagate',
     };
     const runtime = {
@@ -922,6 +959,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
         OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
         OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+        OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
         OPENCOVEN_PHASE1_VERIFIED_RUNNER: '1',
         OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT: resolve(fixture.root, 'relocated-harness'),
       });
@@ -1080,6 +1118,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
             OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
             OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+            OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
           },
         },
       );
@@ -2402,6 +2441,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
     const runtime = {
       environment,
@@ -2504,6 +2544,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_UNIX_WORKSPACE: fixture.workspace,
       OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: fixture.artifactDirectory,
       OPENCOVEN_UNIX_SOURCE_RECORD: fixture.sourceRecord,
+      OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: fixture.nativeLockRoot,
     };
     try {
       const parsed = parseArgs(
