@@ -1091,7 +1091,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 462,746 | `5b0128410851ee26ce11f7cd3cf246373c049968a5c6cb0d754faa2ddb51926f` |
+| `.github/workflows/client-v1-conformance.yml` | 463,033 | `6f1a362be64f1bb0a6bac5980ac4acb87af7fed525a33d55ace9d111b9238fe3` |
 | `scripts/contract-canary.mjs` | 39,346 | `63b2a95c8563143d0d748d36ef2bdbae656e7babdb23b986efca97bbbc9b8d83` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1104,7 +1104,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 164,905 | `e34e3987ea1e2957fc879a4903ee8470f655273a1847eb0dbe166993414a9709` |
+| `scripts/phase1-schema-v2-producer.mjs` | 165,661 | `4e938521a6436c3441781b91f0e0f52fe6e3ac6f44faedfcab0458b144ccd714` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

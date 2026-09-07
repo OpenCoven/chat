@@ -965,6 +965,14 @@ export function runSchemaV2PreflightStage(stage, action) {
   }
 }
 
+export async function runSchemaV2StageAsync(stage, action) {
+  try {
+    return await action();
+  } catch (error) {
+    throw new Error(schemaV2FailureDiagnostic(error, stage), { cause: error });
+  }
+}
+
 export function schemaV2NativeFailureDiagnostic(stage, error) {
   if (stage === 'cleanup-grant') {
     if (error === undefined) {
@@ -1888,6 +1896,8 @@ export async function cloneExactCheckout({
     typeof sourceRoot === 'string' && existsSync(sourceRoot) && statSync(sourceRoot).isDirectory()
       ? sourceRoot
       : undefined;
+  const localSourceSafeDirectory =
+    localSource === undefined ? undefined : realpathSync(localSource);
   const localGitDirectory =
     localSource === undefined ? undefined : resolveLocalGitDirectory(localSource);
   const source = localSource ?? `https://github.com/${repository}.git`;
@@ -1900,6 +1910,8 @@ export async function cloneExactCheckout({
       [
         '-c',
         `core.hooksPath=${devNull}`,
+        '-c',
+        `safe.directory=${localSourceSafeDirectory}`,
         '-c',
         `safe.directory=${localGitDirectory}`,
         'clone',
@@ -4774,159 +4786,161 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     }
   }
 
-  const report = await withOwnedArtifactRoot(reportRoot, async () => {
-    const completedReport = buildPhase1Report({
-      assertions: [...results.values()],
-      revisions: {
-        chat: lock.chat.revision,
-        sdk: lock.sdk.revision,
-        cave: lock.cave.revision,
-        coven: lock.coven.revision,
-      },
-      artifactDigests,
-      versions: {
-        harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
-        node: process.versions.node,
-        ...(schemaV2 && toolchain !== undefined
-          ? {
-              rust: toolchain.rustVersion,
-              tauri: toolchain.tauriVersion,
-            }
-          : {}),
-      },
-    });
-    scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`);
+  const report = await runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
+    withOwnedArtifactRoot(reportRoot, async () => {
+      const completedReport = buildPhase1Report({
+        assertions: [...results.values()],
+        revisions: {
+          chat: lock.chat.revision,
+          sdk: lock.sdk.revision,
+          cave: lock.cave.revision,
+          coven: lock.coven.revision,
+        },
+        artifactDigests,
+        versions: {
+          harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
+          node: process.versions.node,
+          ...(schemaV2 && toolchain !== undefined
+            ? {
+                rust: toolchain.rustVersion,
+                tauri: toolchain.tauriVersion,
+              }
+            : {}),
+        },
+      });
+      scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`);
 
-    if (schemaV2) {
-      if (
-        infrastructureFailure !== undefined ||
-        sdkContract === undefined ||
-        producer === undefined ||
-        evidenceArtifacts === undefined ||
-        toolchain === undefined ||
-        observationTests === undefined ||
-        covenProof === undefined ||
-        packageObservations === undefined ||
-        caveRecord === undefined ||
-        nativeProof === undefined ||
-        roots === undefined ||
-        verifiedIdentities === undefined ||
-        operatorBefore === undefined ||
-        operatorHomes === undefined
-      ) {
-        throw wrapInfrastructureFailure(
-          infrastructureFailure ?? new Error('Schema-v2 evidence prerequisites were incomplete.'),
-          completedReport,
-        );
-      }
-      const operatorAfter = captureOperatorFilesystemState(operatorHomes);
-      const isolation = buildIsolationEvidence({
-        operatorBefore,
-        operatorAfter,
-        nativeBeforeSha256: nativeProof.beforeSha256,
-        nativeAfterSha256: nativeProof.afterSha256,
-        opaqueIds: [
-          randomBytes(16).toString('hex'),
-          randomBytes(16).toString('hex'),
-          randomBytes(16).toString('hex'),
-          nativeProof.opaqueId,
-        ],
-      });
-      const observedAssertions = buildObservedSchemaV2Assertions({
-        registry: sdkContract.registry,
-        platform: options.platform,
-        packageObservations,
-        primaryReport: completedReport,
-        caveRecord,
-        native: nativeProof,
-        coven: covenProof,
-        tests: observationTests,
-        scansPassed: true,
-      });
-      const evidence = buildSchemaV2PlatformEvidence({
-        primaryReport: completedReport,
-        caveRecord,
-        platform: options.platform,
-        timing: {
-          startedAt,
-          completedAt: new Date().toISOString(),
-        },
-        sdkContract,
-        observedAssertions,
-        verified: {
-          validator: sdkContract.validator,
-          ...verifiedIdentities,
-          harness: {
-            ...producer.harness,
-            invocationId: randomUUID(),
-          },
-          artifacts: evidenceArtifacts,
-          environment: {
-            os: process.platform,
-            arch: process.arch,
-            ...toolchain,
-            nativeCustody: {
-              backend: nativeProof.backend,
-              available: true,
-            },
-            covenIdentity: {
-              backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
-              available: true,
-            },
-          },
-          isolation,
-        },
-      });
-      const canonical = serializeValidatedSchemaV2PlatformEvidence(evidence, {
-        contract: sdkContract.contract,
-        schema: sdkContract.schema,
-      });
-      scanPhase1ArtifactText(canonical, {
-        validateReport(_value, contents) {
-          sdkContract.contract.parsePlatformEvidence(
-            contents,
-            'Chat retained schema-v2 platform evidence',
-            sdkContract.schema,
+      if (schemaV2) {
+        if (
+          infrastructureFailure !== undefined ||
+          sdkContract === undefined ||
+          producer === undefined ||
+          evidenceArtifacts === undefined ||
+          toolchain === undefined ||
+          observationTests === undefined ||
+          covenProof === undefined ||
+          packageObservations === undefined ||
+          caveRecord === undefined ||
+          nativeProof === undefined ||
+          roots === undefined ||
+          verifiedIdentities === undefined ||
+          operatorBefore === undefined ||
+          operatorHomes === undefined
+        ) {
+          throw wrapInfrastructureFailure(
+            infrastructureFailure ?? new Error('Schema-v2 evidence prerequisites were incomplete.'),
+            completedReport,
           );
-        },
-      });
-      const reportPath = resolve(reportRoot.rootPath, 'record.json');
-      writeFileSync(reportPath, canonical, { mode: 0o600 });
+        }
+        const operatorAfter = captureOperatorFilesystemState(operatorHomes);
+        const isolation = buildIsolationEvidence({
+          operatorBefore,
+          operatorAfter,
+          nativeBeforeSha256: nativeProof.beforeSha256,
+          nativeAfterSha256: nativeProof.afterSha256,
+          opaqueIds: [
+            randomBytes(16).toString('hex'),
+            randomBytes(16).toString('hex'),
+            randomBytes(16).toString('hex'),
+            nativeProof.opaqueId,
+          ],
+        });
+        const observedAssertions = buildObservedSchemaV2Assertions({
+          registry: sdkContract.registry,
+          platform: options.platform,
+          packageObservations,
+          primaryReport: completedReport,
+          caveRecord,
+          native: nativeProof,
+          coven: covenProof,
+          tests: observationTests,
+          scansPassed: true,
+        });
+        const evidence = buildSchemaV2PlatformEvidence({
+          primaryReport: completedReport,
+          caveRecord,
+          platform: options.platform,
+          timing: {
+            startedAt,
+            completedAt: new Date().toISOString(),
+          },
+          sdkContract,
+          observedAssertions,
+          verified: {
+            validator: sdkContract.validator,
+            ...verifiedIdentities,
+            harness: {
+              ...producer.harness,
+              invocationId: randomUUID(),
+            },
+            artifacts: evidenceArtifacts,
+            environment: {
+              os: process.platform,
+              arch: process.arch,
+              ...toolchain,
+              nativeCustody: {
+                backend: nativeProof.backend,
+                available: true,
+              },
+              covenIdentity: {
+                backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
+                available: true,
+              },
+            },
+            isolation,
+          },
+        });
+        const canonical = serializeValidatedSchemaV2PlatformEvidence(evidence, {
+          contract: sdkContract.contract,
+          schema: sdkContract.schema,
+        });
+        scanPhase1ArtifactText(canonical, {
+          validateReport(_value, contents) {
+            sdkContract.contract.parsePlatformEvidence(
+              contents,
+              'Chat retained schema-v2 platform evidence',
+              sdkContract.schema,
+            );
+          },
+        });
+        const reportPath = resolve(reportRoot.rootPath, 'record.json');
+        writeFileSync(reportPath, canonical, { mode: 0o600 });
+        await reportRoot.retainSanitizedJsonReport({
+          reportPath,
+          destinationPath: options.outputPath,
+          validateReport(_value, bytes) {
+            sdkContract.contract.parsePlatformEvidence(
+              bytes.toString('utf8'),
+              'Chat retained schema-v2 platform evidence',
+              sdkContract.schema,
+            );
+          },
+          secretScan: ({ reportPath: scannedPath }) => {
+            const contents = readFileSync(scannedPath, 'utf8');
+            scanPhase1ArtifactText(contents, {
+              validateReport() {
+                sdkContract.contract.parsePlatformEvidence(
+                  contents,
+                  'Chat retained schema-v2 platform evidence',
+                  sdkContract.schema,
+                );
+              },
+            });
+          },
+        });
+        return evidence;
+      }
+
+      const reportPath = resolve(reportRoot.rootPath, 'report.json');
+      writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
       await reportRoot.retainSanitizedJsonReport({
         reportPath,
-        destinationPath: options.outputPath,
-        validateReport(_value, bytes) {
-          sdkContract.contract.parsePlatformEvidence(
-            bytes.toString('utf8'),
-            'Chat retained schema-v2 platform evidence',
-            sdkContract.schema,
-          );
-        },
-        secretScan: ({ reportPath: scannedPath }) => {
-          const contents = readFileSync(scannedPath, 'utf8');
-          scanPhase1ArtifactText(contents, {
-            validateReport() {
-              sdkContract.contract.parsePlatformEvidence(
-                contents,
-                'Chat retained schema-v2 platform evidence',
-                sdkContract.schema,
-              );
-            },
-          });
-        },
+        destinationPath: options.retainSanitizedReport,
+        secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
       });
-      return evidence;
-    }
-
-    const reportPath = resolve(reportRoot.rootPath, 'report.json');
-    writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
-    await reportRoot.retainSanitizedJsonReport({
-      reportPath,
-      destinationPath: options.retainSanitizedReport,
-      secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
-    });
-    return completedReport;
-  });
+      return completedReport;
+    }),
+  );
 
   if (infrastructureFailure !== undefined) {
     throw wrapInfrastructureFailure(infrastructureFailure, report);

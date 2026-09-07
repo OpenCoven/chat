@@ -671,6 +671,83 @@ describe('Phase 1 real-authority conformance harness', () => {
     30_000,
   );
 
+  test.skipIf(process.platform === 'win32')(
+    'trusts both the schema-v2 local worktree and its Git directory',
+    async () => {
+      const source = mkdtempSync(join(tmpdir(), 'phase1-schema-v2-safe-source-'));
+      const linkedSource = join(tmpdir(), `phase1-schema-v2-safe-worktree-${randomUUID()}`);
+      const bin = mkdtempSync(join(tmpdir(), 'phase1-schema-v2-safe-git-'));
+      const owned = createProcessOwnedArtifactRoot({
+        prefix: 'phase1-schema-v2-safe-clone-test',
+      });
+      try {
+        execFileSync('git', ['init', '--initial-branch=main'], { cwd: source });
+        execFileSync('git', ['config', 'user.name', 'OpenCoven Test'], { cwd: source });
+        execFileSync('git', ['config', 'user.email', 'opencoven-test@example.com'], {
+          cwd: source,
+        });
+        writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: source });
+        execFileSync('git', ['commit', '-m', 'fixture'], { cwd: source });
+        const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: source,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['worktree', 'add', '--detach', linkedSource, revision], {
+          cwd: source,
+        });
+        const localGitDirectory = realpathSync(
+          execFileSync('git', ['-C', linkedSource, 'rev-parse', '--absolute-git-dir'], {
+            encoding: 'utf8',
+          }).trim(),
+        );
+        const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+        const gitWrapper = join(bin, 'git');
+        const cloneArguments = join(bin, 'clone-arguments');
+        writeFileSync(
+          gitWrapper,
+          [
+            '#!/bin/sh',
+            'is_clone=0',
+            'for argument in "$@"; do',
+            '  [ "$argument" = clone ] && is_clone=1',
+            'done',
+            `[ "$is_clone" = 1 ] && printf '%s\\n' "$@" > ${JSON.stringify(cloneArguments)}`,
+            `exec ${JSON.stringify(realGit)} "$@"`,
+            '',
+          ].join('\n'),
+        );
+        chmodSync(gitWrapper, 0o755);
+
+        await cloneSchemaV2ExactCheckout({
+          artifactRoot: owned,
+          sourceRoot: linkedSource,
+          destinationRoot: join(owned.rootPath, 'checkout'),
+          repository: 'OpenCoven/chat',
+          revision,
+          environment: {
+            ...process.env,
+            PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+          },
+          label: 'schema-v2 safe-directory fixture',
+        });
+        const recordedCloneArguments = readFileSync(cloneArguments, 'utf8').trim().split('\n');
+        expect(recordedCloneArguments).toContain(`safe.directory=${realpathSync(linkedSource)}`);
+        expect(recordedCloneArguments).toContain(`safe.directory=${localGitDirectory}`);
+      } finally {
+        if (existsSync(linkedSource)) {
+          execFileSync('git', ['worktree', 'remove', '--force', linkedSource], {
+            cwd: source,
+          });
+        }
+        await owned.cleanup();
+        rmSync(source, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
   test('keeps workflow producer HEAD distinct from the historical executable harness', () => {
     const lock = readPhase1ConformanceLock();
     const workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -1233,6 +1310,29 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(runSource).toContain(
       "const linuxSessionEnvironment = runSchemaV2PreflightStage(\n    'phase1.stage.environment.failed'",
     );
+  });
+
+  test('classifies asynchronous schema-v2 evidence finalization failures', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const runStage = producer.runSchemaV2StageAsync;
+    expect(runStage).toBeTypeOf('function');
+    if (typeof runStage !== 'function') {
+      return;
+    }
+
+    const cause = new Error('private retained-evidence detail');
+    await expect(
+      runStage('phase1.stage.evidence-authority.failed', async () => {
+        throw cause;
+      }),
+    ).rejects.toMatchObject({
+      message: 'phase1.stage.evidence-authority.failed',
+      cause,
+    });
   });
 
   test('authenticates the executing harness before schema-v2 dispatch', () => {
