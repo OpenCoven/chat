@@ -18,7 +18,7 @@ represented through experimental cross-database dependencies.
 
 ## Current delivery audit
 
-See the [2026-09-07 delivery roadmap](../../roadmap.md) for the latest audited
+See the [delivery roadmap and dated checkpoints](../../roadmap.md) for the latest audited
 Chat PR and conformance state. The counts and initial readiness below are the
 program-creation baseline; refresh Beads before claiming work or closing gates.
 
