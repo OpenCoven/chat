@@ -223,7 +223,7 @@ packages:
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
   '@opencoven/cave-client@file:vendor/opencoven-sdk/cave-client-0.1.0.tgz':
-    resolution: {integrity: sha512-RcVL85gfejq70t+KOv2SHXd+pD0nMH+0VClncyTYmis/n2TBOwzDx1hXt8iJLfpSYm72we5GTkrBo8A+4PdTpQ==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
+    resolution: {integrity: sha512-LCfHPq4CHyWZMnrjPpV37+oATTMl7r603d8nJkFd7m5oSdjFXTSk0/dpR5muingplldBgr7yxAUgrP2fOTKgZQ==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24.18.0 <25'}
 
@@ -541,8 +541,8 @@ packages:
   bidi-js@1.0.3:
     resolution: {integrity: sha512-RKshQI1R3YQ+n9YJz2QQ147P66ELpa1FQEg20Dk8oW9t2KgLbpDLLp9aGZ7y8WHSshDknG0bknqGw5/tyCs5tw==}
 
-  canonicalize@3.0.0:
-    resolution: {integrity: sha512-yYLfHyDMIXRyRqsKBRLX023riFLpXY2YOfdtqKXZRZy9qsfOJ9U+4F9YZL7MEzL5+ziN2x2nlBvY/Voi3EBljA==}
+  canonicalize@4.0.0:
+    resolution: {integrity: sha512-FEdXzwWs+N3rZqEqpqleiY9M1A6IAf9oo1zHFABnLW9FcJ/jzsu+G/Ks3Hq3FglmPKe80GeGBw8ZXLEnwPB0vQ==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -1097,7 +1097,7 @@ snapshots:
       '@hpke/core': 1.9.0
       '@hpke/dhkem-x25519': 1.8.0
       '@opencoven/sdk-core': file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz
-      canonicalize: 3.0.0
+      canonicalize: 4.0.0
 
   '@opencoven/coven-client@file:vendor/opencoven-sdk/coven-client-0.1.0.tgz':
     dependencies:
@@ -1330,7 +1330,7 @@ snapshots:
     dependencies:
       require-from-string: 2.0.2
 
-  canonicalize@3.0.0: {}
+  canonicalize@4.0.0: {}
 
   chai@6.2.2: {}
 
