@@ -141,7 +141,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+    revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
   },
   coven: {
     repository: 'OpenCoven/coven',

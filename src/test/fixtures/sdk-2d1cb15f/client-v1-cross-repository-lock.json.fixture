@@ -11,7 +11,7 @@
     "path": "conformance/client-v1-cross-repository-evidence.schema.json",
     "version": 2,
     "size": 23174,
-    "sha256": "f9d58f4daee3f8a6fbf78650a18a74ed3ac14c39f1ae086d94324658d7fbdfad"
+    "sha256": "2581b0976ba655e238d98322adb81ddfa3bc0a251e25d49fb888fa4726435471"
   },
   "candidate": {
     "repository": "OpenCoven/sdk",
@@ -88,8 +88,8 @@
   "sources": {
     "cave": {
       "repository": "OpenCoven/coven-cave",
-      "commit": "6325fc4c1154c7d7398074a9760a2e2dc323b424",
-      "tree": "9144939792d3dbdd91c208d7e2abc5ecc0eac089",
+      "commit": "bc310e9753783678014086ed6f7ef7d3fb797967",
+      "tree": "8a9882f45c7b9f55a2d9bb6cbd16d3ead3c489e6",
       "releaseVersion": "0.3.12",
       "files": [
         {
@@ -165,26 +165,26 @@
   "evidenceProducer": {
     "status": "compatible",
     "repository": "OpenCoven/chat",
-    "commit": "4dc8f64bb71634a01ee647542dcdafdd0888b4f9",
-    "tree": "915232e3595196de447521d9fca59866aeade956",
+    "commit": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
+    "tree": "975de93ac84b0436d381f5e427627f98aaa3dd0a",
     "packageManifest": {
       "path": "package.json",
-      "size": 3849,
-      "sha256": "cff1008b666d3381ad1a68fc99a9334bab04d617efb7e0ea434428af3ac8603a"
+      "size": 4044,
+      "sha256": "ed23998109c7762c18120ecbe31ef517f24ab7a1630239e0ca65a56112aa619b"
     },
     "harness": {
       "path": "scripts/phase1-conformance.mjs",
       "version": "2.0.0",
-      "size": 187131,
-      "sha256": "cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b"
+      "size": 199944,
+      "sha256": "67ba91257a71c36c7d91ef01796c5a348d106e40b4a6f1ef59fde6980a5ba584"
     },
     "command": "test:phase1-conformance",
     "recordSchemaVersion": 2,
     "workflow": {
       "name": "client-v1 conformance",
       "path": ".github/workflows/client-v1-conformance.yml",
-      "size": 443639,
-      "sha256": "d4e4029cf667026463b63eed2a2965f1e9f8c0c34b4b2d796afbbacfc00d2042",
+      "size": 463033,
+      "sha256": "e76c4361fb94c0b9525680f2aac176ca377174665b0323b5aefaf219fa452d02",
       "job": "platform-conformance",
       "jobNameTemplate": "platform-conformance ({platform})",
       "aggregationJob": "aggregate-conformance",
@@ -219,13 +219,19 @@
       ],
       "downloadArtifactAction": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "attestationAction": "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
-      "windowsBootstrapScriptSha256": "d237986c4370f42b32347be9eeb9c33e09c1f3c87f80563b3f11ec17053b91c7",
+      "windowsBootstrapScriptSha256": "d9572f970962a3eb24e0fa307b65578a7722eda902b59af8b268b03d83537a43",
       "validatorRevisionScriptSha256": "9abbfe73f19e47650321e6afb2c2a7db4facbf05a72db30241dfa94261cdcad9",
       "phase1RevisionsScriptSha256": "507ce777b643d97154472eb23135f7965fd55cf0fcedcec30e93b23e6472d225",
-      "linuxKeyringSetupScriptSha256": "26e6bb6da4d80617c99d6edeb577c2026910ffc3b1ee70df03bed5fb8d149a51",
-      "unixSupervisorPreparationScriptSha256": "20748878d28293006178804f3a2075b69eab7a98f88a49028e238069e30d8b11",
-      "unixProductionScriptSha256": "1cbfaf8420970fc488424021dae04136891966fcce9a5a7493fe431a23376aa2",
-      "unixValidationScriptSha256": "b0ce7139bdf365d420c7dde478282f117cce97c1bec63d07cd95b64057121a89",
+      "linuxKeyringSetupScriptSha256": "7b1ff87ab5d2230950632560230899cc450458a800a630c2788b53be8b13d200",
+      "unixSupervisorPreparationScriptSha256": "019a8570d1d16ab896a56a08b446978f0e9d8ddd7daee274e3f1747a56192b5e",
+      "unixToolPathSource": {
+        "path": "scripts/executable-resolution.mjs",
+        "size": 9154,
+        "sha256": "31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430"
+      },
+      "unixToolPathScriptSha256": "72ddd8865c68c5dde15d08decb771914d903f752d4909a52d1a10440eaadf36e",
+      "unixProductionScriptSha256": "043066be50d0c3fa66f7151224242734cb2e9f39ffa9cf1c6f8106ab88c75a02",
+      "unixValidationScriptSha256": "51d1402febcbcf9e5b117bdbc3ee2123a68d5ec6f560af5e629b727e7eb7b7bf",
       "validationGuardScriptSha256": "9abbfe73f19e47650321e6afb2c2a7db4facbf05a72db30241dfa94261cdcad9",
       "validationScriptSha256": "72a2c0810c535d4e3d5e2b0c76bfc1822dc43d54ee653bb034fb977125dbd734",
       "attestationScriptSha256": "24af6732396013e8c1f23404cf38b5332e5a276c034d530c80d02247cb2a7347",
@@ -243,8 +249,8 @@
         ]
       },
       "signerWorkflow": "OpenCoven/chat/.github/workflows/client-v1-conformance.yml",
-      "signerDigest": "4dc8f64bb71634a01ee647542dcdafdd0888b4f9",
-      "sourceDigest": "4dc8f64bb71634a01ee647542dcdafdd0888b4f9",
+      "signerDigest": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
+      "sourceDigest": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
       "predicateType": "https://slsa.dev/provenance/v1",
       "denySelfHostedRunners": true
     }
@@ -268,6 +274,6 @@
   "assertionRegistry": {
     "path": "conformance/client-v1-cross-repository-assertions.json",
     "size": 10715,
-    "sha256": "6d5619033469f81a5d40f4fa4b5000708922da29b2eb7a76e4a4db4dfff198cb"
+    "sha256": "0f8df49a870b7beaac81bc417c072d7f77c1e8a7c2c4ab1241dffe5cd757bbb1"
   }
 }
