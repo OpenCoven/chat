@@ -25,6 +25,7 @@ const {
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
   createGitEnvironment,
+  hasPrivateDirectoryMode,
   phase1ConformanceTestOnly,
   readPhase1ConformanceLock,
 } = phase1ConformanceLock;
@@ -778,6 +779,12 @@ describe('Phase 1 checkout verification', () => {
     expect(environment.GIT_SSH_COMMAND).toBe(expectedGitNullDevice);
     expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
     expect(environment.SSH_ASKPASS).toBe(expectedGitNullDevice);
+  });
+
+  test('does not interpret Windows directory mode bits as POSIX permissions', () => {
+    expect(hasPrivateDirectoryMode(0o777, 'win32')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o700, 'linux')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o777, 'linux')).toBe(false);
   });
 
   gitTest('accepts four clean checkouts at their locked revisions', () => {

@@ -905,6 +905,10 @@ function createRepositoryVerificationContext(label, limits) {
   };
 }
 
+export function hasPrivateDirectoryMode(mode, platform = process.platform) {
+  return platform === 'win32' || (mode & 0o077) === 0;
+}
+
 function remainingGitTimeout(context) {
   const remainingMilliseconds = Math.floor(context.deadline - performance.now());
 
@@ -928,7 +932,7 @@ function createInertHooksDirectory(label) {
     if (
       !hooksStats.isDirectory() ||
       hooksStats.isSymbolicLink() ||
-      (hooksStats.mode & 0o077) !== 0 ||
+      !hasPrivateDirectoryMode(hooksStats.mode) ||
       !ownedByProcess ||
       readdirSync(hooksPath).length !== 0
     ) {

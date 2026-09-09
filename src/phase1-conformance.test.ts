@@ -2008,6 +2008,28 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(diagnose(new Error(expected), 'phase1.stage.native-scenarios.failed')).toBe(expected);
   });
 
+  test.each([
+    ['Verified environment does not match linux-x64.', 'environment'],
+    ['Cave evidence record does not match the verified run.', 'cave-record'],
+    ['Verified isolation metadata is incomplete.', 'isolation'],
+    ['Observed Chat assertions are missing required results.', 'assertions'],
+  ])('classifies evidence build failure %s without exposing details', async (message, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(diagnose(new Error(message), 'phase1.stage.evidence-authority.build.failed')).toBe(
+      `phase1.stage.evidence-authority.build.${category}`,
+    );
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),

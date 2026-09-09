@@ -187,6 +187,10 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.evidence-authority.isolation.failed',
   'phase1.stage.evidence-authority.assertions.failed',
   'phase1.stage.evidence-authority.build.failed',
+  'phase1.stage.evidence-authority.build.environment',
+  'phase1.stage.evidence-authority.build.cave-record',
+  'phase1.stage.evidence-authority.build.isolation',
+  'phase1.stage.evidence-authority.build.assertions',
   'phase1.stage.evidence-authority.serialize.failed',
   'phase1.stage.evidence-authority.scan.failed',
   'phase1.stage.evidence-authority.retain.failed',
@@ -972,6 +976,27 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
   }
   if (activeStage === 'phase1.packaging.cave-build.failed') {
     return classifyCaveBuildFailureDiagnostic(error);
+  }
+  if (activeStage === 'phase1.stage.evidence-authority.build.failed') {
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    if (message.startsWith('Verified environment does not match')) {
+      return 'phase1.stage.evidence-authority.build.environment';
+    }
+    if (message.startsWith('Cave evidence record')) {
+      return 'phase1.stage.evidence-authority.build.cave-record';
+    }
+    if (message.startsWith('Verified isolation')) {
+      return 'phase1.stage.evidence-authority.build.isolation';
+    }
+    if (message.startsWith('Observed ')) {
+      return 'phase1.stage.evidence-authority.build.assertions';
+    }
   }
   if (
     activeStage === 'phase1.packaging.chat-native-build.failed' ||
