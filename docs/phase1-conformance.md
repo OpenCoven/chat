@@ -1107,7 +1107,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `85dac8a5eca58329011e824a97130597faa50fa8bb78805e44b5e907a72ee602` |
+| `.github/workflows/client-v1-conformance.yml` | 463,118 | `987e2d6771cb78d55e254208f4bcfedbbc02829b6687ea391eac11e375043998` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1221,3 +1221,9 @@ The Unix supervisor reports a nonzero restricted producer exit status on stderr
 before containment drain, retaining it even when cleanup subsequently fails.
 This numeric status complements the bounded producer stage diagnostic; it does
 not identify the failed authority check or establish successful containment.
+
+Windows harness directory quotas use the same isolated temp directory as the
+producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
+build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
+directories. This path correction preserves every reviewed byte limit. It does
+not by itself identify the subtree responsible for an aggregate quota failure.
