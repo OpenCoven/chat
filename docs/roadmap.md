@@ -54,10 +54,12 @@ in `merged-retirement-20260909.json` and
 `merged-refs-retirement-20260909.json` within its audit directory. These are local
 recovery receipts, not repository files. No force deletion was used.
 
-Three worktrees remain: main, parked #86, and v17. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
+At the earlier retirement checkpoint, three worktrees remained: main, parked
+#86, and v17. The later minimum-checkout checkpoint below supersedes this count. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
 history instead of v17's additional shallow-checkout fetch. The current workflow suite passed 59 tests with 19 platform skips;
-this is not Windows runtime or protected-matrix acceptance. V17's divergent
-historical authority pins remain preserved in its branch and checkout.
+this is not Windows runtime or protected-matrix acceptance. At that checkpoint, V17's divergent historical authority pins were still
+preserved in its branch and checkout; the later checkpoint records checkout
+retirement and continued history preservation.
 
 [Issue #149](https://github.com/OpenCoven/chat/issues/149) tracks the CI-image
 proposal failure and retry defect. Read-only REST inspection on 2026-09-09 UTC returned no repository or
@@ -66,6 +68,39 @@ maintainer. No `CI_IMAGE_BUMP_TOKEN` was visible in either listing at that time.
 image itself already built and passed its verification job. Repairing the
 proposal requires both an authorized workflow-file write path and retry logic
 that does not confuse an existing branch with a completed update and PR.
+
+### Minimum checkout set and remaining gates
+
+Final cleanup on 2026-09-09 UTC reduced the registered worktrees to two: the
+primary checkout and parked PR #86. V17 was clean and had no observed process
+ownership. After confirming its repair was superseded by merged #143, its exact
+tip `d56e915` was preserved in both its local branch and the verified complete-history
+`retired-v17-history.bundle`; only the redundant checkout was removed.
+The external recovery set contains `v17-retirement-20260909.json` in its audit
+directory, with the absence and retained-ref checks.
+
+The delivered heads of #148, #150, and #151 were compared against their merge
+commits for every changed path. Their obsolete remote branches were removed
+with exact-tip leases after preserving full histories in
+`merged-audit-and-image-repair.bundle`. Local divergent history remains intact;
+no force-deletion was used. At this cleanup checkpoint, before the follow-up documentation PR, the remaining
+remote branches were main, parked #86, the pre-existing SDK archive, and the
+incomplete image proposal tracked in #149.
+
+[#151](https://github.com/OpenCoven/chat/pull/151) delivered the image proposal
+repair and credential documentation. Both
+[PR CI](https://github.com/OpenCoven/chat/actions/runs/34299445667) and
+[rebuilt-image verification](https://github.com/OpenCoven/chat/actions/runs/34299428063)
+passed. Issue #149 remains open for credential setup and a successful live
+proposal; the operator has been asked to configure the dedicated token.
+
+Protected [run 34299665723](https://github.com/OpenCoven/chat/actions/runs/34299665723)
+was verified waiting for named `client-v1-conformance` environment review at
+head `dadef69`. The operator was asked to review that existing run; no replacement
+was dispatched or approval supplied by this audit. Later documentation and
+image-proposal repairs do not change its conformance workflow or pinned inputs.
+This remains a pending run, not successful release evidence. PR #86 and the SDK
+release remain gated by their actual acceptance requirements.
 
 ## Historical audit — 2026-09-07
 
