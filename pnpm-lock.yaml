@@ -223,7 +223,7 @@ packages:
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
   '@opencoven/cave-client@file:vendor/opencoven-sdk/cave-client-0.1.0.tgz':
-    resolution: {integrity: sha512-LCfHPq4CHyWZMnrjPpV37+oATTMl7r603d8nJkFd7m5oSdjFXTSk0/dpR5muingplldBgr7yxAUgrP2fOTKgZQ==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
+    resolution: {integrity: sha512-NytxlNq94Licv0JUGTy4UzgQbZoY27lRDAGFfpcJr3T5SuqSGSvkV2Ua6e6h9+MKmfpOnxm0zH6I9xDM1XQXyg==, tarball: file:vendor/opencoven-sdk/cave-client-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24.18.0 <25'}
 

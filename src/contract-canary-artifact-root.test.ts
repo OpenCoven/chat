@@ -316,11 +316,11 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('6526b56b30c9a9c1c072caf2f0022d3427ae18db');
+    expect(lock.sdk.revision).toBe('1597835325cf3762b51408ff0a565037eeb25f64');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
-      sha256: 'addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41',
+      sha256: 'a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
@@ -337,8 +337,8 @@ describe('contract canary temp directory safety', () => {
       version: '0.1.0',
       releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
       vendorFile: 'cave-client-0.1.0.tgz',
-      size: 81543,
-      sha256: '5718ff2964e5e897d54c01d785530df4d6ac4642b96209d6d5d0713fb0e4459d',
+      size: 82000,
+      sha256: '21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45');
@@ -449,7 +449,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
+        revision: '1597835325cf3762b51408ff0a565037eeb25f64',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -477,7 +477,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
+        revision: '1597835325cf3762b51408ff0a565037eeb25f64',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
