@@ -5140,6 +5140,56 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(packaging).not.toContain("['build:conformance']");
   });
 
+  test('bounds Windows native build output without changing Unix or schema-v1 profiles', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const nativeBuildEnvironment = producer.schemaV2NativeBuildEnvironment;
+    expect(nativeBuildEnvironment).toBeTypeOf('function');
+    if (typeof nativeBuildEnvironment !== 'function') {
+      throw new Error('Missing schema-v2 native build environment.');
+    }
+    const environment = {
+      PATH: '/safe/bin',
+      CARGO_PROFILE_DEV_DEBUG: '2',
+      CARGO_INCREMENTAL: '1',
+      CARGO_PROFILE_DEV_OPT_LEVEL: '0',
+      CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'true',
+    };
+    const windowsEnvironment = {
+      ...environment,
+      CARGO_PROFILE_DEV_DEBUG: '0',
+      CARGO_INCREMENTAL: '0',
+    };
+    expect(nativeBuildEnvironment(environment, 'win32')).toEqual(windowsEnvironment);
+    expect(nativeBuildEnvironment(environment, 'linux')).toBe(environment);
+    expect(nativeBuildEnvironment(environment, 'darwin')).toBe(environment);
+    expect(nativeBuildEnvironment(environment)).toEqual(
+      process.platform === 'win32' ? windowsEnvironment : environment,
+    );
+    expect(environment.CARGO_PROFILE_DEV_DEBUG).toBe('2');
+    expect(environment.CARGO_INCREMENTAL).toBe('1');
+
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const packaging = source.slice(
+      source.indexOf('async function packageLockedArtifacts('),
+      source.indexOf('async function runCaveAuthorityMatrix('),
+    );
+    expect(packaging).toMatch(
+      /const nativeBuildEnvironment = schemaV2\s*\?\s*schemaV2NativeBuildEnvironment\(environment\)\s*:\s*environment/u,
+    );
+    for (const target of ['chatTarget', 'covenTarget']) {
+      expect(packaging).toContain(
+        `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
+      );
+    }
+  });
+
   test('uses the operator home only for isolated macOS keychain process tests', () => {
     const isolated = { HOME: '/isolated/home', CARGO_HOME: '/isolated/cargo' };
     expect(nativeAdapterTestEnvironment(isolated, 'darwin', { HOME: '/operator/home' })).toEqual({

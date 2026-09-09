@@ -327,6 +327,18 @@ export function schemaV2CaveBuildEnvironment(environment = process.env) {
   };
 }
 
+export function schemaV2NativeBuildEnvironment(environment, platform = process.platform) {
+  if (platform !== 'win32') {
+    return environment;
+  }
+  return {
+    ...environment,
+    // These one-shot builds retain dev runtime checks, not debugger or rebuild data.
+    CARGO_PROFILE_DEV_DEBUG: '0',
+    CARGO_INCREMENTAL: '0',
+  };
+}
+
 export function bindMacosKeychainSessionEnvironment(environment, session) {
   environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED = '1';
   environment.PHASE1_TEST_KEYCHAIN = session.keychainPath;
@@ -2520,6 +2532,9 @@ async function packageLockedArtifacts(
     );
   }
 
+  const nativeBuildEnvironment = schemaV2
+    ? schemaV2NativeBuildEnvironment(environment)
+    : environment;
   onStage('phase1.packaging.chat-native-build.failed');
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
@@ -2539,7 +2554,7 @@ async function packageLockedArtifacts(
     ],
     {
       cwd: schemaV2 ? roots.producerRoot : roots.chatRoot,
-      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: chatTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
@@ -2554,7 +2569,7 @@ async function packageLockedArtifacts(
     ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'],
     {
       cwd: roots.covenRoot,
-      env: { ...environment, CARGO_TARGET_DIR: covenTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: covenTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
