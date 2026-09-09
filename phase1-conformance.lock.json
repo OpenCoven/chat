@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "9ec19caafe52ecd16d4ae83b1b57458d0a30e0a1"
+    "revision": "cd2f5a3ded0fe4dabf4cfc84ba53cdb293d2234a"
   },
   "harnessAuthority": {
-    "revision": "9ec19caafe52ecd16d4ae83b1b57458d0a30e0a1",
-    "tree": "365b887126efe2f811fbcf0f3806ecf9b706040e",
+    "revision": "cd2f5a3ded0fe4dabf4cfc84ba53cdb293d2234a",
+    "tree": "d070889ca36ceb7f91c6181f748241516d891c1a",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "01c9c7fd81f65d819ce8271d6e130a79c5d72d2e",
-        "sha256": "ed8acca344cfd359cff62aad794aa8bb0878f4ee59cd0160509071bddab45c97"
+        "blob": "713dd27a41ed4f21bb2dd2dab3696b9c8676c38a",
+        "sha256": "3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -76,13 +76,13 @@
       },
       {
         "path": "scripts/phase1-schema-v2-evidence.mjs",
-        "blob": "0d0424731a06f169342258e76216583667e4deb0",
-        "sha256": "a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387"
+        "blob": "023c87e5055472b4be2e0914d97e14109b1d86ad",
+        "sha256": "0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8"
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "e61b9c60aa7cce95b095023acac46d6fbba6b396",
-        "sha256": "4029ea7f78b8cd706266ea13b4aace33424dc47148946526b147f8d020b3c002"
+        "blob": "7f454590a55d9ca36114d1e774ede1c7afda7331",
+        "sha256": "baa7714f4b7200df3166f818219a81e0ae88fb66a0de1462c98d431defc415f2"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -111,8 +111,8 @@
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "0a27a5be4d2eb4981d35d7e3c178424c851697c5",
-        "sha256": "b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff"
+        "blob": "8d060a0ddc5dd27ef7378db63322e44169855dc9",
+        "sha256": "1a83eb8495b671a9d490a26a8ce23745cdded680aa2b896142883acfde19064a"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "1766e509a2c7d4d78559d70a90b761248b4c7087",
-        "sha256": "675eb86a3cf5140cbc933736dfe10fc981713a591c74bda6da109fd2f3ca535c"
+        "blob": "688a939b241edb06471dde62ce5726ba3af3f813",
+        "sha256": "9d4deae1b25b5c2a6708fbeb760ad7e6af829ac18515672f746ed22e126406d9"
       }
     ],
     "productionDeltas": [

@@ -1091,26 +1091,37 @@ the `validate-conformance-artifacts` and `attest-conformance-artifacts` job
 names, the three static download names and record paths, the pinned download
 and attestation action SHAs, and the environment variable prerequisite.
 
+Cave record validation reports fixed diagnostic suffixes beneath
+`phase1.stage.evidence-authority.build.cave-record`: `identity.platform`,
+`identity.commit`, `identity.cave-version`, `identity.node-version`,
+`timing.invalid`, `timing.before-run`, `timing.after-run`, and `assertions.shape`, `count`,
+`unexpected`, `duplicate`, `result`, or `detail`. Both producer wrappers
+preserve only the exact allowlisted IDs. Record values, assertion IDs,
+private details, and exception causes are never included in these diagnostics.
+Identity, inclusive timing bounds, and assertion requirements still control
+acceptance. Cave timestamps must be canonical UTC millisecond strings before
+range comparisons; malformed values are rejected without coercion.
+
 ### SDK verification metadata for this producer
 
 The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `675eb86a3cf5140cbc933736dfe10fc981713a591c74bda6da109fd2f3ca535c` |
+| `.github/workflows/client-v1-conformance.yml` | 463,030 | `a08ad1025dd70096bd5a0cae5f3d37ff1675f0173de4347deebdddfdc90f225d` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 200,699 | `ed8acca344cfd359cff62aad794aa8bb0878f4ee59cd0160509071bddab45c97` |
+| `scripts/phase1-conformance.mjs` | 201,655 | `3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
-| `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 172,516 | `4029ea7f78b8cd706266ea13b4aace33424dc47148946526b147f8d020b3c002` |
+| `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
+| `scripts/phase1-schema-v2-producer.mjs` | 173,472 | `baa7714f4b7200df3166f818219a81e0ae88fb66a0de1462c98d431defc415f2` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

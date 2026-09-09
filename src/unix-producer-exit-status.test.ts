@@ -12,9 +12,9 @@ const start = supervisor.indexOf('set +e\nwait "$producer_pid"');
 const end = supervisor.indexOf('\ndelete_producer_account ||', start);
 const completion = supervisor.slice(start, end);
 
-describe('Unix producer completion diagnostics', () => {
+describe.skipIf(process.platform === 'win32')('Unix producer completion diagnostics', () => {
   test.each(['Linux', 'Darwin'])('%s reports child failure before draining containment', (host) => {
-    expect(start).toBeGreaterThan(0);
+    expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const result = spawnSync(
       'bash',

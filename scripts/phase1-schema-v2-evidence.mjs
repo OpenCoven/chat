@@ -1158,36 +1158,54 @@ function validateIsolation(value) {
   };
 }
 
-function validateCaveRecord(caveRecordValue, registry, expected) {
+export function validateCaveRecord(caveRecordValue, registry, expected) {
   const caveRecord = requireRecord(caveRecordValue, 'Cave evidence record');
   const expectedIds = registry.assertions.cave;
+  for (const [field, expectedValue, diagnostic] of [
+    ['platform', expected.platform, 'platform'],
+    ['commit', expected.commit, 'commit'],
+    ['caveVersion', expected.releaseVersion, 'cave-version'],
+    ['nodeVersion', expected.nodeVersion, 'node-version'],
+  ]) {
+    if (caveRecord[field] !== expectedValue) {
+      throw new Error(`phase1.stage.evidence-authority.build.cave-record.identity.${diagnostic}`);
+    }
+  }
+  const ranAt = typeof caveRecord.ranAt === 'string' ? new Date(caveRecord.ranAt) : undefined;
   if (
-    caveRecord.platform !== expected.platform ||
-    caveRecord.commit !== expected.commit ||
-    caveRecord.caveVersion !== expected.releaseVersion ||
-    caveRecord.nodeVersion !== expected.nodeVersion ||
-    caveRecord.ranAt < expected.startedAt ||
-    caveRecord.ranAt > expected.completedAt ||
-    !Array.isArray(caveRecord.assertions) ||
-    caveRecord.assertions.length !== expectedIds.length
+    ranAt === undefined ||
+    Number.isNaN(ranAt.valueOf()) ||
+    ranAt.toISOString() !== caveRecord.ranAt
   ) {
-    throw new Error('Cave evidence record does not match the verified run.');
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.timing.invalid');
+  }
+  if (caveRecord.ranAt < expected.startedAt) {
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.timing.before-run');
+  }
+  if (caveRecord.ranAt > expected.completedAt) {
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.timing.after-run');
+  }
+  if (!Array.isArray(caveRecord.assertions)) {
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.shape');
+  }
+  if (caveRecord.assertions.length !== expectedIds.length) {
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.count');
   }
   const expectedSet = new Set(expectedIds);
   const observed = new Map();
   for (let index = 0; index < caveRecord.assertions.length; index += 1) {
     const assertion = requireRecord(caveRecord.assertions[index], `Cave assertion ${index}`);
     if (typeof assertion.id !== 'string' || !expectedSet.has(assertion.id)) {
-      throw new Error('Cave evidence record contains an unexpected assertion.');
+      throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.unexpected');
     }
     if (observed.has(assertion.id)) {
-      throw new Error(`Cave evidence record contains duplicate assertion ${assertion.id}.`);
+      throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.duplicate');
     }
     if (assertion.result !== 'pass') {
-      throw new Error(`Cave evidence record assertion ${assertion.id} is not passing.`);
+      throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.result');
     }
     if (typeof assertion.detail !== 'string') {
-      throw new Error(`Cave evidence record assertion ${assertion.id} has invalid detail.`);
+      throw new Error('phase1.stage.evidence-authority.build.cave-record.assertions.detail');
     }
     observed.set(assertion.id, {
       ...structuredClone(assertion),
