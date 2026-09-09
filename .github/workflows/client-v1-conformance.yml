@@ -41,7 +41,8 @@ jobs:
           $env:GIT_CONFIG_NOSYSTEM = '1'
           $env:GIT_NO_REPLACE_OBJECTS = '1'
           $env:GIT_NO_LAZY_FETCH = '1'
-          $source = Join-Path $root 'counterparts\coven'
+          $executionRoot = Join-Path $root 'temp\phase1-conformance-run-9999-abcdef'
+          $source = Join-Path $executionRoot 'checkouts\coven'
           New-Item -ItemType Directory -Path $source | Out-Null
           git -C $source init
           git -C $source fetch --depth=1 https://github.com/OpenCoven/coven.git 721437b84026c042e431b0882dcd14fdb29ac07d
@@ -55,7 +56,7 @@ jobs:
           Set-Location $source
           cargo build --locked --package coven-cli --bin coven
           Write-Host 'Repeat with the exact frozen safeEnvironment helper and pinned native tool paths.'
-          $env:OPENCOVEN_DIAGNOSTIC_ROOT = $root
+          $env:OPENCOVEN_DIAGNOSTIC_ROOT = $executionRoot
           $env:OPENCOVEN_DIAGNOSTIC_CARGO = & rustup which cargo
           $msvc = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207'
           $sdk = 'C:\Program Files (x86)\Windows Kits\10'
@@ -82,11 +83,11 @@ jobs:
           ));
           const root = process.env.OPENCOVEN_DIAGNOSTIC_ROOT;
           const cargo = process.env.OPENCOVEN_DIAGNOSTIC_CARGO;
-          const env = schemaV2NativeBuildEnvironment(safeEnvironment(resolve(root, 'safe-env'), {
+          const env = schemaV2NativeBuildEnvironment(safeEnvironment(root, {
             LIB: process.env.LIB,
             INCLUDE: process.env.INCLUDE,
           }, cargo));
-          env.CARGO_TARGET_DIR = resolve(root, 'build/safe-coven-target');
+          env.CARGO_TARGET_DIR = resolve(root, 'build/coven-target');
           const result = spawnSync(cargo, ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
             cwd: resolve(root, 'counterparts/coven'),
             env,
