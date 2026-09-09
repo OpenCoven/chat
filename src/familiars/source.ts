@@ -8,12 +8,12 @@ export type { Page, PageCursor, QueryResult };
  * The Familiars surface's data-source seam.
  *
  * `FamiliarsShell` reads through this interface rather than module
- * constants. One implementation exists today: `MockFamiliarsSource`
- * (`./mock-source.ts`), wrapping `src/demo/familiars-data.ts` for the demo
- * build and tests. The Cave-backed implementation, and the single mapping
- * from SDK wire types to these view types, land with the SDK bump that
- * exports `CaveFamiliarIdentity`, `CaveFamiliarWard`, and
- * `CaveExecutionDay`; the seam is shaped for it so that arrival is additive.
+ * constants. Two implementations exist: `MockFamiliarsSource`
+ * (`./mock-source.ts`), wrapping today's `src/demo/familiars-data.ts` for
+ * the demo build and tests, and `CaveFamiliarsSource` (`./cave-source.ts`),
+ * built on `QueryAdapter` and the managed `CaveClient`. The mapping from SDK
+ * wire types to these view types lives in one place, `./mappers.ts`, so a
+ * wire change is a type error there and nowhere else.
  *
  * Scoped to Stage 1 (reads only) of
  * `docs/superpowers/plans/2026-09-02-familiars-integration.md`. Send,

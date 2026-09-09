@@ -1,7 +1,16 @@
 import type {
-  CaveManagedCredentialTransport,
-  CaveManagedDiscoverySource,
-  CavePairingRequest,
+  CaveAnalyticsWindowKey,
+  CaveFamiliarAnalyticsResponse,
+  CaveFamiliarAnalyticsTransportOptions,
+  CaveFamiliarContractResponse,
+} from '@opencoven/cave-client';
+import {
+  CAVE_ANALYTICS_WINDOWS,
+  type CaveManagedCredentialTransport,
+  type CaveManagedDiscoverySource,
+  type CavePairingRequest,
+  canonicalFamiliarAnalyticsData,
+  canonicalFamiliarContractData,
 } from '@opencoven/cave-client/managed';
 import {
   type OperationContext,
@@ -417,6 +426,38 @@ function canonicalConversationId(value: unknown): string {
   return value;
 }
 
+function canonicalFamiliarId(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 64 ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(value)
+  ) {
+    return invalidNativeInput();
+  }
+  return value;
+}
+
+function canonicalAnalyticsWindow(value: CaveAnalyticsWindowKey | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!(CAVE_ANALYTICS_WINDOWS as readonly string[]).includes(value)) {
+    return invalidNativeInput();
+  }
+  return value;
+}
+
+function canonicalRecentLimit(value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    return invalidNativeInput();
+  }
+  return value;
+}
+
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -605,6 +646,35 @@ export function createCaveManagedCredentialTransport(
         },
         context,
       );
+    },
+    async familiarContract(
+      familiarId: string,
+      context?: OperationContext,
+    ): Promise<CaveFamiliarContractResponse> {
+      const result = await invokeBoundOperation(
+        'cave_familiar_contract',
+        {
+          familiarId: canonicalFamiliarId(familiarId),
+        },
+        context,
+      );
+      return canonicalFamiliarContractData(result) as unknown as CaveFamiliarContractResponse;
+    },
+    async familiarAnalytics(
+      familiarId: string,
+      options?: CaveFamiliarAnalyticsTransportOptions,
+      context?: OperationContext,
+    ): Promise<CaveFamiliarAnalyticsResponse> {
+      const result = await invokeBoundOperation(
+        'cave_familiar_analytics',
+        {
+          familiarId: canonicalFamiliarId(familiarId),
+          window: canonicalAnalyticsWindow(options?.window),
+          recentLimit: canonicalRecentLimit(options?.recentLimit),
+        },
+        context,
+      );
+      return canonicalFamiliarAnalyticsData(result) as unknown as CaveFamiliarAnalyticsResponse;
     },
   });
 }
