@@ -8,6 +8,21 @@ on:
 permissions:
   contents: read
 jobs:
+  coven-isolated-user-diagnostic:
+    if: github.ref == 'refs/heads/diag/coven-isolated-user-20260909'
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.1
+      - name: Compile frozen Coven under the frozen isolated-user supervisor
+        shell: pwsh
+        run: ./scripts/diagnostic-coven-isolated-user.ps1
   windows-supervisor:
     name: build-windows-supervisor
     if: github.ref == 'refs/heads/main'
