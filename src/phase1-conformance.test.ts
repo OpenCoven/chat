@@ -5090,7 +5090,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toEqual({
       PATH: '/safe/bin',
       NODE_OPTIONS: '--max-old-space-size=6144',
-      CIRCLE_NODE_TOTAL: '3',
+      CIRCLE_NODE_TOTAL: '2',
     });
   });
 
@@ -5114,13 +5114,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toEqual({
       PATH: '/safe/bin',
       NODE_OPTIONS: '--max-old-space-size=6144',
-      CIRCLE_NODE_TOTAL: '3',
+      CIRCLE_NODE_TOTAL: '2',
       COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
     });
     expect(schemaV2CaveBuildEnvironment()).toEqual(
       expect.objectContaining({
         NODE_OPTIONS: '--max-old-space-size=6144',
-        CIRCLE_NODE_TOTAL: '3',
+        CIRCLE_NODE_TOTAL: '2',
         COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
       }),
     );
@@ -5188,6 +5188,9 @@ describe('Phase 1 real-authority conformance harness', () => {
         `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
       );
     }
+    expect(source).toMatch(
+      /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
+    );
   });
 
   test('uses the operator home only for isolated macOS keychain process tests', () => {

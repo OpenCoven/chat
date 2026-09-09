@@ -43,6 +43,13 @@ blocked until this Chat change merges, a reachable authority commit pins the
 final behavior commit, and the SDK validator is rebound to that final
 post-merge Chat authority commit.
 
+Protected run `34345365355` proved the repaired frozen-consumer boundary and
+completed Linux. Darwin then failed during plugin evaluation, while Windows
+exceeded the aggregate bootstrap quota. The Cave build now uses two reported
+CPUs as a conservative contention experiment, not a proven fix for that generic
+plugin error. Windows uses the measured working-tree allocation and compact
+native builds described below, with the original aggregate ceilings preserved.
+
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
@@ -601,7 +608,8 @@ The Cave allowance accounts for a measured frozen `d20d83c` build with
 3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
 768 MiB allowance could not fit that working tree. The execution and bootstrap
 aggregate limits remain unchanged. Windows schema-v2 native builds use
-`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_INCREMENTAL=0` for both Chat and Coven.
+`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_INCREMENTAL=0` for Chat and Coven packaging
+and the shared native observation-test target.
 They retain the existing dev profile's runtime checks, optimization level, and
 features, but omit debugger and incremental-rebuild data for these one-shot
 builds. Unix and schema-v1 native build settings are unchanged. A local native
@@ -1124,20 +1132,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,333 | `dbea1374732ff8ee13cd166c15b2f0f6bb5d4a036d99af82de9363fbfe26b1f5` |
+| `.github/workflows/client-v1-conformance.yml` | 463,333 | `66ab87a32bcd1f76ace02b8a4a2db1f9c43d8c29c7e98b7cf3acf45e2b1af3af` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 202,423 | `6fd80711c4807a148f9b9ae7fc8dc70604a017deafe1de4d705f5d8ec013de39` |
+| `scripts/phase1-conformance.mjs` | 202,423 | `9cc3231270be8ba244c59c4047b9e9c75003e79633801b19b6ee17eb29e6f1a0` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 175,997 | `83541b65b44a72f82673b59d7e6d4819c1f4bfde667a6d760ec6c2e41d2c1d99` |
+| `scripts/phase1-schema-v2-producer.mjs` | 176,029 | `ae694058306de451de1cc8dd5dd5bf8a26e3e57693481aa2975d5eb53571d570` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
