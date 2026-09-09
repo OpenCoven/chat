@@ -609,9 +609,10 @@ dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
-the watchdog. Schema-v2 Chat and Coven builds share one Cargo target tree so
-common dependencies are not duplicated within those unchanged bounds. Each
-scan materializes only a bounded number of entries through
+the watchdog. After preserving the built Chat RPC executable, schema-v2 removes
+the no-longer-needed Chat Cargo target before building Coven so peak disk usage
+stays within those unchanged bounds. Each scan materializes only a bounded
+number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail

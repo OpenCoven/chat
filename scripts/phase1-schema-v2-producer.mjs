@@ -11,6 +11,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -119,6 +121,8 @@ const cargoBuildFailureCategories = [
   'resource.memory',
   'resource.disk',
   'resource.killed',
+  'process.crash',
+  'no-output',
   'linker',
   'build-script',
   'compile',
@@ -1004,6 +1008,32 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   const output = stripVTControlCharacters(
     `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
   ).toLowerCase();
+  const exitCode = error.result?.code;
+  if (
+    typeof exitCode === 'number' &&
+    (exitCode < 0 || exitCode >= 0x80000000)
+  ) {
+    return `${baseId}.process.crash`;
+  }
+  if (output.trim().length === 0) {
+    return `${baseId}.no-output`;
+  }
+  if (
+    output.includes('out of memory') ||
+    output.includes('failed to allocate memory') ||
+    output.includes('cannot allocate memory') ||
+    output.includes('enomem')
+  ) {
+    return `${baseId}.resource.memory`;
+  }
+  if (
+    output.includes('no space left on device') ||
+    output.includes('not enough space on the disk') ||
+    output.includes('os error 112') ||
+    output.includes('enospc')
+  ) {
+    return `${baseId}.resource.disk`;
+  }
   if (
     /system library .* required by crate .* was not found/u.test(output) ||
     output.includes('pkg-config exited with status code') ||
@@ -1019,23 +1049,6 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     output.includes('could not resolve host')
   ) {
     return `${baseId}.dependency-fetch`;
-  }
-  if (
-    output.includes('out of memory') ||
-    output.includes('failed to allocate memory') ||
-    output.includes('cannot allocate memory') ||
-    output.includes('enomem')
-  ) {
-    return `${baseId}.resource.memory`;
-  }
-  if (
-    output.includes('no space left on device') ||
-    output.includes('not enough space on the disk') ||
-    output.includes('there is not enough space on the disk') ||
-    output.includes('os error 112') ||
-    output.includes('enospc')
-  ) {
-    return `${baseId}.resource.disk`;
   }
   if (output.includes('killed: 9') || /signal: 9\b/u.test(output)) {
     return `${baseId}.resource.killed`;
@@ -2542,8 +2555,8 @@ async function packageLockedArtifacts(
     ? schemaV2NativeBuildEnvironment(environment)
     : environment;
   onStage('phase1.packaging.chat-native-build.failed');
-  const nativeTarget = resolve(artifactRoot.rootPath, 'build', 'native-target');
-  mkdirSync(nativeTarget, { recursive: true, mode: 0o700 });
+  const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
+  mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
   await runCommand(
     artifactRoot,
     'Chat native RPC package',
@@ -2560,12 +2573,29 @@ async function packageLockedArtifacts(
     ],
     {
       cwd: schemaV2 ? roots.producerRoot : roots.chatRoot,
-      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: nativeTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: chatTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
+  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+  const nativeBinRoot = resolve(artifactRoot.rootPath, 'bin');
+  mkdirSync(nativeBinRoot, { recursive: true, mode: 0o700 });
+  const nativeRpcPath = resolve(nativeBinRoot, `phase1-native-rpc${executableSuffix}`);
+  const builtNativeRpcPath = resolve(
+    chatTarget,
+    'debug',
+    `phase1-native-rpc${executableSuffix}`,
+  );
+  const nativeRpcStats = lstatSync(builtNativeRpcPath);
+  if (nativeRpcStats.isSymbolicLink() || !nativeRpcStats.isFile()) {
+    throw new Error('Chat native RPC package is not a regular file.');
+  }
+  renameSync(builtNativeRpcPath, nativeRpcPath);
+  rmSync(chatTarget, { recursive: true });
 
   onStage('phase1.packaging.coven-build.failed');
+  const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
+  mkdirSync(covenTarget, { recursive: true, mode: 0o700 });
   await runCommand(
     artifactRoot,
     'Coven CLI package',
@@ -2573,14 +2603,12 @@ async function packageLockedArtifacts(
     ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'],
     {
       cwd: roots.covenRoot,
-      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: nativeTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: covenTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
 
-  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
-  const nativeRpcPath = resolve(nativeTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
-  const covenBinaryPath = resolve(nativeTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
   onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],

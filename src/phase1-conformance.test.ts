@@ -1856,7 +1856,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       ['      onStage(stage) {', '        activeStage = stage;', '      },'].join('\n'),
     );
     expect(source.indexOf("onStage('phase1.packaging.chat-native-build.failed')")).toBeLessThan(
-      source.indexOf('mkdirSync(nativeTarget'),
+      source.indexOf('mkdirSync(chatTarget'),
     );
     expect(source.indexOf("onStage('phase1.packaging.coven-build.failed')")).toBeLessThan(
       source.indexOf("'Coven CLI package'"),
@@ -3710,6 +3710,22 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.packaging.chat-native-build.resource.disk',
     ],
     [
+      'Windows disk exhaustion during dependency fetch',
+      'error: failed to download /private/crate\nCaused by: os error 112',
+      'phase1.packaging.chat-native-build.resource.disk',
+    ],
+    [
+      'native process crash',
+      '',
+      'phase1.packaging.chat-native-build.process.crash',
+      0xc0000005,
+    ],
+    [
+      'silent nonzero exit',
+      '',
+      'phase1.packaging.chat-native-build.no-output',
+    ],
+    [
       'linker failure',
       'error: linking with `cc` failed: exit status: 1\n/private/object.o',
       'phase1.packaging.chat-native-build.linker',
@@ -3741,7 +3757,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
   ])(
     'classifies bounded Cargo %s failures without exposing output',
-    async (_, stderr, expected) => {
+    async (_, stderr, expected, code = 1) => {
       // @ts-expect-error The executable script intentionally has no declaration file.
       const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
         string,
@@ -3764,7 +3780,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
       const diagnostic = diagnose(
         new SchemaV2CommandExecutionError('private cargo command', {
-          code: 1,
+          code,
           signal: null,
           stdout: '',
           stderr,
@@ -5188,12 +5204,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(packaging).toMatch(
       /const nativeBuildEnvironment = schemaV2\s*\?\s*schemaV2NativeBuildEnvironment\(environment\)\s*:\s*environment/u,
     );
-    expect(packaging).toContain(
-      "const nativeTarget = resolve(artifactRoot.rootPath, 'build', 'native-target');",
-    );
-    expect(packaging.match(/CARGO_TARGET_DIR: nativeTarget/gu)).toHaveLength(2);
-    expect(packaging).not.toContain("'chat-target'");
-    expect(packaging).not.toContain("'coven-target'");
+    for (const target of ['chatTarget', 'covenTarget']) {
+      expect(packaging).toContain(
+        `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
+      );
+    }
+    expect(packaging).toContain('renameSync(builtNativeRpcPath, nativeRpcPath);');
+    expect(packaging).toContain('rmSync(chatTarget, { recursive: true });');
     expect(source).toMatch(
       /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
     );
