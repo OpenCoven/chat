@@ -25,6 +25,13 @@ aggregation were skipped. Retain their exact producer/validator identities.
 Do not combine their platform records, or substitute the newer validator
 variables for the identity recorded by an earlier attempt.
 
+[Chat #188](https://github.com/OpenCoven/chat/issues/188) tracks the public
+`glib::VariantStrIter` advisory in the native Linux graph. A locked, offline
+`cargo tree` check confirms `glib 0.18.5` through Tauri's GTK/WebKit dependencies.
+The advisory lists `0.20.0` as the first patched version; a compatible dependency
+repair and native Linux validation remain outstanding. This audit establishes
+dependency presence, not reachability of the affected API in Chat.
+
 The frozen SDK candidate remains `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
 it does not contain the pending SDK #186 changes. Publication stays disabled,
 and the final release gate `cave-ilh1h` remains blocked.
