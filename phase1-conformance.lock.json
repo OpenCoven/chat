@@ -10,7 +10,7 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "bc310e9753783678014086ed6f7ef7d3fb797967"
+    "revision": "d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45"
   },
   "coven": {
     "repository": "OpenCoven/coven",
@@ -26,8 +26,8 @@
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "713dd27a41ed4f21bb2dd2dab3696b9c8676c38a",
-        "sha256": "3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876"
+        "blob": "cb38a3fa805dc36062ca0ce423799690b2a2aea8",
+        "sha256": "09ec4a7c1204644af151d36577e7f2d78efaf2397ac6d7ca224fbbf04e3e463a"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "688a939b241edb06471dde62ce5726ba3af3f813",
-        "sha256": "9d4deae1b25b5c2a6708fbeb760ad7e6af829ac18515672f746ed22e126406d9"
+        "blob": "6cd5235a13d0539e5a6711c0fb9ea2f5aa54ec2c",
+        "sha256": "814a9d41770161514e63c825a822ed2c2944f436f5a4a9c038ed56c0cb78ac4a"
       }
     ],
     "productionDeltas": [
@@ -316,8 +316,8 @@
     "caveArtifacts": {
       "assertionEngine": {
         "path": "scripts/client-v1-conformance.mjs",
-        "size": 146432,
-        "sha256": "b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd"
+        "size": 146472,
+        "sha256": "a3f16292f0200711c44553bb6874d64f19e94474ae7e9412127ac4c705b79f2c"
       },
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",

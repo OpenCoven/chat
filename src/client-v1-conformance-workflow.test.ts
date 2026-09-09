@@ -2463,7 +2463,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(schemaV2Producer).toContain(
       "pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version']",
     );
-    expect(harness).toContain("const pnpmCommand = pnpmInvocation(\n    [\n      '--ignore-workspace'");
+    expect(harness).toContain(
+      "const pnpmCommand = pnpmInvocation(\n    [\n      '--ignore-workspace'",
+    );
     expect(harness).toContain('pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,');
     expect(harness).not.toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
     expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");

@@ -21,8 +21,8 @@ the final bytes.
   `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
   authority;
 - SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `bc310e9753783678014086ed6f7ef7d3fb797967`, tree
-  `8a9882f45c7b9f55a2d9bb6cbd16d3ead3c489e6`, release `0.3.12`;
+- Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
+  `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
 - Chat conformance driver support at the exact `harness.revision` and
   `harnessAuthority.tree` generated from the preceding code/integration
@@ -1108,13 +1108,13 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `9d4deae1b25b5c2a6708fbeb760ad7e6af829ac18515672f746ed22e126406d9` |
+| `.github/workflows/client-v1-conformance.yml` | 463,082 | `814a9d41770161514e63c825a822ed2c2944f436f5a4a9c038ed56c0cb78ac4a` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 201,655 | `3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876` |
+| `scripts/phase1-conformance.mjs` | 201,819 | `09ec4a7c1204644af151d36577e7f2d78efaf2397ac6d7ca224fbbf04e3e463a` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
