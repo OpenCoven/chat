@@ -1009,10 +1009,7 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
   ).toLowerCase();
   const exitCode = error.result?.code;
-  if (
-    typeof exitCode === 'number' &&
-    (exitCode < 0 || exitCode >= 0x80000000)
-  ) {
+  if (typeof exitCode === 'number' && (exitCode < 0 || exitCode >= 0x80000000)) {
     return `${baseId}.process.crash`;
   }
   if (output.trim().length === 0) {
@@ -2581,11 +2578,7 @@ async function packageLockedArtifacts(
   const nativeBinRoot = resolve(artifactRoot.rootPath, 'bin');
   mkdirSync(nativeBinRoot, { recursive: true, mode: 0o700 });
   const nativeRpcPath = resolve(nativeBinRoot, `phase1-native-rpc${executableSuffix}`);
-  const builtNativeRpcPath = resolve(
-    chatTarget,
-    'debug',
-    `phase1-native-rpc${executableSuffix}`,
-  );
+  const builtNativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
   const nativeRpcStats = lstatSync(builtNativeRpcPath);
   if (nativeRpcStats.isSymbolicLink() || !nativeRpcStats.isFile()) {
     throw new Error('Chat native RPC package is not a regular file.');

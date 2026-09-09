@@ -3714,17 +3714,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       'error: failed to download /private/crate\nCaused by: os error 112',
       'phase1.packaging.chat-native-build.resource.disk',
     ],
-    [
-      'native process crash',
-      '',
-      'phase1.packaging.chat-native-build.process.crash',
-      0xc0000005,
-    ],
-    [
-      'silent nonzero exit',
-      '',
-      'phase1.packaging.chat-native-build.no-output',
-    ],
+    ['native process crash', '', 'phase1.packaging.chat-native-build.process.crash', 0xc0000005],
+    ['silent nonzero exit', '', 'phase1.packaging.chat-native-build.no-output'],
     [
       'linker failure',
       'error: linking with `cc` failed: exit status: 1\n/private/object.o',
