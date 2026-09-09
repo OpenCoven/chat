@@ -2030,6 +2030,65 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test.each([
+    ['pnpm version verification', 'pnpm'],
+    ['Rust version verification', 'rust'],
+    ['Tauri version verification', 'tauri'],
+  ])('classifies %s command failures within toolchain verification', async (label, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number | null;
+        signal: string | null;
+        stdout: string;
+        stderr: string;
+        reason: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    expect(SchemaV2CommandExecutionError).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+    const error = new SchemaV2CommandExecutionError(label, {
+      code: 1,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      reason: 'exit-nonzero',
+    });
+
+    expect(diagnose(error, 'phase1.stage.toolchain.failed')).toBe(
+      `phase1.stage.toolchain.${category}`,
+    );
+  });
+
+  test('classifies frozen toolchain metadata mismatch', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(
+      diagnose(
+        new Error('Observed toolchain does not match the SDK frozen contract.'),
+        'phase1.stage.toolchain.failed',
+      ),
+    ).toBe('phase1.stage.toolchain.metadata');
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
