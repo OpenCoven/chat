@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.18.1
-      - name: Compile frozen Coven without conformance credentials or evidence
+      - name: Reproduce sequential native builds without conformance credentials or evidence
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -53,9 +53,7 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
           rustc --version
           cargo --version
-          Set-Location $source
-          cargo build --locked --package coven-cli --bin coven
-          Write-Host 'Repeat with the exact frozen safeEnvironment helper and pinned native tool paths.'
+          Write-Host 'Run the exact sequential native builds with separate target trees.'
           $env:OPENCOVEN_DIAGNOSTIC_ROOT = $executionRoot
           $env:OPENCOVEN_DIAGNOSTIC_CARGO = & rustup which cargo
           $msvc = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207'
@@ -76,6 +74,7 @@ jobs:
           ) -join ';'
           $probe = @'
           import { spawnSync } from 'node:child_process';
+          import { readdirSync, statfsSync, statSync } from 'node:fs';
           import { resolve } from 'node:path';
           import { pathToFileURL } from 'node:url';
           const { safeEnvironment, schemaV2NativeBuildEnvironment } = await import(pathToFileURL(
@@ -87,15 +86,50 @@ jobs:
             LIB: process.env.LIB,
             INCLUDE: process.env.INCLUDE,
           }, cargo));
-          env.CARGO_TARGET_DIR = resolve(root, 'build/coven-target');
-          const result = spawnSync(cargo, ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
-            cwd: resolve(root, 'checkouts/coven'),
-            env,
-            stdio: 'inherit',
-            timeout: 20 * 60_000,
-          });
-          if (result.error) throw result.error;
-          process.exit(result.status ?? 1);
+          const directoryBytes = (path) => readdirSync(path, { withFileTypes: true }).reduce(
+            (total, entry) => {
+              const child = resolve(path, entry.name);
+              return total + (entry.isDirectory() ? directoryBytes(child) : statSync(child).size);
+            },
+            0,
+          );
+          const run = (label, args, cwd, target) => {
+            const result = spawnSync(cargo, args, {
+              cwd,
+              env: { ...env, CARGO_TARGET_DIR: target },
+              stdio: 'inherit',
+              timeout: 20 * 60_000,
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) {
+              console.error(`${label}_exit=${result.status ?? 'null'}`);
+              process.exit(result.status ?? 1);
+            }
+            const filesystem = statfsSync(root);
+            console.log(`${label}_target_bytes=${directoryBytes(target)}`);
+            console.log(`${label}_free_bytes=${Number(filesystem.bavail) * Number(filesystem.bsize)}`);
+          };
+          run(
+            'chat_native',
+            [
+              'build',
+              '--manifest-path',
+              'src-tauri/Cargo.toml',
+              '--locked',
+              '--features',
+              'phase1-conformance',
+              '--bin',
+              'phase1-native-rpc',
+            ],
+            resolve(process.env.GITHUB_WORKSPACE, 'diagnostic-chat'),
+            resolve(root, 'build/chat-target'),
+          );
+          run(
+            'coven',
+            ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'],
+            resolve(root, 'checkouts/coven'),
+            resolve(root, 'build/coven-target'),
+          );
           '@
           & $node --input-type=module --eval $probe
   windows-supervisor:
