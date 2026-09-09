@@ -998,6 +998,27 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
       return 'phase1.stage.evidence-authority.build.assertions';
     }
   }
+  if (activeStage === 'phase1.stage.toolchain.failed') {
+    if (error instanceof CommandExecutionError) {
+      if (error.label === 'pnpm version verification') {
+        return 'phase1.stage.toolchain.pnpm';
+      }
+      if (error.label === 'Rust version verification') {
+        return 'phase1.stage.toolchain.rust';
+      }
+      if (error.label === 'Tauri version verification') {
+        return 'phase1.stage.toolchain.tauri';
+      }
+    }
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      error.message === 'Observed toolchain does not match the SDK frozen contract.'
+    ) {
+      return 'phase1.stage.toolchain.metadata';
+    }
+  }
   if (
     activeStage === 'phase1.packaging.chat-native-build.failed' ||
     activeStage === 'phase1.packaging.coven-build.failed'
