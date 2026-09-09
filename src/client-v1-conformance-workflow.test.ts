@@ -2821,6 +2821,21 @@ ${pathAssignment}
     expect(runBody).toContain("(Join-Path $msvcBin 'link.exe')");
   });
 
+  test('roots Windows harness quotas in the producer temp directory', () => {
+    const bootstrap = workflowRunBody(
+      workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
+    );
+    expect(bootstrap).toContain('TEMP = $isolatedUser.TempPath');
+    expect(bootstrap).toContain('TMP = $isolatedUser.TempPath');
+    const quotaPatterns = [
+      ...bootstrap.matchAll(/Join-Path (\$[A-Za-z.]+) 'phase1-conformance-run-\*([^']*)'/gu),
+    ];
+    expect(quotaPatterns).toHaveLength(11);
+    for (const [, parent] of quotaPatterns) {
+      expect(parent).toBe('$isolatedUser.TempPath');
+    }
+  });
+
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
     const bootstrap = workflowRunBody(
       workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
@@ -2835,13 +2850,13 @@ ${pathAssignment}
       "Join-Path $bootstrapRoot 'cargo\\git'",
       "Join-Path $bootstrapRoot 'pnpm-store'",
       "Join-Path $workspace '.git\\objects'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\sdk'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\chat'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\cave'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\coven'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\validator'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\producer'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\build'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\sdk'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\chat'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\cave'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\coven'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\validator'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\producer'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\build'",
     ];
     for (const quotaRoot of requiredQuotaRoots) {
       expect(bootstrap).toContain(quotaRoot);

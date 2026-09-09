@@ -46,6 +46,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  classifyCavePluginEvaluationFailure,
   pnpmInvocation,
   runSchemaV2Conformance,
   schemaV2SupervisorEnvironment,
@@ -573,6 +574,10 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
   'phase1.packaging.cave-build.phase.next-build.compile.native-module',
   'phase1.packaging.cave-build.phase.next-build.compile.plugin',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.type',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.range',
   'phase1.packaging.cave-build.phase.next-build.typescript',
   'phase1.packaging.cave-build.phase.next-build.page-data',
   'phase1.packaging.cave-build.phase.next-build.static-pages',
@@ -833,7 +838,12 @@ export function classifyPackagingCommandFailure(baseId, error) {
                               : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
                                     output,
                                   )
-                                ? 'next-build.compile.plugin'
+                                ? [
+                                    'next-build.compile.plugin',
+                                    classifyCavePluginEvaluationFailure(output),
+                                  ]
+                                    .filter((part) => part !== undefined)
+                                    .join('.')
                                 : 'next-build.compile';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';

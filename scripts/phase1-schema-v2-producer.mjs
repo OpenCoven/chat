@@ -245,6 +245,10 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
   'phase1.packaging.cave-build.phase.next-build.compile.native-module',
   'phase1.packaging.cave-build.phase.next-build.compile.plugin',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.type',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.range',
   'phase1.packaging.cave-build.phase.next-build.typescript',
   'phase1.packaging.cave-build.phase.next-build.page-data',
   'phase1.packaging.cave-build.phase.next-build.static-pages',
@@ -281,6 +285,10 @@ const approvedCommandFailureReasons = new Set([
   'compile-native-module',
   'compile-permission',
   'compile-plugin',
+  'compile-plugin-syntax',
+  'compile-plugin-type',
+  'compile-plugin-reference',
+  'compile-plugin-range',
   'compiler-crash',
   'disk-exhausted',
   'memory-exhausted',
@@ -819,6 +827,30 @@ export class CommandExecutionError extends Error {
   }
 }
 
+export function classifyCavePluginEvaluationFailure(output) {
+  const text = stripVTControlCharacters(output);
+  const marker = /error evaluating node\.js code/iu.exec(text);
+  if (marker === null) {
+    return undefined;
+  }
+  const classes = new Set(
+    [
+      ...text
+        .slice(marker.index + marker[0].length)
+        .matchAll(/^[\t ]*([A-Za-z][A-Za-z0-9]{0,63}Error|Error)(?: \[ERR_[A-Z_]+\])?:/gmu),
+    ].map((match) => match[1]),
+  );
+  if (classes.size !== 1) {
+    return undefined;
+  }
+  return new Map([
+    ['SyntaxError', 'syntax'],
+    ['TypeError', 'type'],
+    ['ReferenceError', 'reference'],
+    ['RangeError', 'range'],
+  ]).get([...classes][0]);
+}
+
 export function classifyCavePackageFailure(result) {
   const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
   if (
@@ -853,7 +885,10 @@ export function classifyCavePackageFailure(result) {
     [/error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu, 'compile-plugin'],
     [/failed to compile/iu, 'compile-failed'],
   ];
-  return classifications.find(([pattern]) => pattern.test(output))?.[1];
+  const reason = classifications.find(([pattern]) => pattern.test(output))?.[1];
+  const pluginClass =
+    reason === 'compile-plugin' ? classifyCavePluginEvaluationFailure(output) : undefined;
+  return pluginClass === undefined ? reason : `compile-plugin-${pluginClass}`;
 }
 
 const caveBuildDiagnosticByFailureReason = new Map([
@@ -868,6 +903,13 @@ const caveBuildDiagnosticByFailureReason = new Map([
   ],
   ['compile-native-module', 'phase1.packaging.cave-build.phase.next-build.compile.native-module'],
   ['compile-plugin', 'phase1.packaging.cave-build.phase.next-build.compile.plugin'],
+  ['compile-plugin-syntax', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax'],
+  ['compile-plugin-type', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.type'],
+  [
+    'compile-plugin-reference',
+    'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  ],
+  ['compile-plugin-range', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.range'],
   ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
   ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
   ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],

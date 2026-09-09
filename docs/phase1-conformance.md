@@ -1114,20 +1114,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `b5e5113b3f2e29ea2a6406271f3321e5a9d55630a325bf635bc577c53609eb78` |
+| `.github/workflows/client-v1-conformance.yml` | 463,118 | `5f3ac7eb0f586d4c615643fac0e41be2523121e69750a6d151b75dde4e2f40da` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 201,819 | `7d021f7ddd0efc8c7cbfdc596d8822c7b8ae877689db81a12f14e5106dc7432c` |
+| `scripts/phase1-conformance.mjs` | 202,423 | `9cc3231270be8ba244c59c4047b9e9c75003e79633801b19b6ee17eb29e6f1a0` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 173,845 | `2abe46a2696602599e27e671195086d367370bfe96660c932f6e84c662101371` |
+| `scripts/phase1-schema-v2-producer.mjs` | 175,528 | `4f79647b449d7431da6dd62057ada0a6f8e889d35d68414faf7914fa5e7ccd8c` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1228,3 +1228,15 @@ The Unix supervisor reports a nonzero restricted producer exit status on stderr
 before containment drain, retaining it even when cleanup subsequently fails.
 This numeric status complements the bounded producer stage diagnostic; it does
 not identify the failed authority check or establish successful containment.
+
+Cave plugin-evaluation failures may report a fixed `.syntax`, `.type`,
+`.reference`, or `.range` suffix when one recognized exception class follows
+the Node evaluation marker. Unknown or conflicting classes retain the generic
+plugin category. These IDs expose neither the exception message nor a source
+path, and identify the exception class rather than the underlying plugin cause.
+
+Windows harness directory quotas use the same isolated temp directory as the
+producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
+build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
+directories. This path correction preserves every reviewed byte limit. It does
+not by itself identify the subtree responsible for an aggregate quota failure.
