@@ -141,6 +141,16 @@ describe('Phase 1 specification guards', () => {
     expect(output).toContain('/.worktrees');
   });
 
+  it('aligns packed consumer checkouts with the Phase 1 authorities', () => {
+    const canary = readJson<ContractCanaryLock>('contract-canary.lock.json');
+    const phase1 = readJson<Record<'sdk' | 'cave', { repository: string; revision: string }>>(
+      'phase1-conformance.lock.json',
+    );
+
+    expect(canary.sdk).toMatchObject(phase1.sdk);
+    expect(canary.cave).toMatchObject(phase1.cave);
+  });
+
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
@@ -148,7 +158,7 @@ describe('Phase 1 specification guards', () => {
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
-    expect(lock.cave.revision).toBe('bc310e9753783678014086ed6f7ef7d3fb797967');
+    expect(lock.cave.revision).toBe('d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
