@@ -25,6 +25,7 @@ import {
   assertPackedFixtureMatchesCaveCheckout,
   assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
+  createReviewedSdkReleaseArtifacts,
   parseArgs,
   readContractCanaryLock,
   runPnpm,
@@ -433,11 +434,11 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
+    expect(lock.sdk.revision).toBe('6526b56b30c9a9c1c072caf2f0022d3427ae18db');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
-      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+      sha256: 'addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
@@ -455,7 +456,7 @@ describe('contract canary temp directory safety', () => {
       releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
       vendorFile: 'cave-client-0.1.0.tgz',
       size: 81543,
-      sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
+      sha256: '5718ff2964e5e897d54c01d785530df4d6ac4642b96209d6d5d0713fb0e4459d',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45');
@@ -566,7 +567,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -594,7 +595,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
@@ -763,6 +764,61 @@ describe('packed Cave authority artifact validation', () => {
 });
 
 describe('generated SDK release manifest validation', () => {
+  test('creates conformance inputs without invoking or enabling the publication CLI', () => {
+    const lock = readContractCanaryLock();
+    const scratchRoot = createRepoLocalScratchRoot('conformance-entrypoint');
+    const sdkRoot = resolve(scratchRoot, 'sdk candidate');
+    const artifactRoot = resolve(scratchRoot, 'conformance output');
+    mkdirSync(resolve(sdkRoot, 'scripts'), { recursive: true });
+    const configPath = resolve(sdkRoot, 'release.config.json');
+    writeFileSync(configPath, JSON.stringify({ publishingEnabled: false }));
+    writeFileSync(
+      resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs'),
+      `
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  throw new Error('Release publishing is disabled by release.config.json');
+}
+export function createConformanceArtifacts(options) {
+  assert.deepEqual(options, {
+    root: ${JSON.stringify(sdkRoot)},
+    outputRoot: ${JSON.stringify(artifactRoot)},
+    version: ${JSON.stringify(lock.sdk.releaseManifest.version)},
+    build: true,
+    requireConformanceEvidence: false,
+  });
+  assert.equal(JSON.parse(readFileSync(${JSON.stringify(configPath)}, 'utf8')).publishingEnabled, false);
+  const artifacts = ${JSON.stringify(lock.sdk.artifacts)};
+  const packages = Object.entries(artifacts).map(([key, artifact]) => {
+    const file = resolve(options.outputRoot, artifact.releaseFile);
+    const bytes = Buffer.from('conformance-' + key);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, bytes);
+    return {
+      name: artifact.packageName, version: artifact.version, file: artifact.releaseFile,
+      size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+  });
+  writeFileSync(resolve(options.outputRoot, 'release-manifest.json'), JSON.stringify({
+    schemaVersion: 1, version: ${JSON.stringify(lock.sdk.releaseManifest.version)}, packages,
+  }));
+}
+`,
+    );
+
+    const tarballs = createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot);
+
+    for (const [key, artifact] of Object.entries(lock.sdk.artifacts)) {
+      expect(tarballs).toHaveProperty(key, resolve(artifactRoot, artifact.releaseFile));
+    }
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({ publishingEnabled: false });
+  });
+
   test('accepts platform-specific archive bytes when package identity and manifest integrity hold', () => {
     const lock = readContractCanaryLock();
     const scratchRoot = createRepoLocalScratchRoot('generated-manifest');

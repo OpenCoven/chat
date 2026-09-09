@@ -2,11 +2,11 @@
   "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "edd4728792321771496df58bfc0e6122908a96ec"
+    "revision": "5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "acc38488f00860d246c3c553375634d64806eabb"
+    "revision": "6526b56b30c9a9c1c072caf2f0022d3427ae18db"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
@@ -121,8 +121,8 @@
       },
       {
         "path": "scripts/contract-canary.mjs",
-        "blob": "3277e32ce560211a6ea0d8085c0f0c12b8409311",
-        "sha256": "140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca"
+        "blob": "fc0403721bbd487c11350430ce673bf3913bdb7f",
+        "sha256": "1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380"
       },
       {
         "path": "scripts/supervised-exec.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "a299e961eb862b87ea76e5d562fc31f2eb6c7d61",
-        "sha256": "66ab87a32bcd1f76ace02b8a4a2db1f9c43d8c29c7e98b7cf3acf45e2b1af3af"
+        "blob": "81fe79ef314a041ebedd27fd8b2af30a4ccde1cf",
+        "sha256": "730b18b9f0b5354e74bdf12a6f7a096db31151114f51f10a4f543e4daf526bd8"
       }
     ],
     "productionDeltas": [
@@ -204,7 +204,7 @@
     ]
   },
   "chatAuthority": {
-    "tree": "c373902b48b06520450f520e669a34f72b64a35d",
+    "tree": "10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a",
     "files": [
       {
         "path": "src-tauri/Cargo.toml",
@@ -274,7 +274,7 @@
   "release": {
     "sdkManifest": {
       "version": "0.1.0",
-      "sha256": "b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c"
+      "sha256": "addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41"
     },
     "sdkArtifacts": [
       {
@@ -289,7 +289,7 @@
         "releaseFile": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
         "vendorFile": "cave-client-0.1.0.tgz",
         "size": 81543,
-        "sha256": "c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0"
+        "sha256": "5718ff2964e5e897d54c01d785530df4d6ac4642b96209d6d5d0713fb0e4459d"
       },
       {
         "packageName": "@opencoven/coven-client",
@@ -311,7 +311,7 @@
     "consumerLock": {
       "path": "pnpm-lock.yaml",
       "size": 56222,
-      "sha256": "d2f0db8eca64112324e861bb7cbd2b645ed9ae4aad836200855b3477f3ea49ae"
+      "sha256": "fd5ee257005c81071bec2b4f0fbc33c18debc25e4ae57b72e60d3837663b4bd2"
     },
     "caveArtifacts": {
       "assertionEngine": {
