@@ -22,6 +22,12 @@ See the [delivery roadmap and dated checkpoints](../../roadmap.md) for the lates
 Chat PR and conformance state. The counts and initial readiness below are the
 program-creation baseline; refresh Beads before claiming work or closing gates.
 
+The September 9 full inventory includes 68 records: 30 closed, one open, and
+37 blocked. Teamwork card text, board Status fields, and missing mirrors are
+being reconciled separately. Preserve `until` gates when projecting blocking
+dependencies. The roadmap records the current protected run and unresolved
+release acceptance; historical phase closures do not satisfy that gate.
+
 ## Tracker Summary
 
 | Item | Value |
