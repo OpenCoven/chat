@@ -54,10 +54,12 @@ in `merged-retirement-20260909.json` and
 `merged-refs-retirement-20260909.json` within its audit directory. These are local
 recovery receipts, not repository files. No force deletion was used.
 
-Three worktrees remain: main, parked #86, and v17. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
+At the earlier retirement checkpoint, three worktrees remained: main, parked
+#86, and v17. The later minimum-checkout checkpoint below supersedes this count. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
 history instead of v17's additional shallow-checkout fetch. The current workflow suite passed 59 tests with 19 platform skips;
-this is not Windows runtime or protected-matrix acceptance. V17's divergent
-historical authority pins remain preserved in its branch and checkout.
+this is not Windows runtime or protected-matrix acceptance. At that checkpoint, V17's divergent historical authority pins were still
+preserved in its branch and checkout; the later checkpoint records checkout
+retirement and continued history preservation.
 
 [Issue #149](https://github.com/OpenCoven/chat/issues/149) tracks the CI-image
 proposal failure and retry defect. Read-only REST inspection on 2026-09-09 UTC returned no repository or
