@@ -2089,6 +2089,21 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toBe('phase1.stage.toolchain.metadata');
   });
 
+  test.each([
+    'phase1.stage.toolchain.pnpm',
+    'phase1.stage.toolchain.rust',
+    'phase1.stage.toolchain.tauri',
+    'phase1.stage.toolchain.metadata',
+  ])('preserves %s through schema-v2 and public failure wrappers', (diagnostic) => {
+    const wrapped = schemaV2Producer.wrapInfrastructureFailure(
+      new Error(diagnostic),
+      { schemaVersion: 2 },
+    );
+
+    expect(wrapped.message).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
