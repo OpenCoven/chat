@@ -18,6 +18,7 @@ on:
     paths:
       - .github/ci-image/**
       - .github/workflows/ci-image.yml
+      - scripts/ci-image-proposal.mjs
   # Weekly, so security updates reach CI without anyone remembering to ask.
   schedule:
     - cron: 0 5 * * 1
@@ -211,96 +212,20 @@ jobs:
     # never seen.
     if: needs.build.outputs.changed == 'true' && github.ref_name == 'main'
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Open or update the bump pull request
         env:
-          # GITHUB_TOKEN is used for all git-data write operations (creating the
-          # branch and committing the file). A separate CI_IMAGE_BUMP_TOKEN --
-          # a fine-grained PAT with Pull requests: write on this repository --
-          # is used only for `gh pr create` so the resulting pull request runs
-          # CI on itself. Without that secret the PR still opens; the verify job
-          # above is its evidence.
-          # Keeping the tokens separate avoids a 403 when CI_IMAGE_BUMP_TOKEN is
-          # a fine-grained PAT whose contents scope is read-only.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_TOKEN: ${{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}
+          # Fine-grained token for OpenCoven/chat with Contents, Workflows, and
+          # Pull requests: write. GITHUB_TOKEN cannot perform this workflow-file
+          # update; no fallback is allowed. This token also triggers PR CI.
+          GH_TOKEN: ${{ secrets.CI_IMAGE_BUMP_TOKEN }}
           DIGEST: ${{ needs.build.outputs.digest }}
           REASON: ${{ needs.build.outputs.reason }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-
-          short=${DIGEST#sha256:}
-          branch="ci/image-digest-${short:0:12}"
-
-          # Named for the digest, so a re-run of the same build finds its own
-          # branch already there instead of opening a second pull request for
-          # a bump that is already waiting.
-          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
-            echo "${branch} already exists; nothing to open."
-            exit 0
-          fi
-
-          base=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -X POST \
-            -f ref="refs/heads/${branch}" -f sha="${base}" >/dev/null
-
-          pinned=$(grep -oE 'chat-ci@sha256:[0-9a-f]{64}' .github/workflows/ci.yml | head -1 | cut -d@ -f2)
-          sed -i "s|chat-ci@${pinned}|chat-ci@${DIGEST}|g" .github/workflows/ci.yml
-
-          # Committed through the API rather than with `git commit`, because
-          # GitHub signs what it writes and a runner has no key to sign with.
-          # An unsigned commit here would be the one unverified commit in the
-          # history, arriving weekly.
-          file_sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/ci.yml?ref=${branch}" --jq .sha)
-          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/ci.yml" -X PUT \
-            -f message="ci: adopt rebuilt CI image ${short:0:12}" \
-            -f content="$(base64 -w0 .github/workflows/ci.yml)" \
-            -f sha="${file_sha}" \
-            -f branch="${branch}" >/dev/null
-
-          # Written to a file rather than passed through "$(cat <<BODY ...)".
-          # A heredoc nested inside a command substitution is parsed for quote
-          # balance by some bash versions, so an apostrophe in the prose is
-          # enough to break the script -- and to break it in a way that only
-          # shows up on the machine that runs it.
-          cat > "${RUNNER_TEMP}/pr-body.md" <<BODY
-          The weekly rebuild found the image's contents had moved. Nothing in
-          \`.github/ci-image/Dockerfile\` changed; what it installs did.
-
-          ${REASON}
-
-              was  ${pinned}
-              now  ${DIGEST}
-
-          A rebuild almost always yields a different digest, because a layer digest
-          hashes a tar stream that carries file timestamps. That is not a reason to
-          adopt anything, so this pull request is opened on a comparison of the base
-          image and the installed package versions instead, read from the running
-          image rather than from a lockfile that could disagree with it.
-
-          The new image was verified before this was opened: the E2E suite and the Tauri
-          desktop build both ran inside it, and the Playwright browser was asserted to
-          come from the image rather than be downloaded. See ${RUN_URL}.
-
-          That verification is the evidence for this pull request. If the checks below
-          are absent, it is because a \`GITHUB_TOKEN\` cannot trigger workflows -- set a
-          \`CI_IMAGE_BUMP_TOKEN\` secret to have this run CI on itself, or close and
-          reopen this pull request to start it by hand.
-
-          Merging adopts the rebuilt image. Declining leaves CI on the previous digest,
-          which stays pullable; there is no deadline attached to this.
-
-          🤖 Generated with [Claude Code](https://claude.com/claude-code)
-          BODY
-
-          GH_TOKEN="${PR_TOKEN}" gh pr create \
-            --base main \
-            --head "${branch}" \
-            --title "ci: adopt rebuilt CI image ${short:0:12}" \
-            --body-file "${RUNNER_TEMP}/pr-body.md"
+        run: node scripts/ci-image-proposal.mjs

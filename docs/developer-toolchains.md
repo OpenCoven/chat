@@ -120,3 +120,29 @@
 - Coven conformance starts the real locked daemon and invokes Chat
   `phase1-native-rpc` command `coven_health`; it never uses `coven daemon
   status` or reimplements producer-owned peer/pipe identity checks.
+
+## CI image proposal credential and retries
+
+The weekly CI image workflow builds and verifies an image before proposing a
+new digest in `.github/workflows/ci.yml`. Configure repository Actions secret
+`CI_IMAGE_BUMP_TOKEN` with a fine-grained token restricted to `OpenCoven/chat`
+and **Contents: write**, **Workflows: write**, and **Pull requests: write**.
+The proposal job does not fall back to `GITHUB_TOKEN`: workflow-file updates
+require additional authorization, and the separate credential permits PR CI.
+See [GitHub's Contents API permissions](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents).
+
+The token is consumed only by `scripts/ci-image-proposal.mjs`; checkout does not
+persist credentials. Do not paste a token into issues, logs, or source files.
+An absent credential fails before any API call.
+
+Retries reconcile the digest branch, file update, and PR separately. A branch
+left behind after a failed write is repaired; a completed file update with no
+PR gets a proposal; an existing PR is reused. Closed proposals are not reopened.
+Unrelated workflow edits cause an explicit reconciliation failure. Contents
+updates include the observed blob SHA so conflicting file writes fail without
+creating a PR. API failures remain failures and can be retried after repair.
+
+The image digest update remains subject to normal PR checks, including any
+required conformance authority rebind. Successful image build verification is
+not proof that the proposed repository changes pass CI or satisfy release gates.
+Tracked operational acceptance: [Chat #149](https://github.com/OpenCoven/chat/issues/149).
