@@ -46,6 +46,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  pnpmInvocation,
   runSchemaV2Conformance,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
@@ -334,6 +335,23 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-authority.isolation.failed',
   'phase1.stage.evidence-authority.assertions.failed',
   'phase1.stage.evidence-authority.build.failed',
+  'phase1.stage.evidence-authority.build.environment',
+  'phase1.stage.evidence-authority.build.cave-record',
+  'phase1.stage.evidence-authority.build.cave-record.identity.platform',
+  'phase1.stage.evidence-authority.build.cave-record.identity.commit',
+  'phase1.stage.evidence-authority.build.cave-record.identity.cave-version',
+  'phase1.stage.evidence-authority.build.cave-record.identity.node-version',
+  'phase1.stage.evidence-authority.build.cave-record.timing.invalid',
+  'phase1.stage.evidence-authority.build.cave-record.timing.before-run',
+  'phase1.stage.evidence-authority.build.cave-record.timing.after-run',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.shape',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.count',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.unexpected',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.duplicate',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.result',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.detail',
+  'phase1.stage.evidence-authority.build.isolation',
+  'phase1.stage.evidence-authority.build.assertions',
   'phase1.stage.evidence-authority.serialize.failed',
   'phase1.stage.evidence-authority.scan.failed',
   'phase1.stage.evidence-authority.retain.failed',
@@ -1969,16 +1987,22 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
 }
 
 async function installPnpm(artifactRoot, rootPath, environment, label) {
-  await runCommand(
-    artifactRoot,
-    `${label} dependency install`,
-    'pnpm',
+  const pnpmCommand = pnpmInvocation(
     [
       '--ignore-workspace',
       'install',
       '--frozen-lockfile',
       `--config.store-dir=${environment.PNPM_STORE_DIR}`,
     ],
+    {
+      pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+    },
+  );
+  await runCommand(
+    artifactRoot,
+    `${label} dependency install`,
+    pnpmCommand.command,
+    pnpmCommand.args,
     { cwd: rootPath, env: environment },
   );
 }

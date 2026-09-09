@@ -196,6 +196,19 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.evidence-authority.build.failed',
   'phase1.stage.evidence-authority.build.environment',
   'phase1.stage.evidence-authority.build.cave-record',
+  'phase1.stage.evidence-authority.build.cave-record.identity.platform',
+  'phase1.stage.evidence-authority.build.cave-record.identity.commit',
+  'phase1.stage.evidence-authority.build.cave-record.identity.cave-version',
+  'phase1.stage.evidence-authority.build.cave-record.identity.node-version',
+  'phase1.stage.evidence-authority.build.cave-record.timing.invalid',
+  'phase1.stage.evidence-authority.build.cave-record.timing.before-run',
+  'phase1.stage.evidence-authority.build.cave-record.timing.after-run',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.shape',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.count',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.unexpected',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.duplicate',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.result',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.detail',
   'phase1.stage.evidence-authority.build.isolation',
   'phase1.stage.evidence-authority.build.assertions',
   'phase1.stage.evidence-authority.serialize.failed',
@@ -1511,8 +1524,14 @@ function runCommand(
   args,
   { cwd, env, timeoutMs = commandTimeoutMs } = {},
 ) {
+  const invocation =
+    command === 'pnpm'
+      ? pnpmInvocation(args, {
+          pnpmCli: (env ?? process.env).OPENCOVEN_WINDOWS_PNPM_CLI,
+        })
+      : { command, args };
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
       env,
       detached: ownedProcessGroupsSupported,
@@ -1631,6 +1650,10 @@ function runCommand(
       });
     }, timeoutMs);
   });
+}
+
+export function runSchemaV2CommandForTest(artifactRoot, command, args, options) {
+  return runCommand(artifactRoot, 'Schema-v2 test command', command, args, options);
 }
 
 function parseVitestObservationReport(path, label) {

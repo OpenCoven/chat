@@ -20,7 +20,10 @@ import {
   REQUIRED_PHASE1_ASSERTION_IDS,
   validatePhase1SanitizedReport,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
-import { buildObservedSchemaV2Assertions } from '../scripts/phase1-conformance.mjs';
+import {
+  buildObservedSchemaV2Assertions,
+  publicPhase1FailureDiagnostic,
+} from '../scripts/phase1-conformance.mjs';
 import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
 import {
   assertSdkContractMatchesPhase1Lock,
@@ -28,16 +31,17 @@ import {
   createObservedAssertionRecorder,
   loadSdkEvidenceContract,
   serializeValidatedSchemaV2PlatformEvidence,
+  validateCaveRecord,
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdk933FixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-2d1cb15f');
-const sdk933LockFixturePath = resolve(
-  sdk933FixtureRoot,
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-eb1e8f71');
+const sdkSourceLockFixturePath = resolve(
+  sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
 );
-const sdk933LockProvenancePath = resolve(
-  sdk933FixtureRoot,
+const sdkSourceLockProvenancePath = resolve(
+  sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.provenance.json',
 );
 const validatorRoot =
@@ -57,8 +61,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: '2d1cb15fcb47ff6577ccae1186c74ded69b82fc8',
-  tree: 'a22efd97c9d0f96f6163147f175a1b0e7cc49de0',
+  commit: 'eb1e8f7113ebe9e63364d5255ca976bf076c886d',
+  tree: 'ffcd48bf334f11fd2754afad23c6342e9629706a',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -1512,19 +1516,19 @@ describe('Phase 1 SDK source contract authority', () => {
     }
   });
 
-  test('matches the immutable SDK 933 source contract while retaining its pre-rebind producer', () => {
-    const provenance = JSON.parse(readFileSync(sdk933LockProvenancePath, 'utf8')) as JsonRecord;
+  test('matches the immutable SDK portable Cave source contract while retaining its pre-rebind producer', () => {
+    const provenance = JSON.parse(readFileSync(sdkSourceLockProvenancePath, 'utf8')) as JsonRecord;
     expect(provenance).toEqual({
       repository: 'OpenCoven/sdk',
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: '6d52eddefac8221fca882e62bdab1585657787f2',
+      blob: 'c33477512bf65ad70ab3126fd672195ddd053df1',
       size: 10942,
-      sha256: 'd772737cc10cf0bd9b48546afea51b3eaf61336b9e16619f421d0fbf900571b8',
+      sha256: '010c146be7f73ef0d5d1e9a9df436a05cc9cdaf87732e6254657ebc61fbbefe4',
     });
 
-    const frozenLockBytes = readFileSync(sdk933LockFixturePath);
+    const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
     expect(frozenLockBytes.byteLength).toBe(provenance.size);
     expect(sha256(frozenLockBytes)).toBe(provenance.sha256);
     const frozenLock = JSON.parse(frozenLockBytes.toString('utf8')) as JsonRecord;
@@ -1552,9 +1556,107 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'ada542f731ea1b65dd4e6de94ab7dc28b0551740',
-      tree: '975de93ac84b0436d381f5e427627f98aaa3dd0a',
+      commit: 'b2d63e5fcea3b307d4d97fd560621dc84d659755',
+      tree: '9ca3bedf95729d3dfdc01b4b4435fe335184ec6b',
     });
+  });
+});
+
+describe('bounded Cave record diagnostics', () => {
+  test.each([
+    'identity.platform',
+    'identity.commit',
+    'identity.cave-version',
+    'identity.node-version',
+    'timing.invalid-null',
+    'timing.invalid-number',
+    'timing.invalid-string',
+    'timing.invalid-offset',
+    'timing.invalid-calendar',
+    'timing.before-run',
+    'timing.after-run',
+    'assertions.shape',
+    'assertions.count',
+    'assertions.unexpected',
+    'assertions.duplicate',
+    'assertions.result',
+    'assertions.detail',
+  ])('distinguishes bounded Cave record mismatch %s through both wrappers', async (category) => {
+    const caveRecord = {
+      platform: 'linux-x64',
+      commit: 'a'.repeat(40),
+      caveVersion: '0.3.12',
+      nodeVersion: 'v24.18.1',
+      ranAt: '2026-08-29T04:00:00.000Z',
+      assertions: [
+        { id: 'one', result: 'pass', detail: '' },
+        { id: 'two', result: 'pass', detail: '' },
+      ],
+    } as Record<string, unknown>;
+    const expected = {
+      platform: 'linux-x64',
+      commit: 'a'.repeat(40),
+      releaseVersion: '0.3.12',
+      nodeVersion: 'v24.18.1',
+      startedAt: '2026-08-29T04:00:00.000Z',
+      completedAt: '2026-08-29T04:00:01.000Z',
+    };
+    const registry = { assertions: { cave: ['one', 'two'] } };
+    expect(() => validateCaveRecord(caveRecord, registry, expected)).not.toThrow();
+    const assertions = caveRecord.assertions as Array<Record<string, unknown>>;
+    const [first, second] = assertions;
+    if (first === undefined || second === undefined)
+      throw new Error('Incomplete assertion fixture');
+    if (category.startsWith('identity.')) {
+      const field = category.slice('identity.'.length).replace('-version', 'Version');
+      caveRecord[field] = 'private mismatching record value';
+    } else if (category.startsWith('timing.invalid-')) {
+      const invalid: Record<string, unknown> = {
+        'timing.invalid-null': null,
+        'timing.invalid-number': 0,
+        'timing.invalid-string': 'private invalid timestamp',
+        'timing.invalid-offset': '2026-08-29T04:00:00.000+00:00',
+        'timing.invalid-calendar': '2026-02-30T04:00:00.000Z',
+      };
+      caveRecord.ranAt = invalid[category];
+    } else if (category === 'timing.before-run') {
+      caveRecord.ranAt = '2026-08-29T03:59:59.999Z';
+    } else if (category === 'timing.after-run') {
+      caveRecord.ranAt = '2026-08-29T04:00:01.001Z';
+    } else if (category === 'assertions.shape') {
+      caveRecord.assertions = 'private malformed assertions';
+    } else if (category === 'assertions.count') {
+      assertions.pop();
+    } else if (category === 'assertions.unexpected') {
+      first.id = 'private unexpected assertion';
+    } else if (category === 'assertions.duplicate') {
+      second.id = first.id;
+    } else if (category === 'assertions.result') {
+      first.result = 'fail';
+    } else if (category === 'assertions.detail') {
+      first.detail = null;
+    }
+    let failure: unknown;
+    try {
+      validateCaveRecord(caveRecord, registry, expected);
+    } catch (error) {
+      failure = error;
+    }
+    const suffix = category.startsWith('timing.invalid-') ? 'timing.invalid' : category;
+    const diagnostic = `phase1.stage.evidence-authority.build.cave-record.${suffix}`;
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(diagnostic);
+    // @ts-expect-error The executable producer intentionally has no declaration file.
+    const { schemaV2FailureDiagnostic } = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(schemaV2FailureDiagnostic(failure, 'phase1.stage.evidence-authority.build.failed')).toBe(
+      diagnostic,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic, { cause: failure }))).toBe(
+      diagnostic,
+    );
+    expect(
+      publicPhase1FailureDiagnostic(new Error(`${diagnostic}: private detail`)),
+    ).toBeUndefined();
   });
 });
 
@@ -1784,8 +1886,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: '4dc8f64bb71634a01ee647542dcdafdd0888b4f9',
-      tree: '915232e3595196de447521d9fca59866aeade956',
+      commit: 'b2d63e5fcea3b307d4d97fd560621dc84d659755',
+      tree: '9ca3bedf95729d3dfdc01b4b4435fe335184ec6b',
       workflow: {
         environmentId: '20863036831',
       },

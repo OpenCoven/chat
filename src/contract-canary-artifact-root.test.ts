@@ -184,6 +184,36 @@ describe('contract canary pnpm invocation', () => {
     ).toBe('restricted-pnpm');
     expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
   });
+
+  test('uses the nonce-bound pnpm CLI through Node on Windows', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+      return 'windows-pnpm';
+    };
+
+    expect(
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: {
+            OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
+            OPENCOVEN_WINDOWS_PNPM_CLI: 'C:\\workspace\\pnpm.cjs',
+          },
+          nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+        },
+      ),
+    ).toBe('windows-pnpm');
+    expect(invocations).toEqual([
+      {
+        command: 'C:\\Program Files\\nodejs\\node.exe',
+        args: ['C:\\workspace\\pnpm.cjs', 'install'],
+      },
+    ]);
+  });
 });
 
 function sha256(bytes: Buffer | string) {

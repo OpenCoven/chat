@@ -166,3 +166,16 @@ export function serializeValidatedSchemaV2PlatformEvidence(
     schema: Record<string, unknown>;
   },
 ): string;
+
+export function validateCaveRecord(
+  value: unknown,
+  registry: { assertions: { cave: string[] } },
+  expected: {
+    platform: string;
+    commit: string;
+    releaseVersion: string;
+    nodeVersion: string;
+    startedAt: string;
+    completedAt: string;
+  },
+): Record<string, unknown>;
