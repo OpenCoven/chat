@@ -31,6 +31,7 @@ import {
   gitNullDevice,
   readPhase1ConformanceLock,
   resolveLocalGitDirectory,
+  toGitSafeDirectoryPath,
 } from './phase1-conformance-lock.mjs';
 import {
   buildPlatformEvidence,
@@ -1817,9 +1818,9 @@ export async function cloneExactCheckout({
       '-c',
       `core.hooksPath=${devNull}`,
       '-c',
-      `safe.directory=${sourceSafeDirectory}`,
+      `safe.directory=${toGitSafeDirectoryPath(sourceSafeDirectory)}`,
       '-c',
-      `safe.directory=${sourceGitDirectory}`,
+      `safe.directory=${toGitSafeDirectoryPath(sourceGitDirectory)}`,
       'clone',
       '--local',
       '--no-hardlinks',

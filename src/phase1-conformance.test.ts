@@ -83,6 +83,7 @@ import {
 import {
   assertPhase1ProducerAuthority,
   readPhase1ConformanceLock,
+  toGitSafeDirectoryPath,
 } from '../scripts/phase1-conformance-lock.mjs';
 // @ts-expect-error The executable script intentionally has no declaration file.
 import * as schemaV2Producer from '../scripts/phase1-schema-v2-producer.mjs';
@@ -574,6 +575,33 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
     30_000,
   );
+
+  test('normalizes git safe.directory overrides to Git path separators', () => {
+    expect(toGitSafeDirectoryPath('D:\\a\\chat\\chat')).toBe('D:/a/chat/chat');
+    expect(toGitSafeDirectoryPath('D:\\a\\chat\\chat\\.git')).toBe('D:/a/chat/chat/.git');
+    expect(toGitSafeDirectoryPath('\\\\server\\share\\repository')).toBe(
+      '//server/share/repository',
+    );
+    expect(toGitSafeDirectoryPath('/home/runner/work/chat/chat')).toBe(
+      '/home/runner/work/chat/chat',
+    );
+  });
+
+  test('routes every git safe.directory override through Git path normalization', () => {
+    for (const relativePath of [
+      'scripts/phase1-conformance.mjs',
+      'scripts/phase1-conformance-lock.mjs',
+      'scripts/phase1-schema-v2-producer.mjs',
+    ]) {
+      const source = readFileSync(resolve(projectRoot, relativePath), 'utf8');
+      const overrides = [...source.matchAll(/safe\.directory=\$\{([^}]+)\}/gu)];
+
+      expect(overrides.length).toBeGreaterThan(0);
+      for (const [, expression] of overrides) {
+        expect(expression).toMatch(/^toGitSafeDirectoryPath\(/u);
+      }
+    }
+  });
 
   test('selects the protected historical harness tag for the Windows verified-runner clone', () => {
     const source = readFileSync(resolve(projectRoot, 'scripts', 'phase1-conformance.mjs'), 'utf8');

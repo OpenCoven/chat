@@ -173,6 +173,12 @@ export function createGitCheckoutEnvironment(inheritedEnvironment = process.env)
   return environment;
 }
 
+export function toGitSafeDirectoryPath(path) {
+  // Git compares safe.directory entries against its own real paths, which always
+  // use forward slashes. Native Windows separators never match those entries.
+  return path.replaceAll('\\', '/');
+}
+
 export function resolveLocalGitDirectory(repositoryRoot) {
   const metadataPath = resolve(repositoryRoot, '.git');
   const metadataStats = lstatSync(metadataPath);
@@ -656,7 +662,7 @@ function runAuthorityGit(repositoryRoot, args) {
     [
       ...gitConfigurationOverrides,
       '-c',
-      `safe.directory=${repositoryRoot}`,
+      `safe.directory=${toGitSafeDirectoryPath(repositoryRoot)}`,
       '-C',
       repositoryRoot,
       ...args,

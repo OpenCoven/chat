@@ -10,6 +10,7 @@ export const gitNullDevice: string;
 export function createGitCheckoutEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export function toGitSafeDirectoryPath(path: string): string;
 export function assertCleanPhase1Checkout(
   repositoryRoot: string,
   label?: string,
