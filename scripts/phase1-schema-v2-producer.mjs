@@ -182,6 +182,13 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.checkouts.validator.failed',
   'phase1.stage.checkouts.producer.failed',
   'phase1.stage.evidence-authority.failed',
+  'phase1.stage.evidence-authority.producer',
+  'phase1.stage.evidence-authority.validator',
+  'phase1.stage.evidence-authority.compatibility',
+  'phase1.stage.evidence-authority.lock',
+  'phase1.stage.evidence-authority.checkout',
+  'phase1.stage.evidence-authority.artifacts',
+  'phase1.stage.evidence-authority.identities',
   'phase1.stage.evidence-authority.report.failed',
   'phase1.stage.evidence-authority.operator-state.failed',
   'phase1.stage.evidence-authority.isolation.failed',
@@ -4711,34 +4718,50 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
       activeStage = 'phase1.stage.evidence-authority.failed';
-      validateSchemaV2AuthorityCheckouts({
-        lock,
-        harnessRoot: projectRoot,
-        producerRoot: roots.producerRoot,
-        producerIdentity: roots.producerIdentity,
-      });
-      sdkContract = await loadSdkEvidenceContract({
-        validatorRoot: roots.validatorRoot,
-        validatorIdentity: {
-          repository: 'OpenCoven/sdk',
-          commit: options.validatorRevision,
-          tree: roots.validatorIdentity.tree,
-        },
-      });
-      sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock);
-      assertSdkContractMatchesPhase1Lock(sdkContract, lock);
-      producer = await verifySchemaV2ProducerCheckout({
-        producerRoot: roots.producerRoot,
-        producerIdentity: roots.producerIdentity,
-        sdkContract,
-      });
-      evidenceArtifacts = collectFrozenEvidenceArtifacts({ roots, sdkContract });
-      verifiedIdentities = {
-        candidate: verifiedCheckoutIdentity(lock, 'sdk', roots.sdkRoot),
-        cave: verifiedCheckoutIdentity(lock, 'cave', roots.caveRoot),
-        coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
-        chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
-      };
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.producer', () =>
+        validateSchemaV2AuthorityCheckouts({
+          lock,
+          harnessRoot: projectRoot,
+          producerRoot: roots.producerRoot,
+          producerIdentity: roots.producerIdentity,
+        }),
+      );
+      sdkContract = await runSchemaV2StageAsync('phase1.stage.evidence-authority.validator', () =>
+        loadSdkEvidenceContract({
+          validatorRoot: roots.validatorRoot,
+          validatorIdentity: {
+            repository: 'OpenCoven/sdk',
+            commit: options.validatorRevision,
+            tree: roots.validatorIdentity.tree,
+          },
+        }),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.compatibility', () =>
+        sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.lock', () =>
+        assertSdkContractMatchesPhase1Lock(sdkContract, lock),
+      );
+      producer = await runSchemaV2StageAsync('phase1.stage.evidence-authority.checkout', () =>
+        verifySchemaV2ProducerCheckout({
+          producerRoot: roots.producerRoot,
+          producerIdentity: roots.producerIdentity,
+          sdkContract,
+        }),
+      );
+      evidenceArtifacts = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.artifacts',
+        () => collectFrozenEvidenceArtifacts({ roots, sdkContract }),
+      );
+      verifiedIdentities = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.identities',
+        () => ({
+          candidate: verifiedCheckoutIdentity(lock, 'sdk', roots.sdkRoot),
+          cave: verifiedCheckoutIdentity(lock, 'cave', roots.caveRoot),
+          coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
+          chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
+        }),
+      );
       activeStage = 'phase1.stage.toolchain.failed';
       const toolchainRoot =
         supervisorEnvironment.OPENCOVEN_WINDOWS_WORKSPACE ??

@@ -2103,6 +2103,41 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
   });
 
+  test.each([
+    'phase1.stage.evidence-authority.producer',
+    'phase1.stage.evidence-authority.validator',
+    'phase1.stage.evidence-authority.compatibility',
+    'phase1.stage.evidence-authority.lock',
+    'phase1.stage.evidence-authority.checkout',
+    'phase1.stage.evidence-authority.artifacts',
+    'phase1.stage.evidence-authority.identities',
+  ])('publishes bounded %s diagnostics', (diagnostic) => {
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+  });
+
+  test('bounds each schema-v2 authority verification step independently', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    for (const diagnostic of [
+      'phase1.stage.evidence-authority.producer',
+      'phase1.stage.evidence-authority.validator',
+      'phase1.stage.evidence-authority.compatibility',
+      'phase1.stage.evidence-authority.lock',
+      'phase1.stage.evidence-authority.checkout',
+      'phase1.stage.evidence-authority.artifacts',
+      'phase1.stage.evidence-authority.identities',
+    ]) {
+      expect(source).toMatch(
+        new RegExp(
+          `runSchemaV2(?:PreflightStage|StageAsync)\\(\\s*'${diagnostic.replaceAll('.', '\\.')}'`,
+          'u',
+        ),
+      );
+    }
+  });
+
   test('retains the first schema-v2 infrastructure failure when a later stage also fails', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
