@@ -2,7 +2,7 @@
   "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "edd4728792321771496df58bfc0e6122908a96ec"
+    "revision": "93bbe74e54e019ef2405c66ba0c8878b7133f920"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
@@ -204,42 +204,42 @@
     ]
   },
   "chatAuthority": {
-    "tree": "c373902b48b06520450f520e669a34f72b64a35d",
+    "tree": "ee2c982669ed7013fbed0a031abb62eb230c9c0f",
     "files": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "75a54c604d5d8b88b661f5a2427c3f9494e3a374",
-        "sha256": "92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf"
+        "blob": "2cc49129ba7a4649e84a55beb942f7fbaa77b79c",
+        "sha256": "637e8de652eee686a3d62ade180234020c3bec76858cb05a5432ead919852c20"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a",
-        "sha256": "50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca"
+        "blob": "8728413b2fc97ff4f61384fa90e0cf0ab1b2340d",
+        "sha256": "f4f9a5126d5467949d7e4ee42a2a7748c52bf69c5b5790cfc41a5cd0684f159c"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
-        "blob": "0fbf0dcd1d2f1a49a556a9319b3121990cf53946",
-        "sha256": "a479704ea719138967f4828707bca04fb2a3de7fd2d2d2b9c7282831ec4bdf09"
+        "blob": "eb209dbbd54089a61d7c72a6ab571d4f83574831",
+        "sha256": "adfe422281e056ba5b9ab526c5889fc4c52601d5ac8538d1da7b5d56fdf90ec1"
       },
       {
         "path": "src-tauri/src/conformance.rs",
-        "blob": "8271a0c39c5e213067c96e08e154faa95b340f03",
-        "sha256": "dac67fb376e2c80aa1a562720ec300c772c1d68146370b4b403d54b8ecd83896"
+        "blob": "7cffd03c932a52286ee5329aee180e693e2afeed",
+        "sha256": "3f45ce93f960ef91d9b9d1f58fb8ac48b9b20e98aca092891675f15d45376919"
       },
       {
         "path": "src-tauri/src/coven.rs",
-        "blob": "b904e5eeded97aa624140b56c5141daebea772b2",
-        "sha256": "09ca4871fc95d818cb642764ceaba3b1a8d6adba62e7552e69f0d0ac47662ff6"
+        "blob": "553592580a4ab7b667e3a6752b42aaeecda881e9",
+        "sha256": "fb50ed35404765b5ad3e01c22f873bbf839db1da57f0e612b2884176d8e7ac33"
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "a33c68672b87a5cfa39cba37d4629619408309a4",
-        "sha256": "3d9215c4ba388d9180c43dea573fc839e6bfd6a214876cff7f836c9d7ad50c52"
+        "blob": "530ff1a04b375b646d6161021dd9915173efb64a",
+        "sha256": "e3a3f1d945062e5c891ec8a8dfb75af0b9c6f6eb819d609997bf7da5585019c8"
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "48c048a4b8830ddcf7a09b0b30dc9f4d2723b203",
-        "sha256": "d25bf49f3b41ea3ad9a6f8da49f8a01397aa340e943f029926b97945fec78314"
+        "blob": "a0fbe1740af89e9c65f4de5d6a92eecf032945dc",
+        "sha256": "344b275750ae7ea44078beb1e7b78eb888212cf3ca1e74a36d1a98f3bfd99f42"
       }
     ]
   },

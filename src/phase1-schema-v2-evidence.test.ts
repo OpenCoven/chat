@@ -35,7 +35,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-eb1e8f71');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-46274867');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -61,8 +61,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: 'eb1e8f7113ebe9e63364d5255ca976bf076c886d',
-  tree: 'ffcd48bf334f11fd2754afad23c6342e9629706a',
+  commit: '46274867493c942a78731e0ccc1ab2ab8e3e438a',
+  tree: '9230cd74dfcc20aec82c3548761da557f0bff15a',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -1523,9 +1523,9 @@ describe('Phase 1 SDK source contract authority', () => {
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: 'c33477512bf65ad70ab3126fd672195ddd053df1',
+      blob: 'eab8b98aec3a6082c96ec05138f033f993a8c15e',
       size: 10942,
-      sha256: '010c146be7f73ef0d5d1e9a9df436a05cc9cdaf87732e6254657ebc61fbbefe4',
+      sha256: '9e9533cf1be50a13115419cd3621248a5c42d47041f0e36eb38b10f338d15db9',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
@@ -1556,8 +1556,8 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'b2d63e5fcea3b307d4d97fd560621dc84d659755',
-      tree: '9ca3bedf95729d3dfdc01b4b4435fe335184ec6b',
+      commit: '523b49f4e7e512c467483fc4373844dea6c2d077',
+      tree: '827da29893ec88c1c3a9c95b6b069a5c51c2ba52',
     });
   });
 });
