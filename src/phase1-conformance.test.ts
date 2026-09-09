@@ -1856,10 +1856,10 @@ describe('Phase 1 real-authority conformance harness', () => {
       ['      onStage(stage) {', '        activeStage = stage;', '      },'].join('\n'),
     );
     expect(source.indexOf("onStage('phase1.packaging.chat-native-build.failed')")).toBeLessThan(
-      source.indexOf('mkdirSync(chatTarget'),
+      source.indexOf('mkdirSync(nativeTarget'),
     );
     expect(source.indexOf("onStage('phase1.packaging.coven-build.failed')")).toBeLessThan(
-      source.indexOf('mkdirSync(covenTarget'),
+      source.indexOf("'Coven CLI package'"),
     );
   });
 
@@ -3705,6 +3705,11 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.packaging.chat-native-build.dependency-fetch',
     ],
     [
+      'Windows disk exhaustion',
+      'error: failed to write /private/output: There is not enough space on the disk. (os error 112)',
+      'phase1.packaging.chat-native-build.resource.disk',
+    ],
+    [
       'linker failure',
       'error: linking with `cc` failed: exit status: 1\n/private/object.o',
       'phase1.packaging.chat-native-build.linker',
@@ -5183,11 +5188,12 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(packaging).toMatch(
       /const nativeBuildEnvironment = schemaV2\s*\?\s*schemaV2NativeBuildEnvironment\(environment\)\s*:\s*environment/u,
     );
-    for (const target of ['chatTarget', 'covenTarget']) {
-      expect(packaging).toContain(
-        `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
-      );
-    }
+    expect(packaging).toContain(
+      "const nativeTarget = resolve(artifactRoot.rootPath, 'build', 'native-target');",
+    );
+    expect(packaging.match(/CARGO_TARGET_DIR: nativeTarget/gu)).toHaveLength(2);
+    expect(packaging).not.toContain("'chat-target'");
+    expect(packaging).not.toContain("'coven-target'");
     expect(source).toMatch(
       /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
     );
