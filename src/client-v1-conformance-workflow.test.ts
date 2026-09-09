@@ -46,12 +46,14 @@ const attestBuildProvenanceAction =
 const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026',
   OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1',
+  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3',
   OPENCOVEN_WINDOWS_BUILD: '26100.33296',
   OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296',
   OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
   OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
   OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12120.119',
+  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12112.369',
   OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise',
   OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
@@ -747,6 +749,61 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
 });
 
 describe('Chat-local protected Windows conformance workflow', () => {
+  test.each([
+    ['20260824.214.3', '18.9.12112.369', true],
+    ['20260907.229.1', '18.9.12120.119', true],
+    ['20260824.214.3', '18.9.12120.119', false],
+    ['20260907.229.1', '18.9.12112.369', false],
+    ['20260908.230.1', '18.9.12120.119', false],
+    ['20260907.229.1', '18.9.99999.999', false],
+  ])(
+    'validates the reviewed Windows image/VS pair %s / %s',
+    (imageVersion, vsVersion, accepted) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const source = workflowRunBody(
+        workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+      ).replace(/^ {10}/gmu, '');
+      const selector = extractPowerShellFunction(source, 'Get-ReviewedWindowsVisualStudioVersion');
+      const start = source.indexOf('if ($visualStudioVersion -cne $reviewedVisualStudioVersion)');
+      const end = source.indexOf('Assert-NoReparsePath -Path $visualStudioRoot', start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      expect(source).toContain(
+        '$reviewedVisualStudioVersion = Get-ReviewedWindowsVisualStudioVersion',
+      );
+      const harness = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${selector}
+$reviewedVisualStudioVersion = Get-ReviewedWindowsVisualStudioVersion
+$visualStudioVersion = $env:TEST_VISUAL_STUDIO_VERSION
+${source.slice(start, end)}
+[Console]::Out.Write('accepted')
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: {
+            ...process.env,
+            ImageVersion: String(imageVersion),
+            TEST_VISUAL_STUDIO_VERSION: String(vsVersion),
+            OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1',
+            OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12120.119',
+            OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3',
+            OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12112.369',
+          },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(accepted ? 0 : 1);
+      expect(result.stdout).toBe(accepted ? 'accepted' : '');
+      if (!accepted) expect(result.stderr).toMatch(/reviewed.*(?:image|Studio)/u);
+    },
+  );
+
   test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     expect(() => verifyHardenedWorkflowGraph(workflow)).not.toThrow();
