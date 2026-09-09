@@ -1034,7 +1034,7 @@ describe('Phase 1 real-authority conformance harness', () => {
             const tracked = [];
             const owner = {
               trackChild(child) { tracked.push(child.pid); },
-              terminateChild(child) { child.kill('SIGKILL'); },
+              async terminateChild(child) { child.kill('SIGKILL'); },
             };
             const options = {
               cwd: process.argv[1],
@@ -1062,10 +1062,20 @@ describe('Phase 1 real-authority conformance harness', () => {
               ['-e', 'process.stdout.write("node-unchanged")'],
               options,
             );
+            const timeout = await runSchemaV2CommandForTest(
+              owner,
+              process.execPath,
+              ['-e', 'setInterval(() => {}, 1000)'],
+              { ...options, timeoutMs: 25 },
+            ).then(
+              () => 'unexpected-success',
+              (error) => error.result.reason,
+            );
             process.stdout.write(JSON.stringify({
               observations,
               tracked: tracked.length,
               node: node.stdout,
+              timeout,
             }));
           `,
           root,
@@ -1081,8 +1091,9 @@ describe('Phase 1 real-authority conformance harness', () => {
           { args: ['exec', 'vitest', 'run'], marker: 'restricted' },
           { args: ['--ignore-workspace', 'run', 'verify'], marker: 'restricted' },
         ],
-        tracked: 5,
+        tracked: 6,
         node: 'node-unchanged',
+        timeout: 'timeout',
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -9062,7 +9062,6 @@ jobs:
               OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
               OPENCOVEN_WINDOWS_JOB_NAME = $jobName
               OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
-              OPENCOVEN_WINDOWS_PNPM_CLI = $pnpmCli
               OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH = $fleetSupervisorPath
               OPENCOVEN_WINDOWS_WORKSPACE = $workspace
               OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY = (Join-Path $workspace '.artifacts')
