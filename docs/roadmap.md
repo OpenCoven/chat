@@ -49,19 +49,20 @@ tip was revalidated as an ancestor of refreshed main immediately before
 
 The three named local branches were deleted with `git branch -d`. Their remote
 branches were removed atomically with exact-tip leases, and a fresh remote
-listing verified their absence. The recovery set records these operations in
-`audit/merged-retirement-20260909.json` and
-`audit/merged-refs-retirement-20260909.json`. No force deletion was used.
+listing verified their absence. The maintainer-held recovery set outside this repository records these operations
+in `merged-retirement-20260909.json` and
+`merged-refs-retirement-20260909.json` within its audit directory. These are local
+recovery receipts, not repository files. No force deletion was used.
 
-Three worktrees remain: main, parked #86, and v17. Review of closed #144 confirms
-that merged #143 supersedes v17's shallow-checkout repair by retaining full Chat
-history. The current workflow suite passed 59 tests with 19 platform skips;
+Three worktrees remain: main, parked #86, and v17. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
+history instead of v17's additional shallow-checkout fetch. The current workflow suite passed 59 tests with 19 platform skips;
 this is not Windows runtime or protected-matrix acceptance. V17's divergent
 historical authority pins remain preserved in its branch and checkout.
 
 [Issue #149](https://github.com/OpenCoven/chat/issues/149) tracks the CI-image
-proposal failure and retry defect. Read-only inspection found no repository
-Actions secrets configured: the proposed separate credential is absent. The
+proposal failure and retry defect. Read-only REST inspection on 2026-09-09 UTC returned no repository or
+repository-accessible organization Actions secrets for the authenticated
+maintainer. No `CI_IMAGE_BUMP_TOKEN` was visible in either listing at that time. The
 image itself already built and passed its verification job. Repairing the
 proposal requires both an authorized workflow-file write path and retry logic
 that does not confuse an existing branch with a completed update and PR.
