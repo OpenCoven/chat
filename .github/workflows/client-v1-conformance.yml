@@ -18,6 +18,14 @@ jobs:
       CARGO_INCREMENTAL: '0'
       GIT_TERMINAL_PROMPT: '0'
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 6ab87e150af7b46ce4d3c0a480a14b8a06acc694
+          path: diagnostic-chat
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.1
       - name: Compile frozen Coven without conformance credentials or evidence
         shell: pwsh
         run: |
@@ -46,6 +54,49 @@ jobs:
           cargo --version
           Set-Location $source
           cargo build --locked --package coven-cli --bin coven
+          Write-Host 'Repeat with the exact frozen safeEnvironment helper and pinned native tool paths.'
+          $env:OPENCOVEN_DIAGNOSTIC_ROOT = $root
+          $env:OPENCOVEN_DIAGNOSTIC_CARGO = & rustup which cargo
+          $msvc = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207'
+          $sdk = 'C:\Program Files (x86)\Windows Kits\10'
+          $env:LIB = "$msvc\lib\x64;$sdk\Lib\10.0.26100.0\um\x64;$sdk\Lib\10.0.26100.0\ucrt\x64"
+          $env:INCLUDE = "$msvc\include;$sdk\Include\10.0.26100.0\ucrt;$sdk\Include\10.0.26100.0\shared;$sdk\Include\10.0.26100.0\um;$sdk\Include\10.0.26100.0\winrt;$sdk\Include\10.0.26100.0\cppwinrt"
+          $node = (Get-Command node).Source
+          $gitBin = Split-Path (Get-Command git).Source
+          $env:PATH = @(
+            (Split-Path $env:OPENCOVEN_DIAGNOSTIC_CARGO),
+            $gitBin,
+            (Split-Path $node),
+            "$msvc\bin\Hostx64\x64",
+            "$sdk\bin\10.0.26100.0\x64",
+            'C:\Windows\System32',
+            'C:\Windows',
+            (Split-Path (Get-Process -Id $PID).Path)
+          ) -join ';'
+          $probe = @'
+          import { spawnSync } from 'node:child_process';
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const { safeEnvironment, schemaV2NativeBuildEnvironment } = await import(pathToFileURL(
+            resolve(process.env.GITHUB_WORKSPACE, 'diagnostic-chat/scripts/phase1-schema-v2-producer.mjs')
+          ));
+          const root = process.env.OPENCOVEN_DIAGNOSTIC_ROOT;
+          const cargo = process.env.OPENCOVEN_DIAGNOSTIC_CARGO;
+          const env = schemaV2NativeBuildEnvironment(safeEnvironment(resolve(root, 'safe-env'), {
+            LIB: process.env.LIB,
+            INCLUDE: process.env.INCLUDE,
+          }, cargo));
+          env.CARGO_TARGET_DIR = resolve(root, 'build/safe-coven-target');
+          const result = spawnSync(cargo, ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
+            cwd: resolve(root, 'counterparts/coven'),
+            env,
+            stdio: 'inherit',
+            timeout: 20 * 60_000,
+          });
+          if (result.error) throw result.error;
+          process.exit(result.status ?? 1);
+          '@
+          & $node --input-type=module --eval $probe
   windows-supervisor:
     name: build-windows-supervisor
     if: github.ref == 'refs/heads/main'
