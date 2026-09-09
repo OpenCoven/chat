@@ -553,26 +553,67 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test('retains the locked harness authority under a tag copied through nested isolated clones', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const fetchLabel = "-Label 'Chat harness exact-SHA fetch'";
-    const authorityLabel = "-Label 'Chat harness authority ref'";
-    const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
-    const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
-    const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
-    const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
-
-    expect(fetchLabelIndex).toBeGreaterThan(-1);
-    expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
-    expect(authorityStart).toBeGreaterThan(-1);
-    expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
-    const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
-
-    expect(authorityFetch).toContain("'refs/tags/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/heads/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/opencoven/phase1-harness'");
+  test.each([
+    ['OpenCoven/chat', 'a'.repeat(40), 'accepted'],
+    ['OpenCoven/other', 'a'.repeat(40), 'rejected'],
+    ['OpenCoven/chat', '--upload-pack=unexpected', 'rejected'],
+    ['OpenCoven/chat', 'A'.repeat(40), 'rejected'],
+  ])('validates frozen Chat source %s at %s before fetching', (repository, revision, result) => {
+    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
+    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+    const validationStart = childBootstrap.indexOf('if (', lockStart);
+    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+    expect(validationStart).toBeGreaterThan(lockStart);
+    expect(validationEnd).toBeGreaterThan(validationStart);
+    const lock = JSON.parse(
+      readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
+    );
+    lock.chat = { repository, revision };
+    const encoded = Buffer.from(JSON.stringify(lock)).toString('base64');
+    const script = `
+$ErrorActionPreference = 'Stop'
+$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json
+try {
+${childBootstrap.slice(validationStart, validationEnd)}
+[Console]::Out.Write('accepted')
+} catch {
+[Console]::Out.Write('rejected')
+}
+`;
+    expect(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 10_000,
+      }),
+    ).toBe(result);
   });
+
+  test.each([
+    ['harness', 'opencoven-phase1-harness'],
+    ['frozen source', 'opencoven-phase1-chat-source'],
+  ])(
+    'retains the locked %s authority under a tag copied through nested isolated clones',
+    (label, tag) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const fetchLabel = `-Label 'Chat ${label} exact-SHA fetch'`;
+      const authorityLabel = `-Label 'Chat ${label} authority ref'`;
+      const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
+      const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
+      const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
+      const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
+
+      expect(fetchLabelIndex).toBeGreaterThan(-1);
+      expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
+      expect(authorityStart).toBeGreaterThan(-1);
+      expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
+      const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+
+      expect(authorityFetch).toContain(`'refs/tags/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/heads/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/opencoven/${tag}'`);
+    },
+  );
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
