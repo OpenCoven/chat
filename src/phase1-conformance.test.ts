@@ -916,6 +916,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      OPENCOVEN_WINDOWS_PNPM_CLI: `${bootstrapRoot}\\tools\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs`,
       SYSTEMROOT: 'C:\\Windows',
       WINDIR: 'C:\\Windows',
       COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
@@ -984,6 +985,32 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(() => windowsJobBindingEnvironment({ ...binding, PATHEXT: '.EXE' }, 'win32')).toThrow(
       'phase1.stage.invocation.windows-path-extensions',
     );
+    expect(() =>
+      windowsJobBindingEnvironment(
+        { ...binding, OPENCOVEN_WINDOWS_PNPM_CLI: 'C:\\untrusted\\pnpm.cjs' },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+  });
+
+  test('invokes the pinned pnpm CLI through Node on Windows', () => {
+    const pnpmCli = 'C:\\trusted\\pnpm\\bin\\pnpm.cjs';
+    expect(
+      schemaV2Producer.pnpmInvocation(['--version'], {
+        platform: 'win32',
+        nodePath: 'C:\\trusted\\node.exe',
+        pnpmCli,
+      }),
+    ).toEqual({
+      command: 'C:\\trusted\\node.exe',
+      args: [pnpmCli, '--version'],
+    });
+    expect(
+      schemaV2Producer.pnpmInvocation(['--version'], {
+        platform: 'linux',
+        nodePath: '/trusted/node',
+      }),
+    ).toEqual({ command: 'pnpm', args: ['--version'] });
   });
 
   test('requires a distinct Unix producer UID and native containment binding', () => {
@@ -1158,6 +1185,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      OPENCOVEN_WINDOWS_PNPM_CLI: `${bootstrapRoot}\\tools\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs`,
       SYSTEMROOT: 'C:\\Windows',
       WINDIR: 'C:\\Windows',
       COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
