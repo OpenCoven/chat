@@ -18,16 +18,16 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "35a39711998e4d0542f1b7d835feeec424b9cff6"
+    "revision": "effa8c419d8c57ff29d0672b6826ee778fab7c48"
   },
   "harnessAuthority": {
-    "revision": "35a39711998e4d0542f1b7d835feeec424b9cff6",
-    "tree": "efc7af360f38b5ffb6de5a31ef6119ee468967bb",
+    "revision": "effa8c419d8c57ff29d0672b6826ee778fab7c48",
+    "tree": "9c039990d04601f2e36166d3887f40f189a625e5",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "8a22b1ff197c096f1b077fbe5d6c57f292c561c1",
-        "sha256": "04ee71a3e40e4ffc26de4e7bfeae5f7eeb414aada0e177d07a2340e2dd635721"
+        "blob": "3f1fe73b9c0fa2e3b73bc4346dfd566f1e5ce8ef",
+        "sha256": "3da74e803359adf258ebeabcdfe2ba7422f6c01d5e902b7a34c9c321bc5c0df4"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "1f4359bd54124f71b989353a8f548938eea1748c",
-        "sha256": "44f54c79482e9b6e8b322be1be7450c5115c8080cac576833cbd77ec768ce651"
+        "blob": "95069a953f76a16a093552dcbcb9b3305fc7727d",
+        "sha256": "15aeab3a615c9012fd2f1be106ef8667ea197ea2af985008b11f2031d607f6c3"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
