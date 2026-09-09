@@ -44,11 +44,11 @@ final behavior commit, and the SDK validator is rebound to that final
 post-merge Chat authority commit.
 
 Protected run `34345365355` proved the repaired frozen-consumer boundary and
-completed Linux. Darwin then failed inside the worker-thread plugin compiler,
-while Windows exceeded the aggregate bootstrap quota before any narrower
-reviewed subtree quota fired. The next authority caps the Cave build at two
-reported CPUs and raises only the Windows aggregate ceiling to 24 GiB; all
-existing per-directory quotas remain unchanged.
+completed Linux. Darwin then failed during plugin evaluation, while Windows
+exceeded the aggregate bootstrap quota. The Cave build now uses two reported
+CPUs as a conservative contention experiment, not a proven fix for that generic
+plugin error. Windows uses the measured working-tree allocation and compact
+native builds described below, with the original aggregate ceilings preserved.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
@@ -591,8 +591,9 @@ Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
 384 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
 for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
 for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
-protected checkout's Git objects, 768 MiB for each SDK/Chat/Cave/Coven/
-validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
+protected checkout's Git objects, 768 MiB for each SDK/Chat/Coven/
+validator/producer checkout, 4 GiB for the Cave working tree including its
+dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
@@ -602,6 +603,23 @@ by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
 closed. Failures report either the fixed reviewed quota label or a path-free
 quota-monitor error.
+
+The Cave allowance accounts for a measured frozen `d20d83c` build with
+3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
+768 MiB allowance could not fit that working tree. The execution and bootstrap
+aggregate limits remain unchanged. Windows schema-v2 native builds use
+`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_INCREMENTAL=0` for Chat and Coven packaging
+and the shared native observation-test target.
+They retain the existing dev profile's runtime checks, optimization level, and
+features, but omit debugger and incremental-rebuild data for these one-shot
+builds. Unix and schema-v1 native build settings are unchanged. A local native
+RPC comparison reduced the build tree from 1,980,684,162 to 1,004,039,629 bytes;
+that measurement is not a substitute for the protected Windows quota result.
+
+Before throwing for a supervised production failure, the parent writes its
+existing bounded quota or exit-code diagnostic to stderr. A subsequent trusted
+cleanup exception therefore cannot erase that first diagnostic. Cleanup errors
+still fail the job and prevent evidence acceptance.
 
 The child receives a constructed environment rather than the runner
 environment. It contains no GitHub token, OIDC request value, Git credential,
@@ -1114,7 +1132,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,118 | `5f3ac7eb0f586d4c615643fac0e41be2523121e69750a6d151b75dde4e2f40da` |
+| `.github/workflows/client-v1-conformance.yml` | 463,333 | `66ab87a32bcd1f76ace02b8a4a2db1f9c43d8c29c7e98b7cf3acf45e2b1af3af` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1127,7 +1145,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 175,528 | `4f79647b449d7431da6dd62057ada0a6f8e889d35d68414faf7914fa5e7ccd8c` |
+| `scripts/phase1-schema-v2-producer.mjs` | 176,029 | `ae694058306de451de1cc8dd5dd5bf8a26e3e57693481aa2975d5eb53571d570` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
