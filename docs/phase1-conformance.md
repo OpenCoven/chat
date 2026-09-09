@@ -17,10 +17,10 @@ the final bytes.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c`, tree
-  `10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a`, the frozen SDK source
+- Chat production `841a88f8885bc20cac2f9d5b5b6bc2a23a76e657`, tree
+  `81bbc67b3024c9c76444f7f4e84d79ac6fad1cc6`, the frozen SDK source
   authority;
-- SDK package candidate `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
+- SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
@@ -30,25 +30,25 @@ the final bytes.
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41`;
+  `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
-contract committed in SDK source authority
-`eb1e8f7113ebe9e63364d5255ca976bf076c886d`. This is source-authority
-compatibility only. That authority still names Chat producer
-`b2d63e5fcea3b307d4d97fd560621dc84d659755`, not the final producer
-identity for this fix. Full producer compatibility and provenance remain
-blocked until this Chat change merges, a reachable authority commit pins the
-final behavior commit, and the SDK validator is rebound to that final
-post-merge Chat authority commit.
+The replacement candidate and frozen source are prepared in SDK PR #189 at
+`0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e`. The frozen source refreshes the
+SDK artifacts on the previous source baseline; it preserves all ten native
+file differences required by `harnessAuthority.productionDeltas`. Pinning the
+producer-derived `8a63ff1` source would remove those differences and fail the
+existing authority check.
 
-Protected run `34345365355` proved the repaired frozen-consumer boundary and
-completed Linux. Darwin then failed during plugin evaluation, while Windows
-exceeded the aggregate bootstrap quota. The Cave build now uses two reported
-CPUs as a conservative contention experiment, not a proven fix for that generic
-plugin error. Windows uses the measured working-tree allocation and compact
-native builds described below, with the original aggregate ceilings preserved.
+Full producer compatibility and provenance remain blocked until this Chat
+change merges and the SDK validator binds the final merged producer and its
+source-lock authority. Publishing remains disabled and no aggregate is accepted.
+Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
+and Darwin passed, while Windows failed at
+`phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
+identified by that stage label. The replacement candidate requires a fresh
+protected attempt with the complete observation suite and existing resource
+ceilings.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate

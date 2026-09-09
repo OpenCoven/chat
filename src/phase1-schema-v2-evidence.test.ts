@@ -35,7 +35,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-bed0d36f');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-0c79a8a2');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -61,8 +61,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: 'bed0d36f9ccfcf22fd8dde355c2f677d3d4ee996',
-  tree: 'ef533da466a3a9cf5b3052857d354367b0fb2ccf',
+  commit: '0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e',
+  tree: '41e5f0b0a51e8af899911023ee8d594f153a432d',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -1516,16 +1516,16 @@ describe('Phase 1 SDK source contract authority', () => {
     }
   });
 
-  test('matches the immutable SDK portable Cave source contract while retaining its pre-rebind producer', () => {
+  test('matches the immutable Windows-safe SDK source contract while retaining its pre-rebind producer', () => {
     const provenance = JSON.parse(readFileSync(sdkSourceLockProvenancePath, 'utf8')) as JsonRecord;
     expect(provenance).toEqual({
       repository: 'OpenCoven/sdk',
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: 'c49c13fbc728a3a2e502d1088c864caca7a907b9',
+      blob: '188dd37443c7669a403084fda04116fd06465ca1',
       size: 10942,
-      sha256: 'd16281ba0ff786e354d8d9d7a5f04598858c2f26fd299330916263f62013133c',
+      sha256: '481d1d4da9365ee92036bf635f4705185044f244c138ce84b8412b935b318374',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
@@ -1556,8 +1556,8 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'f6eba8af1f71d4251583cf39d4e5fb5b4797d209',
-      tree: '1b6ea72f0edc18c6f54e4bdcf96df68e46dc7a17',
+      commit: '4cf28daa3017e683ccce76b42c3590919b984c90',
+      tree: '0178cf511059ee77f814e7100adc786ecf6cef0f',
     });
   });
 });
@@ -1886,8 +1886,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'b2d63e5fcea3b307d4d97fd560621dc84d659755',
-      tree: '9ca3bedf95729d3dfdc01b4b4435fe335184ec6b',
+      commit: '4cf28daa3017e683ccce76b42c3590919b984c90',
+      tree: '0178cf511059ee77f814e7100adc786ecf6cef0f',
       workflow: {
         environmentId: '20863036831',
       },

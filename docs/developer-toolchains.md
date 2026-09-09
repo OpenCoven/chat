@@ -86,8 +86,8 @@
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
   checked-out HEADs before the canary runs. The SDK lock targets canonical
-  `main` commit `6526b56b30c9a9c1c072caf2f0022d3427ae18db` and manifest digest
-  `addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41`.
+  `main` commit `1597835325cf3762b51408ff0a565037eeb25f64` and manifest digest
+  `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`.
   The lock also pins the Cave
   producer's Client v1 contract fixture and `hpke-bound-v1` vector digests;
   the canary proves packed vector byte identity and the ancestry of the SDK's
