@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
@@ -2836,6 +2836,129 @@ ${pathAssignment}
     }
   });
 
+  test.each([
+    {
+      name: 'quota exceeded',
+      overrides: { ResourceQuotaExceeded: true, ResourceQuotaLabel: 'bootstrap aggregate' },
+      diagnostic: "Supervised Windows production exceeded resource quota 'bootstrap aggregate'.",
+    },
+    {
+      name: 'quota monitor failed',
+      overrides: { ResourceQuotaExceeded: true, ResourceQuotaMonitorError: true },
+      diagnostic: 'Supervised Windows resource quota monitor failed closed.',
+    },
+    {
+      name: 'unidentified quota',
+      overrides: { ResourceQuotaExceeded: true },
+      diagnostic: 'Supervised Windows production exceeded an unidentified resource quota.',
+    },
+    {
+      name: 'nonzero exit',
+      overrides: {},
+      diagnostic: 'Supervised Windows production failed with exit code 17.',
+    },
+    {
+      name: 'successful production',
+      overrides: { ExitCode: 0 },
+      diagnostic: undefined,
+    },
+  ])(
+    'reports Windows production state "$name" before failing cleanup',
+    ({ overrides, diagnostic }) => {
+      const bootstrap = workflowRunBody(
+        workflowStep(
+          readFileSync(workflowPath, 'utf8'),
+          'Bootstrap supervised Windows conformance',
+        ),
+      );
+      const start = bootstrap.indexOf('            if (\n              $result.TimedOut -or');
+      const end = bootstrap.indexOf('\n            $isolatedRecord = Join-Path', start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$result = $env:OPENCOVEN_TEST_PRODUCTION_RESULT | ConvertFrom-Json
+try {
+${bootstrap.slice(start, end)}
+} finally {
+  throw 'trusted cleanup fixture failed'
+}
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: {
+            ...process.env,
+            OPENCOVEN_TEST_PRODUCTION_RESULT: JSON.stringify({
+              TimedOut: false,
+              StdoutOverflow: false,
+              StderrOverflow: false,
+              ResourceQuotaExceeded: false,
+              ResourceQuotaMonitorError: false,
+              ResourceQuotaLabel: '',
+              ExitCode: 17,
+              ...overrides,
+            }),
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('trusted cleanup fixture failed');
+      if (diagnostic === undefined) {
+        expect(result.stderr).not.toContain('Supervised Windows');
+      } else {
+        expect(result.stderr).toContain(diagnostic);
+      }
+    },
+    30_000,
+  );
+
+  test('fits the measured Cave working tree without raising aggregate disk limits', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const quotaClass = supervisor.slice(
+      supervisor.indexOf('public sealed class WindowsDirectoryQuota'),
+      supervisor.indexOf('public sealed class WindowsJobSupervisor'),
+    );
+    const quotaAssignment = workflow.match(/\$directoryQuotas = @\([\s\S]*?\n {12}\)/u)?.[0];
+    expect(quotaAssignment).toBeDefined();
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+namespace OpenCoven {
+${quotaClass}
+}
+'@
+$bootstrapRoot = $PWD.Path
+$workspace = Join-Path $bootstrapRoot 'workspace'
+$isolatedUser = [pscustomobject]@{ TempPath = (Join-Path $bootstrapRoot 'temp') }
+${quotaAssignment}
+[Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
+`;
+    const quotas: { Label: string; MaxBytes: number }[] = JSON.parse(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        timeout: 15_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    );
+    const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
+    // The exact d20d83c build measured this many bytes in node_modules plus .next.
+    expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
+    expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
+    expect(limits.get('harness execution aggregate')).toBe(10 * 1024 ** 3);
+    expect(limits.get('harness build roots')).toBe(4 * 1024 ** 3);
+  }, 30_000);
+
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
     const bootstrap = workflowRunBody(
       workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
@@ -2862,13 +2985,13 @@ ${pathAssignment}
       expect(bootstrap).toContain(quotaRoot);
     }
     for (const [label, limit] of [
-      ['bootstrap aggregate', '24GB'],
+      ['bootstrap aggregate', '12GB'],
       ['workspace aggregate', '2GB'],
       ['direct downloads', '128MB'],
       ['protected Chat Git objects', '512MB'],
       ['SDK checkout', '768MB'],
       ['Chat checkout', '768MB'],
-      ['Cave checkout', '768MB'],
+      ['Cave checkout', '4GB'],
       ['Coven checkout', '768MB'],
       ['validator checkout', '768MB'],
       ['producer checkout', '768MB'],
