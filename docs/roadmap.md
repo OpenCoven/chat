@@ -1,5 +1,46 @@
 # Delivery roadmap and consolidation audit
 
+## Current delivery snapshot — 2026-09-09 UTC
+
+Verified against `origin/main` at `6fd7c620a4edab491fed2a4daf1e5b63e7e0927a`.
+[Main CI passed](https://github.com/OpenCoven/chat/actions/runs/34295829482).
+The September 7 audit below is retained as historical evidence; its pending
+items and branch counts are superseded by this snapshot.
+
+| Work | Verified state | Next action |
+| --- | --- | --- |
+| Disconnected familiar reads | [#138](https://github.com/OpenCoven/chat/pull/138) merged; [#90](https://github.com/OpenCoven/chat/issues/90) closed | Delivered |
+| Protected diagnostics | [#140](https://github.com/OpenCoven/chat/pull/140) merged; its report-scan review was fixed in [#142](https://github.com/OpenCoven/chat/pull/142), verified on main, and resolved with evidence | Retain the corrected producer authority in subsequent validator bindings |
+| Windows checkout and Cave authority | [#143](https://github.com/OpenCoven/chat/pull/143), [#145](https://github.com/OpenCoven/chat/pull/145), and [#146](https://github.com/OpenCoven/chat/pull/146) merged; [#144](https://github.com/OpenCoven/chat/pull/144) closed without merge | Audit the remaining v17 branch before retirement |
+| Protected conformance | Latest dispatched [run 34091592534](https://github.com/OpenCoven/chat/actions/runs/34091592534) failed at historical head `ada542f`; no newer protected run was listed | Reconcile SDK validator and current producer pins, then obtain successful three-platform evidence and aggregation |
+| Familiar contract and analytics | [#86](https://github.com/OpenCoven/chat/pull/86) is the only open Chat PR and remains draft | SDK `release.config.json` still has `publishingEnabled: false` and no aggregate record; satisfy release dependencies before consuming new artifacts |
+| Scheduled CI image | [Run 34107998897](https://github.com/OpenCoven/chat/actions/runs/34107998897) built and verified the image; proposal job failed with HTTP 403, leaving `ci/image-digest-2c64789641a9` at its base commit | Repair the workflow-write authorization and retry logic: an existing branch currently causes an early successful exit without creating the missing update or PR |
+
+The approved September 7 follow-through completed draft readiness for #138/#140
+and synchronized the three existing Teamwork mirrors (`cave-k0aqq`,
+`cave-23nmv`, `cave-0prpu`). The maintainer-held recovery set contains the
+operation receipts and read-back verification. This records those completed
+operations, not a claim that every project card is current today. A compatible
+isolated Beads executable was built and used to append the audit note; the
+global executable and database schema were not replaced.
+
+Seven worktrees were registered in this refresh. All were clean:
+
+- Primary checkout on main.
+- `familiars-source-stage1`: preserve for draft #86.
+- `protected-matrix-v17`: preserve; its tip is not an ancestor of main.
+- `protected-matrix-v16`, `repin-cave-v0.3.12`, `windows-chat-history`, and
+  detached `/private/tmp/chat-main-check`: exact tips are ancestors of main.
+  These are retirement candidates, subject to fresh ownership checks and the
+  operator's instruction to retain active worktrees.
+
+No worktree was removed by this refresh. The machine-readable inventory is in
+the maintainer-held `chat-consolidation-20260907` recovery set as
+`audit/refresh-20260909.json`. Main CI and merged diagnostic repairs do not
+establish protected release acceptance. The program remains incomplete.
+
+## Historical audit — 2026-09-07
+
 Audited 2026-09-07 against Chat `origin/main` at
 `c4332b07969966fbf1d5fbfb0ea7231b896a8fc6`. This is a dated delivery snapshot;
 refresh GitHub runs and branch heads before acting on it.
