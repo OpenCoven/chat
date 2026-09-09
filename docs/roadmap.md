@@ -39,6 +39,34 @@ the maintainer-held `chat-consolidation-20260907` recovery set as
 `audit/refresh-20260909.json`. Main CI and merged diagnostic repairs do not
 establish protected release acceptance. The program remains incomplete.
 
+### Worktree retirement follow-through
+
+A subsequent ownership check found no live process working in or referencing
+four clean merged checkouts: `protected-matrix-v16`, `repin-cave-v0.3.12`,
+`windows-chat-history`, and detached `/private/tmp/chat-main-check`. Each exact
+tip was revalidated as an ancestor of refreshed main immediately before
+`git worktree remove`; all four paths were verified absent afterward.
+
+The three named local branches were deleted with `git branch -d`. Their remote
+branches were removed atomically with exact-tip leases, and a fresh remote
+listing verified their absence. The maintainer-held recovery set outside this repository records these operations
+in `merged-retirement-20260909.json` and
+`merged-refs-retirement-20260909.json` within its audit directory. These are local
+recovery receipts, not repository files. No force deletion was used.
+
+Three worktrees remain: main, parked #86, and v17. Closed, unmerged #144 was superseded by merged #143, which retains full Chat
+history instead of v17's additional shallow-checkout fetch. The current workflow suite passed 59 tests with 19 platform skips;
+this is not Windows runtime or protected-matrix acceptance. V17's divergent
+historical authority pins remain preserved in its branch and checkout.
+
+[Issue #149](https://github.com/OpenCoven/chat/issues/149) tracks the CI-image
+proposal failure and retry defect. Read-only REST inspection on 2026-09-09 UTC returned no repository or
+repository-accessible organization Actions secrets for the authenticated
+maintainer. No `CI_IMAGE_BUMP_TOKEN` was visible in either listing at that time. The
+image itself already built and passed its verification job. Repairing the
+proposal requires both an authorized workflow-file write path and retry logic
+that does not confuse an existing branch with a completed update and PR.
+
 ## Historical audit — 2026-09-07
 
 Audited 2026-09-07 against Chat `origin/main` at
