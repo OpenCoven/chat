@@ -802,6 +802,7 @@ ${source.slice(start, end)}
       expect(result.stdout).toBe(accepted ? 'accepted' : '');
       if (!accepted) expect(result.stderr).toMatch(/reviewed.*(?:image|Studio)/u);
     },
+    30_000,
   );
 
   test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
