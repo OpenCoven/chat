@@ -987,7 +987,7 @@ function classifyCaveBuildFailureDiagnostic(error) {
   return `phase1.packaging.cave-build.phase.${phase}`;
 }
 
-export function classifyCargoBuildFailureDiagnostic(baseId, error) {
+export function classifyCargoBuildFailureDiagnostic(baseId, error, platform = process.platform) {
   if (!(error instanceof CommandExecutionError)) {
     return `${baseId}.unknown`;
   }
@@ -1033,7 +1033,7 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   if (
     output.includes('no space left on device') ||
     output.includes('not enough space on the disk') ||
-    output.includes('os error 112') ||
+    (platform === 'win32' && output.includes('os error 112')) ||
     output.includes('enospc')
   ) {
     return `${baseId}.resource.disk`;
