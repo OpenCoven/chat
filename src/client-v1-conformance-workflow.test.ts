@@ -553,46 +553,49 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test.each([
-    ['OpenCoven/chat', 'a'.repeat(40), 'accepted'],
-    ['OpenCoven/other', 'a'.repeat(40), 'rejected'],
-    ['OpenCoven/chat', '--upload-pack=unexpected', 'rejected'],
-    ['OpenCoven/chat', 'A'.repeat(40), 'rejected'],
-  ])(
-    'validates frozen Chat source %s at %s before fetching',
-    (repository, revision, result) => {
-      const childBootstrap = embeddedWindowsChildBootstrapSource(
-        readFileSync(workflowPath, 'utf8'),
-      );
-      const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
-      const validationStart = childBootstrap.indexOf('if (', lockStart);
-      const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
-      expect(validationStart).toBeGreaterThan(lockStart);
-      expect(validationEnd).toBeGreaterThan(validationStart);
-      const lock = JSON.parse(
-        readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
-      );
-      lock.chat = { repository, revision };
-      const encoded = Buffer.from(JSON.stringify(lock)).toString('base64');
-      const script = `
+  test('validates all frozen Chat source pins before fetching', () => {
+    const cases = [
+      { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
+      { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
+    ];
+    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
+    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+    const validationStart = childBootstrap.indexOf('if (', lockStart);
+    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+    expect(validationStart).toBeGreaterThan(lockStart);
+    expect(validationEnd).toBeGreaterThan(validationStart);
+    const encodedLock = readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json')).toString(
+      'base64',
+    );
+    const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
+    // Share one bounded PowerShell startup across every case, including cold CI images.
+    const script = `
 $ErrorActionPreference = 'Stop'
-$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json
-try {
+$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedLock}')) | ConvertFrom-Json
+$cases = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCases}')) | ConvertFrom-Json
+$results = @(foreach ($case in $cases) {
+  $phase1Lock.chat = $case
+  try {
 ${childBootstrap.slice(validationStart, validationEnd)}
-[Console]::Out.Write('accepted')
-} catch {
-[Console]::Out.Write('rejected')
-}
+    'accepted'
+  } catch {
+    'rejected'
+  }
+})
+[Console]::Out.Write(($results | ConvertTo-Json -Compress))
 `;
-      expect(
-        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-          encoding: 'utf8',
-          timeout: 10_000,
-        }),
-      ).toBe(result);
-    },
-    30_000,
-  );
+    const result = execFileSync(
+      'pwsh',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        encoding: 'utf8',
+        timeout: 25_000,
+      },
+    );
+    expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
+  }, 30_000);
 
   test.each([
     ['harness', 'opencoven-phase1-harness'],
