@@ -2348,7 +2348,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     ]) {
       expect(supervisor).toContain(required);
     }
-    expect(producerHarness).toContain('`safe.directory=$' + '{localGitDirectory}`');
+    expect(producerHarness).toContain(
+      '`safe.directory=$' + '{toGitSafeDirectoryPath(localGitDirectory)}`',
+    );
     for (const required of [
       'openat',
       'O_NOFOLLOW',
