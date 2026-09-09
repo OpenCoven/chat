@@ -616,8 +616,13 @@ number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
-closed. Failures report either the fixed reviewed quota label or a path-free
-quota-monitor error.
+closed. After preserving the built Coven executable, schema-v2 also removes the
+Coven Cargo target before starting the observation suite, so neither packaging
+target remains at the next peak. Observation failures expose only the fixed SDK
+install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
+tests substage, plus a distinct temporary-root cleanup substage on Unix;
+command output and private paths remain suppressed. Failures report either the
+fixed reviewed quota label or a path-free quota-monitor error.
 
 The Cave allowance accounts for a measured frozen `d20d83c` build with
 3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
@@ -1161,20 +1166,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,942 | `dcf4b43469cb91bb02292d4a847f458378e8bc5bfe5454db7d7aa35d85b4504e` |
+| `.github/workflows/client-v1-conformance.yml` | 463,942 | `4bae4b08e7fde45876a2212f0f934de40d617bbc958bf1f06308b5c951e1733a` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 202,803 | `3da74e803359adf258ebeabcdfe2ba7422f6c01d5e902b7a34c9c321bc5c0df4` |
+| `scripts/phase1-conformance.mjs` | 203,170 | `9f0c12ab30939a77c3ecac5f86c932446871a28d9be5ad4609b17d2f65fc145f` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 177,317 | `d0a534d277e6a9e2179522f21f4ee26954d6eabfb76383dfd0fe1abe4dc53335` |
+| `scripts/phase1-schema-v2-producer.mjs` | 179,138 | `3b620276f2438eebe1e9d8ed64a251ef46323740a9976266ff981201d8adb2ff` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

@@ -5310,8 +5310,33 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
     expect(packaging).toContain('renameSync(builtNativeRpcPath, nativeRpcPath);');
     expect(packaging).toContain('rmSync(chatTarget, { recursive: true });');
+    expect(packaging).toContain('renameSync(builtCovenBinaryPath, covenBinaryPath);');
+    expect(packaging).toContain('rmSync(covenTarget, { recursive: true });');
     expect(source).toMatch(
       /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
+    );
+  });
+
+  test('tracks bounded schema-v2 observation substages without exposing command output', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    for (const stage of [
+      'phase1.runtime-observations.sdk-install.failed',
+      'phase1.runtime-observations.chat-install.failed',
+      'phase1.runtime-observations.sdk-tests.failed',
+      'phase1.runtime-observations.chat-tests.failed',
+      'phase1.runtime-observations.chat-rust-tests.failed',
+      'phase1.runtime-observations.coven-rust-tests.failed',
+      'phase1.runtime-observations.cleanup.failed',
+    ]) {
+      expect(publicPhase1FailureDiagnostic(new Error(stage))).toBe(stage);
+      expect(source).toContain(`onStage('${stage}')`);
+    }
+    expect(source).toContain(
+      ['        (stage) => {', '          activeStage = stage;', '        },'].join('\n'),
     );
   });
 
