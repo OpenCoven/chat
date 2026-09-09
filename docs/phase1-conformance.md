@@ -1107,7 +1107,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,082 | `814a9d41770161514e63c825a822ed2c2944f436f5a4a9c038ed56c0cb78ac4a` |
+| `.github/workflows/client-v1-conformance.yml` | 463,030 | `a08ad1025dd70096bd5a0cae5f3d37ff1675f0173de4347deebdddfdc90f225d` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1127,7 +1127,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 29,289 | `1a83eb8495b671a9d490a26a8ce23745cdded680aa2b896142883acfde19064a` |
+| `scripts/unix-producer-supervisor.sh` | 29,424 | `b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
@@ -1216,3 +1216,8 @@ are recomputed from the exact clean checkout and embedded in the platform
 record. The SDK aggregator still requires those values to equal the validator
 checkout performing aggregation. No SDK validator revision is committed back
 into Chat, so the two repositories do not form a commit-hash cycle.
+
+The Unix supervisor reports a nonzero restricted producer exit status on stderr
+before containment drain, retaining it even when cleanup subsequently fails.
+This numeric status complements the bounded producer stage diagnostic; it does
+not identify the failed authority check or establish successful containment.

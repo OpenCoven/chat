@@ -736,6 +736,10 @@ producer_status=$?
 set -e
 producer_pid=
 
+if (( producer_status != 0 )); then
+  echo "unix-producer-supervisor: restricted producer exited with status $producer_status" >&2
+fi
+
 if [[ "$host_os" == Linux ]]; then
   drain_linux_cgroup ||
     { echo 'unix-producer-supervisor: cgroup.kill did not reach populated 0' >&2; exit 1; }
