@@ -2847,7 +2847,7 @@ ${pathAssignment}
       expect(bootstrap).toContain(quotaRoot);
     }
     for (const [label, limit] of [
-      ['bootstrap aggregate', '12GB'],
+      ['bootstrap aggregate', '24GB'],
       ['workspace aggregate', '2GB'],
       ['direct downloads', '128MB'],
       ['protected Chat Git objects', '512MB'],

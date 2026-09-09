@@ -43,6 +43,13 @@ blocked until this Chat change merges, a reachable authority commit pins the
 final behavior commit, and the SDK validator is rebound to that final
 post-merge Chat authority commit.
 
+Protected run `34345365355` proved the repaired frozen-consumer boundary and
+completed Linux. Darwin then failed inside the worker-thread plugin compiler,
+while Windows exceeded the aggregate bootstrap quota before any narrower
+reviewed subtree quota fired. The next authority caps the Cave build at two
+reported CPUs and raises only the Windows aggregate ceiling to 24 GiB; all
+existing per-directory quotas remain unchanged.
+
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
@@ -1107,20 +1114,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `85dac8a5eca58329011e824a97130597faa50fa8bb78805e44b5e907a72ee602` |
+| `.github/workflows/client-v1-conformance.yml` | 463,030 | `b5e5113b3f2e29ea2a6406271f3321e5a9d55630a325bf635bc577c53609eb78` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 201,819 | `09ec4a7c1204644af151d36577e7f2d78efaf2397ac6d7ca224fbbf04e3e463a` |
+| `scripts/phase1-conformance.mjs` | 201,819 | `7d021f7ddd0efc8c7cbfdc596d8822c7b8ae877689db81a12f14e5106dc7432c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 173,845 | `b9064811c2bcef77ce1eef7a5561ae2c6bee79c3fc9a354bd116436c739be534` |
+| `scripts/phase1-schema-v2-producer.mjs` | 173,845 | `2abe46a2696602599e27e671195086d367370bfe96660c932f6e84c662101371` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
