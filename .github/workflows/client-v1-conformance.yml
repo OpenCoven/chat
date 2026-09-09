@@ -89,7 +89,7 @@ jobs:
           }, cargo));
           env.CARGO_TARGET_DIR = resolve(root, 'build/coven-target');
           const result = spawnSync(cargo, ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
-            cwd: resolve(root, 'counterparts/coven'),
+            cwd: resolve(root, 'checkouts/coven'),
             env,
             stdio: 'inherit',
             timeout: 20 * 60_000,
