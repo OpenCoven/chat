@@ -22,13 +22,19 @@ try {
   $env:RUSTUP_HOME = Join-Path $root 'rustup'
   rustup toolchain install 1.95.0 --profile minimal --no-self-update
   $cargo = & rustup which --toolchain 1.95.0 cargo
+  $shimBin = Join-Path $env:CARGO_HOME 'bin'
+  New-Item -ItemType Directory -Path $shimBin -Force | Out-Null
+  Copy-Item -LiteralPath (Get-Command rustup).Source -Destination (Join-Path $shimBin 'cargo.exe')
   Copy-Item -LiteralPath $PSScriptRoot -Destination (Join-Path $user.WorkspacePath 'scripts') -Recurse
+  Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'fixed-producer\scripts') `
+    -Destination (Join-Path $user.WorkspacePath 'fixed-scripts') -Recurse
   $probePath = Join-Path $user.WorkspacePath 'compiler-probe.mjs'
   [IO.File]::WriteAllText($probePath, @'
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { safeEnvironment, schemaV2NativeBuildEnvironment } from './scripts/phase1-schema-v2-producer.mjs';
+import { safeEnvironment, CommandExecutionError, classifyCargoBuildFailureDiagnostic } from './scripts/phase1-schema-v2-producer.mjs';
+import { safeEnvironment as fixedEnvironment, schemaV2NativeBuildEnvironment } from './fixed-scripts/phase1-schema-v2-producer.mjs';
 import { createProcessOwnedArtifactRoot } from './scripts/process-owned-artifact-root.mjs';
 
 const artifactRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
@@ -41,12 +47,27 @@ execFileSync('git', ['-C', source, 'fetch', '--depth=1', 'https://github.com/Ope
 execFileSync('git', ['-C', source, 'checkout', '--detach', 'FETCH_HEAD'], { stdio: 'inherit' });
 assert.equal(execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), revision);
 const cargo = process.env.OPENCOVEN_DIAGNOSTIC_CARGO;
-const env = schemaV2NativeBuildEnvironment(safeEnvironment(artifactRoot.rootPath, {
+const supervisorEnvironment = {
+  PATH: process.env.PATH,
   LIB: process.env.LIB,
   INCLUDE: process.env.INCLUDE,
-}, cargo));
+};
+const brokenEnvironment = safeEnvironment(artifactRoot.rootPath, supervisorEnvironment, cargo);
+const broken = spawnSync('cargo', ['--version'], {
+  cwd: source, env: brokenEnvironment, encoding: 'utf8', timeout: 30_000,
+});
+assert.equal(broken.status, 1);
+assert.match(broken.stderr, /could not choose a version of cargo/);
+const failure = classifyCargoBuildFailureDiagnostic('phase1.packaging.coven-build',
+  new CommandExecutionError('Coven CLI package', {
+    code: broken.status, stdout: broken.stdout, stderr: broken.stderr,
+  }));
+assert.equal(failure, 'phase1.packaging.coven-build.unknown');
+console.log(`Reproduced original failure: ${failure}`);
+const env = schemaV2NativeBuildEnvironment(fixedEnvironment(artifactRoot.rootPath, supervisorEnvironment, cargo));
+assert.equal(env.RUSTUP_HOME, undefined);
 env.CARGO_TARGET_DIR = resolve(artifactRoot.rootPath, 'build/coven-target');
-const result = spawnSync(cargo, ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
+const result = spawnSync('cargo', ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'], {
   cwd: source,
   env,
   stdio: 'inherit',
@@ -64,7 +85,7 @@ process.exit(result.status ?? 1);
     COMSPEC = 'C:\Windows\System32\cmd.exe'
     PATHEXT = '.COM;.EXE;.BAT;.CMD'
     PATH = @(
-      (Split-Path $cargo), $gitBin, (Split-Path $node),
+      $shimBin, $gitBin, (Split-Path $node),
       "$msvc\bin\Hostx64\x64", "$sdk\bin\10.0.26100.0\x64",
       'C:\Windows\System32', 'C:\Windows', (Split-Path $trustedPwsh)
     ) -join ';'

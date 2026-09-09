@@ -20,6 +20,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.18.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 35a39711998e4d0542f1b7d835feeec424b9cff6
+          path: fixed-producer
+          persist-credentials: false
       - name: Compile frozen Coven under the frozen isolated-user supervisor
         shell: pwsh
         run: ./scripts/diagnostic-coven-isolated-user.ps1
