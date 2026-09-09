@@ -2282,11 +2282,15 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
 }
 
 async function installPnpm(artifactRoot, rootPath, environment, label) {
+  const pnpmCommand = pnpmInvocation(
+    ['install', '--frozen-lockfile', `--config.store-dir=${environment.PNPM_STORE_DIR}`],
+    { pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI },
+  );
   await runCommand(
     artifactRoot,
     `${label} dependency install`,
-    'pnpm',
-    ['install', '--frozen-lockfile', `--config.store-dir=${environment.PNPM_STORE_DIR}`],
+    pnpmCommand.command,
+    pnpmCommand.args,
     { cwd: rootPath, env: environment },
   );
 }
@@ -2376,18 +2380,36 @@ async function packageLockedArtifacts(
   onStage('phase1.packaging.cave-install.failed');
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
   onStage('phase1.packaging.cave-build.failed');
-  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'], {
-    cwd: roots.caveRoot,
-    env: schemaV2CaveBuildEnvironment(environment),
+  const caveBuildCommand = pnpmInvocation(['build'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
   });
+  await runCommand(
+    artifactRoot,
+    'Cave conformance package',
+    caveBuildCommand.command,
+    caveBuildCommand.args,
+    {
+      cwd: roots.caveRoot,
+      env: schemaV2CaveBuildEnvironment(environment),
+    },
+  );
 
   onStage('phase1.packaging.chat-install.failed');
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
   onStage('phase1.packaging.chat-web-build.failed');
-  await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
-    cwd: roots.chatRoot,
-    env: environment,
+  const chatBuildCommand = pnpmInvocation(['build'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
   });
+  await runCommand(
+    artifactRoot,
+    'Chat web package',
+    chatBuildCommand.command,
+    chatBuildCommand.args,
+    {
+      cwd: roots.chatRoot,
+      env: environment,
+    },
+  );
 
   const packageNames = {
     core: 'sdk-core-0.1.0.tgz',

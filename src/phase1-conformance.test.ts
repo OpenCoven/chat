@@ -1013,6 +1013,17 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toEqual({ command: 'pnpm', args: ['--version'] });
   });
 
+  test('routes schema-v2 pnpm commands through the pinned invocation helper', () => {
+    const producer = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(producer).toContain(
+      "const pnpmCommand = pnpmInvocation(\n    ['install', '--frozen-lockfile'",
+    );
+    expect(producer).toContain("const caveBuildCommand = pnpmInvocation(['build'], {");
+  });
+
   test('requires a distinct Unix producer UID and native containment binding', () => {
     const fixture = createSupervisorArtifactFixture('linux-x64');
     const currentUid = process.getuid?.() ?? 1977;
@@ -4992,9 +5003,8 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(packagingStart).toBeGreaterThanOrEqual(0);
     expect(packagingEnd).toBeGreaterThan(packagingStart);
     const packaging = source.slice(packagingStart, packagingEnd);
-    expect(packaging).toContain(
-      "await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
-    );
+    expect(packaging).toContain("const caveBuildCommand = pnpmInvocation(['build'], {");
+    expect(packaging).toContain('pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,');
     expect(packaging).not.toContain("['build:conformance']");
   });
 
