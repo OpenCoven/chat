@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'd597a25dfe85bcf84c4cf6792186f14a415bf006',
-      sha256: '82051d1d269c9d2be8be62cd697c0b8eb2c304ece2fdf6b99a1a0c8759560d6b',
+      blob: 'e61b9c60aa7cce95b095023acac46d6fbba6b396',
+      sha256: '4029ea7f78b8cd706266ea13b4aace33424dc47148946526b147f8d020b3c002',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
