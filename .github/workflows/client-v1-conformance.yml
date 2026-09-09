@@ -8,6 +8,24 @@ on:
 permissions:
   contents: read
 jobs:
+  image-diagnostic:
+    if: github.ref == 'refs/heads/diag/windows-image-env-20260909'
+    runs-on: windows-2025
+    steps:
+      - shell: pwsh
+        run: |
+          $visualStudio = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise'
+          $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          Write-Host "RUNNER_OS=$env:RUNNER_OS"
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "OSVersion=$([Environment]::OSVersion.Version)"
+          Write-Host "Kernel32=$((Get-Item \"$env:SystemRoot\System32\kernel32.dll\").VersionInfo.FileVersion)"
+          Write-Host "PowerShell=$($PSVersionTable.PSVersion)"
+          Write-Host "DotNet=$([Environment]::Version)"
+          Write-Host "VisualStudio=$(& $vswhere -products * -property catalog_productDisplayVersion -latest)"
+          Write-Host "MSVC=$((Get-ChildItem \"$visualStudio\VC\Tools\MSVC\" -Directory | Select-Object -ExpandProperty Name) -join ',')"
+          Write-Host "WindowsSDK=$(Test-Path 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe')"
   windows-supervisor:
     name: build-windows-supervisor
     if: github.ref == 'refs/heads/main'
