@@ -1112,21 +1112,16 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain("github.ref_name == 'main'");
   });
 
-  it('uses the default token for git-data writes and the bump token only for PR creation', () => {
+  it('requires a workflow-authorized token for image proposals', () => {
     const workflow = readText('.github/workflows/ci-image.yml');
     const propose = workflow.slice(workflow.indexOf('\n  propose:'));
-
-    expect(propose).toContain('contents: write');
-    expect(propose).toContain('pull-requests: write');
-    expect(propose).toContain('GH_TOKEN: $' + '{{ secrets.GITHUB_TOKEN }}');
-    expect(propose).toContain(
-      'PR_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
-    );
-    expect(propose).toContain('Pull requests: write on this repository');
-    expect(propose).toContain('GH_TOKEN="$' + '{PR_TOKEN}" gh pr create');
-    expect(propose).not.toContain(
-      'GH_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
-    );
+    expect(propose).toContain('contents: read');
+    expect(propose).toContain('GH_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN }}');
+    expect(propose).toContain('persist-credentials: false');
+    expect(propose).toContain('Contents, Workflows, and');
+    expect(propose).toContain('Pull requests: write');
+    expect(propose).not.toContain('|| secrets.GITHUB_TOKEN');
+    expect(propose).toContain('node scripts/ci-image-proposal.mjs');
   });
 
   it('decides the image bump on contents rather than on a layer digest', () => {
@@ -1147,10 +1142,10 @@ describe('Phase 1 specification guards', () => {
     // unverified commit in the history -- arriving weekly, forever. Commits
     // written through the contents API are signed by GitHub.
     const workflow = readText('.github/workflows/ci-image.yml');
-    const proposeBlock = workflow.slice(workflow.indexOf('\n  propose:'));
-
+    const proposeBlock = readText('scripts/ci-image-proposal.mjs');
+    expect(workflow).toContain('node scripts/ci-image-proposal.mjs');
     expect(proposeBlock).toContain('/contents/.github/workflows/ci.yml');
-    expect(proposeBlock).toMatch(/-X PUT/);
+    expect(proposeBlock).toContain("api('PUT', filePath");
 
     // Comments stripped, because the comment explaining why `git commit` is
     // not used here necessarily contains the words `git commit`.
