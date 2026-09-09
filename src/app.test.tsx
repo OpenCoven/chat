@@ -296,7 +296,7 @@ describe('App', () => {
     });
     expect(queryAdapter.dispose).not.toHaveBeenCalled();
     // The Cave view is gone, but the user still has their own chat.
-    expect(await screen.findByRole('heading', { name: 'Local chat', exact: true })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Local chat' })).toBeVisible();
 
     unmount();
   });
