@@ -8,6 +8,48 @@ on:
 permissions:
   contents: read
 jobs:
+  diagnostic-sdk-observations:
+    name: diagnostic-sdk-observations
+    if: github.ref == 'refs/heads/diag/windows-sdk-observations-20260909'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: OpenCoven/sdk
+          ref: 6526b56b30c9a9c1c072caf2f0022d3427ae18db
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 10.34.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.1
+      - name: Install and build the frozen SDK
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run the exact SDK observation selectors
+        shell: pwsh
+        run: |
+          $tests = @(
+            'tests/cave-discovery-pairing.spec.ts',
+            'tests/cave-canonical-reads.spec.ts',
+            'tests/cave-hpke-bound-v1.spec.ts',
+            'tests/cave-managed-native.spec.ts',
+            'tests/cave-managed-native-staged.spec.ts',
+            'tests/coven-discovery.spec.ts',
+            'tests/health-validation.spec.ts',
+            'tests/client-contract.spec.ts',
+            'tests/native-secret-store.spec.ts'
+          )
+          pnpm --ignore-workspace exec vitest run @tests --reporter=default --reporter=json "--outputFile=$env:RUNNER_TEMP/sdk-observations.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   windows-supervisor:
     name: build-windows-supervisor
     if: github.ref == 'refs/heads/main'
