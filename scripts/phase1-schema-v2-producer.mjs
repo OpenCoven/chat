@@ -74,7 +74,7 @@ export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
-const caveBuildReportedCpuTotal = '3';
+const caveBuildReportedCpuTotal = '2';
 const ownedProcessGroupsSupported = process.platform !== 'win32';
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const schemaV2NativeFailureStages = new Set([
