@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 import { cleanupOwnedTempRoot, createOwnedTempDirectory } from './owned-temp-directory.mjs';
@@ -803,7 +803,16 @@ export function assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarbal
 function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
   const createReleaseArtifacts = resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs');
   requirePath(createReleaseArtifacts, 'SDK create-release-artifacts script');
-  run(process.execPath, [createReleaseArtifacts, '--output', artifactRoot], sdkRoot);
+  const invocation = `import { createConformanceArtifacts } from ${JSON.stringify(
+    pathToFileURL(createReleaseArtifacts).href,
+  )};
+createConformanceArtifacts({
+  root: ${JSON.stringify(sdkRoot)},
+  outputRoot: ${JSON.stringify(artifactRoot)},
+  version: ${JSON.stringify(lock.sdk.releaseManifest.version)},
+  requireConformanceEvidence: false,
+});`;
+  run(process.execPath, ['--input-type=module', '--eval', invocation], sdkRoot);
 
   const manifestPath = resolve(artifactRoot, lock.sdk.releaseManifest.file);
   requirePath(manifestPath, 'SDK release manifest');

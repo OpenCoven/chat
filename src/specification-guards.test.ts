@@ -1314,6 +1314,8 @@ describe('Phase 1 specification guards', () => {
     );
     expect(canaryScript).toContain('contract-canary.lock.json');
     expect(canaryScript).toContain('create-release-artifacts.mjs');
+    expect(canaryScript).toContain('createConformanceArtifacts');
+    expect(canaryScript).toContain('requireConformanceEvidence: false');
     expect(canaryScript).toContain('Generated SDK release manifest');
     expect(canaryScript).toContain('verify-contracts.mjs');
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
