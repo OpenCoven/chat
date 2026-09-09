@@ -34,11 +34,10 @@ the final bytes.
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
-contract committed in SDK validator
-`933a9523ccbee071417eca01b8a7a37e54d6cbc0`. This is source-authority
-compatibility only. SDK 933 still names Chat producer
-`4dc8f64bb71634a01ee647542dcdafdd0888b4f9`, while SDK #100 currently binds
-Chat `95de47f7aa2bf8233f71a601ad16011a82905e41`; neither is the final producer
+contract committed in SDK source authority
+`eb1e8f7113ebe9e63364d5255ca976bf076c886d`. This is source-authority
+compatibility only. That authority still names Chat producer
+`b2d63e5fcea3b307d4d97fd560621dc84d659755`, not the final producer
 identity for this fix. Full producer compatibility and provenance remain
 blocked until this Chat change merges, a reachable authority commit pins the
 final behavior commit, and the SDK validator is rebound to that final
