@@ -2699,9 +2699,7 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(childBootstrap).toContain(
       "$pnpmCli = Join-Path $pnpmRoot 'node_modules\\pnpm\\bin\\pnpm.cjs'",
     );
-    expect(workflow).toMatch(
-      /\$childEnvironment = \[ordered\]@\{[\s\S]*?OPENCOVEN_WINDOWS_PNPM_CLI = \$pnpmCli[\s\S]*?\n {12}\}/u,
-    );
+    expect(childBootstrap).toContain('$env:OPENCOVEN_WINDOWS_PNPM_CLI = $pnpmCli');
     expect(childBootstrap).not.toContain('$npm =');
     expect(childBootstrap).not.toContain('$pnpm =');
 
@@ -2714,6 +2712,42 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(childBootstrap).toContain('(& $node $pnpmCli --version).Trim()');
     expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
   });
+
+  test('builds the parent environment without reading child-only tool variables', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const environmentAssignment = workflow.match(
+      /\$childEnvironment = \[ordered\]@\{[\s\S]*?\n {12}\}/u,
+    )?.[0];
+    expect(environmentAssignment).toBeDefined();
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$bootstrapRoot = $PWD.Path
+$workspace = $PWD.Path
+$childNodeRoot = $PWD.Path
+$isolatedUser = [pscustomobject]@{
+  ProfilePath = $PWD.Path
+  TempPath = $PWD.Path
+}
+foreach ($name in @(
+  'trustedComspec', 'trustedPwsh', 'validatorRevision', 'nonce', 'jobName',
+  'fleetSupervisorPath', 'supervisorSourcePath', 'msvcBin', 'msvcLib',
+  'msvcInclude', 'windowsSdkBin', 'windowsSdkLibUm', 'windowsSdkLibUcrt',
+  'windowsSdkIncludeRoot'
+)) {
+  Set-Variable -Name $name -Value 'fixture'
+}
+${environmentAssignment}
+[Console]::Out.Write($childEnvironment.Contains('OPENCOVEN_WINDOWS_PNPM_CLI'))
+`;
+
+    expect(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    ).toBe('False');
+  }, 30_000);
 
   test('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
