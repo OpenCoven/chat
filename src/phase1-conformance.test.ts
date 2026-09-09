@@ -1721,6 +1721,35 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('runs exactly the SDK tests consumed by schema-v2 evidence assertions', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const assertionBuilderStart = source.indexOf('export function buildObservedSchemaV2Assertions');
+    const assertionBuilderEnd = source.indexOf(
+      "recordWhen(chat, 'chat.cave.compatibility-before-pairing'",
+      assertionBuilderStart,
+    );
+    expect(assertionBuilderStart).toBeGreaterThanOrEqual(0);
+    expect(assertionBuilderEnd).toBeGreaterThan(assertionBuilderStart);
+    const assertionBuilder = source.slice(assertionBuilderStart, assertionBuilderEnd);
+    const consumedFragments = [...assertionBuilder.matchAll(/sdkTest\((['"])(.*?)\1\)/gu)].map(
+      (match) => match[2],
+    );
+    expect([...assertionBuilder.matchAll(/\bsdkTest\(/gu)]).toHaveLength(consumedFragments.length);
+
+    expect(new Set(consumedFragments)).toEqual(
+      new Set(schemaV2Producer.SCHEMA_V2_REQUIRED_SDK_OBSERVATION_TEST_FRAGMENTS),
+    );
+    expect(schemaV2Producer.SCHEMA_V2_REQUIRED_SDK_OBSERVATION_TEST_FRAGMENTS).not.toContain(
+      'does not delete a replacement written by another native store instance',
+    );
+    expect(source).toMatch(
+      /testNamePattern:\s*regexAlternation\(\s*SCHEMA_V2_REQUIRED_SDK_OBSERVATION_TEST_FRAGMENTS\s*\)/u,
+    );
+  });
+
   test('binds schema-v2 producer identity to the supplied workflow checkout', async () => {
     const producerModulePath = '../scripts/phase1-schema-v2-producer.mjs';
     const { readSchemaV2ProducerIdentity } = await import(producerModulePath);

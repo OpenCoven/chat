@@ -623,6 +623,10 @@ install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
 tests substage, plus a distinct temporary-root cleanup substage on Unix;
 command output and private paths remain suppressed. Failures report either the
 fixed reviewed quota label or a path-free quota-monitor error.
+The SDK observation invocation selects exactly the test titles consumed by the
+schema-v2 assertion builder. Unrelated tests in those source files do not become
+release-gate dependencies; a regression test keeps the selected title set equal
+to every `sdkTest(...)` evidence predicate.
 
 The Cave allowance accounts for a measured frozen `d20d83c` build with
 3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized

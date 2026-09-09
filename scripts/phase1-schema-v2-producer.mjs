@@ -1773,6 +1773,41 @@ function parseVitestObservationReport(path, label) {
   return passed;
 }
 
+export const SCHEMA_V2_REQUIRED_SDK_OBSERVATION_TEST_FRAGMENTS = Object.freeze([
+  'canonicalizes routes and validates strict discovery v2',
+  'rejects stale or malformed discovery records',
+  'invalidates an instance-replaced credential before bearer attachment',
+  'accepts Cave health responses when the minimum client version is compatible',
+  'creates, polls, exchanges, validates, and forgets a paired credential',
+  "surfaces pairing exchange errors: 'pairing_pending'",
+  'allows only one transport exchange across concurrent exchange attempts',
+  "surfaces pairing exchange errors: 'pairing_denied'",
+  "surfaces pairing exchange errors: 'pairing_expired'",
+  'allows retry after a pre-send authority mismatch without replaying the secret',
+  'preserves the managed contract error code and retry semantics for rate_limited',
+  'never parses a proxy rejection as a Client v1 health envelope',
+  'uses exact canonical routes, deterministic queries, encoded ids',
+  'validates page options and conversation ids before transport I/O',
+  'parses the optional top-level cursor with core canonical validation',
+  'propagates reconcile_required from messages without retrying and forwards the id',
+  'preserves revoked bearer rejection without fallback or retry',
+  'prefers non-empty COVEN_HOME without invoking the CLI',
+  'sends only the reviewed health request and parses a valid response',
+  'preserves structured daemon error fields without flattening them',
+  'reports connect timeout and honors cancellation',
+  'rejects a Unix response received at its 1ms absolute deadline',
+  'rejects a Windows response received at its 1ms absolute deadline',
+  "rejects 'oversized body declaration'",
+  'rejects invalid HTTP health framing',
+  'shares frame limits and structured daemon errors with Unix',
+  'rejects missing Entry constructors as secure_store_unavailable',
+  'fails closed before discovery when transport security is missing at runtime',
+]);
+
+function regexAlternation(values) {
+  return values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|');
+}
+
 async function runVitestObservationSuite({
   artifactRoot,
   rootPath,
@@ -1780,6 +1815,7 @@ async function runVitestObservationSuite({
   label,
   files,
   outputName,
+  testNamePattern,
 }) {
   const outputPath = resolve(artifactRoot.rootPath, outputName);
   await runCommand(
@@ -1792,6 +1828,7 @@ async function runVitestObservationSuite({
       'vitest',
       'run',
       ...files,
+      ...(testNamePattern === undefined ? [] : ['--testNamePattern', testNamePattern]),
       '--reporter=json',
       `--outputFile=${outputPath}`,
     ],
@@ -1911,6 +1948,7 @@ export async function runSchemaV2ObservationSuites(
         'tests/native-secret-store.spec.ts',
       ],
       outputName: 'sdk-observation-tests.json',
+      testNamePattern: regexAlternation(SCHEMA_V2_REQUIRED_SDK_OBSERVATION_TEST_FRAGMENTS),
     });
     onStage('phase1.runtime-observations.chat-tests.failed');
     const chatTests = await runVitestObservationSuite({
