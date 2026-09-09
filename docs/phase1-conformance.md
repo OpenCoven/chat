@@ -457,11 +457,11 @@ The `win32-x64` matrix expansion does not begin with checkout or a setup
 action. Its first step is inline `pwsh` reviewed as part of the workflow
 itself. Before network access or repository mutation, that step requires the
 GitHub `windows-2025-vs2026` x64 image at exact image version
-`20260824.214.3`,
+`20260907.229.1`,
 Windows build `26100.33296`, `kernel32.dll` file version
 `10.0.26100.33296`, PowerShell `7.6.5` at
 `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
-`10.0.11`, Visual Studio Enterprise 2026 `18.9.12112.369` at
+`10.0.11`, Visual Studio Enterprise 2026 `18.9.12120.119` at
 `C:\Program Files\Microsoft Visual Studio\18\Enterprise`, and its legacy v143
 `Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version
 `18.9.12009.81`. The v143 compiler toolset directory version remains
@@ -472,8 +472,8 @@ The compiler and linker are pinned respectively to that toolset's
 `10.0.26100.0` provides `rc.exe` at
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
 These values come from the authoritative `actions/runner-images` inventory for
-release tag `win25-vs2026/20260824.214` at commit
-`8c3c8c0bf0068534d87e970a58b590522f1dc1a5`.
+release tag `win25-vs2026/20260907.229` at commit
+`c240f76fa0dd523af7376dbe8480964a3cb0af47`.
 The workflow also requires valid Microsoft Authenticode signatures for the
 trusted PowerShell, kernel, command processor, Visual Studio executable,
 compiler, linker, and resource compiler, plus non-reparse runner temporary and
@@ -1140,7 +1140,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,333 | `730b18b9f0b5354e74bdf12a6f7a096db31151114f51f10a4f543e4daf526bd8` |
+| `.github/workflows/client-v1-conformance.yml` | 463,333 | `0303dbe9068f990ed00aac45bb182f658e7f5355069701784e06bcb78148e6e3` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |

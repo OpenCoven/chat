@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "81fe79ef314a041ebedd27fd8b2af30a4ccde1cf",
-        "sha256": "730b18b9f0b5354e74bdf12a6f7a096db31151114f51f10a4f543e4daf526bd8"
+        "blob": "28e8144203a95854d57c2d61cb79f9d64f117209",
+        "sha256": "0303dbe9068f990ed00aac45bb182f658e7f5355069701784e06bcb78148e6e3"
       }
     ],
     "productionDeltas": [
