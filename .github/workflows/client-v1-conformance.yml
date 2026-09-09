@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: OpenCoven/sdk
-          ref: 6526b56b30c9a9c1c072caf2f0022d3427ae18db
+          ref: 839534efdd51e73fc0063487b13205ff258ab9ec
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
         with:
@@ -33,6 +33,37 @@ jobs:
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Inspect native fixture identity precision
+        shell: pwsh
+        run: |
+          $probe = @'
+          import { lstatSync, mkdtempSync, rmSync } from 'node:fs';
+          import { join } from 'node:path';
+          let reproduced = false;
+          for (let iteration = 0; iteration < 128; iteration += 1) {
+            const root = mkdtempSync(join(process.cwd(), '.sdk-stat-probe-'));
+            try {
+              const numeric = lstatSync(root);
+              const exact = lstatSync(root, { bigint: true });
+              if (!Number.isSafeInteger(numeric.ino) || !Number.isSafeInteger(numeric.dev)) {
+                console.log(JSON.stringify({
+                  iteration, device: numeric.dev, inode: numeric.ino,
+                  exactDevice: String(exact.dev), exactInode: String(exact.ino),
+                  mode: numeric.mode, uid: numeric.uid,
+                  directory: numeric.isDirectory(), symbolicLink: numeric.isSymbolicLink(),
+                }));
+                reproduced = true;
+                break;
+              }
+            } finally {
+              rmSync(root, { recursive: true });
+            }
+          }
+          console.log(JSON.stringify({ unsafeNumericIdentityReproduced: reproduced }));
+          if (!reproduced) process.exitCode = 2;
+          '@
+          node --input-type=module -e $probe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run the exact SDK observation selectors
         shell: pwsh
