@@ -2095,10 +2095,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.stage.toolchain.tauri',
     'phase1.stage.toolchain.metadata',
   ])('preserves %s through schema-v2 and public failure wrappers', (diagnostic) => {
-    const wrapped = schemaV2Producer.wrapInfrastructureFailure(
-      new Error(diagnostic),
-      { schemaVersion: 2 },
-    );
+    const wrapped = schemaV2Producer.wrapInfrastructureFailure(new Error(diagnostic), {
+      schemaVersion: 2,
+    });
 
     expect(wrapped.message).toBe(diagnostic);
     expect(publicPhase1FailureDiagnostic(wrapped)).toBe(diagnostic);
