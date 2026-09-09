@@ -1013,6 +1013,93 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toEqual({ command: 'pnpm', args: ['--version'] });
   });
 
+  test('runs every schema-v2 pnpm command with the pinned Windows CLI and no PATH shim', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'schema-v2-pnpm-'));
+    try {
+      const cli = resolve(root, 'pinned pnpm.cjs');
+      writeFileSync(
+        cli,
+        'process.stdout.write(JSON.stringify({args: process.argv.slice(2), marker: process.env.PNPM_TEST_MARKER}));\n',
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+            import { runSchemaV2CommandForTest } from ${JSON.stringify(
+              pathToFileURL(resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs')).href,
+            )};
+            Object.defineProperty(process, 'platform', { value: 'win32' });
+            const tracked = [];
+            const owner = {
+              trackChild(child) { tracked.push(child.pid); },
+              async terminateChild(child) { child.kill('SIGKILL'); },
+            };
+            const options = {
+              cwd: process.argv[1],
+              env: {
+                PATH: '',
+                OPENCOVEN_WINDOWS_PNPM_CLI: process.argv[2],
+                PNPM_TEST_MARKER: 'restricted',
+              },
+              timeoutMs: 5000,
+            };
+            const commands = [
+              ['install', '--frozen-lockfile'],
+              ['build'],
+              ['exec', 'vitest', 'run'],
+              ['--ignore-workspace', 'run', 'verify'],
+            ];
+            const observations = [];
+            for (const args of commands) {
+              const result = await runSchemaV2CommandForTest(owner, 'pnpm', args, options);
+              observations.push(JSON.parse(result.stdout));
+            }
+            const node = await runSchemaV2CommandForTest(
+              owner,
+              process.execPath,
+              ['-e', 'process.stdout.write("node-unchanged")'],
+              options,
+            );
+            const timeout = await runSchemaV2CommandForTest(
+              owner,
+              process.execPath,
+              ['-e', 'setInterval(() => {}, 1000)'],
+              { ...options, timeoutMs: 25 },
+            ).then(
+              () => 'unexpected-success',
+              (error) => error.result.reason,
+            );
+            process.stdout.write(JSON.stringify({
+              observations,
+              tracked: tracked.length,
+              node: node.stdout,
+              timeout,
+            }));
+          `,
+          root,
+          cli,
+        ],
+        { encoding: 'utf8', timeout: 30_000 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        observations: [
+          { args: ['install', '--frozen-lockfile'], marker: 'restricted' },
+          { args: ['build'], marker: 'restricted' },
+          { args: ['exec', 'vitest', 'run'], marker: 'restricted' },
+          { args: ['--ignore-workspace', 'run', 'verify'], marker: 'restricted' },
+        ],
+        tracked: 6,
+        node: 'node-unchanged',
+        timeout: 'timeout',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('requires a distinct Unix producer UID and native containment binding', () => {
     const fixture = createSupervisorArtifactFixture('linux-x64');
     const currentUid = process.getuid?.() ?? 1977;

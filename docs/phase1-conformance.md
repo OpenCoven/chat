@@ -34,11 +34,10 @@ the final bytes.
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
-contract committed in SDK validator
-`933a9523ccbee071417eca01b8a7a37e54d6cbc0`. This is source-authority
-compatibility only. SDK 933 still names Chat producer
-`4dc8f64bb71634a01ee647542dcdafdd0888b4f9`, while SDK #100 currently binds
-Chat `95de47f7aa2bf8233f71a601ad16011a82905e41`; neither is the final producer
+contract committed in SDK source authority
+`eb1e8f7113ebe9e63364d5255ca976bf076c886d`. This is source-authority
+compatibility only. That authority still names Chat producer
+`b2d63e5fcea3b307d4d97fd560621dc84d659755`, not the final producer
 identity for this fix. Full producer compatibility and provenance remain
 blocked until this Chat change merges, a reachable authority commit pins the
 final behavior commit, and the SDK validator is rebound to that final
@@ -1108,7 +1107,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `3a56a60313da17d5ae81f41f2fd1bdb93c84473328a894196ef31387664dae5b` |
+| `.github/workflows/client-v1-conformance.yml` | 463,030 | `85dac8a5eca58329011e824a97130597faa50fa8bb78805e44b5e907a72ee602` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1121,14 +1120,14 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 173,472 | `baa7714f4b7200df3166f818219a81e0ae88fb66a0de1462c98d431defc415f2` |
+| `scripts/phase1-schema-v2-producer.mjs` | 173,845 | `b9064811c2bcef77ce1eef7a5561ae2c6bee79c3fc9a354bd116436c739be534` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 29,289 | `1a83eb8495b671a9d490a26a8ce23745cdded680aa2b896142883acfde19064a` |
+| `scripts/unix-producer-supervisor.sh` | 29,424 | `b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
@@ -1217,3 +1216,8 @@ are recomputed from the exact clean checkout and embedded in the platform
 record. The SDK aggregator still requires those values to equal the validator
 checkout performing aggregation. No SDK validator revision is committed back
 into Chat, so the two repositories do not form a commit-hash cycle.
+
+The Unix supervisor reports a nonzero restricted producer exit status on stderr
+before containment drain, retaining it even when cleanup subsequently fails.
+This numeric status complements the bounded producer stage diagnostic; it does
+not identify the failed authority check or establish successful containment.

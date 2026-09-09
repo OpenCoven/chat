@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "e0f8f7bd6b47dbd039990bd7bc221c6b31c03158"
+    "revision": "36738d8b7e5e73577175ca32a1291cdf9c0aabf6"
   },
   "harnessAuthority": {
-    "revision": "e0f8f7bd6b47dbd039990bd7bc221c6b31c03158",
-    "tree": "b67ad5277f1d03f85d7f6ed3aee87fb32607fbcf",
+    "revision": "36738d8b7e5e73577175ca32a1291cdf9c0aabf6",
+    "tree": "7e254ce382247c5828d2b141ba488a5b2e3589e6",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "7f454590a55d9ca36114d1e774ede1c7afda7331",
-        "sha256": "baa7714f4b7200df3166f818219a81e0ae88fb66a0de1462c98d431defc415f2"
+        "blob": "6a6b03da769ca6f86cfd9890e5f539b64e464556",
+        "sha256": "b9064811c2bcef77ce1eef7a5561ae2c6bee79c3fc9a354bd116436c739be534"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -111,8 +111,8 @@
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "8d060a0ddc5dd27ef7378db63322e44169855dc9",
-        "sha256": "1a83eb8495b671a9d490a26a8ce23745cdded680aa2b896142883acfde19064a"
+        "blob": "0a27a5be4d2eb4981d35d7e3c178424c851697c5",
+        "sha256": "b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "6cd5235a13d0539e5a6711c0fb9ea2f5aa54ec2c",
-        "sha256": "814a9d41770161514e63c825a822ed2c2944f436f5a4a9c038ed56c0cb78ac4a"
+        "blob": "cb36544a0edccce27b212f288aeb8d1d14bdc804",
+        "sha256": "84a1320b1b9111949714ab52022818978bb739e7564fd7c593055791a3097ce8"
       }
     ],
     "productionDeltas": [
