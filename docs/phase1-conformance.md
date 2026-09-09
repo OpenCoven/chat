@@ -60,6 +60,9 @@ of the locked Chat SHA restored it. The Windows bootstrap therefore validates
 and fetches that exact source and retains a tag for nested local clones.
 This repair requires a new validator binding and protected run; local Git
 regression tests do not establish Windows platform conformance.
+Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
+assertions. Windows failed before those observations, so final validation,
+attestation, and aggregation were skipped. No three-platform aggregate is accepted.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate

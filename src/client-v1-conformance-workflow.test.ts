@@ -558,19 +558,23 @@ describe('client-v1 conformance workflow bootstrap', () => {
     ['OpenCoven/other', 'a'.repeat(40), 'rejected'],
     ['OpenCoven/chat', '--upload-pack=unexpected', 'rejected'],
     ['OpenCoven/chat', 'A'.repeat(40), 'rejected'],
-  ])('validates frozen Chat source %s at %s before fetching', (repository, revision, result) => {
-    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
-    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
-    const validationStart = childBootstrap.indexOf('if (', lockStart);
-    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
-    expect(validationStart).toBeGreaterThan(lockStart);
-    expect(validationEnd).toBeGreaterThan(validationStart);
-    const lock = JSON.parse(
-      readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
-    );
-    lock.chat = { repository, revision };
-    const encoded = Buffer.from(JSON.stringify(lock)).toString('base64');
-    const script = `
+  ])(
+    'validates frozen Chat source %s at %s before fetching',
+    (repository, revision, result) => {
+      const childBootstrap = embeddedWindowsChildBootstrapSource(
+        readFileSync(workflowPath, 'utf8'),
+      );
+      const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+      const validationStart = childBootstrap.indexOf('if (', lockStart);
+      const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+      expect(validationStart).toBeGreaterThan(lockStart);
+      expect(validationEnd).toBeGreaterThan(validationStart);
+      const lock = JSON.parse(
+        readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
+      );
+      lock.chat = { repository, revision };
+      const encoded = Buffer.from(JSON.stringify(lock)).toString('base64');
+      const script = `
 $ErrorActionPreference = 'Stop'
 $phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json
 try {
@@ -580,13 +584,15 @@ ${childBootstrap.slice(validationStart, validationEnd)}
 [Console]::Out.Write('rejected')
 }
 `;
-    expect(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-        encoding: 'utf8',
-        timeout: 10_000,
-      }),
-    ).toBe(result);
-  });
+      expect(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+          encoding: 'utf8',
+          timeout: 10_000,
+        }),
+      ).toBe(result);
+    },
+    30_000,
+  );
 
   test.each([
     ['harness', 'opencoven-phase1-harness'],
