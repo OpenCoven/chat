@@ -28,7 +28,12 @@ all four; their paths were verified absent. Their four remote branches were
 subsequently deleted atomically with exact-tip leases and verified absent.
 Every retired tip remains reachable from main.
 
-Thirteen registered worktrees remain at this checkpoint. Recent platform-repair
+A subsequent check retired detached `/private/tmp/opencoven-harness-55` and
+`/private/tmp/opencoven-producer-714` after verifying clean state, main ancestry,
+and no observed process references. Both paths are absent;
+`audit/detached-retirement-platform-20260909.json` records the proof. Eleven
+registered worktrees remained immediately after retirement. The active
+`canary-portable-cave` repair then brought the live count to twelve. Recent platform-repair
 checkouts stay available during protected validation; dirty and unmerged work
 is preserved. The completed `cave-record-diagnostics` checkout was reused for
 this documentation audit. The external `chat-consolidation-20260907` recovery
@@ -44,9 +49,24 @@ remain the tracking entry points. The canonical program Bead `cave-k0aqq` now in
 verified the appended note and unchanged blocked status. REST inspection of the
 three existing Teamwork mirrors confirmed that `cave-23nmv` and `cave-0prpu`
 already show their historical closed acceptance. The `cave-k0aqq` draft card
-still needs this new program note synchronized; no new card was created.
+was synchronized from the exact Beads source notes and verified through REST
+read-back. Its identity, title, and project fields were unchanged; no new card
+was created.
 Preserve historical phase closures and keep the current protected release gate
 open until its acceptance evidence exists.
+
+### Protected Linux result after the checkpoint
+
+Linux [job 102437406770](https://github.com/OpenCoven/chat/actions/runs/34342544626/job/102437406770)
+failed with `phase1.packaging.frozen-consumer.authority.failed`. The frozen
+consumer checks checkout identity before Cave production: the producer's
+`phase1-conformance.lock.json` selects Cave `d20d83c`, while
+`contract-canary.lock.json` still requires `bc310e9`.
+`assertContractCanaryCheckoutHeads` rejects that mismatch. This run therefore
+does not yet prove the portable Cave assertion repair passes in protected
+production. Reconcile the reviewed Cave canary revision and verify its fixture
+hashes before rebinding the producer and validator for another protected run.
+Windows and macOS were still in progress when this Linux result was retrieved.
 
 ## Earlier delivery snapshot — 2026-09-09 UTC
 
