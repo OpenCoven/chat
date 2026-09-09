@@ -39,6 +39,33 @@ the maintainer-held `chat-consolidation-20260907` recovery set as
 `audit/refresh-20260909.json`. Main CI and merged diagnostic repairs do not
 establish protected release acceptance. The program remains incomplete.
 
+### Worktree retirement follow-through
+
+A subsequent ownership check found no live process working in or referencing
+four clean merged checkouts: `protected-matrix-v16`, `repin-cave-v0.3.12`,
+`windows-chat-history`, and detached `/private/tmp/chat-main-check`. Each exact
+tip was revalidated as an ancestor of refreshed main immediately before
+`git worktree remove`; all four paths were verified absent afterward.
+
+The three named local branches were deleted with `git branch -d`. Their remote
+branches were removed atomically with exact-tip leases, and a fresh remote
+listing verified their absence. The recovery set records these operations in
+`audit/merged-retirement-20260909.json` and
+`audit/merged-refs-retirement-20260909.json`. No force deletion was used.
+
+Three worktrees remain: main, parked #86, and v17. Review of closed #144 confirms
+that merged #143 supersedes v17's shallow-checkout repair by retaining full Chat
+history. The current workflow suite passed 59 tests with 19 platform skips;
+this is not Windows runtime or protected-matrix acceptance. V17's divergent
+historical authority pins remain preserved in its branch and checkout.
+
+[Issue #149](https://github.com/OpenCoven/chat/issues/149) tracks the CI-image
+proposal failure and retry defect. Read-only inspection found no repository
+Actions secrets configured: the proposed separate credential is absent. The
+image itself already built and passed its verification job. Repairing the
+proposal requires both an authorized workflow-file write path and retry logic
+that does not confuse an existing branch with a completed update and PR.
+
 ## Historical audit — 2026-09-07
 
 Audited 2026-09-07 against Chat `origin/main` at
