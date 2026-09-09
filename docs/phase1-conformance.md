@@ -50,6 +50,20 @@ identified by that stage label. The replacement candidate requires a fresh
 protected attempt with the complete observation suite and existing resource
 ceilings.
 
+Protected run `34401360323` validates merged Chat `4f5cbf8` against SDK
+validator `9dd5890`, with both validator variable scopes rotated to that revision.
+Windows passed the image bootstrap but failed at
+`phase1.stage.checkouts.chat.failed`, before SDK observations. Fetching only the
+producer and harness revisions omits frozen Chat `841a88f`, which is outside
+their ancestry. A cold fetch reproduced the missing commit; an explicit fetch
+of the locked Chat SHA restored it. The Windows bootstrap therefore validates
+and fetches that exact source and retains a tag for nested local clones.
+This repair requires a new validator binding and protected run; local Git
+regression tests do not establish Windows platform conformance.
+Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
+assertions. Windows failed before those observations, so final validation,
+attestation, and aggregation were skipped. No three-platform aggregate is accepted.
+
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
@@ -1166,7 +1180,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,942 | `4bae4b08e7fde45876a2212f0f934de40d617bbc958bf1f06308b5c951e1733a` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8f47ea4fb25594701312022bf6df04ce5465b78acd706e92f1ee64dbb4f091ca` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |

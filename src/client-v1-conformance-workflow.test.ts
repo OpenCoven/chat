@@ -553,26 +553,76 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test('retains the locked harness authority under a tag copied through nested isolated clones', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const fetchLabel = "-Label 'Chat harness exact-SHA fetch'";
-    const authorityLabel = "-Label 'Chat harness authority ref'";
-    const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
-    const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
-    const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
-    const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
+  test('validates all frozen Chat source pins before fetching', () => {
+    const cases = [
+      { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
+      { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
+    ];
+    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
+    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+    const validationStart = childBootstrap.indexOf('if (', lockStart);
+    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+    expect(validationStart).toBeGreaterThan(lockStart);
+    expect(validationEnd).toBeGreaterThan(validationStart);
+    const encodedLock = readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json')).toString(
+      'base64',
+    );
+    const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
+    // Share one bounded PowerShell startup across every case, including cold CI images.
+    const script = `
+$ErrorActionPreference = 'Stop'
+$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedLock}')) | ConvertFrom-Json
+$cases = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCases}')) | ConvertFrom-Json
+$results = @(foreach ($case in $cases) {
+  $phase1Lock.chat = $case
+  try {
+${childBootstrap.slice(validationStart, validationEnd)}
+    'accepted'
+  } catch {
+    'rejected'
+  }
+})
+[Console]::Out.Write(($results | ConvertTo-Json -Compress))
+`;
+    const result = execFileSync(
+      'pwsh',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        encoding: 'utf8',
+        timeout: 25_000,
+      },
+    );
+    expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
+  }, 30_000);
 
-    expect(fetchLabelIndex).toBeGreaterThan(-1);
-    expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
-    expect(authorityStart).toBeGreaterThan(-1);
-    expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
-    const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+  test.each([
+    ['harness', 'opencoven-phase1-harness'],
+    ['frozen source', 'opencoven-phase1-chat-source'],
+  ])(
+    'retains the locked %s authority under a tag copied through nested isolated clones',
+    (label, tag) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const fetchLabel = `-Label 'Chat ${label} exact-SHA fetch'`;
+      const authorityLabel = `-Label 'Chat ${label} authority ref'`;
+      const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
+      const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
+      const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
+      const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
 
-    expect(authorityFetch).toContain("'refs/tags/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/heads/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/opencoven/phase1-harness'");
-  });
+      expect(fetchLabelIndex).toBeGreaterThan(-1);
+      expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
+      expect(authorityStart).toBeGreaterThan(-1);
+      expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
+      const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+
+      expect(authorityFetch).toContain(`'refs/tags/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/heads/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/opencoven/${tag}'`);
+    },
+  );
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {

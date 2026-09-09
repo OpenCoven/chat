@@ -8862,6 +8862,8 @@ jobs:
             ConvertFrom-Json
           if (
             $phase1Lock.version -ne 5 -or
+            $phase1Lock.chat.repository -cne 'OpenCoven/chat' -or
+            $phase1Lock.chat.revision -cnotmatch '^[0-9a-f]{40}$' -or
             $phase1Lock.harness.repository -cne 'OpenCoven/chat' -or
             $phase1Lock.harness.revision -cnotmatch '^[0-9a-f]{40}$' -or
             $phase1Lock.sdk.repository -cne 'OpenCoven/sdk' -or
@@ -8907,6 +8909,38 @@ jobs:
               $phase1Lock.harness.revision
             ) `
             -Label 'Chat harness authority ref'
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              '-c',
+              'credential.helper=',
+              '-c',
+              'core.hooksPath=NUL',
+              '-c',
+              'fetch.fsckObjects=true',
+              '-c',
+              'transfer.fsckObjects=true',
+              '-c',
+              'protocol.https.allow=always',
+              'fetch',
+              '--quiet',
+              '--no-tags',
+              'origin',
+              $phase1Lock.chat.revision
+            ) `
+            -Label 'Chat frozen source exact-SHA fetch'
+          Invoke-Checked `
+            -FilePath $git `
+            -ArgumentList @(
+              '-C',
+              $workspace,
+              'update-ref',
+              'refs/tags/opencoven-phase1-chat-source',
+              $phase1Lock.chat.revision
+            ) `
+            -Label 'Chat frozen source authority ref'
 
           $counterpartsRoot = Join-Path $root 'counterparts'
           $sdkRoot = Join-Path $counterpartsRoot 'sdk'
