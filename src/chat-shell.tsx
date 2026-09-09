@@ -904,7 +904,9 @@ export function ChatShell({
       ? titleForConversation(conversationState.data)
       : selectedConversation !== null
         ? titleForConversation(selectedConversation)
-        : 'Read-only chat';
+        : canWrite
+          ? 'Local chat'
+          : 'Read-only chat';
 
   return (
     <div className="chat-shell">

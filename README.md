@@ -1,10 +1,13 @@
 # OpenCoven Chat
 
-OpenCoven Chat is a production-oriented read-only desktop client with a
-least-privilege native adapter for the Cave SDK. The default UI initializes a
-keychain-backed installation identity, connects or pairs with Cave, and renders
-bounded canonical chat reads. Explicit demo routes remain available for later
-write-oriented design exploration.
+OpenCoven Chat opens on local conversations you can write and save on this
+device. Local messages persist in IndexedDB when available; the UI reports when
+storage falls back to memory. No familiar is connected to local chat, so saving
+a message does not produce an AI reply.
+
+The desktop app can also connect or pair with Cave through a least-privilege
+native adapter and render bounded, read-only canonical chat data. Explicit demo
+routes remain available for design exploration.
 
 ## Security boundaries
 
@@ -107,7 +110,8 @@ pnpm exec playwright install chromium
 The current application renders:
 
 - the OpenCoven Chat product identity and exact `#9386d0` Coven violet token
-- an explicitly labeled browser fallback when Tauri is absent
+- writable local conversations in both the desktop app and browser, with an
+  explicit memory-only notice when durable storage is unavailable
 - a typed, non-secret desktop bridge that reads the keyring-backed pairing
   identity through `app_installation_id` before creating the SDK controller
 - connection states and actions for discovery, launch, pairing, cancellation,
@@ -119,12 +123,13 @@ The current application renders:
 - the familiar switcher at the top of the left rail
 - explicit `?demo=chat`, `?demo=messages`, and `?demo=minimal` local mock surfaces
 
-Sending messages and other write operations remain deferred to later phases.
+Local messages are saved on this device. Sending to Cave or a familiar, and
+other remote write operations, remain deferred to later phases.
 
 ## Proof-of-concept chat demo
 
-`pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
-serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
+`pnpm app:dev` opens local chat in the desktop app, with an optional Cave
+connection. `pnpm dev` serves local chat at <127.0.0.1:4173/> and the mock chat at
 <127.0.0.1:4173/?demo=chat>, which implements the **Familiars Redesign v2**
 design: the ward at the centre of the chat, with a "Needs you" section, held
 actions the familiar stops at until you decide, a composer that warns before a
@@ -154,8 +159,8 @@ Two consequences worth knowing:
 
 - **The demo is explicit.** `tauri.conf.json` uses the production shell route;
   no demo query is embedded in `devUrl`.
-- **The production gate is the default view.** Without a demo query flag the
-  app initializes native installation identity and Cave connection state.
+- **Local chat is the default view.** Cave connection and pairing are optional;
+  local conversations remain usable while Cave is unavailable.
 
 `src/demo/` is meant to be deleted when the real read and send paths land. Its
 mock types are shaped close to the canonical ones so that lands as a change of
