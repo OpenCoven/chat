@@ -11,6 +11,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -119,6 +121,8 @@ const cargoBuildFailureCategories = [
   'resource.memory',
   'resource.disk',
   'resource.killed',
+  'process.crash',
+  'no-output',
   'linker',
   'build-script',
   'compile',
@@ -265,6 +269,13 @@ const publicFailureDiagnosticSet = new Set([
   ),
   'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
@@ -983,7 +994,7 @@ function classifyCaveBuildFailureDiagnostic(error) {
   return `phase1.packaging.cave-build.phase.${phase}`;
 }
 
-export function classifyCargoBuildFailureDiagnostic(baseId, error) {
+export function classifyCargoBuildFailureDiagnostic(baseId, error, platform = process.platform) {
   if (!(error instanceof CommandExecutionError)) {
     return `${baseId}.unknown`;
   }
@@ -1004,6 +1015,36 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   const output = stripVTControlCharacters(
     `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
   ).toLowerCase();
+  const exitCode = error.result?.code;
+  const signal = error.result?.signal;
+  if (signal === 'SIGKILL') {
+    return `${baseId}.resource.killed`;
+  }
+  if (typeof signal === 'string' && signal.length > 0) {
+    return `${baseId}.process.crash`;
+  }
+  if (typeof exitCode === 'number' && (exitCode < 0 || exitCode >= 0x80000000)) {
+    return `${baseId}.process.crash`;
+  }
+  if (output.trim().length === 0) {
+    return `${baseId}.no-output`;
+  }
+  if (
+    output.includes('out of memory') ||
+    output.includes('failed to allocate memory') ||
+    output.includes('cannot allocate memory') ||
+    output.includes('enomem')
+  ) {
+    return `${baseId}.resource.memory`;
+  }
+  if (
+    output.includes('no space left on device') ||
+    output.includes('not enough space on the disk') ||
+    (platform === 'win32' && output.includes('os error 112')) ||
+    output.includes('enospc')
+  ) {
+    return `${baseId}.resource.disk`;
+  }
   if (
     /system library .* required by crate .* was not found/u.test(output) ||
     output.includes('pkg-config exited with status code') ||
@@ -1019,17 +1060,6 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     output.includes('could not resolve host')
   ) {
     return `${baseId}.dependency-fetch`;
-  }
-  if (
-    output.includes('out of memory') ||
-    output.includes('failed to allocate memory') ||
-    output.includes('cannot allocate memory') ||
-    output.includes('enomem')
-  ) {
-    return `${baseId}.resource.memory`;
-  }
-  if (output.includes('no space left on device') || output.includes('enospc')) {
-    return `${baseId}.resource.disk`;
   }
   if (output.includes('killed: 9') || /signal: 9\b/u.test(output)) {
     return `${baseId}.resource.killed`;
@@ -1529,9 +1559,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     chmodSync(path, 0o700);
   }
 
-  const inheritedPath = process.env.PATH ?? '';
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1562,6 +1591,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of ['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT']) {
     if (process.env[name] !== undefined) {
@@ -1831,7 +1862,13 @@ export function normalizeSchemaV2ObservationTests(value) {
   });
 }
 
-export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+export async function runSchemaV2ObservationSuites(
+  artifactRoot,
+  roots,
+  environment,
+  platform,
+  onStage = () => {},
+) {
   const shortRoot =
     process.platform === 'win32'
       ? undefined
@@ -1849,9 +1886,14 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
         };
+  let observations;
+  let observationFailure;
   try {
+    onStage('phase1.runtime-observations.sdk-install.failed');
     await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    onStage('phase1.runtime-observations.chat-install.failed');
     await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    onStage('phase1.runtime-observations.sdk-tests.failed');
     const sdkTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.sdkRoot,
@@ -1870,6 +1912,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       ],
       outputName: 'sdk-observation-tests.json',
     });
+    onStage('phase1.runtime-observations.chat-tests.failed');
     const chatTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1892,6 +1935,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       'phase1-conformance',
       '--lib',
     ];
+    onStage('phase1.runtime-observations.chat-rust-tests.failed');
     const chatRustTests = await runExactCargoObservationTests({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1908,6 +1952,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
         },
       ],
     });
+    onStage('phase1.runtime-observations.coven-rust-tests.failed');
     const covenLibraryTests =
       platform === 'win32-x64'
         ? [
@@ -1945,17 +1990,35 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
             ]),
       ],
     });
-    return normalizeSchemaV2ObservationTests({
+    observations = normalizeSchemaV2ObservationTests({
       sdk: sdkTests,
       chat: chatTests,
       chatRust: chatRustTests,
       covenRust: covenRustTests,
     });
-  } finally {
-    if (shortRoot !== undefined) {
+  } catch (error) {
+    observationFailure = error;
+  }
+  if (shortRoot !== undefined) {
+    if (observationFailure === undefined) {
+      onStage('phase1.runtime-observations.cleanup.failed');
+    }
+    try {
       await shortRoot.cleanup();
+    } catch (cleanupError) {
+      if (observationFailure !== undefined) {
+        throw new AggregateError(
+          [observationFailure, cleanupError],
+          'Schema-v2 observation suite and temporary-root cleanup failed.',
+        );
+      }
+      throw cleanupError;
     }
   }
+  if (observationFailure !== undefined) {
+    throw observationFailure;
+  }
+  return observations;
 }
 
 function sha256File(path) {
@@ -2558,6 +2621,17 @@ async function packageLockedArtifacts(
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
+  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+  const nativeBinRoot = resolve(artifactRoot.rootPath, 'bin');
+  mkdirSync(nativeBinRoot, { recursive: true, mode: 0o700 });
+  const nativeRpcPath = resolve(nativeBinRoot, `phase1-native-rpc${executableSuffix}`);
+  const builtNativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
+  const nativeRpcStats = lstatSync(builtNativeRpcPath);
+  if (nativeRpcStats.isSymbolicLink() || !nativeRpcStats.isFile()) {
+    throw new Error('Chat native RPC package is not a regular file.');
+  }
+  renameSync(builtNativeRpcPath, nativeRpcPath);
+  rmSync(chatTarget, { recursive: true });
 
   onStage('phase1.packaging.coven-build.failed');
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
@@ -2574,9 +2648,15 @@ async function packageLockedArtifacts(
     },
   );
 
-  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
-  const nativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
-  const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryPath = resolve(nativeBinRoot, `coven${executableSuffix}`);
+  const builtCovenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryStats = lstatSync(builtCovenBinaryPath);
+  if (covenBinaryStats.isSymbolicLink() || !covenBinaryStats.isFile()) {
+    throw new Error('Coven CLI package is not a regular file.');
+  }
+  renameSync(builtCovenBinaryPath, covenBinaryPath);
+  rmSync(covenTarget, { recursive: true });
+
   onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],
@@ -4898,6 +4978,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         roots,
         environment,
         options.platform,
+        (stage) => {
+          activeStage = stage;
+        },
       );
     }
 

@@ -1787,7 +1787,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.packaging.chat-install.failed',
     'phase1.packaging.chat-web-build.failed',
     'phase1.packaging.chat-native-build.failed',
+    'phase1.packaging.chat-native-build.process.crash',
+    'phase1.packaging.chat-native-build.no-output',
     'phase1.packaging.coven-build.failed',
+    'phase1.packaging.coven-build.process.crash',
+    'phase1.packaging.coven-build.no-output',
     'phase1.packaging.outputs.failed',
   ])('publishes bounded schema-v2 packaging diagnostic %s', (diagnostic) => {
     const wrapped = wrapInfrastructureFailure(
@@ -1859,7 +1863,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('mkdirSync(chatTarget'),
     );
     expect(source.indexOf("onStage('phase1.packaging.coven-build.failed')")).toBeLessThan(
-      source.indexOf('mkdirSync(covenTarget'),
+      source.indexOf("'Coven CLI package'"),
     );
   });
 
@@ -3705,6 +3709,13 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.packaging.chat-native-build.dependency-fetch',
     ],
     [
+      'Windows disk exhaustion',
+      'error: failed to write /private/output: There is not enough space on the disk. (os error 112)',
+      'phase1.packaging.chat-native-build.resource.disk',
+    ],
+    ['native process crash', '', 'phase1.packaging.chat-native-build.process.crash', 0xc0000005],
+    ['silent nonzero exit', '', 'phase1.packaging.chat-native-build.no-output'],
+    [
       'linker failure',
       'error: linking with `cc` failed: exit status: 1\n/private/object.o',
       'phase1.packaging.chat-native-build.linker',
@@ -3736,7 +3747,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
   ])(
     'classifies bounded Cargo %s failures without exposing output',
-    async (_, stderr, expected) => {
+    async (_, stderr, expected, code = 1) => {
       // @ts-expect-error The executable script intentionally has no declaration file.
       const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
         string,
@@ -3759,7 +3770,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
       const diagnostic = diagnose(
         new SchemaV2CommandExecutionError('private cargo command', {
-          code: 1,
+          code,
           signal: null,
           stdout: '',
           stderr,
@@ -3771,6 +3782,81 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(diagnostic).not.toContain('private');
     },
   );
+
+  test.each([
+    ['win32', 'phase1.packaging.chat-native-build.resource.disk'],
+    ['linux', 'phase1.packaging.chat-native-build.dependency-fetch'],
+  ])('interprets numeric os error 112 for %s', async (platform, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const classify = producer.classifyCargoBuildFailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(classify).toBeTypeOf('function');
+    if (typeof classify !== 'function') {
+      return;
+    }
+
+    expect(
+      classify(
+        'phase1.packaging.chat-native-build',
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: 1,
+          signal: null,
+          stdout: '',
+          stderr: 'error: failed to download /private/crate\nCaused by: os error 112',
+        }),
+        platform,
+      ),
+    ).toBe(expected);
+  });
+
+  test.each([
+    ['SIGKILL', 'phase1.packaging.chat-native-build.resource.killed'],
+    ['SIGSEGV', 'phase1.packaging.chat-native-build.process.crash'],
+  ])('classifies Cargo %s termination before empty output', async (signal, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number | null;
+        signal: string | null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(
+      diagnose(
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: null,
+          signal,
+          stdout: '',
+          stderr: '',
+        }),
+        'phase1.packaging.chat-native-build.failed',
+      ),
+    ).toBe(expected);
+  });
 
   test('classifies an actual pnpm Cave prebuild header with its workspace path', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
@@ -5080,6 +5166,40 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
   });
 
+  test.each([
+    ['schema-v1', 'supervisor'],
+    ['schema-v1', 'empty'],
+    ['schema-v2', 'supervisor'],
+    ['schema-v2', 'empty'],
+  ] as const)('%s preserves resolved Cargo ahead of the %s PATH', (schema, pathKind) => {
+    const root = mkdtempSync(join(tmpdir(), 'phase1-cargo-path-'));
+    try {
+      const cargoPath = realpathSync(
+        execFileSync('rustup', ['which', 'cargo'], { encoding: 'utf8' }).trim(),
+      );
+      const supervisorPath = pathKind === 'empty' ? '' : resolve(root, 'supervisor-tools');
+      if (supervisorPath !== '') mkdirSync(supervisorPath);
+      const buildEnvironment: typeof safeEnvironment =
+        schema === 'schema-v1' ? safeEnvironment : schemaV2Producer.safeEnvironment;
+      const environment = buildEnvironment(root, { PATH: supervisorPath });
+      const expectedPath = [dirname(cargoPath), supervisorPath].filter(Boolean).join(delimiter);
+      expect(environment.PATH).toBe(expectedPath);
+      expect(environment.RUSTUP_HOME).toBeUndefined();
+      expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
+      const result = spawnSync('cargo', ['--version'], {
+        cwd: root,
+        env: environment,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(execFileSync(cargoPath, ['--version'], { encoding: 'utf8' }));
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+  });
+
   test('uses fixed resource limits for the Cave release build', () => {
     expect(
       caveBuildEnvironment({
@@ -5188,8 +5308,35 @@ describe('Phase 1 real-authority conformance harness', () => {
         `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
       );
     }
+    expect(packaging).toContain('renameSync(builtNativeRpcPath, nativeRpcPath);');
+    expect(packaging).toContain('rmSync(chatTarget, { recursive: true });');
+    expect(packaging).toContain('renameSync(builtCovenBinaryPath, covenBinaryPath);');
+    expect(packaging).toContain('rmSync(covenTarget, { recursive: true });');
     expect(source).toMatch(
       /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
+    );
+  });
+
+  test('tracks bounded schema-v2 observation substages without exposing command output', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    for (const stage of [
+      'phase1.runtime-observations.sdk-install.failed',
+      'phase1.runtime-observations.chat-install.failed',
+      'phase1.runtime-observations.sdk-tests.failed',
+      'phase1.runtime-observations.chat-tests.failed',
+      'phase1.runtime-observations.chat-rust-tests.failed',
+      'phase1.runtime-observations.coven-rust-tests.failed',
+      'phase1.runtime-observations.cleanup.failed',
+    ]) {
+      expect(publicPhase1FailureDiagnostic(new Error(stage))).toBe(stage);
+      expect(source).toContain(`onStage('${stage}')`);
+    }
+    expect(source).toContain(
+      ['        (stage) => {', '          activeStage = stage;', '        },'].join('\n'),
     );
   });
 

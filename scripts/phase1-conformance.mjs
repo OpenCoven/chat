@@ -375,6 +375,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.chat-native-build.resource.memory',
   'phase1.packaging.chat-native-build.resource.disk',
   'phase1.packaging.chat-native-build.resource.killed',
+  'phase1.packaging.chat-native-build.process.crash',
+  'phase1.packaging.chat-native-build.no-output',
   'phase1.packaging.chat-native-build.linker',
   'phase1.packaging.chat-native-build.build-script',
   'phase1.packaging.chat-native-build.compile',
@@ -389,6 +391,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.coven-build.resource.memory',
   'phase1.packaging.coven-build.resource.disk',
   'phase1.packaging.coven-build.resource.killed',
+  'phase1.packaging.coven-build.process.crash',
+  'phase1.packaging.coven-build.no-output',
   'phase1.packaging.coven-build.linker',
   'phase1.packaging.coven-build.build-script',
   'phase1.packaging.coven-build.compile',
@@ -509,6 +513,13 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.coven-identity.failed',
   ...covenIdentityDiagnosticIds,
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  'phase1.runtime-observations.cleanup.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
   'phase1.stage.isolation-proof.failed',
@@ -1229,8 +1240,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     }
   });
 
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1262,6 +1273,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of [
     'SYSTEMROOT',
