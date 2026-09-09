@@ -20,7 +20,10 @@ import {
   REQUIRED_PHASE1_ASSERTION_IDS,
   validatePhase1SanitizedReport,
 } from '../scripts/phase1-artifact-secret-scan.mjs';
-import { buildObservedSchemaV2Assertions } from '../scripts/phase1-conformance.mjs';
+import {
+  buildObservedSchemaV2Assertions,
+  publicPhase1FailureDiagnostic,
+} from '../scripts/phase1-conformance.mjs';
 import { readPhase1ConformanceLock } from '../scripts/phase1-conformance-lock.mjs';
 import {
   assertSdkContractMatchesPhase1Lock,
@@ -28,6 +31,7 @@ import {
   createObservedAssertionRecorder,
   loadSdkEvidenceContract,
   serializeValidatedSchemaV2PlatformEvidence,
+  validateCaveRecord,
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -1555,6 +1559,89 @@ describe('Phase 1 SDK source contract authority', () => {
       commit: 'ada542f731ea1b65dd4e6de94ab7dc28b0551740',
       tree: '975de93ac84b0436d381f5e427627f98aaa3dd0a',
     });
+  });
+});
+
+describe('bounded Cave record diagnostics', () => {
+  test.each([
+    'identity.platform',
+    'identity.commit',
+    'identity.cave-version',
+    'identity.node-version',
+    'timing.before-run',
+    'timing.after-run',
+    'assertions.shape',
+    'assertions.count',
+    'assertions.unexpected',
+    'assertions.duplicate',
+    'assertions.result',
+    'assertions.detail',
+  ])('distinguishes bounded Cave record mismatch %s through both wrappers', async (category) => {
+    const caveRecord = {
+      platform: 'linux-x64',
+      commit: 'a'.repeat(40),
+      caveVersion: '0.3.12',
+      nodeVersion: 'v24.18.1',
+      ranAt: '2026-08-29T04:00:00.000Z',
+      assertions: [
+        { id: 'one', result: 'pass', detail: '' },
+        { id: 'two', result: 'pass', detail: '' },
+      ],
+    } as Record<string, unknown>;
+    const expected = {
+      platform: 'linux-x64',
+      commit: 'a'.repeat(40),
+      releaseVersion: '0.3.12',
+      nodeVersion: 'v24.18.1',
+      startedAt: '2026-08-29T04:00:00.000Z',
+      completedAt: '2026-08-29T04:00:01.000Z',
+    };
+    const registry = { assertions: { cave: ['one', 'two'] } };
+    expect(() => validateCaveRecord(caveRecord, registry, expected)).not.toThrow();
+    const assertions = caveRecord.assertions as Array<Record<string, unknown>>;
+    const [first, second] = assertions;
+    if (first === undefined || second === undefined)
+      throw new Error('Incomplete assertion fixture');
+    if (category.startsWith('identity.')) {
+      const field = category.slice('identity.'.length).replace('-version', 'Version');
+      caveRecord[field] = 'private mismatching record value';
+    } else if (category === 'timing.before-run') {
+      caveRecord.ranAt = '2026-08-29T03:59:59.999Z';
+    } else if (category === 'timing.after-run') {
+      caveRecord.ranAt = '2026-08-29T04:00:01.001Z';
+    } else if (category === 'assertions.shape') {
+      caveRecord.assertions = 'private malformed assertions';
+    } else if (category === 'assertions.count') {
+      assertions.pop();
+    } else if (category === 'assertions.unexpected') {
+      first.id = 'private unexpected assertion';
+    } else if (category === 'assertions.duplicate') {
+      second.id = first.id;
+    } else if (category === 'assertions.result') {
+      first.result = 'fail';
+    } else if (category === 'assertions.detail') {
+      first.detail = null;
+    }
+    let failure: unknown;
+    try {
+      validateCaveRecord(caveRecord, registry, expected);
+    } catch (error) {
+      failure = error;
+    }
+    const diagnostic = `phase1.stage.evidence-authority.build.cave-record.${category}`;
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(diagnostic);
+    // @ts-expect-error The executable producer intentionally has no declaration file.
+    const { schemaV2FailureDiagnostic } = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(schemaV2FailureDiagnostic(failure, 'phase1.stage.evidence-authority.build.failed')).toBe(
+      diagnostic,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic, { cause: failure }))).toBe(
+      diagnostic,
+    );
+    expect(
+      publicPhase1FailureDiagnostic(new Error(`${diagnostic}: private detail`)),
+    ).toBeUndefined();
   });
 });
 
