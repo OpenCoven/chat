@@ -269,6 +269,13 @@ const publicFailureDiagnosticSet = new Set([
   ),
   'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
@@ -1855,7 +1862,13 @@ export function normalizeSchemaV2ObservationTests(value) {
   });
 }
 
-export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+export async function runSchemaV2ObservationSuites(
+  artifactRoot,
+  roots,
+  environment,
+  platform,
+  onStage = () => {},
+) {
   const shortRoot =
     process.platform === 'win32'
       ? undefined
@@ -1873,9 +1886,14 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
         };
+  let observations;
+  let observationFailure;
   try {
+    onStage('phase1.runtime-observations.sdk-install.failed');
     await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    onStage('phase1.runtime-observations.chat-install.failed');
     await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    onStage('phase1.runtime-observations.sdk-tests.failed');
     const sdkTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.sdkRoot,
@@ -1894,6 +1912,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       ],
       outputName: 'sdk-observation-tests.json',
     });
+    onStage('phase1.runtime-observations.chat-tests.failed');
     const chatTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1916,6 +1935,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       'phase1-conformance',
       '--lib',
     ];
+    onStage('phase1.runtime-observations.chat-rust-tests.failed');
     const chatRustTests = await runExactCargoObservationTests({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1932,6 +1952,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
         },
       ],
     });
+    onStage('phase1.runtime-observations.coven-rust-tests.failed');
     const covenLibraryTests =
       platform === 'win32-x64'
         ? [
@@ -1969,17 +1990,35 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
             ]),
       ],
     });
-    return normalizeSchemaV2ObservationTests({
+    observations = normalizeSchemaV2ObservationTests({
       sdk: sdkTests,
       chat: chatTests,
       chatRust: chatRustTests,
       covenRust: covenRustTests,
     });
-  } finally {
-    if (shortRoot !== undefined) {
+  } catch (error) {
+    observationFailure = error;
+  }
+  if (shortRoot !== undefined) {
+    if (observationFailure === undefined) {
+      onStage('phase1.runtime-observations.cleanup.failed');
+    }
+    try {
       await shortRoot.cleanup();
+    } catch (cleanupError) {
+      if (observationFailure !== undefined) {
+        throw new AggregateError(
+          [observationFailure, cleanupError],
+          'Schema-v2 observation suite and temporary-root cleanup failed.',
+        );
+      }
+      throw cleanupError;
     }
   }
+  if (observationFailure !== undefined) {
+    throw observationFailure;
+  }
+  return observations;
 }
 
 function sha256File(path) {
@@ -2609,7 +2648,15 @@ async function packageLockedArtifacts(
     },
   );
 
-  const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryPath = resolve(nativeBinRoot, `coven${executableSuffix}`);
+  const builtCovenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryStats = lstatSync(builtCovenBinaryPath);
+  if (covenBinaryStats.isSymbolicLink() || !covenBinaryStats.isFile()) {
+    throw new Error('Coven CLI package is not a regular file.');
+  }
+  renameSync(builtCovenBinaryPath, covenBinaryPath);
+  rmSync(covenTarget, { recursive: true });
+
   onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],
@@ -4931,6 +4978,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         roots,
         environment,
         options.platform,
+        (stage) => {
+          activeStage = stage;
+        },
       );
     }
 

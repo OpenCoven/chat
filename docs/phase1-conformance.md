@@ -616,8 +616,13 @@ number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
-closed. Failures report either the fixed reviewed quota label or a path-free
-quota-monitor error.
+closed. After preserving the built Coven executable, schema-v2 also removes the
+Coven Cargo target before starting the observation suite, so neither packaging
+target remains at the next peak. Observation failures expose only the fixed SDK
+install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
+tests substage, plus a distinct temporary-root cleanup substage on Unix;
+command output and private paths remain suppressed. Failures report either the
+fixed reviewed quota label or a path-free quota-monitor error.
 
 The Cave allowance accounts for a measured frozen `d20d83c` build with
 3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
