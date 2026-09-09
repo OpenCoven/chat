@@ -1233,8 +1233,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     }
   });
 
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1266,6 +1266,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of [
     'SYSTEMROOT',

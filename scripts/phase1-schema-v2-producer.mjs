@@ -1552,9 +1552,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     chmodSync(path, 0o700);
   }
 
-  const inheritedPath = process.env.PATH ?? '';
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1585,6 +1584,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of ['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT']) {
     if (process.env[name] !== undefined) {
