@@ -103,6 +103,11 @@ export function assertGeneratedReleaseManifestMatchesLock(
   manifest: GeneratedReleaseManifest,
   tarballs: Record<'core' | 'cave' | 'coven' | 'sdk', string>,
 ): void;
+export function createReviewedSdkReleaseArtifacts(
+  lock: ContractCanaryLock,
+  sdkRoot: string,
+  artifactRoot: string,
+): Record<keyof ContractCanarySdkArtifacts, string>;
 export function assertPackedFixtureMatchesCaveCheckout(
   lock: ContractCanaryPackedFixtureLock,
   harnessRoot: string,

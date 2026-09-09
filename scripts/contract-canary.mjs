@@ -800,19 +800,27 @@ export function assertGeneratedReleaseManifestMatchesLock(lock, manifest, tarbal
   }
 }
 
-function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
+export function createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot) {
   const createReleaseArtifacts = resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs');
-  requirePath(createReleaseArtifacts, 'SDK create-release-artifacts script');
-  const invocation = `import { createConformanceArtifacts } from ${JSON.stringify(
-    pathToFileURL(createReleaseArtifacts).href,
-  )};
-createConformanceArtifacts({
-  root: ${JSON.stringify(sdkRoot)},
-  outputRoot: ${JSON.stringify(artifactRoot)},
-  version: ${JSON.stringify(lock.sdk.releaseManifest.version)},
-  requireConformanceEvidence: false,
-});`;
-  run(process.execPath, ['--input-type=module', '--eval', invocation], sdkRoot);
+  requirePath(createReleaseArtifacts, 'SDK conformance artifact module');
+  // These are inputs to conformance, not publication artifacts or already-qualified evidence.
+  const options = {
+    root: sdkRoot,
+    outputRoot: artifactRoot,
+    version: lock.sdk.releaseManifest.version,
+    build: true,
+    requireConformanceEvidence: false,
+  };
+  run(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `import { createConformanceArtifacts } from ${JSON.stringify(pathToFileURL(createReleaseArtifacts).href)};
+createConformanceArtifacts(${JSON.stringify(options)});`,
+    ],
+    sdkRoot,
+  );
 
   const manifestPath = resolve(artifactRoot, lock.sdk.releaseManifest.file);
   requirePath(manifestPath, 'SDK release manifest');

@@ -44,11 +44,11 @@ final behavior commit, and the SDK validator is rebound to that final
 post-merge Chat authority commit.
 
 Protected run `34345365355` proved the repaired frozen-consumer boundary and
-completed Linux. Darwin then failed inside the worker-thread plugin compiler,
-while Windows exceeded the aggregate bootstrap quota before any narrower
-reviewed subtree quota fired. The next authority caps the Cave build at two
-reported CPUs and raises only the Windows aggregate ceiling to 24 GiB; all
-existing per-directory quotas remain unchanged.
+completed Linux. Darwin then failed during plugin evaluation, while Windows
+exceeded the aggregate bootstrap quota. The Cave build now uses two reported
+CPUs as a conservative contention experiment, not a proven fix for that generic
+plugin error. Windows uses the measured working-tree allocation and compact
+native builds described below, with the original aggregate ceilings preserved.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
@@ -591,8 +591,9 @@ Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
 384 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
 for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
 for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
-protected checkout's Git objects, 768 MiB for each SDK/Chat/Cave/Coven/
-validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
+protected checkout's Git objects, 768 MiB for each SDK/Chat/Coven/
+validator/producer checkout, 4 GiB for the Cave working tree including its
+dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
@@ -602,6 +603,23 @@ by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
 closed. Failures report either the fixed reviewed quota label or a path-free
 quota-monitor error.
+
+The Cave allowance accounts for a measured frozen `d20d83c` build with
+3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
+768 MiB allowance could not fit that working tree. The execution and bootstrap
+aggregate limits remain unchanged. Windows schema-v2 native builds use
+`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_INCREMENTAL=0` for Chat and Coven packaging
+and the shared native observation-test target.
+They retain the existing dev profile's runtime checks, optimization level, and
+features, but omit debugger and incremental-rebuild data for these one-shot
+builds. Unix and schema-v1 native build settings are unchanged. A local native
+RPC comparison reduced the build tree from 1,980,684,162 to 1,004,039,629 bytes;
+that measurement is not a substitute for the protected Windows quota result.
+
+Before throwing for a supervised production failure, the parent writes its
+existing bounded quota or exit-code diagnostic to stderr. A subsequent trusted
+cleanup exception therefore cannot erase that first diagnostic. Cleanup errors
+still fail the job and prevent evidence acceptance.
 
 The child receives a constructed environment rather than the runner
 environment. It contains no GitHub token, OIDC request value, Git credential,
@@ -1110,12 +1128,20 @@ range comparisons; malformed values are rejected without coercion.
 
 ### SDK verification metadata for this producer
 
+The ordinary contract canary imports the SDK's `createConformanceArtifacts` API
+instead of invoking its publication CLI. It builds the already-checked, exact SDK
+checkout with the locked version and `requireConformanceEvidence: false`: these
+private artifacts are inputs to conformance, so they cannot require an accepted
+conformance aggregate first. Checkout, manifest, package-content, and isolated
+consumer checks remain mandatory. This does not enable publication or qualify a
+release.
+
 The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,333 | `e0cbfc60d779dd2f064740fb26c4034db6c01b25fc5f1253fc7656066f77570f` |
-| `scripts/contract-canary.mjs` | 40,002 | `d7f35c48853eb268d4174ebb73f02a808bc8bfad945dd045b5e225a6afbb1df8` |
+| `.github/workflows/client-v1-conformance.yml` | 463,333 | `730b18b9f0b5354e74bdf12a6f7a096db31151114f51f10a4f543e4daf526bd8` |
+| `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |

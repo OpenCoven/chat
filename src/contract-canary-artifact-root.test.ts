@@ -25,6 +25,7 @@ import {
   assertPackedFixtureMatchesCaveCheckout,
   assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
+  createReviewedSdkReleaseArtifacts,
   parseArgs,
   readContractCanaryLock,
   runPnpm,
@@ -763,6 +764,61 @@ describe('packed Cave authority artifact validation', () => {
 });
 
 describe('generated SDK release manifest validation', () => {
+  test('creates conformance inputs without invoking or enabling the publication CLI', () => {
+    const lock = readContractCanaryLock();
+    const scratchRoot = createRepoLocalScratchRoot('conformance-entrypoint');
+    const sdkRoot = resolve(scratchRoot, 'sdk candidate');
+    const artifactRoot = resolve(scratchRoot, 'conformance output');
+    mkdirSync(resolve(sdkRoot, 'scripts'), { recursive: true });
+    const configPath = resolve(sdkRoot, 'release.config.json');
+    writeFileSync(configPath, JSON.stringify({ publishingEnabled: false }));
+    writeFileSync(
+      resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs'),
+      `
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  throw new Error('Release publishing is disabled by release.config.json');
+}
+export function createConformanceArtifacts(options) {
+  assert.deepEqual(options, {
+    root: ${JSON.stringify(sdkRoot)},
+    outputRoot: ${JSON.stringify(artifactRoot)},
+    version: ${JSON.stringify(lock.sdk.releaseManifest.version)},
+    build: true,
+    requireConformanceEvidence: false,
+  });
+  assert.equal(JSON.parse(readFileSync(${JSON.stringify(configPath)}, 'utf8')).publishingEnabled, false);
+  const artifacts = ${JSON.stringify(lock.sdk.artifacts)};
+  const packages = Object.entries(artifacts).map(([key, artifact]) => {
+    const file = resolve(options.outputRoot, artifact.releaseFile);
+    const bytes = Buffer.from('conformance-' + key);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, bytes);
+    return {
+      name: artifact.packageName, version: artifact.version, file: artifact.releaseFile,
+      size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+  });
+  writeFileSync(resolve(options.outputRoot, 'release-manifest.json'), JSON.stringify({
+    schemaVersion: 1, version: ${JSON.stringify(lock.sdk.releaseManifest.version)}, packages,
+  }));
+}
+`,
+    );
+
+    const tarballs = createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot);
+
+    for (const [key, artifact] of Object.entries(lock.sdk.artifacts)) {
+      expect(tarballs).toHaveProperty(key, resolve(artifactRoot, artifact.releaseFile));
+    }
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({ publishingEnabled: false });
+  });
+
   test('accepts platform-specific archive bytes when package identity and manifest integrity hold', () => {
     const lock = readContractCanaryLock();
     const scratchRoot = createRepoLocalScratchRoot('generated-manifest');
