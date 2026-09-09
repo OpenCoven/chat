@@ -11,7 +11,7 @@ against Chat main `79eab77884245b4f34d8a14b5e1c8cea78b6dabe` after
 | --- | --- | --- |
 | Linux failure classification | Protected [run 34335249644](https://github.com/OpenCoven/chat/actions/runs/34335249644/job/102414260606) emitted `phase1.stage.evidence-authority.build.cave-record.assertions.result`. Record identity, timing, and assertion count passed before that check. | Obtain successful real-authority evidence with the repaired Cave source. |
 | Portable canonical conversation ID assertion | Frozen Cave source recorded `skip` for `reads.messages-canonical-conversation-id` when the mixed-case `BRANCHED` lookup returned 404. [Cave #5348](https://github.com/OpenCoven/coven-cave/pull/5348) replaces the filesystem-dependent lookup with a non-case-only alias. Chat pins backport `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`; a fresh local run of `node --test scripts/client-v1-conformance.test.mjs` passed all 75 tests with zero skips. | All 110 recorded Cave assertions must pass in protected production. Unit tests do not satisfy this gate. |
-| Windows and producer integration | Chat [#166](https://github.com/OpenCoven/chat/pull/166), [#167](https://github.com/OpenCoven/chat/pull/167), #168, and #169 merged the pinned pnpm routing and parent PowerShell scope correction with the diagnostic work. | Validate the complete producer in the protected Windows lane. Resource limits, global pnpm installation, and dependency policy were not changed to mask these failures. |
+| Windows and producer integration | Chat [#166](https://github.com/OpenCoven/chat/pull/166), [#167](https://github.com/OpenCoven/chat/pull/167), [#168](https://github.com/OpenCoven/chat/pull/168), and [#169](https://github.com/OpenCoven/chat/pull/169) merged the pinned pnpm routing and parent PowerShell scope correction with the diagnostic work. | Validate the complete producer in the protected Windows lane. Resource limits, global pnpm installation, and dependency policy were not changed to mask these failures. |
 | Exact validator binding | [SDK #170](https://github.com/OpenCoven/sdk/pull/170) merged the binding to Chat `79eab77884245b4f34d8a14b5e1c8cea78b6dabe`. Protected [run 34341625053](https://github.com/OpenCoven/chat/actions/runs/34341625053) at the preceding head `d57677c` was canceled. | The SDK #170 owner dispatched [run 34342544626](https://github.com/OpenCoven/chat/actions/runs/34342544626) at that exact Chat head; it was in progress at this checkpoint. Verify its validator revision, terminal three-platform results, validation, attestation, and aggregation. |
 | Remaining Chat PRs | [#86](https://github.com/OpenCoven/chat/pull/86) remains a parked draft dependent on the SDK release. [#160](https://github.com/OpenCoven/chat/pull/160) proposes the Vitest patch update. | Audit #160 independently. Preserve #86 until its packed-artifact and release dependencies are satisfied. |
 | Image proposal | [Run 34300089789](https://github.com/OpenCoven/chat/actions/runs/34300089789) passed image build and verification but failed the proposal job after the retry repair landed. [#149](https://github.com/OpenCoven/chat/issues/149) remains open. | Configure and verify the authorized workflow-write credential path, then produce the actual digest-update PR and obtain its CI. |
@@ -24,7 +24,9 @@ were retired after fresh clean-status, exact-tip ancestry, lock, and process
 reference checks: `evidence-authority-diagnostics`,
 `evidence-build-diagnostic-propagation`, `toolchain-diagnostic-propagation`, and
 `toolchain-diagnostics`. `git worktree remove` and `git branch -d` succeeded for
-all four; their paths were verified absent. No remote branch was deleted.
+all four; their paths were verified absent. Their four remote branches were
+subsequently deleted atomically with exact-tip leases and verified absent.
+Every retired tip remains reachable from main.
 
 Thirteen registered worktrees remain at this checkpoint. Recent platform-repair
 checkouts stay available during protected validation; dirty and unmerged work
@@ -32,13 +34,19 @@ is preserved. The completed `cave-record-diagnostics` checkout was reused for
 this documentation audit. The external `chat-consolidation-20260907` recovery
 set holds `audit/platform-repair-refresh-20260909.json` and
 `audit/diagnostic-retirement-platform-refresh-20260909.json` with the exact
-inventory and operation receipts. The minimum working set is not yet proven.
+inventory and local operation receipts.
+`audit/diagnostic-remote-retirement-platform-20260909.json` records remote
+retirement and read-back verification. The minimum working set is not yet proven.
 
 The [program register](superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md)
 and existing [Teamwork mirrors](https://github.com/orgs/OpenCoven/projects/9)
-remain the tracking entry points. This checkpoint does not claim a fresh Beads
-or Project synchronization. Preserve historical phase closures and keep the
-current protected release gate open until its acceptance evidence exists.
+remain the tracking entry points. The canonical program Bead `cave-k0aqq` now includes this checkpoint; read-back
+verified the appended note and unchanged blocked status. REST inspection of the
+three existing Teamwork mirrors confirmed that `cave-23nmv` and `cave-0prpu`
+already show their historical closed acceptance. The `cave-k0aqq` draft card
+still needs this new program note synchronized; no new card was created.
+Preserve historical phase closures and keep the current protected release gate
+open until its acceptance evidence exists.
 
 ## Earlier delivery snapshot — 2026-09-09 UTC
 
