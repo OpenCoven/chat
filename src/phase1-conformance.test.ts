@@ -5332,6 +5332,65 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test.each([
+    ['legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors', 'legacy-case'],
+    ['recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes', 'pipe-shapes'],
+    ['recorded_daemon_status_rejects_a_stable_pipe_for_another_profile', 'profile-pipe'],
+    [
+      'windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+      'inspection-wait',
+    ],
+    ['status_file_reader_allows_an_atomic_status_replacement', 'status-replacement'],
+  ])('identifies bounded Coven observation failure for %s', async (name, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const stage = 'phase1.runtime-observations.coven-rust-tests.failed';
+    const testName = `discovery::tests::${name}`;
+    const label = `Coven native trust observation tests ${testName}`;
+    const base = `phase1.runtime-observations.coven-rust-tests.${category}`;
+    for (const [reason, stdout, stderr, expected] of [
+      [undefined, `test ${testName} ... FAILED\n`, 'private assertion payload', 'test-failed'],
+      [undefined, '', 'error[E0308]: private compiler payload', 'compile'],
+      ['timeout', `test ${testName} ... FAILED\n`, 'private timeout payload', 'timeout'],
+      [undefined, 'unrecognized private test output', '', 'unknown'],
+      [undefined, 'test discovery::tests::unselected ... FAILED\n', '', 'unknown'],
+      ['stdout-limit', `test ${testName} ... FAILED\n`, 'private output', 'output-limit'],
+    ]) {
+      const error = new producer.CommandExecutionError(label, {
+        reason,
+        code: 101,
+        signal: null,
+        stdout,
+        stderr,
+      });
+      const actual = producer.schemaV2FailureDiagnostic(error, stage);
+      expect(actual).toBe(`${base}.${expected}`);
+      expect(publicPhase1FailureDiagnostic(new Error(actual, { cause: error }))).toBe(actual);
+      expect(actual).not.toContain('private');
+    }
+    const missing = new Error(`Coven native trust observation tests did not execute ${testName}.`);
+    expect(producer.schemaV2FailureDiagnostic(missing, stage)).toBe(`${base}.not-observed`);
+    expect(publicPhase1FailureDiagnostic(new Error(`${base}.not-observed`))).toBe(
+      `${base}.not-observed`,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(`${base}.private-payload`))).toBeUndefined();
+    expect(producer.schemaV2FailureDiagnostic(new Error('private arbitrary failure'), stage)).toBe(
+      stage,
+    );
+    expect(
+      producer.schemaV2FailureDiagnostic(
+        new producer.CommandExecutionError('private unknown test', {
+          reason: undefined,
+          code: 101,
+          signal: null,
+          stdout: `test ${testName} ... FAILED\n`,
+          stderr: '',
+        }),
+        stage,
+      ),
+    ).toBe(stage);
+  });
+
   test('tracks bounded schema-v2 observation substages without exposing command output', () => {
     const source = readFileSync(
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),

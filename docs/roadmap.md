@@ -1,61 +1,48 @@
 # Delivery roadmap and consolidation audit
 
-## Windows-safe candidate and binding checkpoint, 2026-09-09 UTC
+## Protected validation checkpoint, 2026-09-09 UTC
 
-This checkpoint supersedes the active PR, validation, and checkout dispositions
-in the older snapshots below. Chat producer
-`4cf28daa3017e683ccce76b42c3590919b984c90` is bound by SDK validator
-`ac63ef1968c84e2ec1e4ded3356f66579b7b9156`. Both the repository and protected
-environment validator variables match that SDK revision. Protected
-[run 34395004109](https://github.com/OpenCoven/chat/actions/runs/34395004109)
-completed Linux and Darwin successfully, but Windows failed at
-`phase1.runtime-observations.sdk-tests.failed`. Validation, attestation, and
-aggregation were skipped. The stage identifies the SDK observation boundary,
-not a failing assertion. That attempt used the previous SDK candidate
-`6526b56b30c9a9c1c072caf2f0022d3427ae18db`.
+This checkpoint supersedes the pending PR and validation dispositions in the
+older snapshots below. [Chat #191](https://github.com/OpenCoven/chat/pull/191)
+merged at `3f2302da7dc2b39adb8042853b64aa58c406de08`.
+[SDK #191](https://github.com/OpenCoven/sdk/pull/191) binds that producer at
+`0d480eb72e00d5e0f915dbe0cb289ef12cbb9ebd`. Both the repository and protected
+environment validator scopes were verified at that revision before
+[run 34406621503](https://github.com/OpenCoven/chat/actions/runs/34406621503),
+attempt 1.
 
 | Boundary | Verified disposition | Remaining acceptance |
 | --- | --- | --- |
-| Windows image rollout | [Chat #180](https://github.com/OpenCoven/chat/pull/180) refreshed the image fingerprint; [#181](https://github.com/OpenCoven/chat/pull/181) accepts the two reviewed image/Visual Studio pairs and rejects unknown or crossed pairs. Both pairs match immutable upstream manifests. | A complete protected Windows result, including the workload after image validation. |
-| Toolchain and storage | [Chat #183](https://github.com/OpenCoven/chat/pull/183) preserves the resolved Cargo path. [#184](https://github.com/OpenCoven/chat/pull/184) bounds Coven build storage, [#185](https://github.com/OpenCoven/chat/pull/185) scopes Windows disk errno classification, and [#186](https://github.com/OpenCoven/chat/pull/186) releases the completed Coven target before observations and adds bounded observation substages. | Confirm the full workload using the replacement candidate in a fresh protected attempt. A wrapper exit code or stage label alone does not identify a root cause. |
-| Portable observations and production identity | [SDK #186](https://github.com/OpenCoven/sdk/pull/186) merged at `1597835325cf3762b51408ff0a565037eeb25f64`. Windows discovery uses native path/opened-file identity checks and derives safe numeric identity values when needed. [SDK #189](https://github.com/OpenCoven/sdk/pull/189) prepares this candidate and its new runtime fingerprint. | Land the matching Chat producer, finalize the SDK validator binding, rotate both validator scopes, and collect a fresh protected attempt. |
-| Frozen source and artifacts | Frozen Chat source `841a88f8885bc20cac2f9d5b5b6bc2a23a76e657` preserves all ten required native producer differences. All four package artifacts and the consumer-lock bytes are verified. [Chat #189](https://github.com/OpenCoven/chat/pull/189) binds this source and retains the complete observation suite and existing limits. | Exact-head CI and reviewed landing. The first Web run exposed a stale SDK fixture; its replacement comes from committed SDK #189 authority. |
-| Local conversation wording | [Chat #182](https://github.com/OpenCoven/chat/pull/182) and its integrated documentation [#187](https://github.com/OpenCoven/chat/pull/187) merged after exact-head checks passed. | This wording change does not add familiar replies or remote writes; feature acceptance remains separate. |
+| Image and frozen-source bootstrap | The two reviewed Windows image/Visual Studio pairs remain enforced. Chat #191 explicitly fetches frozen source `841a88f8885bc20cac2f9d5b5b6bc2a23a76e657` and preserves it for nested clones. The fresh Windows run passed bootstrap and reached runtime observations. | Full Windows conformance. |
+| SDK candidate and observations | Candidate `1597835325cf3762b51408ff0a565037eeb25f64` and all four frozen tarballs remain unchanged. Windows completed the full selected SDK, Chat, and Chat Rust observation suites. | The Coven Rust observation stage failed; the specific test and failure category are unclassified in this run. Bounded diagnostics retain every selected test and existing limit. |
+| Linux and macOS evidence | Both platform jobs passed all 110 Cave, 46 SDK, and 41 Chat assertions. Downloaded artifact digests, source identities, scans, and parsing with the committed SDK validator were verified. | One complete accepted attempt; do not mix records from earlier attempts. |
+| Final release gate | Validation, attestation, and aggregation were skipped after the Windows failure. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) remains open. | A subsequent verified producer binding and complete protected run. Publishing stays disabled and the aggregate record remains unset. |
+| Familiar feature | [Chat #86](https://github.com/OpenCoven/chat/pull/86) remains parked. Local conversation wording is delivered by #182 and #187. | Familiar replies and remote writes remain separate feature acceptance. |
 
-Protected [run 34366415938](https://github.com/OpenCoven/chat/actions/runs/34366415938)
-and [run 34386769165](https://github.com/OpenCoven/chat/actions/runs/34386769165)
-each passed Darwin and Linux but failed Windows; validation, attestation, and
-aggregation were skipped. Retain their exact producer/validator identities.
-Do not combine their platform records, or substitute the newer validator
-variables for the identity recorded by an earlier attempt.
-
-[Chat #188](https://github.com/OpenCoven/chat/issues/188) tracks the public
-`glib::VariantStrIter` advisory in the native Linux graph. A locked, offline
-`cargo tree` check confirms `glib 0.18.5` through Tauri's GTK/WebKit dependencies.
-The advisory lists `0.20.0` as the first patched version; a compatible dependency
-repair and native Linux validation remain outstanding. This audit establishes
-dependency presence, not reachability of the affected API in Chat.
-
-The replacement SDK candidate is `1597835325cf3762b51408ff0a565037eeb25f64`,
-with runtime fingerprint
+The SDK runtime fingerprint remains
 `ba1b822d45e130579209f6da4fa11bdac775b0213c08ffb3af1838448207733f`.
-Its draft freeze and final producer binding are not protected acceptance.
-Publication stays disabled, the aggregate record is unset, and final release
-gate `cave-ilh1h` remains blocked.
+Earlier run `34401360323` passed Linux/macOS but failed Windows at the frozen
+Chat checkout. The new run passed that boundary and failed later at
+`phase1.runtime-observations.coven-rust-tests.failed`. The stage label does not
+justify raising resource limits, reinstalling pnpm globally, or removing tests.
 
-The completed #175 diagnostic checkout was retired after verifying clean state,
-main ancestry, no lock, and no observed process references. Its branch history
-is retained. The completed `sdk-1597835-frozen-source` checkout was also
-retired after clean-state, remote-preservation, and process-reference checks;
-its published branch and immutable commit remain available. Active repair and
-feature checkouts, the primary checkout, and
-dirty recovery work remain preserved. The minimum working set is not yet
-established; the older checkout counts are historical snapshots.
+[Chat #188](https://github.com/OpenCoven/chat/issues/188) tracks the native Linux
+`glib::VariantStrIter` advisory. The dependency audit establishes `glib 0.18.5`
+in Tauri's GTK/WebKit graph; compatible repair and native Linux validation
+remain outstanding. Dependency presence alone does not prove API reachability.
 
-A fresh canonical inventory still contains 68 Beads: 30 closed, one open, and
-37 blocked. The previously prepared 21-card text correction and dirty Unix
-checkout discard decisions remain pending. No additional Teamwork cards,
-board Status fields, or release gates were changed by this checkpoint.
+Verified merged, unattached local refs for Chat #177, #181, and #189 and SDK
+#168 and #181 were retired with `git branch -d`; their commits remain retained.
+Active repair and feature worktrees, primary checkouts, and dirty recovery work
+remain preserved. The minimum working set is not yet established. Worktree and
+branch counts in earlier snapshots are historical.
+
+The root Bead `cave-k0aqq` and final gate `cave-ilh1h` remain blocked. Beads and
+the authorized Teamwork root carry the current evidence checkpoint. The prepared
+21-card corrections, board Status reconciliation, and dirty Unix discard
+remain pending. No additional card or board-field changes are implied by this
+checkpoint. The external `chat-consolidation-20260907/audit` directory retains
+exact merge, variable-rotation, run, artifact, and local-ref retirement receipts.
 
 ## Current validation and tracking checkpoint, 2026-09-09 UTC
 

@@ -33,16 +33,24 @@ the final bytes.
   `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-The replacement candidate and frozen source are prepared in SDK PR #189 at
-`0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e`. The frozen source refreshes the
+SDK PR #189 froze the replacement candidate and source contract; the local
+fixture retains committed authority `0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e`. The frozen source refreshes the
 SDK artifacts on the previous source baseline; it preserves all ten native
 file differences required by `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
 existing authority check.
 
-Full producer compatibility and provenance remain blocked until this Chat
-change merges and the SDK validator binds the final merged producer and its
-source-lock authority. Publishing remains disabled and no aggregate is accepted.
+Chat #191 merged the source-fetch repair at
+`3f2302da7dc2b39adb8042853b64aa58c406de08`. SDK #191 binds that producer at
+`0d480eb72e00d5e0f915dbe0cb289ef12cbb9ebd`. Both validator variable scopes were
+verified at that SDK revision before protected run `34406621503`, attempt 1.
+Linux and macOS passed all 110 Cave, 46 SDK, and 41 Chat assertions. Windows
+completed the SDK, Chat, and Chat Rust observations, then failed at
+`phase1.runtime-observations.coven-rust-tests.failed`. The label does not
+identify which Coven test failed or distinguish compilation from execution.
+Final validation, attestation, and aggregation were skipped. Publishing remains
+disabled and no three-platform aggregate is accepted.
+
 Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
 and Darwin passed, while Windows failed at
 `phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
@@ -58,8 +66,9 @@ producer and harness revisions omits frozen Chat `841a88f`, which is outside
 their ancestry. A cold fetch reproduced the missing commit; an explicit fetch
 of the locked Chat SHA restored it. The Windows bootstrap therefore validates
 and fetches that exact source and retains a tag for nested local clones.
-This repair requires a new validator binding and protected run; local Git
-regression tests do not establish Windows platform conformance.
+The later #191 binding and run `34406621503` exercised this repair and reached
+Coven Rust observations. Local Git regression tests alone do not establish
+Windows platform conformance.
 Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
 assertions. Windows failed before those observations, so final validation,
 attestation, and aggregation were skipped. No three-platform aggregate is accepted.
@@ -1180,20 +1189,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8f47ea4fb25594701312022bf6df04ce5465b78acd706e92f1ee64dbb4f091ca` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `13adbc05ff760d6b29ff9cc0c270e4daea2f309e061fc3becb24add228d5dcd7` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 203,170 | `9f0c12ab30939a77c3ecac5f86c932446871a28d9be5ad4609b17d2f65fc145f` |
+| `scripts/phase1-conformance.mjs` | 203,817 | `42252f6f51cf8673f5771508f5b74b7c026203aa954f5a92d22b3027addbe100` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 179,138 | `3b620276f2438eebe1e9d8ed64a251ef46323740a9976266ff981201d8adb2ff` |
+| `scripts/phase1-schema-v2-producer.mjs` | 181,166 | `7558786589fc09ad4315e7721160c2f9a94cd2e2e23c1cf964503ed6c62c3f46` |
 | `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1257,7 +1266,7 @@ after this commit is created; no SDK validator SHA is committed into Chat.
 
 The governed loader behavior is committed first. A separate Chat authority
 commit then pins that prior behavior commit, its tree, and every changed
-governed blob and SHA-256. After the Chat fix merges, SDK #100 must freeze the
+governed blob and SHA-256. After a Chat fix merges, a later SDK validator must freeze the
 final reachable Chat authority commit/tree, package manifest, harness,
 workflow, environment ID, and source/signer digests in a later validator
 commit. Operators dispatch the already-committed Chat workflow with that full
@@ -1274,8 +1283,8 @@ to the historical harness checkout, is rejected rather than accepted as an
 alternate SHA.
 
 The pre-rebind SDK validator remains authoritative for its old producer and is
-not evidence that this PR head is producer-compatible. Chat's always-on frozen
-fixture proves only that the local Phase 1 lock matches SDK 933's committed
+not evidence that a changed producer is compatible. Chat's always-on frozen
+fixture proves only that the local Phase 1 lock matches the committed SDK
 source contract, while the optional real-checkout integration continues to
 exercise the exact SDK loader. The later SDK change must replace the producer
 workflow size/SHA-256 and producer commit/tree metadata and retain the
@@ -1306,3 +1315,15 @@ producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
 build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
 directories. This path correction preserves every reviewed byte limit. It does
 not by itself identify the subtree responsible for an aggregate quota failure.
+
+Windows Coven Rust observation failures report only a fixed test category and
+failure category. The five test categories are `legacy-case`, `pipe-shapes`,
+`profile-pipe`, `inspection-wait`, and `status-replacement`. Cargo compilation,
+linking, resource, and process failures retain their existing bounded categories.
+`test-failed` requires a failed result for the exact selected test;
+`not-observed` means a successful command did not report that test as passed.
+Unknown command labels retain the generic stage. Raw stdout, stderr, assertion
+messages, and private paths are never included. The selected tests, command
+arguments, deadlines, and production limits are unchanged. These diagnostics
+need a subsequent producer binding and protected run before the Windows cause
+can be identified.

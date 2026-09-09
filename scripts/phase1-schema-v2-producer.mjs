@@ -128,6 +128,28 @@ const cargoBuildFailureCategories = [
   'compile',
   'unknown',
 ];
+const covenRustObservationDiagnostics = new Map([
+  [
+    'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+    'legacy-case',
+  ],
+  [
+    'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
+    'pipe-shapes',
+  ],
+  [
+    'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
+    'profile-pipe',
+  ],
+  [
+    'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+    'inspection-wait',
+  ],
+  [
+    'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
+    'status-replacement',
+  ],
+]);
 const cleanupGrantFailureCategories = [
   'service-unavailable',
   'process-secret-unavailable',
@@ -275,6 +297,11 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.runtime-observations.chat-tests.failed',
   'phase1.runtime-observations.chat-rust-tests.failed',
   'phase1.runtime-observations.coven-rust-tests.failed',
+  ...[...covenRustObservationDiagnostics.values()].flatMap((test) =>
+    [...cargoBuildFailureCategories, 'test-failed', 'not-observed'].map(
+      (category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`,
+    ),
+  ),
   'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
@@ -1085,6 +1112,36 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
     publicFailureDiagnosticSet.has(error.message)
   ) {
     return error.message;
+  }
+  if (activeStage === 'phase1.runtime-observations.coven-rust-tests.failed') {
+    for (const [name, test] of covenRustObservationDiagnostics) {
+      const base = `phase1.runtime-observations.coven-rust-tests.${test}`;
+      if (
+        error instanceof Error &&
+        error.message === `Coven native trust observation tests did not execute ${name}.`
+      ) {
+        return `${base}.not-observed`;
+      }
+      if (
+        error instanceof CommandExecutionError &&
+        error.label === `Coven native trust observation tests ${name}`
+      ) {
+        const category = classifyCargoBuildFailureDiagnostic(base, error);
+        if (
+          category === `${base}.unknown` &&
+          error.result?.reason === undefined &&
+          typeof error.result?.code === 'number' &&
+          error.result.code !== 0 &&
+          stripVTControlCharacters(error.result?.stdout ?? '')
+            .split(/\r?\n/u)
+            .some((line) => line.trim() === `test ${name} ... FAILED`)
+        ) {
+          return `${base}.test-failed`;
+        }
+        return category;
+      }
+    }
+    return activeStage;
   }
   if (activeStage === 'phase1.packaging.cave-build.failed') {
     return classifyCaveBuildFailureDiagnostic(error);
