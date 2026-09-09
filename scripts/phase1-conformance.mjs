@@ -46,6 +46,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  pnpmInvocation,
   runSchemaV2Conformance,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
@@ -1986,16 +1987,22 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
 }
 
 async function installPnpm(artifactRoot, rootPath, environment, label) {
-  await runCommand(
-    artifactRoot,
-    `${label} dependency install`,
-    'pnpm',
+  const pnpmCommand = pnpmInvocation(
     [
       '--ignore-workspace',
       'install',
       '--frozen-lockfile',
       `--config.store-dir=${environment.PNPM_STORE_DIR}`,
     ],
+    {
+      pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+    },
+  );
+  await runCommand(
+    artifactRoot,
+    `${label} dependency install`,
+    pnpmCommand.command,
+    pnpmCommand.args,
     { cwd: rootPath, env: environment },
   );
 }
