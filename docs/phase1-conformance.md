@@ -17,10 +17,10 @@ the final bytes.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `edd4728792321771496df58bfc0e6122908a96ec`, tree
-  `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
+- Chat production `5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c`, tree
+  `10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a`, the frozen SDK source
   authority;
-- SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
+- SDK package candidate `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
@@ -30,7 +30,7 @@ the final bytes.
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`;
+  `addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
@@ -1128,12 +1128,20 @@ range comparisons; malformed values are rejected without coercion.
 
 ### SDK verification metadata for this producer
 
+The ordinary contract canary imports the SDK's `createConformanceArtifacts` API
+instead of invoking its publication CLI. It builds the already-checked, exact SDK
+checkout with the locked version and `requireConformanceEvidence: false`: these
+private artifacts are inputs to conformance, so they cannot require an accepted
+conformance aggregate first. Checkout, manifest, package-content, and isolated
+consumer checks remain mandatory. This does not enable publication or qualify a
+release.
+
 The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,333 | `66ab87a32bcd1f76ace02b8a4a2db1f9c43d8c29c7e98b7cf3acf45e2b1af3af` |
-| `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
+| `.github/workflows/client-v1-conformance.yml` | 463,333 | `730b18b9f0b5354e74bdf12a6f7a096db31151114f51f10a4f543e4daf526bd8` |
+| `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
