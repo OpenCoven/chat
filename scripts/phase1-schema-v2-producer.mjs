@@ -195,6 +195,10 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.evidence-authority.scan.failed',
   'phase1.stage.evidence-authority.retain.failed',
   'phase1.stage.toolchain.failed',
+  'phase1.stage.toolchain.pnpm',
+  'phase1.stage.toolchain.rust',
+  'phase1.stage.toolchain.tauri',
+  'phase1.stage.toolchain.metadata',
   'phase1.stage.packaging.failed',
   'phase1.packaging.frozen-consumer.failed',
   ...FROZEN_PACKED_CONSUMER_STAGES.map(
