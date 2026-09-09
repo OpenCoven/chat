@@ -9139,57 +9139,57 @@ jobs:
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'SDK checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\sdk'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\sdk'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'Chat checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\chat'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\chat'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'Cave checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\cave'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\cave'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'Coven checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\coven'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\coven'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'validator checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\validator'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\validator'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'producer checkout',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\checkouts\producer'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\checkouts\producer'),
                 768MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'harness Cargo registry',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\cargo-home\registry'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\cargo-home\registry'),
                 2GB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'harness Cargo git',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\cargo-home\git'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\cargo-home\git'),
                 1GB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'harness pnpm store',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\pnpm-store'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\pnpm-store'),
                 3GB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'harness build roots',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*\build'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\build'),
                 4GB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'harness execution aggregate',
-                (Join-Path $bootstrapRoot 'phase1-conformance-run-*'),
+                (Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*'),
                 10GB
               )
             )

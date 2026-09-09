@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, matchesGlob, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as ts from 'typescript';
@@ -2821,6 +2822,93 @@ ${pathAssignment}
     expect(runBody).toContain("(Join-Path $msvcBin 'link.exe')");
   });
 
+  test('scopes Windows harness quotas to actual process-owned temporary roots', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    expect(workflow).toContain('TEMP = $isolatedUser.TempPath');
+    expect(workflow).toContain('TMP = $isolatedUser.TempPath');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const quotaClass = supervisor.slice(
+      supervisor.indexOf('public sealed class WindowsDirectoryQuota'),
+      supervisor.indexOf('public sealed class WindowsJobSupervisor'),
+    );
+    const quotaAssignment = workflow.match(/\$directoryQuotas = @\([\s\S]*?\n {12}\)/u)?.[0];
+    expect(quotaAssignment).toBeDefined();
+    const fixtureRoot = realpathSync(mkdtempSync(resolve(tmpdir(), 'phase1-quota-roots-')));
+    const tempRoot = resolve(fixtureRoot, 'temp');
+    mkdirSync(tempRoot);
+
+    try {
+      const artifactRoot = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `
+import { createProcessOwnedArtifactRoot } from ${JSON.stringify(
+            pathToFileURL(resolve(projectRoot, 'scripts/process-owned-artifact-root.mjs')).href,
+          )};
+const root = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
+try {
+  process.stdout.write(root.rootPath);
+} finally {
+  await root.cleanup();
+}
+`,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, TEMP: tempRoot, TMP: tempRoot, TMPDIR: tempRoot },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+namespace OpenCoven {
+${quotaClass}
+}
+'@
+$bootstrapRoot = $env:OPENCOVEN_TEST_BOOTSTRAP_ROOT
+$workspace = Join-Path $bootstrapRoot 'workspace'
+$isolatedUser = [pscustomobject]@{ TempPath = (Join-Path $bootstrapRoot 'temp') }
+${quotaAssignment}
+[Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
+`;
+      const quotas: { Label: string; PathPattern: string; MaxBytes: number }[] = JSON.parse(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          env: { ...process.env, OPENCOVEN_TEST_BOOTSTRAP_ROOT: fixtureRoot },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      expect(dirname(artifactRoot)).toBe(tempRoot);
+      for (const [label, suffix] of [
+        ['SDK checkout', 'checkouts/sdk'],
+        ['Chat checkout', 'checkouts/chat'],
+        ['Cave checkout', 'checkouts/cave'],
+        ['Coven checkout', 'checkouts/coven'],
+        ['validator checkout', 'checkouts/validator'],
+        ['producer checkout', 'checkouts/producer'],
+        ['harness Cargo registry', 'cargo-home/registry'],
+        ['harness Cargo git', 'cargo-home/git'],
+        ['harness pnpm store', 'pnpm-store'],
+        ['harness build roots', 'build'],
+        ['harness execution aggregate', '.'],
+      ] as const) {
+        const quota = quotas.find((entry) => entry.Label === label);
+        if (quota === undefined) {
+          throw new Error(`Missing Windows quota: ${label}`);
+        }
+        expect(matchesGlob(resolve(artifactRoot, suffix), quota.PathPattern), label).toBe(true);
+      }
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
     const bootstrap = workflowRunBody(
       workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
@@ -2835,13 +2923,13 @@ ${pathAssignment}
       "Join-Path $bootstrapRoot 'cargo\\git'",
       "Join-Path $bootstrapRoot 'pnpm-store'",
       "Join-Path $workspace '.git\\objects'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\sdk'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\chat'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\cave'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\coven'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\validator'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\producer'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\build'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\sdk'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\chat'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\cave'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\coven'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\validator'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\producer'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\build'",
     ];
     for (const quotaRoot of requiredQuotaRoots) {
       expect(bootstrap).toContain(quotaRoot);

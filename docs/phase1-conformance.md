@@ -589,7 +589,11 @@ validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
-the watchdog. Each scan materializes only a bounded number of entries through
+the watchdog. Harness quota patterns are rooted at the isolated user's
+`TempPath`, the same directory supplied as the child's `TEMP` and `TMP`, rather
+than at its parent bootstrap directory. Checkout quotas include ignored and
+generated files such as `node_modules` and `.next`, not only tracked source.
+Each scan materializes only a bounded number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
@@ -1107,7 +1111,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `85dac8a5eca58329011e824a97130597faa50fa8bb78805e44b5e907a72ee602` |
+| `.github/workflows/client-v1-conformance.yml` | 463,118 | `987e2d6771cb78d55e254208f4bcfedbbc02829b6687ea391eac11e375043998` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
