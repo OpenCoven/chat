@@ -1787,7 +1787,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.packaging.chat-install.failed',
     'phase1.packaging.chat-web-build.failed',
     'phase1.packaging.chat-native-build.failed',
+    'phase1.packaging.chat-native-build.process.crash',
+    'phase1.packaging.chat-native-build.no-output',
     'phase1.packaging.coven-build.failed',
+    'phase1.packaging.coven-build.process.crash',
+    'phase1.packaging.coven-build.no-output',
     'phase1.packaging.outputs.failed',
   ])('publishes bounded schema-v2 packaging diagnostic %s', (diagnostic) => {
     const wrapped = wrapInfrastructureFailure(
@@ -3783,6 +3787,43 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(diagnostic).not.toContain('private');
     },
   );
+
+  test.each([
+    ['SIGKILL', 'phase1.packaging.chat-native-build.resource.killed'],
+    ['SIGSEGV', 'phase1.packaging.chat-native-build.process.crash'],
+  ])('classifies Cargo %s termination before empty output', async (signal, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number | null;
+        signal: string | null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(
+      diagnose(
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: null,
+          signal,
+          stdout: '',
+          stderr: '',
+        }),
+        'phase1.packaging.chat-native-build.failed',
+      ),
+    ).toBe(expected);
+  });
 
   test('classifies an actual pnpm Cave prebuild header with its workspace path', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.

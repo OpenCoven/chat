@@ -1009,6 +1009,13 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
   ).toLowerCase();
   const exitCode = error.result?.code;
+  const signal = error.result?.signal;
+  if (signal === 'SIGKILL') {
+    return `${baseId}.resource.killed`;
+  }
+  if (typeof signal === 'string' && signal.length > 0) {
+    return `${baseId}.process.crash`;
+  }
   if (typeof exitCode === 'number' && (exitCode < 0 || exitCode >= 0x80000000)) {
     return `${baseId}.process.crash`;
   }
