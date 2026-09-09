@@ -1171,6 +1171,14 @@ export function validateCaveRecord(caveRecordValue, registry, expected) {
       throw new Error(`phase1.stage.evidence-authority.build.cave-record.identity.${diagnostic}`);
     }
   }
+  const ranAt = typeof caveRecord.ranAt === 'string' ? new Date(caveRecord.ranAt) : undefined;
+  if (
+    ranAt === undefined ||
+    Number.isNaN(ranAt.valueOf()) ||
+    ranAt.toISOString() !== caveRecord.ranAt
+  ) {
+    throw new Error('phase1.stage.evidence-authority.build.cave-record.timing.invalid');
+  }
   if (caveRecord.ranAt < expected.startedAt) {
     throw new Error('phase1.stage.evidence-authority.build.cave-record.timing.before-run');
   }

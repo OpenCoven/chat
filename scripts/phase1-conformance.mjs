@@ -340,6 +340,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-authority.build.cave-record.identity.commit',
   'phase1.stage.evidence-authority.build.cave-record.identity.cave-version',
   'phase1.stage.evidence-authority.build.cave-record.identity.node-version',
+  'phase1.stage.evidence-authority.build.cave-record.timing.invalid',
   'phase1.stage.evidence-authority.build.cave-record.timing.before-run',
   'phase1.stage.evidence-authority.build.cave-record.timing.after-run',
   'phase1.stage.evidence-authority.build.cave-record.assertions.shape',

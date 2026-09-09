@@ -1568,6 +1568,11 @@ describe('bounded Cave record diagnostics', () => {
     'identity.commit',
     'identity.cave-version',
     'identity.node-version',
+    'timing.invalid-null',
+    'timing.invalid-number',
+    'timing.invalid-string',
+    'timing.invalid-offset',
+    'timing.invalid-calendar',
     'timing.before-run',
     'timing.after-run',
     'assertions.shape',
@@ -1605,6 +1610,15 @@ describe('bounded Cave record diagnostics', () => {
     if (category.startsWith('identity.')) {
       const field = category.slice('identity.'.length).replace('-version', 'Version');
       caveRecord[field] = 'private mismatching record value';
+    } else if (category.startsWith('timing.invalid-')) {
+      const invalid: Record<string, unknown> = {
+        'timing.invalid-null': null,
+        'timing.invalid-number': 0,
+        'timing.invalid-string': 'private invalid timestamp',
+        'timing.invalid-offset': '2026-08-29T04:00:00.000+00:00',
+        'timing.invalid-calendar': '2026-02-30T04:00:00.000Z',
+      };
+      caveRecord.ranAt = invalid[category];
     } else if (category === 'timing.before-run') {
       caveRecord.ranAt = '2026-08-29T03:59:59.999Z';
     } else if (category === 'timing.after-run') {
@@ -1628,7 +1642,8 @@ describe('bounded Cave record diagnostics', () => {
     } catch (error) {
       failure = error;
     }
-    const diagnostic = `phase1.stage.evidence-authority.build.cave-record.${category}`;
+    const suffix = category.startsWith('timing.invalid-') ? 'timing.invalid' : category;
+    const diagnostic = `phase1.stage.evidence-authority.build.cave-record.${suffix}`;
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe(diagnostic);
     // @ts-expect-error The executable producer intentionally has no declaration file.

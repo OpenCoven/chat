@@ -1094,12 +1094,13 @@ and attestation action SHAs, and the environment variable prerequisite.
 Cave record validation reports fixed diagnostic suffixes beneath
 `phase1.stage.evidence-authority.build.cave-record`: `identity.platform`,
 `identity.commit`, `identity.cave-version`, `identity.node-version`,
-`timing.before-run`, `timing.after-run`, and `assertions.shape`, `count`,
+`timing.invalid`, `timing.before-run`, `timing.after-run`, and `assertions.shape`, `count`,
 `unexpected`, `duplicate`, `result`, or `detail`. Both producer wrappers
 preserve only the exact allowlisted IDs. Record values, assertion IDs,
 private details, and exception causes are never included in these diagnostics.
-The same identity, inclusive timing bounds, and assertion requirements still
-control acceptance.
+Identity, inclusive timing bounds, and assertion requirements still control
+acceptance. Cave timestamps must be canonical UTC millisecond strings before
+range comparisons; malformed values are rejected without coercion.
 
 ### SDK verification metadata for this producer
 
