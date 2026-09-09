@@ -25,6 +25,7 @@ const {
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
   createGitEnvironment,
+  hasPrivateDirectoryMode,
   phase1ConformanceTestOnly,
   readPhase1ConformanceLock,
 } = phase1ConformanceLock;
@@ -79,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: 'b47d347db1073c1b86c23fcf6467f20949a2df26',
-  tree: 'b0e4445df5836f0a1e5e6ed041b70bd61230e2fc',
+  revision: '44417c8cbb03ae160b59fa88ed7167afafb7bcac',
+  tree: '3b7b66bbf6209df2d277db5f95d9411ba0c3030b',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -89,8 +90,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
-      blob: 'e039ad7e4b0acea7af45c66395c400b56e765900',
-      sha256: '562fb96e648ae61950546128b6022278ac088f3d5759e13aaaff7154cdd163e8',
+      blob: '45199b51289c8dc9e1dd16d9ec50c0c36fec3d43',
+      sha256: '54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389',
     },
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -99,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '16f9950105ebc7006b26dc286af43f65a5ba8276',
-      sha256: 'dcdf9db45b1c530e00e6e41588d0f12a12299df0779762aadac3636f72f39666',
+      blob: 'b4ea14596ceede85d414079cdb529c1afa652616',
+      sha256: 'e7e3ed331a5381afdb75ebe1a48b58f5f9edad4f5192839b9c25a7eb1da182c6',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -124,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'b0c05adc78fc3aa93d1d5cd17c78ef85f98c0a09',
-      sha256: 'fe74b6d73c3f8d17dc64cc1767b0ccc3b578e8d6d5e6b57f947265046cf99d7c',
+      blob: '533aa5a10022c534934a0917426fc03d87e18e92',
+      sha256: '77c96c54fb6a16073a30b0d44f14ce431875e28a850422b8d4d33d393d75007b',
     },
   ],
 } as const;
@@ -778,6 +779,12 @@ describe('Phase 1 checkout verification', () => {
     expect(environment.GIT_SSH_COMMAND).toBe(expectedGitNullDevice);
     expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
     expect(environment.SSH_ASKPASS).toBe(expectedGitNullDevice);
+  });
+
+  test('does not interpret Windows directory mode bits as POSIX permissions', () => {
+    expect(hasPrivateDirectoryMode(0o777, 'win32')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o700, 'linux')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o777, 'linux')).toBe(false);
   });
 
   gitTest('accepts four clean checkouts at their locked revisions', () => {
