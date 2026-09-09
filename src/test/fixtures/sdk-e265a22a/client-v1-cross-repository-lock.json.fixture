@@ -127,12 +127,12 @@
     },
     "chat": {
       "repository": "OpenCoven/chat",
-      "commit": "93bbe74e54e019ef2405c66ba0c8878b7133f920",
-      "tree": "ee2c982669ed7013fbed0a031abb62eb230c9c0f",
+      "commit": "5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c",
+      "tree": "10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a",
       "consumerLock": {
         "path": "pnpm-lock.yaml",
-        "size": 60536,
-        "sha256": "982df5d84a6679047e5fd0d9177bc3ba9de7f41a8f04c5345c19cad5f00dd990"
+        "size": 56222,
+        "sha256": "fd5ee257005c81071bec2b4f0fbc33c18debc25e4ae57b72e60d3837663b4bd2"
       },
       "vendorFiles": [
         {

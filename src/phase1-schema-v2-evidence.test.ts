@@ -35,7 +35,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-46274867');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-e265a22a');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -61,8 +61,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: '46274867493c942a78731e0ccc1ab2ab8e3e438a',
-  tree: '9230cd74dfcc20aec82c3548761da557f0bff15a',
+  commit: 'e265a22a748ebf7692216ac16baba676ac681d09',
+  tree: '8e555c37fb54c63fbaa695b18e8e4c62487a2e9e',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -1523,9 +1523,9 @@ describe('Phase 1 SDK source contract authority', () => {
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: 'eab8b98aec3a6082c96ec05138f033f993a8c15e',
+      blob: 'e560f7b1964e59a8e880c2e059bf6f93cdc6dc77',
       size: 10942,
-      sha256: '9e9533cf1be50a13115419cd3621248a5c42d47041f0e36eb38b10f338d15db9',
+      sha256: 'ba03a8cfddaf0eb2dff2b5909eb82ebe9a3110361f9bd0a8cf63e662f0e7fa77',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);

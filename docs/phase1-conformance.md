@@ -17,8 +17,8 @@ the final bytes.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `93bbe74e54e019ef2405c66ba0c8878b7133f920`, tree
-  `ee2c982669ed7013fbed0a031abb62eb230c9c0f`, the frozen SDK source
+- Chat production `5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c`, tree
+  `10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a`, the frozen SDK source
   authority;
 - SDK package candidate `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
