@@ -1107,7 +1107,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,030 | `37004efcc745ff420049ee82460aaadb7cea53bb71b4ba64743322ed99e70726` |
+| `.github/workflows/client-v1-conformance.yml` | 463,118 | `348f48e653753b237cbbdc084e031908434c8247d26152e29e43c3fd5f0f9ba6` |
 | `scripts/contract-canary.mjs` | 39,636 | `140552c13e8eeba12396ce0e13f812b4e2c53cbcccd4c15a3365ed335827cfca` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1227,3 +1227,9 @@ Cave plugin-evaluation failures may report a fixed `.syntax`, `.type`,
 the Node evaluation marker. Unknown or conflicting classes retain the generic
 plugin category. These IDs expose neither the exception message nor a source
 path, and identify the exception class rather than the underlying plugin cause.
+
+Windows harness directory quotas use the same isolated temp directory as the
+producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
+build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
+directories. This path correction preserves every reviewed byte limit. It does
+not by itself identify the subtree responsible for an aggregate quota failure.
