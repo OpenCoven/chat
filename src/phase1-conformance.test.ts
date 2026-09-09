@@ -3713,11 +3713,6 @@ describe('Phase 1 real-authority conformance harness', () => {
       'error: failed to write /private/output: There is not enough space on the disk. (os error 112)',
       'phase1.packaging.chat-native-build.resource.disk',
     ],
-    [
-      'Windows disk exhaustion during dependency fetch',
-      'error: failed to download /private/crate\nCaused by: os error 112',
-      'phase1.packaging.chat-native-build.resource.disk',
-    ],
     ['native process crash', '', 'phase1.packaging.chat-native-build.process.crash', 0xc0000005],
     ['silent nonzero exit', '', 'phase1.packaging.chat-native-build.no-output'],
     [
@@ -3787,6 +3782,44 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(diagnostic).not.toContain('private');
     },
   );
+
+  test.each([
+    ['win32', 'phase1.packaging.chat-native-build.resource.disk'],
+    ['linux', 'phase1.packaging.chat-native-build.dependency-fetch'],
+  ])('interprets numeric os error 112 for %s', async (platform, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const classify = producer.classifyCargoBuildFailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(classify).toBeTypeOf('function');
+    if (typeof classify !== 'function') {
+      return;
+    }
+
+    expect(
+      classify(
+        'phase1.packaging.chat-native-build',
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: 1,
+          signal: null,
+          stdout: '',
+          stderr: 'error: failed to download /private/crate\nCaused by: os error 112',
+        }),
+        platform,
+      ),
+    ).toBe(expected);
+  });
 
   test.each([
     ['SIGKILL', 'phase1.packaging.chat-native-build.resource.killed'],
