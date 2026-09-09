@@ -74,12 +74,14 @@ jobs:
           OPENCOVEN_CHAT_SHA: ${{ github.sha }}
           OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026'
           OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1'
+          OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3'
           OPENCOVEN_WINDOWS_BUILD: '26100.33296'
           OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296'
           OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5'
           OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\Program Files\PowerShell\7\pwsh.exe'
           OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11'
           OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12120.119'
+          OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12112.369'
           OPENCOVEN_WINDOWS_VS_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise'
           OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207'
           OPENCOVEN_WINDOWS_MSVC_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207'
@@ -101,6 +103,16 @@ jobs:
               throw 'Protected workflow revision must be an exact lowercase 40-hex commit.'
             }
             return $Value
+          }
+
+          function Get-ReviewedWindowsVisualStudioVersion {
+            if ($env:ImageVersion -ceq $env:OPENCOVEN_WINDOWS_IMAGE_VERSION) {
+              return $env:OPENCOVEN_WINDOWS_VS_VERSION
+            }
+            if ($env:ImageVersion -ceq $env:OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION) {
+              return $env:OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION
+            }
+            throw 'The Windows runner image does not match a reviewed image profile.'
           }
 
           function Assert-NoReparsePath {
@@ -280,11 +292,11 @@ jobs:
           if (
             -not $IsWindows -or
             $env:RUNNER_OS -ne 'Windows' -or
-            $env:ImageOS -ne $env:OPENCOVEN_WINDOWS_IMAGE_OS -or
-            $env:ImageVersion -ne $env:OPENCOVEN_WINDOWS_IMAGE_VERSION
+            $env:ImageOS -ne $env:OPENCOVEN_WINDOWS_IMAGE_OS
           ) {
             throw 'The win32-x64 lane requires the GitHub windows-2025 image.'
           }
+          $reviewedVisualStudioVersion = Get-ReviewedWindowsVisualStudioVersion
           if (
             [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64' -or
             [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or
@@ -372,7 +384,7 @@ jobs:
             [Diagnostics.FileVersionInfo]::GetVersionInfo($trustedVisualStudio).ProductVersion `
               -split ' '
           )[0]
-          if ($visualStudioVersion -ne $env:OPENCOVEN_WINDOWS_VS_VERSION) {
+          if ($visualStudioVersion -cne $reviewedVisualStudioVersion) {
             throw 'The reviewed Visual Studio 2026 version changed.'
           }
           Assert-NoReparsePath -Path $visualStudioRoot -Label 'Visual Studio 2026 installation'
