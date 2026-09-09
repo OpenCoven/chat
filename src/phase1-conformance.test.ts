@@ -5080,6 +5080,40 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
   });
 
+  test.each([
+    ['schema-v1', 'supervisor'],
+    ['schema-v1', 'empty'],
+    ['schema-v2', 'supervisor'],
+    ['schema-v2', 'empty'],
+  ] as const)('%s preserves resolved Cargo ahead of the %s PATH', (schema, pathKind) => {
+    const root = mkdtempSync(join(tmpdir(), 'phase1-cargo-path-'));
+    try {
+      const cargoPath = realpathSync(
+        execFileSync('rustup', ['which', 'cargo'], { encoding: 'utf8' }).trim(),
+      );
+      const supervisorPath = pathKind === 'empty' ? '' : resolve(root, 'supervisor-tools');
+      if (supervisorPath !== '') mkdirSync(supervisorPath);
+      const buildEnvironment: typeof safeEnvironment =
+        schema === 'schema-v1' ? safeEnvironment : schemaV2Producer.safeEnvironment;
+      const environment = buildEnvironment(root, { PATH: supervisorPath });
+      const expectedPath = [dirname(cargoPath), supervisorPath].filter(Boolean).join(delimiter);
+      expect(environment.PATH).toBe(expectedPath);
+      expect(environment.RUSTUP_HOME).toBeUndefined();
+      expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
+      const result = spawnSync('cargo', ['--version'], {
+        cwd: root,
+        env: environment,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(execFileSync(cargoPath, ['--version'], { encoding: 'utf8' }));
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+  });
+
   test('uses fixed resource limits for the Cave release build', () => {
     expect(
       caveBuildEnvironment({
