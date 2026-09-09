@@ -401,6 +401,15 @@ export function runPnpm(
   options = {},
   { execute = run, environment = process.env, nodeExecutable = process.execPath } = {},
 ) {
+  const windowsPnpmCli = environment.OPENCOVEN_WINDOWS_PNPM_CLI;
+  if (
+    environment.OPENCOVEN_WINDOWS_JOB_REQUIRED === '1' &&
+    typeof windowsPnpmCli === 'string' &&
+    windowsPnpmCli.length > 0
+  ) {
+    return execute(nodeExecutable, [windowsPnpmCli, ...args], cwd, options);
+  }
+
   const restrictedProducer =
     environment.OPENCOVEN_UNIX_PRODUCER_REQUIRED === '1' ||
     environment.OPENCOVEN_WINDOWS_JOB_REQUIRED === '1';
