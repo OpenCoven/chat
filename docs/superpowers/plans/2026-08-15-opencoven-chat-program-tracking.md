@@ -26,7 +26,10 @@ The September 9 full inventory includes 68 records: 30 closed, one open, and
 37 blocked. Teamwork card text, board Status fields, and missing mirrors are
 being reconciled separately. Preserve `until` gates when projecting blocking
 dependencies. The roadmap records the current protected run and unresolved
-release acceptance; historical phase closures do not satisfy that gate.
+release acceptance; historical phase closures do not satisfy that gate. The latest
+image/observation checkpoint also distinguishes the current frozen SDK candidate
+from the production identity changes proposed in SDK #186; those changes require
+fresh candidate fingerprints and protected acceptance.
 
 ## Tracker Summary
 

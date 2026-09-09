@@ -1,5 +1,45 @@
 # Delivery roadmap and consolidation audit
 
+## Image rollout and observation checkpoint, 2026-09-09 UTC
+
+This checkpoint supersedes the active PR, validation, and checkout dispositions
+in the older snapshots below. Chat producer
+`4cf28daa3017e683ccce76b42c3590919b984c90` is bound by SDK validator
+`ac63ef1968c84e2ec1e4ded3356f66579b7b9156`. Both the repository and protected
+environment validator variables match that SDK revision. Protected
+[run 34395004109](https://github.com/OpenCoven/chat/actions/runs/34395004109)
+had completed its Windows supervisor build and was running all three platform
+jobs at this audit. It is not accepted release evidence yet.
+
+| Boundary | Verified disposition | Remaining acceptance |
+| --- | --- | --- |
+| Windows image rollout | [Chat #180](https://github.com/OpenCoven/chat/pull/180) refreshed the image fingerprint; [#181](https://github.com/OpenCoven/chat/pull/181) accepts the two reviewed image/Visual Studio pairs and rejects unknown or crossed pairs. Both pairs match immutable upstream manifests. | A complete protected Windows result, including the workload after image validation. |
+| Toolchain and storage | [Chat #183](https://github.com/OpenCoven/chat/pull/183) preserves the resolved Cargo path. [#184](https://github.com/OpenCoven/chat/pull/184) bounds Coven build storage, [#185](https://github.com/OpenCoven/chat/pull/185) scopes Windows disk errno classification, and [#186](https://github.com/OpenCoven/chat/pull/186) releases the completed Coven target before observations and adds bounded observation substages. | Confirm the full workload in the current protected attempt. A wrapper exit code or stage label alone does not identify a root cause. |
+| Portable observations and production identity | [SDK #186](https://github.com/OpenCoven/sdk/pull/186), reviewed at `987b885eb05a704434ec24a54a9dd63955f16ec0`, includes both fixture portability changes and production Cave handling of Windows file IDs outside JavaScript's safe integer range. Native path/opened-file identity proof remains required. Its description now reflects that production scope. | Review the changed trust behavior, freeze corrected source and package artifacts, compute fresh fingerprints, and update producer/validator bindings. The prior runtime fingerprint is not proof of the changed source. |
+| Local conversation wording | [Chat #182](https://github.com/OpenCoven/chat/pull/182) labels writable local chat accurately. Follow-up `0688d1856196308da48df08d2035eea7d9dac879` fixes the unsupported Testing Library role-query option. Typecheck, Biome, and all six app tests passed locally. | Fresh PR CI and reviewed integration. This wording change does not add familiar replies or remote writes. |
+
+Protected [run 34366415938](https://github.com/OpenCoven/chat/actions/runs/34366415938)
+and [run 34386769165](https://github.com/OpenCoven/chat/actions/runs/34386769165)
+each passed Darwin and Linux but failed Windows; validation, attestation, and
+aggregation were skipped. Retain their exact producer/validator identities.
+Do not combine their platform records, or substitute the newer validator
+variables for the identity recorded by an earlier attempt.
+
+The frozen SDK candidate remains `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
+it does not contain the pending SDK #186 changes. Publication stays disabled,
+and the final release gate `cave-ilh1h` remains blocked.
+
+The completed #175 diagnostic checkout was retired after verifying clean state,
+main ancestry, no lock, and no observed process references. Its branch history
+is retained. Active repair and feature checkouts, the primary checkout, and
+dirty recovery work remain preserved. The minimum working set is not yet
+established; the older checkout counts are historical snapshots.
+
+A fresh canonical inventory still contains 68 Beads: 30 closed, one open, and
+37 blocked. The previously prepared 21-card text correction and dirty Unix
+checkout discard decisions remain pending. No additional Teamwork cards,
+board Status fields, or release gates were changed by this checkpoint.
+
 ## Current validation and tracking checkpoint, 2026-09-09 UTC
 
 This checkpoint supersedes the pending PRs and worktree counts in earlier
