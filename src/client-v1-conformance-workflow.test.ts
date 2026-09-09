@@ -2459,9 +2459,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'return execute(nodeExecutable, [pnpmExecPath, ...args], cwd, options);',
     );
     expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
-    expect(schemaV2Producer).toMatch(/'pnpm',\s*\['--version'\]/u);
-    expect(schemaV2Producer).toMatch(
-      /'pnpm',\s*\['--ignore-workspace', 'exec', 'tauri', '--version'\]/u,
+    expect(schemaV2Producer).toContain("pnpmInvocation(['--version']");
+    expect(schemaV2Producer).toContain(
+      "pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version']",
     );
     expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
     expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");

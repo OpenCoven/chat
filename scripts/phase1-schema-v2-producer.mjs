@@ -327,6 +327,7 @@ export function windowsJobBindingEnvironment(
   const workspace = environment.OPENCOVEN_WINDOWS_WORKSPACE;
   const artifactDirectory = environment.OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY;
   const sourceRecord = environment.OPENCOVEN_WINDOWS_SOURCE_RECORD;
+  const pnpmCli = environment.OPENCOVEN_WINDOWS_PNPM_CLI;
   const systemRoot = environment.SYSTEMROOT;
   const windowsDirectory = environment.WINDIR;
   const commandProcessor = environment.COMSPEC;
@@ -402,12 +403,14 @@ export function windowsJobBindingEnvironment(
   const canonicalWorkspace = requireCanonicalWindowsPath(workspace);
   const canonicalArtifactDirectory = requireCanonicalWindowsPath(artifactDirectory);
   const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord);
+  const canonicalPnpmCli = requireCanonicalWindowsPath(pnpmCli);
   const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory);
   const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
     secondaryTemporaryDirectory,
   );
   requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
   requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
+  requireDescendant(canonicalBootstrapRoot, canonicalPnpmCli);
   if (
     windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
     canonicalWorkspace.toLowerCase() !==
@@ -457,6 +460,7 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
     OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
     OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
+    OPENCOVEN_WINDOWS_PNPM_CLI: canonicalPnpmCli,
     SYSTEMROOT: systemRoot,
     WINDIR: windowsDirectory,
     COMSPEC: commandProcessor,
@@ -1903,11 +1907,36 @@ function resolveOperatorHomes() {
   return { caveHome, covenHome };
 }
 
+export function pnpmInvocation(
+  args,
+  {
+    platform = process.platform,
+    nodePath = process.execPath,
+    pnpmCli = process.env.OPENCOVEN_WINDOWS_PNPM_CLI,
+  } = {},
+) {
+  return platform === 'win32'
+    ? { command: nodePath, args: [pnpmCli, ...args] }
+    : { command: 'pnpm', args };
+}
+
 async function collectToolchainMetadata(artifactRoot, environment, expected, toolchainRoot) {
-  const pnpm = await runCommand(artifactRoot, 'pnpm version verification', 'pnpm', ['--version'], {
-    cwd: projectRoot,
-    env: environment,
-    timeoutMs: 30_000,
+  const pnpmCommand = pnpmInvocation(['--version'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+  });
+  const pnpm = await runCommand(
+    artifactRoot,
+    'pnpm version verification',
+    pnpmCommand.command,
+    pnpmCommand.args,
+    {
+      cwd: projectRoot,
+      env: environment,
+      timeoutMs: 30_000,
+    },
+  );
+  const tauriCommand = pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
   });
   const rust = await runCommand(artifactRoot, 'Rust version verification', 'rustc', ['--version'], {
     cwd: projectRoot,
@@ -1917,8 +1946,8 @@ async function collectToolchainMetadata(artifactRoot, environment, expected, too
   const tauri = await runCommand(
     artifactRoot,
     'Tauri version verification',
-    'pnpm',
-    ['--ignore-workspace', 'exec', 'tauri', '--version'],
+    tauriCommand.command,
+    tauriCommand.args,
     {
       cwd: toolchainRoot,
       env: environment,
