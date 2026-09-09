@@ -66,7 +66,8 @@ consumer checks checkout identity before Cave production: the producer's
 does not yet prove the portable Cave assertion repair passes in protected
 production. Reconcile the reviewed Cave canary revision and verify its fixture
 hashes before rebinding the producer and validator for another protected run.
-Windows and macOS were still in progress when this Linux result was retrieved.
+The terminal Windows and macOS logs report the same bounded failure. All three
+platform lanes failed; validation, attestation, and aggregation were skipped.
 
 ## Earlier delivery snapshot — 2026-09-09 UTC
 
