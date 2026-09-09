@@ -1,5 +1,69 @@
 # Delivery roadmap and consolidation audit
 
+## Current validation and tracking checkpoint, 2026-09-09 UTC
+
+This checkpoint supersedes the pending PRs and worktree counts in earlier
+snapshots. Chat main is `523b49f4e7e512c467483fc4373844dea6c2d077`.
+
+- [Chat #171](https://github.com/OpenCoven/chat/pull/171) aligned the frozen
+  consumer Cave revision with the portable canonical-ID backport. The prior
+  three-platform failure occurred before Cave production and does not establish
+  whether the repaired assertion passes.
+- [Chat #160](https://github.com/OpenCoven/chat/pull/160) merged Vitest 4.1.11
+  after applicable CI passed on the refreshed branch.
+- [SDK #172](https://github.com/OpenCoven/sdk/pull/172) binds the validator to
+  that exact Chat commit. Protected
+  [run 34345365355](https://github.com/OpenCoven/chat/actions/runs/34345365355)
+  uses validator `711ee26ad817e6bfefb4245da1cfb01cce829872`. The Windows
+  supervisor build passed. Linux
+  [job 102446252647](https://github.com/OpenCoven/chat/actions/runs/34345365355/job/102446252647)
+  passed all 110 Cave, 46 SDK, and 41 Chat assertions with unique IDs and zero
+  skips. The repaired `reads.messages-canonical-conversation-id` assertion passed.
+  Retained evidence reports both redaction scans passed; downloaded artifact
+  SHA-256 matches the upload receipt
+  `4b6d2acb5f5eff4bacbfdf20aae98c9cb1a69f0e77b232b1f424d34fbdcd80bb`.
+  macOS [job 102446252660](https://github.com/OpenCoven/chat/actions/runs/34345365355/job/102446252660)
+  failed with `phase1.packaging.cave-build.phase.next-build.compile.plugin`
+  before Cave record assertions. The exact plugin/evaluation cause is unknown.
+  Windows [job 102446252710](https://github.com/OpenCoven/chat/actions/runs/34345365355/job/102446252710)
+  exceeded the 12 GiB `bootstrap aggregate` directory quota; the responsible
+  subtree is not identified. The next investigation requires bounded diagnostics,
+  without increasing limits or changing dependency policy. Validation,
+  attestation, and aggregation were skipped, so release acceptance remains blocked.
+- [Chat #86](https://github.com/OpenCoven/chat/pull/86) is the only open Chat PR
+  and remains a parked draft. [SDK #38](https://github.com/OpenCoven/sdk/issues/38)
+  remains open; publishing is disabled and the aggregate evidence record is unset.
+
+The runtime/feature inventory retains five Chat checkouts: the primary checkout, `canary-portable-cave`,
+`familiars-source-stage1`, `frozen-consumer-portable-cave`, and
+`unix-producer-exit-status`. Preserve the active validation checkouts, the
+parked feature, the alternate candidate's unique test changes, and the dirty
+Unix diagnostic checkout. The latter has verified backups, but discarding its
+superseded edits still requires the pending decision. No dirty work was removed.
+Before this documentation branch, the inventory held 17 local branches.
+This review adds one temporary documentation checkout and branch. Historical refs preserve divergent commit
+identities; reviewed runtime and diagnostic changes are already represented on
+main. The minimum working set is not yet established.
+
+The canonical `program:chat-v1` inventory contains 68 Beads: 30 closed, one
+open, and 37 blocked. The linked program index retains its 57-record creation baseline. Teamwork reconciliation found 21 existing cards with
+stale status text. Corrected draft payloads are prepared; the additional write
+scope remains pending. Six blocked records use `until` dependencies, which
+must remain visible alongside `blocks` dependencies in the projection.
+
+A separate board-field audit found nine closed Beads displayed as Todo or
+Started, and blocked `cave-o8gc4` displayed as Done. Card text and the board's
+Status field require separate verification. Fourteen closed Beads have no
+identity-marker or exact-title match among the 609 returned project items;
+archived-item completeness is unproven, so this does not authorize duplicate
+cards. No additional cards or board fields were changed by this audit.
+
+The external `chat-consolidation-20260907` recovery set retains the operation
+receipts, exact branch dispositions, dirty-state backups, prepared card
+corrections, and board-field audit. The program root `cave-k0aqq` and final gate
+`cave-ilh1h` remain blocked. Historical phase acceptance does not close the
+current protected release gate.
+
 ## Platform repair and consolidation checkpoint, 2026-09-09 UTC
 
 This checkpoint supersedes the earlier delivery snapshots below. It was audited
