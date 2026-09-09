@@ -43,7 +43,7 @@ existing authority check.
 Full producer compatibility and provenance remain blocked until this Chat
 change merges and the SDK validator binds the final merged producer and its
 source-lock authority. Publishing remains disabled and no aggregate is accepted.
-Protected run `34395004109` used the previous `6526b56` SDK candidate: Linux
+Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
 and Darwin passed, while Windows failed at
 `phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
 identified by that stage label. The replacement candidate requires a fresh
