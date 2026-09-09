@@ -433,11 +433,11 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
+    expect(lock.sdk.revision).toBe('6526b56b30c9a9c1c072caf2f0022d3427ae18db');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
-      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+      sha256: 'addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
@@ -455,7 +455,7 @@ describe('contract canary temp directory safety', () => {
       releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
       vendorFile: 'cave-client-0.1.0.tgz',
       size: 81543,
-      sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
+      sha256: '5718ff2964e5e897d54c01d785530df4d6ac4642b96209d6d5d0713fb0e4459d',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45');
@@ -566,7 +566,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -594,7 +594,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {

@@ -20,7 +20,7 @@ the final bytes.
 - Chat production `edd4728792321771496df58bfc0e6122908a96ec`, tree
   `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
   authority;
-- SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
+- SDK package candidate `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
@@ -30,7 +30,7 @@ the final bytes.
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`;
+  `addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
