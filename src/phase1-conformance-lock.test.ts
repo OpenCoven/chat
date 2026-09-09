@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '4a700bce4217536b294fd2d2c58f579459685484',
-  tree: '898802820d9e35b2544b6f5705c401d13bda1700',
+  revision: '36738d8b7e5e73577175ca32a1291cdf9c0aabf6',
+  tree: '7e254ce382247c5828d2b141ba488a5b2e3589e6',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '713dd27a41ed4f21bb2dd2dab3696b9c8676c38a',
-      sha256: '3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876',
+      blob: 'cb38a3fa805dc36062ca0ce423799690b2a2aea8',
+      sha256: '09ec4a7c1204644af151d36577e7f2d78efaf2397ac6d7ca224fbbf04e3e463a',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '7f454590a55d9ca36114d1e774ede1c7afda7331',
-      sha256: 'baa7714f4b7200df3166f818219a81e0ae88fb66a0de1462c98d431defc415f2',
+      blob: '6a6b03da769ca6f86cfd9890e5f539b64e464556',
+      sha256: 'b9064811c2bcef77ce1eef7a5561ae2c6bee79c3fc9a354bd116436c739be534',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '20929040fbe91ff0f9b7f96f4b8acb16af167422',
-      sha256: 'a08ad1025dd70096bd5a0cae5f3d37ff1675f0173de4347deebdddfdc90f225d',
+      blob: 'cb36544a0edccce27b212f288aeb8d1d14bdc804',
+      sha256: '84a1320b1b9111949714ab52022818978bb739e7564fd7c593055791a3097ce8',
     },
   ],
 } as const;
@@ -142,7 +142,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
+    revision: 'd20d83c46ba0c32433ce8dc6a358fb14b6bd0e45',
   },
   coven: {
     repository: 'OpenCoven/coven',
@@ -267,8 +267,8 @@ const expectedEntries = {
     caveArtifacts: {
       assertionEngine: {
         path: 'scripts/client-v1-conformance.mjs',
-        size: 146432,
-        sha256: 'b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd',
+        size: 146472,
+        sha256: 'a3f16292f0200711c44553bb6874d64f19e94474ae7e9412127ac4c705b79f2c',
       },
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',

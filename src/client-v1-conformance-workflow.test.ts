@@ -2463,7 +2463,11 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(schemaV2Producer).toContain(
       "pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version']",
     );
-    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
+    expect(harness).toContain(
+      "const pnpmCommand = pnpmInvocation(\n    [\n      '--ignore-workspace'",
+    );
+    expect(harness).toContain('pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,');
+    expect(harness).not.toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
     expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");
     expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'exec'");
   });
@@ -2694,6 +2698,9 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     );
     expect(childBootstrap).toContain(
       "$pnpmCli = Join-Path $pnpmRoot 'node_modules\\pnpm\\bin\\pnpm.cjs'",
+    );
+    expect(workflow).toMatch(
+      /\$childEnvironment = \[ordered\]@\{[\s\S]*?OPENCOVEN_WINDOWS_PNPM_CLI = \$pnpmCli[\s\S]*?\n {12}\}/u,
     );
     expect(childBootstrap).not.toContain('$npm =');
     expect(childBootstrap).not.toContain('$pnpm =');

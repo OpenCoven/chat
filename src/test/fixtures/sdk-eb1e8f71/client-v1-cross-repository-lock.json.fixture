@@ -11,7 +11,7 @@
     "path": "conformance/client-v1-cross-repository-evidence.schema.json",
     "version": 2,
     "size": 23174,
-    "sha256": "2581b0976ba655e238d98322adb81ddfa3bc0a251e25d49fb888fa4726435471"
+    "sha256": "593115e2ededad802f386f764006d97c282d2be15c855f95936aa98a7a24a075"
   },
   "candidate": {
     "repository": "OpenCoven/sdk",
@@ -88,14 +88,14 @@
   "sources": {
     "cave": {
       "repository": "OpenCoven/coven-cave",
-      "commit": "bc310e9753783678014086ed6f7ef7d3fb797967",
-      "tree": "8a9882f45c7b9f55a2d9bb6cbd16d3ead3c489e6",
+      "commit": "d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45",
+      "tree": "7ff358ac42a9d94ae5feb1f08e2af64a5513e78e",
       "releaseVersion": "0.3.12",
       "files": [
         {
           "path": "scripts/client-v1-conformance.mjs",
-          "size": 146432,
-          "sha256": "b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd"
+          "size": 146472,
+          "sha256": "a3f16292f0200711c44553bb6874d64f19e94474ae7e9412127ac4c705b79f2c"
         },
         {
           "path": "src/lib/server/client-v1/contract-fixture.json",
@@ -165,8 +165,8 @@
   "evidenceProducer": {
     "status": "compatible",
     "repository": "OpenCoven/chat",
-    "commit": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
-    "tree": "975de93ac84b0436d381f5e427627f98aaa3dd0a",
+    "commit": "b2d63e5fcea3b307d4d97fd560621dc84d659755",
+    "tree": "9ca3bedf95729d3dfdc01b4b4435fe335184ec6b",
     "packageManifest": {
       "path": "package.json",
       "size": 4044,
@@ -175,16 +175,16 @@
     "harness": {
       "path": "scripts/phase1-conformance.mjs",
       "version": "2.0.0",
-      "size": 199944,
-      "sha256": "67ba91257a71c36c7d91ef01796c5a348d106e40b4a6f1ef59fde6980a5ba584"
+      "size": 201655,
+      "sha256": "3bc17f74a8d80bdde9426eef59f52c95b4db6e95494fd6d6080dc7c4686a0876"
     },
     "command": "test:phase1-conformance",
     "recordSchemaVersion": 2,
     "workflow": {
       "name": "client-v1 conformance",
       "path": ".github/workflows/client-v1-conformance.yml",
-      "size": 463033,
-      "sha256": "e76c4361fb94c0b9525680f2aac176ca377174665b0323b5aefaf219fa452d02",
+      "size": 463030,
+      "sha256": "9d4deae1b25b5c2a6708fbeb760ad7e6af829ac18515672f746ed22e126406d9",
       "job": "platform-conformance",
       "jobNameTemplate": "platform-conformance ({platform})",
       "aggregationJob": "aggregate-conformance",
@@ -219,11 +219,11 @@
       ],
       "downloadArtifactAction": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "attestationAction": "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
-      "windowsBootstrapScriptSha256": "d9572f970962a3eb24e0fa307b65578a7722eda902b59af8b268b03d83537a43",
+      "windowsBootstrapScriptSha256": "65b8dd570ef4b50e88c5615afef17775ac277ef746a38d9e98f1b8f4069effb0",
       "validatorRevisionScriptSha256": "9abbfe73f19e47650321e6afb2c2a7db4facbf05a72db30241dfa94261cdcad9",
       "phase1RevisionsScriptSha256": "507ce777b643d97154472eb23135f7965fd55cf0fcedcec30e93b23e6472d225",
       "linuxKeyringSetupScriptSha256": "7b1ff87ab5d2230950632560230899cc450458a800a630c2788b53be8b13d200",
-      "unixSupervisorPreparationScriptSha256": "019a8570d1d16ab896a56a08b446978f0e9d8ddd7daee274e3f1747a56192b5e",
+      "unixSupervisorPreparationScriptSha256": "39525db16d2eda0d409b438fd982f8b3329e605d63c57fe6309ac041f4e9afa0",
       "unixToolPathSource": {
         "path": "scripts/executable-resolution.mjs",
         "size": 9154,
@@ -249,8 +249,8 @@
         ]
       },
       "signerWorkflow": "OpenCoven/chat/.github/workflows/client-v1-conformance.yml",
-      "signerDigest": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
-      "sourceDigest": "ada542f731ea1b65dd4e6de94ab7dc28b0551740",
+      "signerDigest": "b2d63e5fcea3b307d4d97fd560621dc84d659755",
+      "sourceDigest": "b2d63e5fcea3b307d4d97fd560621dc84d659755",
       "predicateType": "https://slsa.dev/provenance/v1",
       "denySelfHostedRunners": true
     }
@@ -274,6 +274,6 @@
   "assertionRegistry": {
     "path": "conformance/client-v1-cross-repository-assertions.json",
     "size": 10715,
-    "sha256": "0f8df49a870b7beaac81bc417c072d7f77c1e8a7c2c4ab1241dffe5cd757bbb1"
+    "sha256": "66181b715e5566ce34d0470a7d5b6e2c96ab3af3d1ac40c2ec1c10f433906769"
   }
 }

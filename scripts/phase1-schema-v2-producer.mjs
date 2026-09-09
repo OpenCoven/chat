@@ -1524,8 +1524,14 @@ function runCommand(
   args,
   { cwd, env, timeoutMs = commandTimeoutMs } = {},
 ) {
+  const invocation =
+    command === 'pnpm'
+      ? pnpmInvocation(args, {
+          pnpmCli: (env ?? process.env).OPENCOVEN_WINDOWS_PNPM_CLI,
+        })
+      : { command, args };
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
       env,
       detached: ownedProcessGroupsSupported,
@@ -1644,6 +1650,10 @@ function runCommand(
       });
     }, timeoutMs);
   });
+}
+
+export function runSchemaV2CommandForTest(artifactRoot, command, args, options) {
+  return runCommand(artifactRoot, 'Schema-v2 test command', command, args, options);
 }
 
 function parseVitestObservationReport(path, label) {
