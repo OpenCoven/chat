@@ -5339,6 +5339,35 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['status replacement should wait for the active reader', 'early-result'],
     ['status replacement result: Timeout', 'result-timeout'],
     ['status replacement result: Disconnected', 'result-disconnected'],
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        [2, 'file-not-found'],
+        [3, 'path-not-found'],
+        [5, 'access-denied'],
+        [32, 'sharing-violation'],
+        [1307, 'invalid-owner'],
+        [1314, 'privilege-not-held'],
+      ].map(([code, category]) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: ${code}, kind: Other, message: "private message" } }`,
+        `writer-error.${operation}.${category}`,
+      ]),
+    ),
+    ...['private-operation', 'replace-status-file.extra', '', 'replace-status-file '].map(
+      (operation) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: 5, kind: Other, message: "private message" } }`,
+        'writer-error',
+      ],
+    ),
     ['replace status after reader closes: private writer error', 'writer-error'],
     [
       'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{1b}" } }',
