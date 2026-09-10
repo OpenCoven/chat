@@ -151,7 +151,7 @@ const expectedEntries = {
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: '721437b84026c042e431b0882dcd14fdb29ac07d',
+    revision: '705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4',
   },
   harness: {
     repository: 'OpenCoven/chat',

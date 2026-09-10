@@ -1,6 +1,43 @@
 # Delivery roadmap and consolidation audit
 
-## Protected validation checkpoint, 2026-09-09 UTC
+## Protected validation checkpoint, 2026-09-10 UTC
+
+[Run 34425192604](https://github.com/OpenCoven/chat/actions/runs/34425192604),
+attempt 1, used merged Chat #197 at
+`572be6197980c39c8034a84ec92b44311b28df21` and SDK #194 validator
+`d348ab9d51a10480afe3b75229cdf319842bcb56`. Both repository and protected
+environment validator scopes matched before approval. This checkpoint supersedes
+the earlier run dispositions below.
+
+Linux and Darwin passed all 110 Cave, 46 SDK, and 41 Chat assertions. Downloaded
+records passed source identity, exact assertion-set, timing, secret-scan, and
+validator checks. Windows failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.early-result`.
+The selected Coven status-replacement test received a result within its 20 ms
+window. This identifies the timing assertion; it does not establish whether
+the writer returned success or an error.
+
+[Coven #982](https://github.com/OpenCoven/coven/pull/982) preserves that early
+result and retains timeout, writer-error, and exact-content assertions.
+[CI 34427592967](https://github.com/OpenCoven/coven/actions/runs/34427592967)
+passed on `b8fba355c937b2914ff83d0cf288061457dd24f0`, including the selected
+native Windows test and the required PR gate. #982 merged at
+`705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4`; #981 is closed. The protected
+run used Coven source `721437b8`. The staged source-adoption lock now selects
+merged Coven `705623e9` for daemon and observation builds. Chat retains its
+frozen native client at `721437b8`, so the next run must prove that consumer
+against the new daemon. SDK source authority `d00d82a7` records the exact
+Coven commit and tree; the final producer binding and fresh protected run with
+every selected observation remain outstanding. Ordinary PR CI does not establish
+protected acceptance.
+
+Final validation, attestation, and aggregation were skipped. No three-platform
+aggregate is accepted; publishing remains disabled and
+[SDK #38](https://github.com/OpenCoven/sdk/issues/38) remains open. The packed
+SDK candidate `1597835325cf3762b51408ff0a565037eeb25f64` and its four tarballs
+remain unchanged. Chat and active worktrees remain preserved.
+
+## Historical protected validation checkpoint, 2026-09-09 UTC
 
 This checkpoint supersedes the pending PR and validation dispositions in the
 older snapshots below. [Chat #191](https://github.com/OpenCoven/chat/pull/191)
