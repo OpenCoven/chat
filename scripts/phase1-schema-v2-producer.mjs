@@ -314,6 +314,12 @@ const publicFailureDiagnosticSet = new Set([
     'result-timeout',
     'result-disconnected',
     'writer-error',
+    'writer-error.access-denied',
+    'writer-error.sharing-violation',
+    'writer-error.privilege-not-held',
+    'writer-error.invalid-owner',
+    'writer-error.file-not-found',
+    'writer-error.path-not-found',
     'writer-join',
     'readback',
     'content',
@@ -1173,6 +1179,23 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
                 /panicked at .*discovery\.rs:\d+:\d+:$/u.test(line),
             );
             const message = panic < 0 ? '' : (lines[panic + 1] ?? '');
+            // Inspect only the structured OS code at the start of this exact writer error.
+            // The localized message and any private trailing output never become diagnostics.
+            const writerCode =
+              /^replace status after reader closes: Io \{ operation: "failed to write owner-only Windows daemon status", source: Os \{ code: (2|3|5|32|1307|1314), kind: [A-Za-z]+, message: "(?:[^"\\\r\n]|\\[\\"nrt0])*" \} \}$/u.exec(
+                message,
+              )?.[1];
+            const writerCategories = {
+              2: 'file-not-found',
+              3: 'path-not-found',
+              5: 'access-denied',
+              32: 'sharing-violation',
+              1307: 'invalid-owner',
+              1314: 'privilege-not-held',
+            };
+            if (writerCode) {
+              return `${base}.assertion.writer-error.${writerCategories[writerCode]}`;
+            }
             const categories = [
               [/^(?:create status replacement home|write current status):/u, 'setup'],
               [/^assertion `left != right` failed: open status reader$/u, 'reader-open'],

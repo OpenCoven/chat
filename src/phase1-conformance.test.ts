@@ -5340,6 +5340,71 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['status replacement result: Timeout', 'result-timeout'],
     ['status replacement result: Disconnected', 'result-disconnected'],
     ['replace status after reader closes: private writer error', 'writer-error'],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\q" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{zz}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "path C:\\\\private\\\\file and \\"quote\\"" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: ',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "unterminated',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private" }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private" } } trailing',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private message" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 32, kind: Other, message: "private message" } }',
+      'writer-error.sharing-violation',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 1314, kind: Other, message: "private message" } }',
+      'writer-error.privilege-not-held',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 1307, kind: Other, message: "private message" } }',
+      'writer-error.invalid-owner',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 2, kind: Other, message: "private message" } }',
+      'writer-error.file-not-found',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 3, kind: Other, message: "private message" } }',
+      'writer-error.path-not-found',
+    ],
+    ['replace status after reader closes: private writer error code: 5', 'writer-error'],
+    [
+      'replace status after reader closes: Io { operation: "wrong operation", source: Os { code: 5, kind: Other, message: "private" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 999999, kind: Other, message: "code: 5" } }',
+      'writer-error',
+    ],
     ['status replacement thread: private join error', 'writer-join'],
     ['read replaced status: private error', 'readback'],
     ['assertion `left == right` failed', 'content'],
