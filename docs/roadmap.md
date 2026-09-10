@@ -6,9 +6,9 @@ This checkpoint supersedes the pending repair and validation claims below.
 The latest verified protected attempt is
 [run 34441519622](https://github.com/OpenCoven/chat/actions/runs/34441519622),
 using Chat `b7986d081db76d80b2d479d151ce9d0f503492d8` and SDK validator
-`d1c9ddf2a7514e56fac26e20d571114ca97fe623`. Linux and Darwin records each passed
-all 110 Cave, 46 SDK, and 41 Chat assertions, with verified identities, digests,
-timing, and scans. Windows failed at
+`d1c9ddf2a7514e56fac26e20d571114ca97fe623`. The Linux and Darwin records each passed
+all 110 Cave, 46 SDK, and 41 Chat assertions. Their identities, digests, timing
+and scans were verified. Windows failed at
 `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.apply-owner-only-security.access-denied`.
 Validation, attestation, and aggregation were skipped. These records do not
 establish acceptance for subsequent source changes.
@@ -19,7 +19,7 @@ establish acceptance for subsequent source changes.
 | Linux GLib | [Chat #204](https://github.com/OpenCoven/chat/pull/204) merged as `8d5215e24755b671ef1caee6f62aafc66212e4c1`. Native Linux reproduced the pristine optimized crash, passed all 11 patched iterator tests and 158 application tests, and completed the desktop build. | [#188](https://github.com/OpenCoven/chat/issues/188) remains open: both frozen production Chat and the packaged harness lack the backport. Adopt both with vendor integrity proof and governed bindings before reconciling the advisory. |
 | Windows status writer | [Chat #201](https://github.com/OpenCoven/chat/pull/201) merged as `7ca56c5c8c95fc1be4efecf22554cb4f3cc08e22`. Coven diagnostics distinguish requested from granted handle rights under the restricted directory. | [Coven #988](https://github.com/OpenCoven/coven/pull/988) remains draft at `093f278a9c868b78ed50591a83e1167f9f6250cd`: its 72 Windows tests pass, but the replacement fixture uses explicit alternate staging and does not prove the default path, trusted staging directory, safe replacement, or ownership-scoped cleanup. [#984](https://github.com/OpenCoven/coven/issues/984) remains open. |
 | Windows process identity | [Chat #207](https://github.com/OpenCoven/chat/pull/207) adds bounded test-only observations for null WTS SIDs; it does not change supervisor acceptance. | Complete exact-head native CI and review. [#206](https://github.com/OpenCoven/chat/issues/206) still needs evidence explaining the original failure; a passing retry alone does not classify it. |
-| Validator | [SDK #200](https://github.com/OpenCoven/sdk/pull/200) merged as `f431cf6a4a61183d95e40adf4b50d36d12f3292e`, binding Chat `7ca56c5`. Both repository and protected-environment scopes were rotated and read back to that SDK merge. | Rebind any subsequent producer changes before a fresh protected run. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) and the final release gate remain open; publishing remains disabled. |
+| Current validator configuration | [SDK #200](https://github.com/OpenCoven/sdk/pull/200) merged as `f431cf6a4a61183d95e40adf4b50d36d12f3292e`, binding Chat `7ca56c5`. Both repository and protected-environment scopes were rotated and read back to that SDK merge. This configuration postdates run `34441519622`, which used SDK #197 at `d1c9ddf`; the newer binding has no fresh protected acceptance. | Rebind any subsequent producer changes before a fresh protected run. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) and the final release gate remain open; publishing remains disabled. |
 
 The minimum working set is not yet established. Twelve previously reviewed
 merged worktrees were clean and their tips reachable from main, but active or
