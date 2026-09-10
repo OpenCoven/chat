@@ -62,3 +62,6 @@ windows-sys = { version = "=0.61.2", features = [
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 zbus-secret-service-keyring-store = { version = "=1.0.1", features = ["crypto-rust"] }
+
+[patch.crates-io]
+glib = { path = "../vendor/glib-0.18.5" }
