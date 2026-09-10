@@ -1548,7 +1548,7 @@ public static class ScmDenialProbe
     $statusAclProbeSource
   )
   Add-Type -Path $statusAclProbeSource
-  $statusAclControl = [StatusAclProbe]::Run([IO.Path]::GetTempPath(), $null)
+  $statusAclControl = [StatusAclProbe]::RunControl([IO.Path]::GetTempPath())
   if ($statusAclControl -cne "combined:success`nowner-only:success`ndacl-only:success") {
     throw "Ordinary-directory status ACL control failed: $statusAclControl"
   }

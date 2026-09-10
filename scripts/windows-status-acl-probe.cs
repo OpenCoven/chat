@@ -64,7 +64,19 @@ public static class StatusAclProbe
         }
     }
 
+    public static string RunControl(string scratchDirectory)
+    {
+        return RunInternal(scratchDirectory, null);
+    }
+
     public static string Run(string scratchDirectory, string supervisorSid)
+    {
+        if (string.IsNullOrEmpty(supervisorSid))
+            throw new InvalidOperationException("supervisor-identity-required");
+        return RunInternal(scratchDirectory, supervisorSid);
+    }
+
+    private static string RunInternal(string scratchDirectory, string supervisorSid)
     {
         if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("windows-required");
         if (!Directory.Exists(scratchDirectory)) throw new InvalidOperationException("scratch-required");
