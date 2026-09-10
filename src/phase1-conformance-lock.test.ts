@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '1063456c397dea3b871862d3cc3a70a0b8e2392a',
-  tree: '01d77e5cb856c4ce05f55f260d78563df924d2be',
+  revision: 'd27fe99d6d75f94962ddff1a3c24d1a0b21e56c2',
+  tree: '141c35fbd37f252d5b274f91963227c0b946e857',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '82dc46726a7d10f23ec435d7ed81cd7065aad1bc',
-      sha256: 'f93b5720b105c06655158646137cad559b9b289983bd94939f055f29bdf48fa5',
+      blob: 'd6dfbf230fda3dd5a1734d9369b72a35f4e77804',
+      sha256: 'c565651117dc4104a1e0229af69662a86164e2b277092462ae38676dd7746b41',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '67814e324dcd7f71f43b809ef057dff57765c9f2',
-      sha256: '5721d71f99b4abcee7cd02d007e2c344db5512c138fbc912c15124117261f59e',
+      blob: '6c392ec4c76c4bee091ffe7a5f7b44f4bc9500e7',
+      sha256: '0351d8e992e143f71e7ac5d44cf00c76d04ad024bf7a0bccb6e7d5490875d6ce',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'a4e609df4c31ec1360d5229c03c618f7b6f865b3',
-      sha256: '6f1eebccd436914523fc6fe7f7ef97e34da65b4e313bb3aa37626218ce199fef',
+      blob: '34a22f9d7caf9244cd31315d0b6066a133aed744',
+      sha256: 'da836653133fde665d886ea1d049c53c7d128c92660a8983d098f6b28de41275',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -151,7 +151,7 @@ const expectedEntries = {
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: '705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4',
+    revision: 'c0c979cdee96327bf24218bc7c7ecb90d719cb27',
   },
   harness: {
     repository: 'OpenCoven/chat',

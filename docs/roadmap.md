@@ -2,24 +2,24 @@
 
 ## Protected validation checkpoint, 2026-09-10 UTC
 
-[Run 34431068139](https://github.com/OpenCoven/chat/actions/runs/34431068139),
-attempt 1, used merged Chat #198 at `83518c85605a69089ef96fe31206cfa25741d5e4`
-and SDK #195 validator `c02993c468808c84e39255caa185f2399db16ba0`. Both validator
+[Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
+attempt 1, used merged Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490`
+and SDK #196 validator `a5c7e38ecc905a6fdb9c9a3e704c6395ec2df02a`. Both validator
 scopes matched before protected approval. Coven daemon and observation source
 was `705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4`, including Coven #982's test repair.
 The frozen Chat native client remains at Coven `721437b8`.
 
 Linux artifact `10134896616` and Darwin artifact `10135000700` were downloaded
 and verified against this attempt: all 110 Cave, 46 SDK, and 41 Chat assertions
-passed with matching identities, digests, timing, and clean scans. Windows failed
-at `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error`.
-This identifies a returned writer error, superseding the earlier timing-assertion
-failure. The underlying OS error and operation remain unclassified.
-
-Bounded OS-code diagnostics are being prepared without changing the status
-writer, observation selection, resource limits, or dependency settings. They
-require updated harness authority, workflow digests, and a matching SDK validator
-before fresh protected validation. Ordinary CI is not protected acceptance.
+passed with matching identities, digests, timing, and clean scans. Windows failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
+This identifies Windows OS code 5 while preserving the writer operation as the
+remaining unknown. Coven #985 merged nine fixed operation labels at
+`c0c979cdee96327bf24218bc7c7ecb90d719cb27`; native Windows and the retried
+Linux suite passed. The staged Chat binding selects that source and classifies
+only the reviewed operation/code combinations without exposing raw output.
+Updated harness authority and a matching SDK validator are required before
+fresh protected validation. Ordinary CI is not protected acceptance.
 
 The run is terminal failed. Validation, attestation, and aggregation were skipped;
 publishing remains disabled and [SDK #38](https://github.com/OpenCoven/sdk/issues/38)
