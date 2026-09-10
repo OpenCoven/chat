@@ -740,6 +740,23 @@ toolchain component hashes from that release manifest. The workflow then
 requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
 
+When the ordinary Windows test suite reports a non-system null WTS SID, its
+failure reporter makes one bounded observation without changing the failure.
+The test-only `scripts/windows-process-sid-diagnostics.cs` opens one
+query/synchronize handle, performs at most two zero-time waits and one token
+query, and closes the handle. Fixed labels and numeric OS codes distinguish
+open-not-found, open failure, exited, live readable/unreadable token, invalid
+token, and wait failure without emitting a SID. The observation describes the
+newly opened handle; it cannot establish continuity or reuse relative to the
+original WTS row. Chat #206 remains open until native evidence explains the
+ambiguity. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
+exercise states and call/cleanup bounds and also run in the native suite.
+The native suite additionally checks one real self-process observation through a
+nested failure report; terminal-attempt wrapping preserves the inner exception
+chain so a real WTS failure reaches the same reporter. The reporter traverses
+aggregate children within a twelve-exception total bound and shares one probe
+budget across all branches, including producer-plus-quarantine failures.
+
 `scripts/windows-job-supervisor.test.ps1` is also run by the ordinary elevated
 `windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
 user and scoped profile/temp/workspace ACLs, launches every supervised probe as
@@ -1260,7 +1277,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 172,760 | `cecc4c4a88ddceff68ab941798a700d2f60e18048be6373044e6c115b08bfcfe` |
+| `scripts/windows-job-supervisor.test.ps1` | 175,090 | `8d4ae0914a65f4648523c161c3a212e7d8926bc878ce8e54eeaab102c29b25d7` |
+| `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
+| `scripts/windows-process-sid-diagnostics.test.ps1` | 6,490 | `4b924b90a71092d4e352e319b157f73388c7e54e178fc7d7cd16c15d50595bc9` |
 | `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
