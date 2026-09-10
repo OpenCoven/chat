@@ -937,6 +937,25 @@ describe('Phase 1 specification guards', () => {
     }
   });
 
+  it('verifies the maintained GLib source and optimized Linux behavior before acceptance', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const desktop = workflow.slice(workflow.indexOf('\n  desktop:'), workflow.indexOf('\n  rust:'));
+    const sourceCheck =
+      'node scripts/verify-glib-backport.mjs "$RUNNER_TEMP/glib-0.18.5.crate" --test';
+
+    expect(desktop).toContain(sourceCheck);
+    expect(desktop.indexOf(sourceCheck)).toBeLessThan(desktop.indexOf('pnpm app:build'));
+    expect(desktop).toContain('--filter-platform x86_64-unknown-linux-gnu');
+    expect(desktop).toContain('assert.equal(glib[0].source, null');
+    expect(desktop).toContain("realpathSync('vendor/glib-0.18.5/Cargo.toml')");
+    expect(desktop).toContain('cargo test --manifest-path src-tauri/Cargo.toml --locked --release');
+    expect(desktop).toContain('--features phase1-conformance --lib');
+    expect(desktop).toContain('--test coven_health_process_boundary --test phase1_native_rpc');
+    expect(readText('src-tauri/Cargo.toml')).toContain(
+      '[patch.crates-io]\nglib = { path = "../vendor/glib-0.18.5" }',
+    );
+  });
+
   it('installs no system packages while a pull request is waiting on it', () => {
     // Six runs hung on an apt-get that never returned, in two jobs whose only
     // shared property was calling it. Installing the packages ahead of time
