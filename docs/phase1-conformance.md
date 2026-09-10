@@ -1257,7 +1257,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 171,179 | `55e9cf065e2dc7cc656c6aa8cc9ea53542259d3d7eee55c368c6cf0fc6356ab9` |
+| `scripts/windows-job-supervisor.test.ps1` | 172,760 | `dec344175a45330ddd45850899c32bf1d72246dcb42dec3a2e509c3d56b1a87f` |
+| `scripts/windows-status-acl-probe.cs` | 6,144 | `77ca59d2532b6d719f0004fbe8065560758a190d0f0bc01d4c45395b45f0451a` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
 `harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
