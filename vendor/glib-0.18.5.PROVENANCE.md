@@ -125,6 +125,15 @@ Secret Service or graphical integration still require their established
 isolated runtime setup; do not substitute a protected conformance run against
 unchanged frozen authority.
 
+The existing Linux `Desktop build` CI job runs the authenticated optimized
+before/after check and asserts the resolved package sources before building
+the desktop. It then runs the existing native library and process-boundary/RPC
+tests in release mode. The job retains its pinned container, Rust toolchain,
+and finite deadline; it does not install system packages at run time.
+Core dumps are disabled for the intentional pristine-crate crash.
+These checks establish development-source Linux behavior, not protected
+release-candidate acceptance.
+
 ## Advisory status and maintenance boundary
 
 [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html) /
@@ -151,5 +160,5 @@ bindings and must not be claimed as an accepted protected candidate.
 The vendor path introduces source outside the existing explicit Cargo-file
 authority lists; the parent must account for the vendored bytes as part of
 the next authorized source/lock binding, not merely update a lockfile hash.
-No authority pins, frozen candidates, source guards, or workflows are
-changed by this backport.
+No authority pins, frozen candidates, or source guards are changed by this
+backport. Only ordinary Linux CI gains the backport acceptance checks.
