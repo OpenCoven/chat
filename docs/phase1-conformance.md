@@ -15,18 +15,19 @@ the final bytes.
 
 ## Latest protected result
 
-[Run 34425192604](https://github.com/OpenCoven/chat/actions/runs/34425192604)
-used Chat #197 and SDK #194. Linux and Darwin records passed verification;
-Windows failed the selected Coven status-replacement test's 20 ms timing
-assertion. The bounded diagnostic was
-`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.early-result`.
-It does not distinguish an early writer success from an early writer error.
-Final validation, attestation, and aggregation were skipped.
+[Run 34431068139](https://github.com/OpenCoven/chat/actions/runs/34431068139)
+used Chat #198 at `83518c85605a69089ef96fe31206cfa25741d5e4` and SDK #195
+validator `c02993c468808c84e39255caa185f2399db16ba0`. Linux and Darwin records
+passed identity, digest, timing, scan, and all 197 assertion checks. Windows
+failed at `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error`.
+The repaired Coven test preserves the writer result; this category establishes
+an error, but does not identify its OS code or the failing writer operation.
+Final validation, attestation, and aggregation were skipped. No aggregate is accepted.
 
-The [roadmap checkpoint](roadmap.md#protected-validation-checkpoint-2026-09-10-utc)
-records exact revisions and the pending source repair. No aggregate is accepted.
-The staged inputs below require a matching final SDK validator binding before
-the next protected run.
+The staged diagnostic change classifies six fixed Windows OS codes from an
+attributed, structurally valid writer panic. Unsupported codes or string forms
+retain the generic category. Raw error messages are never emitted. A matching
+SDK binding and fresh protected run remain required before acceptance.
 
 ## Exact inputs
 
@@ -1208,20 +1209,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `d2085e29912242a1991fc2d78dd0870c409417031efc26aeae93c1fcf45f5c2b` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `6f1eebccd436914523fc6fe7f7ef97e34da65b4e313bb3aa37626218ce199fef` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 204,285 | `7b5b47e1ddf7e78027fc6bd5b41085cf6b3c2769b9a68cedeaa5065d7e0ac63a` |
+| `scripts/phase1-conformance.mjs` | 204,500 | `f93b5720b105c06655158646137cad559b9b289983bd94939f055f29bdf48fa5` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 183,519 | `b137f5d23a70a69f4bddd141f1bca3d7529ea05aca7714a780ab5e08d90b356a` |
+| `scripts/phase1-schema-v2-producer.mjs` | 185,403 | `5721d71f99b4abcee7cd02d007e2c344db5512c138fbc912c15124117261f59e` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
