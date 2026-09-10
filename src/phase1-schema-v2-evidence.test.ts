@@ -1519,7 +1519,7 @@ describe('Phase 1 SDK source contract authority', () => {
     }
   });
 
-  test('matches the immutable repaired-Coven SDK source contract while retaining its pre-rebind producer', () => {
+  test('preserves the historical SDK source contract and rejects it for the adopted GLib source', () => {
     const provenance = JSON.parse(readFileSync(sdkSourceLockProvenancePath, 'utf8')) as JsonRecord;
     expect(provenance).toEqual({
       repository: 'OpenCoven/sdk',
@@ -1537,7 +1537,19 @@ describe('Phase 1 SDK source contract authority', () => {
     const frozenLock = JSON.parse(frozenLockBytes.toString('utf8')) as JsonRecord;
     const phase1Lock = readPhase1ConformanceLock();
 
-    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).not.toThrow();
+    const historicalPhase1Lock = {
+      ...phase1Lock,
+      chat: {
+        repository: 'OpenCoven/chat',
+        revision: '841a88f8885bc20cac2f9d5b5b6bc2a23a76e657',
+      },
+    };
+    expect(() =>
+      assertSdkContractMatchesPhase1Lock({ frozenLock }, historicalPhase1Lock),
+    ).not.toThrow();
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).toThrow(
+      'Phase 1 chat pin does not match the SDK frozen contract.',
+    );
     expect(frozenLock.sources).toMatchObject({
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -1549,7 +1561,7 @@ describe('Phase 1 SDK source contract authority', () => {
       },
       chat: {
         repository: 'OpenCoven/chat',
-        commit: phase1Lock.chat.revision,
+        commit: historicalPhase1Lock.chat.revision,
       },
     });
     expect(frozenLock.candidate).toMatchObject({
