@@ -36,7 +36,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-d00d82a7');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-c614dfe7');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -62,8 +62,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: 'd00d82a7ad8f28fb0970c4e4e2cb418c08f7d0b9',
-  tree: '6289344c431b1e5c32730e31bd7d1c785765c8b5',
+  commit: 'c614dfe72e494d21b267b825edd5ff78da184acb',
+  tree: '3668a30c3291f3b7ac248fc0473ffae70e9aca4d',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -1526,9 +1526,9 @@ describe('Phase 1 SDK source contract authority', () => {
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: '2f89f599d74eab836b4d0651e3469c838f080c94',
+      blob: 'c4355017545fe8fbb6db34a84846ba66d6fe4fb8',
       size: 10942,
-      sha256: 'f1dea0fff79235063040eca11a1ab1207a23f671934655d121210c34643a3329',
+      sha256: '896e9a46162f5a82fdbc1e502da7c5f614d6493fc4787273d791213a88471e4b',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
@@ -1559,8 +1559,8 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: '572be6197980c39c8034a84ec92b44311b28df21',
-      tree: '3b8795ded6176b61f59b7b001b03126ab10fbb73',
+      commit: '724690e64c4be820bdf4e0e1f8c568db516ba490',
+      tree: 'd04b68843f534ef992642e4de281a0a3071c4f09',
     });
   });
 });
@@ -1889,8 +1889,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: '572be6197980c39c8034a84ec92b44311b28df21',
-      tree: '3b8795ded6176b61f59b7b001b03126ab10fbb73',
+      commit: '724690e64c4be820bdf4e0e1f8c568db516ba490',
+      tree: 'd04b68843f534ef992642e4de281a0a3071c4f09',
       workflow: {
         environmentId: '20863036831',
       },
