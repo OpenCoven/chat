@@ -5333,6 +5333,76 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 
   test.each([
+    ['create status replacement home: private error', 'setup'],
+    ['write current status: private error', 'setup'],
+    ['assertion `left != right` failed: open status reader', 'reader-open'],
+    ['status replacement should wait for the active reader', 'early-result'],
+    ['status replacement result: Timeout', 'result-timeout'],
+    ['status replacement result: Disconnected', 'result-disconnected'],
+    ['replace status after reader closes: private writer error', 'writer-error'],
+    ['status replacement thread: private join error', 'writer-join'],
+    ['read replaced status: private error', 'readback'],
+    ['assertion `left == right` failed', 'content'],
+    ['remove status replacement home: private error', 'cleanup'],
+  ])('classifies bounded status replacement panic %s', async (message, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const name = 'discovery::tests::status_file_reader_allows_an_atomic_status_replacement';
+    const error = new producer.CommandExecutionError(
+      `Coven native trust observation tests ${name}`,
+      {
+        code: 101,
+        signal: null,
+        stdout: `test ${name} ... FAILED\n\n---- ${name} stdout ----\nthread '${name}' (3156804) panicked at crates/coven-client/src/discovery.rs:2084:9:\n${message}\nprivate trailing payload\n`,
+        stderr: '',
+      },
+    );
+    const actual = producer.schemaV2FailureDiagnostic(
+      error,
+      'phase1.runtime-observations.coven-rust-tests.failed',
+    );
+    expect(actual).toBe(
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(actual))).toBe(actual);
+    expect(actual).not.toContain('private');
+  });
+
+  test.each(['wrong-thread', 'wrong-file', 'unknown-message', 'unattributed-message'])(
+    'keeps status replacement panic %s unclassified',
+    async (variant) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const name = 'discovery::tests::status_file_reader_allows_an_atomic_status_replacement';
+      const thread = variant === 'wrong-thread' ? 'unrelated_test' : name;
+      const file = variant === 'wrong-file' ? 'status.rs' : 'discovery.rs';
+      const header =
+        variant === 'unattributed-message'
+          ? ''
+          : `thread '${thread}' (3156804) panicked at crates/coven-client/src/${file}:2084:9:\n`;
+      const message =
+        variant === 'unknown-message'
+          ? 'private unknown message'
+          : 'status replacement should wait for the active reader';
+      const error = new producer.CommandExecutionError(
+        `Coven native trust observation tests ${name}`,
+        {
+          code: 101,
+          signal: null,
+          stdout: `test ${name} ... FAILED\n${header}${message}\n`,
+          stderr: '',
+        },
+      );
+      expect(
+        producer.schemaV2FailureDiagnostic(
+          error,
+          'phase1.runtime-observations.coven-rust-tests.failed',
+        ),
+      ).toBe('phase1.runtime-observations.coven-rust-tests.status-replacement.test-failed');
+    },
+  );
+
+  test.each([
     ['legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors', 'legacy-case'],
     ['recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes', 'pipe-shapes'],
     ['recorded_daemon_status_rejects_a_stable_pipe_for_another_profile', 'profile-pipe'],
