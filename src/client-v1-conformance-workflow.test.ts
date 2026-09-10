@@ -2307,6 +2307,7 @@ ${source.slice(start, end)}
       'scripts/phase1-windows-supervisor-install.ps1',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
+      'scripts/windows-status-acl-probe.cs',
     ];
     for (const relativePath of [...new Set(metadataPaths)]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
