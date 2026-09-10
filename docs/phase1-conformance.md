@@ -13,7 +13,35 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
-## Latest protected result
+## Frozen GLib source adoption
+
+The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
+
+| Source | Revision | Tree |
+| --- | --- | --- |
+| Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
+| Executable harness | `0207b93f4238017764e59eca4916e4c790561f77` | `afc0cd3964866069e707fdd72d2bbc2efac6ebbb` |
+
+Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
+files from its prior frozen revision. The 121 crate files are identical in both
+snapshots. The existing whole-checkout checks cover vendor files; no authority
+file list or cleanliness check is relaxed. Only the two Cargo-file bindings
+change within the production authority and native delta tables. All 25 pinned
+harness files retain their previous bytes.
+
+[Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
+validated both exact trees: production passed 128 native tests and the harness
+passed 158. Both passed the optimized desktop build, 11 patched iterator tests,
+Linux dependency-graph checks and final source consistency. The source commits
+have verified signatures and are retained as parents of the adoption branch.
+This adoption must land with an actual merge commit to preserve their ancestry.
+
+Native candidate validation does not establish protected acceptance. Full
+packaged CI, an updated SDK validator binding, both protected scopes and fresh
+platform/aggregate validation remain required. Issue #188 remains open until
+those gates and advisory reconciliation are complete.
+
+## Earlier protected diagnostic result
 
 [Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
 attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
