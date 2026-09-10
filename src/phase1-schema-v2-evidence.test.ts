@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -35,7 +36,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-0c79a8a2');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-d00d82a7');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -61,8 +62,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: '0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e',
-  tree: '41e5f0b0a51e8af899911023ee8d594f153a432d',
+  commit: 'd00d82a7ad8f28fb0970c4e4e2cb418c08f7d0b9',
+  tree: '6289344c431b1e5c32730e31bd7d1c785765c8b5',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -595,8 +596,9 @@ function expectFixtureLoaderFailure(
 }
 
 async function fixture() {
-  const contract = await import(
-    pathToFileURL(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs')).href
+  // Load the external committed validator with Node, outside Vite's module resolver.
+  const contract = createRequire(import.meta.url)(
+    resolve(validatorRoot, 'scripts', 'conformance-contract.mjs'),
   );
   const schemaText = readFileSync(
     resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-evidence.schema.json'),
@@ -640,6 +642,7 @@ async function fixture() {
     command: 'test:phase1-conformance',
     recordSchemaVersion: 2,
     workflow: {
+      ...((frozenLock.evidenceProducer as JsonRecord).workflow as JsonRecord),
       name: 'client-v1 conformance',
       path: '.github/workflows/client-v1-conformance.yml',
       size: 4_000,
@@ -1516,16 +1519,16 @@ describe('Phase 1 SDK source contract authority', () => {
     }
   });
 
-  test('matches the immutable Windows-safe SDK source contract while retaining its pre-rebind producer', () => {
+  test('matches the immutable repaired-Coven SDK source contract while retaining its pre-rebind producer', () => {
     const provenance = JSON.parse(readFileSync(sdkSourceLockProvenancePath, 'utf8')) as JsonRecord;
     expect(provenance).toEqual({
       repository: 'OpenCoven/sdk',
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: '188dd37443c7669a403084fda04116fd06465ca1',
+      blob: '2f89f599d74eab836b4d0651e3469c838f080c94',
       size: 10942,
-      sha256: '481d1d4da9365ee92036bf635f4705185044f244c138ce84b8412b935b318374',
+      sha256: 'f1dea0fff79235063040eca11a1ab1207a23f671934655d121210c34643a3329',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
@@ -1556,8 +1559,8 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: '4cf28daa3017e683ccce76b42c3590919b984c90',
-      tree: '0178cf511059ee77f814e7100adc786ecf6cef0f',
+      commit: '572be6197980c39c8034a84ec92b44311b28df21',
+      tree: '3b8795ded6176b61f59b7b001b03126ab10fbb73',
     });
   });
 });
@@ -1886,8 +1889,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: '4cf28daa3017e683ccce76b42c3590919b984c90',
-      tree: '0178cf511059ee77f814e7100adc786ecf6cef0f',
+      commit: '572be6197980c39c8034a84ec92b44311b28df21',
+      tree: '3b8795ded6176b61f59b7b001b03126ab10fbb73',
       workflow: {
         environmentId: '20863036831',
       },

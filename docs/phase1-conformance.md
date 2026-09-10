@@ -13,6 +13,21 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
+## Latest protected result
+
+[Run 34425192604](https://github.com/OpenCoven/chat/actions/runs/34425192604)
+used Chat #197 and SDK #194. Linux and Darwin records passed verification;
+Windows failed the selected Coven status-replacement test's 20 ms timing
+assertion. The bounded diagnostic was
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.early-result`.
+It does not distinguish an early writer success from an early writer error.
+Final validation, attestation, and aggregation were skipped.
+
+The [roadmap checkpoint](roadmap.md#protected-validation-checkpoint-2026-09-10-utc)
+records exact revisions and the pending source repair. No aggregate is accepted.
+The staged inputs below require a matching final SDK validator binding before
+the next protected run.
+
 ## Exact inputs
 
 `phase1-conformance.lock.json` pins:
@@ -23,7 +38,9 @@ the final bytes.
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
-- Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
+- Coven daemon and observation-test source `705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4`;
+- Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
+  in its frozen Cargo manifest and lock;
 - Chat conformance driver support at the exact `harness.revision` and
   `harnessAuthority.tree` generated from the preceding code/integration
   commit;
@@ -33,10 +50,12 @@ the final bytes.
   `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-SDK PR #189 froze the replacement candidate and source contract; the local
-fixture retains committed authority `0c79a8a2530fda0ec3ab5737b8edd3f5acf0e40e`. The frozen source refreshes the
-SDK artifacts on the previous source baseline; it preserves all ten native
-file differences required by `harnessAuthority.productionDeltas`. Pinning the
+SDK PR #189 froze the replacement candidate and Chat source contract. The
+current local fixture retains SDK source authority
+`d00d82a7ad8f28fb0970c4e4e2cb418c08f7d0b9`, which adopts the repaired Coven
+daemon revision while preserving that candidate and Chat source. The frozen
+Chat source preserves all ten native file differences required by
+`harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
 existing authority check.
 
