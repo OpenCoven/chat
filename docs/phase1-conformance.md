@@ -1189,7 +1189,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `13adbc05ff760d6b29ff9cc0c270e4daea2f309e061fc3becb24add228d5dcd7` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `3171e46b0b8d9b9f6960bdc76b01e807011bd909211024433baac3f934fc6e4d` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1203,7 +1203,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
 | `scripts/phase1-schema-v2-producer.mjs` | 181,166 | `7558786589fc09ad4315e7721160c2f9a94cd2e2e23c1cf964503ed6c62c3f46` |
-| `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
+| `scripts/process-owned-artifact-root.mjs` | 10,989 | `d4f37d792cf9ab6b9bedb81620994e8088bb19d6bb693f433711f6968ec20659` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -1327,3 +1327,13 @@ messages, and private paths are never included. The selected tests, command
 arguments, deadlines, and production limits are unchanged. These diagnostics
 need a subsequent producer binding and protected run before the Windows cause
 can be identified.
+
+Protected run `34413820955` reached `coven-rust-tests.legacy-case.spawn`;
+that diagnostic covers both OS spawn and child-tracking failures, not a failed
+Rust assertion. The artifact root now tracks direct `ChildProcess` identities
+instead of numeric PIDs. A completed child retained for cleanup cannot prevent
+tracking a new child whose PID the OS has reused. Termination still requires
+the exact tracked object, and reverse-order cleanup retains every child.
+Deterministic PID-reuse regressions run in Windows CI. This repairs a reproduced
+tracking failure; a fresh producer binding and protected run must establish
+whether it resolves the observed Windows failure.

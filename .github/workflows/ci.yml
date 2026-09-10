@@ -690,4 +690,9 @@ jobs:
         env:
           OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: C:\OpenCoven\conformance\phase1-process-supervisor.exe
         run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run --config vitest.heavy.config.ts src/phase1-windows-supervisor.test.ts
+      - name: Test child ownership across Windows PID reuse
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance-artifact-root.test.ts
+          -t "PID"
       - run: corepack pnpm test:native-e2e

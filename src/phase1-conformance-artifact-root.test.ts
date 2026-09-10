@@ -1,4 +1,4 @@
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -217,6 +217,45 @@ describe('process-owned artifact root', () => {
     expect(untracked.exitCode).toBeNull();
     expect(untracked.signalCode).toBeNull();
     expect(existsSync(root.rootPath)).toBe(false);
+  });
+
+  test.each(['exit', 'signal'] as const)(
+    'keeps child ownership distinct when a PID is reused after %s',
+    async (completion) => {
+      const root = createRoot();
+      const current = await spawnChild('setInterval(() => {}, 1_000)');
+      const completed = new ChildProcess();
+      Object.defineProperty(completed, 'pid', { value: current.pid });
+      Object.defineProperty(completed, completion === 'exit' ? 'exitCode' : 'signalCode', {
+        value: completion === 'exit' ? 0 : 'SIGTERM',
+      });
+      root.trackChild(completed);
+      root.trackChild(current);
+      root.trackChild(current);
+
+      await root.terminateChild(completed);
+      expect(current.exitCode).toBeNull();
+      expect(current.signalCode).toBeNull();
+      await expect(root.terminateChild(completed)).rejects.toThrow(/currently tracked/);
+
+      await root.cleanup();
+      activeRoots.delete(root);
+      expect(current.signalCode).toBe('SIGTERM');
+      expect(root.reapedChildren).toEqual([current.pid, current.pid]);
+      expect(existsSync(root.rootPath)).toBe(false);
+    },
+  );
+
+  test('does not authorize termination through another child object with the same PID', async () => {
+    const root = createRoot();
+    const tracked = await spawnChild('setInterval(() => {}, 1_000)');
+    root.trackChild(tracked);
+    const untracked = new ChildProcess();
+    Object.defineProperty(untracked, 'pid', { value: tracked.pid });
+
+    await expect(root.terminateChild(untracked)).rejects.toThrow(/currently tracked/);
+    expect(tracked.exitCode).toBeNull();
+    expect(tracked.signalCode).toBeNull();
   });
 
   test('continues reverse-order child cleanup after failure and retains root until retry succeeds', async () => {

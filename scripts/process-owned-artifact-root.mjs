@@ -270,7 +270,8 @@ export function createProcessOwnedArtifactRoot(options) {
   const { prefix, terminationGraceMs, shortPath } = requireExactOptions(options);
   const createOwnedRoot = shortPath ? createOwnedShortTempDirectory : createOwnedTempDirectory;
   const owned = createOwnedRoot({ prefix: `${prefix}-${process.pid}` });
-  const trackedChildren = new Map();
+  // PIDs can be reused while completed ChildProcess objects still await cleanup.
+  const trackedChildren = new Set();
   const cleanedChildren = [];
   const reapedChildren = [];
   let cleaned = false;
@@ -288,20 +289,15 @@ export function createProcessOwnedArtifactRoot(options) {
         throw new Error('trackChild requires a spawned ChildProcess with a positive PID.');
       }
 
-      const existing = trackedChildren.get(child.pid);
-      if (existing !== undefined && existing !== child) {
-        throw new Error(`A different child is already tracked for PID ${child.pid}.`);
-      }
-      trackedChildren.set(child.pid, child);
+      trackedChildren.add(child);
       return child;
     },
     async terminateChild(child) {
-      const tracked = trackedChildren.get(child?.pid);
-      if (tracked === undefined || tracked !== child) {
+      if (!trackedChildren.has(child)) {
         throw new Error('terminateChild requires a currently tracked ChildProcess.');
       }
-      await terminateAndReapChild(tracked, terminationGraceMs);
-      trackedChildren.delete(child.pid);
+      await terminateAndReapChild(child, terminationGraceMs);
+      trackedChildren.delete(child);
       cleanedChildren.push(child.pid);
       reapedChildren.push(child.pid);
     },
@@ -343,12 +339,12 @@ export function createProcessOwnedArtifactRoot(options) {
       }
 
       const failures = [];
-      for (const [pid, child] of [...trackedChildren.entries()].reverse()) {
+      for (const child of [...trackedChildren].reverse()) {
         try {
           await terminateAndReapChild(child, terminationGraceMs);
-          cleanedChildren.push(pid);
-          reapedChildren.push(pid);
-          trackedChildren.delete(pid);
+          cleanedChildren.push(child.pid);
+          reapedChildren.push(child.pid);
+          trackedChildren.delete(child);
         } catch (error) {
           failures.push(error);
         }
