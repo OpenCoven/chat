@@ -1189,21 +1189,21 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `13adbc05ff760d6b29ff9cc0c270e4daea2f309e061fc3becb24add228d5dcd7` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `2613523480fa8558405891979ab17ff9937f84fc801cc351564d98d020a94750` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 203,817 | `42252f6f51cf8673f5771508f5b74b7c026203aa954f5a92d22b3027addbe100` |
+| `scripts/phase1-conformance.mjs` | 203,965 | `8eb673d34a8e52f3a83150c173ccafda8e89645c0cf07358422c0791284145cf` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 181,166 | `7558786589fc09ad4315e7721160c2f9a94cd2e2e23c1cf964503ed6c62c3f46` |
-| `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
+| `scripts/phase1-schema-v2-producer.mjs` | 181,826 | `1bd6fcbd68145296171c41a1ff287a733b163d6ae6372ea3c0b1f68e89a61c54` |
+| `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -1320,6 +1320,10 @@ Windows Coven Rust observation failures report only a fixed test category and
 failure category. The five test categories are `legacy-case`, `pipe-shapes`,
 `profile-pipe`, `inspection-wait`, and `status-replacement`. Cargo compilation,
 linking, resource, and process failures retain their existing bounded categories.
+`tracking` identifies a child-ownership registration failure. Launch failures
+report `spawn.enoent`, `spawn.eacces`, `spawn.eperm`, `spawn.einval`,
+`spawn.e2big`, or `spawn.enomem` only when Node supplies that exact error code;
+other launch errors retain `spawn` without disclosing their text.
 `test-failed` requires a failed result for the exact selected test;
 `not-observed` means a successful command did not report that test as passed.
 Unknown command labels retain the generic stage. Raw stdout, stderr, assertion
@@ -1327,3 +1331,16 @@ messages, and private paths are never included. The selected tests, command
 arguments, deadlines, and production limits are unchanged. These diagnostics
 need a subsequent producer binding and protected run before the Windows cause
 can be identified.
+
+Child ownership accepts a recycled PID only after its former child has exited
+or been signaled. A live PID collision remains an error. Termination removes
+only the child instance it reaped, so an overlapping registration cannot lose
+ownership. Cleanup retains the root and fails if children registered during
+cleanup remain; an explicit cleanup retry handles those children.
+
+Protected run `34413820955` passed Linux and Darwin, including all 110 Cave,
+46 SDK, and 41 Chat assertions per platform. Windows stopped at
+`phase1.runtime-observations.coven-rust-tests.legacy-case.spawn`; that producer
+used the same category for launch and tracking failures. Local tests reproduce
+stale PID registration and cover its repair, but do not prove it caused this
+Windows failure. Fresh bound protected evidence is still required.
