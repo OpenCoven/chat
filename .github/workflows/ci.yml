@@ -456,7 +456,47 @@ jobs:
         with:
           toolchain: 1.95.0
       - run: pnpm install --frozen-lockfile
+      - name: Verify maintained GLib source and optimized iterator regression
+        run: |
+          set -eu
+          ulimit -c 0
+          curl --proto '=https' --tlsv1.2 --fail --location \
+            https://static.crates.io/crates/glib/glib-0.18.5.crate \
+            --output "$RUNNER_TEMP/glib-0.18.5.crate"
+          node scripts/verify-glib-backport.mjs "$RUNNER_TEMP/glib-0.18.5.crate" --test
+      - name: Verify the patched Linux dependency graph
+        run: |
+          set -eu
+          cargo metadata --manifest-path src-tauri/Cargo.toml --locked \
+            --filter-platform x86_64-unknown-linux-gnu --format-version 1 \
+            > "$RUNNER_TEMP/chat-native-metadata.json"
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync, realpathSync } from 'node:fs';
+          import { resolve } from 'node:path';
+
+          const metadata = JSON.parse(readFileSync(
+            resolve(process.env.RUNNER_TEMP, 'chat-native-metadata.json'), 'utf8',
+          ));
+          const glib = metadata.packages.filter((entry) => entry.name === 'glib');
+          assert.equal(glib.length, 1, 'The native graph must contain exactly one GLib');
+          assert.equal(glib[0].version, '0.18.5');
+          assert.equal(glib[0].source, null, 'GLib must resolve to the maintained source');
+          assert.equal(realpathSync(glib[0].manifest_path),
+            realpathSync('vendor/glib-0.18.5/Cargo.toml'));
+          for (const name of ['glib-sys', 'glib-macros', 'gobject-sys', 'gio-sys']) {
+            const siblings = metadata.packages.filter((entry) => entry.name === name);
+            assert.equal(siblings.length, 1, `Unexpected ${name} source graph`);
+            assert.equal(siblings[0].source, 'registry+https://github.com/rust-lang/crates.io-index');
+          }
+          console.log('Linux graph: one maintained glib 0.18.5; sys/macro siblings remain registry packages.');
+          EOF
       - run: pnpm app:build
+      - name: Run optimized Linux native regressions
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --release
+          --features phase1-conformance --lib
+          --test coven_health_process_boundary --test phase1_native_rpc
 
   rust:
     name: Rust
