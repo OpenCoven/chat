@@ -9,7 +9,7 @@ scopes matched before protected approval. Coven daemon and observation source
 was `705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4`, including Coven #982's test repair.
 The frozen Chat native client remains at Coven `721437b8`.
 
-Linux artifact `10134896616` and Darwin artifact `10135000700` were downloaded
+Linux artifact `10136315804` and Darwin artifact `10136396539` were downloaded
 and verified against this attempt: all 110 Cave, 46 SDK, and 41 Chat assertions
 passed with matching identities, digests, timing, and clean scans. Windows failed at
 `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
