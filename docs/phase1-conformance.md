@@ -1279,7 +1279,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
 | `scripts/windows-job-supervisor.test.ps1` | 175,090 | `8d4ae0914a65f4648523c161c3a212e7d8926bc878ce8e54eeaab102c29b25d7` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
-| `scripts/windows-process-sid-diagnostics.test.ps1` | 6,490 | `4b924b90a71092d4e352e319b157f73388c7e54e178fc7d7cd16c15d50595bc9` |
+| `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s

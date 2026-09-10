@@ -90,16 +90,37 @@ foreach ($case in @(
   }
 }
 # Unexpected query failures propagate to the native call site's fixed fallback,
-# but must still release the only opened handle.
-$calls = @{ Open = 0; Wait = 0; Query = 0; Close = 0 }
-$deniedQuery = [SidDiagnosticDeniedQuery]::new()
-$deniedQuery.Unexpected = $true
-$arguments[4] = [Delegate]::CreateDelegate(
-  [Func[IntPtr, string]], $deniedQuery, 'Query'
+# but must still release the only opened handle. This fixture is independent of
+# the matrix case order and its captured delegates.
+$unexpectedCalls = @{ Open = 0; Wait = 0; Close = 0 }
+$unexpectedQuery = [SidDiagnosticDeniedQuery]::new()
+$unexpectedQuery.Unexpected = $true
+$unexpectedArguments = [object[]]::new(6)
+$unexpectedArguments[0] = [uint32]123
+$unexpectedArguments[1] = [Func[uint32, IntPtr]]{
+  param($processId)
+  if ($processId -ne 123) { throw 'Wrong unexpected-query PID.' }
+  $unexpectedCalls.Open++
+  return [IntPtr]1
+}
+$unexpectedArguments[2] = [Func[int]]{ return 0 }
+$unexpectedArguments[3] = [Func[IntPtr, uint32]]{
+  param($handle)
+  if ($handle -ne [IntPtr]1) { throw 'Wrong unexpected-query wait handle.' }
+  $unexpectedCalls.Wait++
+  return [uint32]258
+}
+$unexpectedArguments[4] = [Delegate]::CreateDelegate(
+  [Func[IntPtr, string]], $unexpectedQuery, 'Query'
 )
+$unexpectedArguments[5] = [Action[IntPtr]]{
+  param($handle)
+  if ($handle -ne [IntPtr]1) { throw 'Wrong unexpected-query close handle.' }
+  $unexpectedCalls.Close++
+}
 $unexpectedFailed = $false
 try {
-  $null = $observe.Invoke($null, $arguments)
+  $null = $observe.Invoke($null, $unexpectedArguments)
 } catch [Management.Automation.MethodInvocationException] {
   $underlying = $_.Exception.InnerException
   if ($underlying -is [Reflection.TargetInvocationException]) {
@@ -107,8 +128,9 @@ try {
   }
   $unexpectedFailed = $underlying.GetType() -eq [Exception]
 }
-if (-not $unexpectedFailed -or $calls.Open -ne 1 -or $calls.Wait -ne 1 -or
-    $deniedQuery.Calls -ne 1 -or $calls.Close -ne 1) {
+if (-not $unexpectedFailed -or $unexpectedCalls.Open -ne 1 -or
+    $unexpectedCalls.Wait -ne 1 -or $unexpectedQuery.Calls -ne 1 -or
+    $unexpectedCalls.Close -ne 1) {
   throw 'Unexpected query failure did not preserve bounded cleanup.'
 }
 # Execute only the checked-in reporter function, without starting the native
