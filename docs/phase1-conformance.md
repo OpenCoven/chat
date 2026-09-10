@@ -15,19 +15,41 @@ the final bytes.
 
 ## Latest protected result
 
-[Run 34431068139](https://github.com/OpenCoven/chat/actions/runs/34431068139)
-used Chat #198 at `83518c85605a69089ef96fe31206cfa25741d5e4` and SDK #195
-validator `c02993c468808c84e39255caa185f2399db16ba0`. Linux and Darwin records
-passed identity, digest, timing, scan, and all 197 assertion checks. Windows
-failed at `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error`.
-The repaired Coven test preserves the writer result; this category establishes
-an error, but does not identify its OS code or the failing writer operation.
-Final validation, attestation, and aggregation were skipped. No aggregate is accepted.
+[Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
+attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
+#196 validator `a5c7e38ecc905a6fdb9c9a3e704c6395ec2df02a`. Linux artifact
+`10136315804` and Darwin artifact `10136396539` passed identity, digest, timing,
+scan, and all 197 assertion checks. Windows failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
+This establishes OS code 5 from the writer, but does not identify the failing
+operation. Final validation, attestation, and aggregation were skipped. No
+aggregate is accepted.
 
-The staged diagnostic change classifies six fixed Windows OS codes from an
-attributed, structurally valid writer panic. Unsupported codes or string forms
-retain the generic category. Raw error messages are never emitted. A matching
-SDK binding and fresh protected run remain required before acceptance.
+[Coven #984](https://github.com/OpenCoven/coven/issues/984) tracks fixed operation
+labels; [#985](https://github.com/OpenCoven/coven/pull/985) is the diagnostic
+implementation. The Chat classifier recognizes nine fixed operation labels and
+six fixed OS codes only within an attributed, structurally valid writer panic.
+Old operation strings retain their previous categories; unknown labels, codes,
+or malformed records retain the generic category. Raw messages are never emitted.
+Source adoption, harness authority, workflow digests, a matching SDK binding,
+and fresh protected validation remain required. This diagnostic work does not
+change writer security, retry limits, or observation selection.
+
+Coven #985 head `367e670a01379799d89b6802e1a00bea7a0e20ef` passed native
+Windows CI, including the new failure-path tests. Its Linux retry passed in
+[run 34437695364, attempt 2](https://github.com/OpenCoven/coven/actions/runs/34437695364/attempts/2).
+The initial Linux failure was SQLite exit-persistence contention, tracked in
+[Coven #986](https://github.com/OpenCoven/coven/issues/986); a passing retry does
+not establish a persistence fix. Val merged #985 as
+`c0c979cdee96327bf24218bc7c7ecb90d719cb27`; its tree matches the reviewed head.
+These CI results do not replace protected conformance validation.
+
+The proposed Coven update also includes merged
+[#983](https://github.com/OpenCoven/coven/pull/983), which changes CLI authority
+refusal receipts and store initialization. Source adoption therefore includes
+production CLI changes as well as diagnostic metadata. The frozen Chat native
+client remains separately pinned; do not describe the complete adoption as a
+diagnostic-only change.
 
 ## Exact inputs
 
@@ -39,7 +61,7 @@ SDK binding and fresh protected run remain required before acceptance.
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
-- Coven daemon and observation-test source `705623e9cf2dfa9ee2d52973b2a6eb194a4cf7c4`;
+- Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
 - Chat conformance driver support at the exact `harness.revision` and
@@ -53,8 +75,8 @@ SDK binding and fresh protected run remain required before acceptance.
 
 SDK PR #189 froze the replacement candidate and Chat source contract. The
 current local fixture retains SDK source authority
-`d00d82a7ad8f28fb0970c4e4e2cb418c08f7d0b9`, which adopts the repaired Coven
-daemon revision while preserving that candidate and Chat source. The frozen
+`c614dfe72e494d21b267b825edd5ff78da184acb`, which adopts Coven #983 and
+#985 while preserving that candidate and Chat source. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
@@ -1209,20 +1231,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `6f1eebccd436914523fc6fe7f7ef97e34da65b4e313bb3aa37626218ce199fef` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `9d88d47f9c0041c9c7d1e183151e419fd6f9a49a866247bd2a0b332ec1fed94b` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 204,500 | `f93b5720b105c06655158646137cad559b9b289983bd94939f055f29bdf48fa5` |
+| `scripts/phase1-conformance.mjs` | 205,046 | `583b9b29a1bd90c833fb82e0a6a0597edfe59876a5aabdff940aca78601a3cd0` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 185,403 | `5721d71f99b4abcee7cd02d007e2c344db5512c138fbc912c15124117261f59e` |
+| `scripts/phase1-schema-v2-producer.mjs` | 186,285 | `4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
