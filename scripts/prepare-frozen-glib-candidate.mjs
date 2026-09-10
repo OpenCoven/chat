@@ -47,12 +47,24 @@ function regularFiles(root, path) {
   return [path];
 }
 
-export function prepareFrozenGlibCandidate(candidatePath, maintenancePath) {
+export function prepareFrozenGlibCandidate(
+  candidatePath,
+  maintenancePath,
+  sourceKind = 'production',
+) {
+  assert(['production', 'harness'].includes(sourceKind), 'Unsupported frozen source kind');
+  const source =
+    sourceKind === 'production'
+      ? production
+      : {
+          revision: harness,
+          tree: '00b29f6e402e01575c382be692b3a755ae0df294',
+        };
   const candidate = resolve(candidatePath);
   const maintained = resolve(maintenancePath);
   assert.notEqual(candidate, maintained, 'Source roots must differ');
   for (const [root, identity, label] of [
-    [candidate, production, 'Frozen GLib candidate'],
+    [candidate, source, 'Frozen GLib candidate'],
     [maintained, maintenance, 'Frozen GLib maintained'],
   ]) {
     assertCleanPhase1Checkout(root, label);
@@ -117,6 +129,8 @@ export function prepareFrozenGlibCandidate(candidatePath, maintenancePath) {
   );
   return Object.freeze({
     productionRevision: production.revision,
+    sourceKind,
+    sourceRevision: source.revision,
     maintenanceRevision: maintenance.revision,
     candidateTree: git(candidate, ['write-tree']).trim(),
     vendorFiles: vendorFiles.length - 2,
@@ -124,12 +138,15 @@ export function prepareFrozenGlibCandidate(candidatePath, maintenancePath) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  assert.equal(
-    process.argv.length,
-    4,
-    'Usage: node prepare-frozen-glib-candidate.mjs CANDIDATE MAINTAINED',
+  assert(
+    process.argv.length === 4 || process.argv.length === 5,
+    'Usage: node prepare-frozen-glib-candidate.mjs CANDIDATE MAINTAINED [production|harness]',
   );
   console.log(
-    JSON.stringify(prepareFrozenGlibCandidate(process.argv[2], process.argv[3]), null, 2),
+    JSON.stringify(
+      prepareFrozenGlibCandidate(process.argv[2], process.argv[3], process.argv[4]),
+      null,
+      2,
+    ),
   );
 }

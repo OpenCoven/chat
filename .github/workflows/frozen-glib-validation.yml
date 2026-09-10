@@ -17,7 +17,15 @@ concurrency:
 
 jobs:
   frozen-native:
-    name: Frozen production GLib (Linux x64)
+    name: Frozen ${{ matrix.source }} GLib (Linux x64)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: production
+            revision: 841a88f8885bc20cac2f9d5b5b6bc2a23a76e657
+          - source: harness
+            revision: c5445941750f5ac232a78f3d7c7dcecf91bd52bc
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -42,10 +50,10 @@ jobs:
           path: maintained
           fetch-depth: 0
           persist-credentials: false
-      - name: Check out frozen production source
+      - name: Check out frozen ${{ matrix.source }} source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: 841a88f8885bc20cac2f9d5b5b6bc2a23a76e657
+          ref: ${{ matrix.revision }}
           path: candidate
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -57,13 +65,13 @@ jobs:
       - name: Reconstruct and verify the narrow frozen candidate
         id: reconstruct
         run: >-
-          node tooling/scripts/prepare-frozen-glib-candidate.mjs candidate maintained
+          node tooling/scripts/prepare-frozen-glib-candidate.mjs candidate maintained ${{ matrix.source }}
           > "$RUNNER_TEMP/frozen-glib-candidate-receipt.json"
       - name: Retain source identity and delta receipt
         if: always() && steps.reconstruct.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: frozen-glib-candidate-receipt
+          name: frozen-glib-${{ matrix.source }}-candidate-receipt
           path: ${{ runner.temp }}/frozen-glib-candidate-receipt.json
           if-no-files-found: error
           retention-days: 14
@@ -75,7 +83,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-      - name: Install frozen production dependencies
+      - name: Install frozen candidate dependencies
         working-directory: candidate
         run: pnpm install --frozen-lockfile
       # The helper verifies that the candidate contains these exact maintained bytes.
@@ -116,7 +124,7 @@ jobs:
           }
           console.log('Linux graph: one maintained glib 0.18.5; sys/macro siblings remain registry packages.');
           EOF
-      - name: Build frozen production desktop
+      - name: Build frozen candidate desktop
         working-directory: candidate
         run: pnpm app:build
       - name: Run optimized Linux native regressions

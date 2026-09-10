@@ -75,3 +75,20 @@ test('rejects a symlink replacing reviewed vendor source', (t) => {
   assert.throws(() => prepareFrozenGlibCandidate(candidate, maintained));
   assert.equal(git(candidate, 'status', '--porcelain'), '');
 });
+
+test('reconstructs the exact frozen harness candidate when explicitly selected', (t) => {
+  const { candidate, maintained } = fixture(t);
+  git(candidate, 'checkout', '--detach', 'c5445941750f5ac232a78f3d7c7dcecf91bd52bc');
+  const receipt = prepareFrozenGlibCandidate(candidate, maintained, 'harness');
+  assert.equal(receipt.sourceKind, 'harness');
+  assert.equal(receipt.sourceRevision, 'c5445941750f5ac232a78f3d7c7dcecf91bd52bc');
+  assert.equal(receipt.candidateTree, 'afc0cd3964866069e707fdd72d2bbc2efac6ebbb');
+  assert.equal(git(candidate, 'diff', '--name-only', 'HEAD').split('\n').length, 125);
+});
+
+test('rejects unsupported source selection before mutating either checkout', (t) => {
+  const { candidate, maintained } = fixture(t);
+  assert.throws(() => prepareFrozenGlibCandidate(candidate, maintained, 'other'), /source kind/);
+  assert.equal(git(candidate, 'status', '--porcelain'), '');
+  assert.equal(git(maintained, 'status', '--porcelain'), '');
+});
