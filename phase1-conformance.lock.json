@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "1a2967d3661f89974a76eaac8ed544ab0a849ee9"
+    "revision": "adb60d2d15771bfd67e75dce5bae51928e6a5821"
   },
   "harnessAuthority": {
-    "revision": "1a2967d3661f89974a76eaac8ed544ab0a849ee9",
-    "tree": "7752796438804d9dd8812b539ad8698b2563f2e1",
+    "revision": "adb60d2d15771bfd67e75dce5bae51928e6a5821",
+    "tree": "a954eda4ca703f881a7cc8e41a0ddce2a13f64f1",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -51,8 +51,8 @@
       },
       {
         "path": "scripts/process-owned-artifact-root.mjs",
-        "blob": "d6f44015f0ddd93d01c41b4baa9c0591ad1a7fbf",
-        "sha256": "9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a"
+        "blob": "21aa0330bab345f86832d026fe80e4f513c64be0",
+        "sha256": "d4f37d792cf9ab6b9bedb81620994e8088bb19d6bb693f433711f6968ec20659"
       },
       {
         "path": "scripts/owned-temp-directory.mjs",
