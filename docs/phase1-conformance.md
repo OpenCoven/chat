@@ -118,9 +118,10 @@ attestation, and aggregation were skipped. No three-platform aggregate is accept
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
-The runner verifies that the evidence-authority commit descends from the
-candidate and that all four candidate source package identities match the
-frozen manifest. It never rebuilds replacement per-platform SDK tarballs.
+The runner verifies both exact revisions and clean checkouts independently,
+checks the locked evidence registry, schema, and contract digests, and requires
+all four candidate source package identities to match the frozen manifest.
+The evidence authority and package candidate do not require shared ancestry. It never rebuilds replacement per-platform SDK tarballs.
 
 After reading the lock and configuring the frozen Windows supervisor, the
 verified entrypoint authenticates its own Chat revision, tree, and every
@@ -209,9 +210,11 @@ the same trust boundary used by the desktop application.
 Before building the conformance driver, the runner requires the production
 adapter, RPC entrypoint, Cargo manifest, and Cargo lock bytes to match the
 locked Chat production commit. The conformance-only Rust support is built from
-the separate immutable descendant harness revision in the lock. The production
-tree plus selected adapter/custody Git blobs and SHA-256 values are checked
-before packaging.
+the separate immutable harness revision in the lock. Before packaging, the
+runner verifies the exact production revision and tree, clean source, selected
+adapter/custody Git blobs and SHA-256 values, and the harness authority with its
+allowlisted native changes. The production adapter bytes must agree; ancestry
+between the independently frozen revisions is not required.
 
 The runner never calls `coven daemon status`, duplicates Unix peer or Windows
 pipe identity logic, or adds a pathname/shell fallback. Missing authority and
@@ -1231,13 +1234,13 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `9d88d47f9c0041c9c7d1e183151e419fd6f9a49a866247bd2a0b332ec1fed94b` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 205,046 | `583b9b29a1bd90c833fb82e0a6a0597edfe59876a5aabdff940aca78601a3cd0` |
+| `scripts/phase1-conformance.mjs` | 205,138 | `7dfe2cc2bf7deafec6749e3801075e238cb2d3fe5ccff6ad60e2fa9a36277c4d` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
