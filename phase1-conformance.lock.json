@@ -141,13 +141,13 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "6ad548f2c25dd68254302cff10cc6988a9911a5e",
-        "sha256": "8f4dd4b106568f72c1f42ddfa44f0005925789259600d9c977809df6e1f48081"
+        "blob": "0b3ff2492ea02398e5ff72b86512658dd63c9673",
+        "sha256": "4f17156dc4cf5f4f4ace330144ce81e312c7e857c353e0d8dd18ced171e8c731"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "e66cf5d4f10e050aa794e981f09b71c1acaec216",
-        "sha256": "13adbc05ff760d6b29ff9cc0c270e4daea2f309e061fc3becb24add228d5dcd7"
+        "blob": "96ad550085f36f02c48ecae6945dc41a2f6e89dd",
+        "sha256": "3171e46b0b8d9b9f6960bdc76b01e807011bd909211024433baac3f934fc6e4d"
       }
     ],
     "productionDeltas": [
