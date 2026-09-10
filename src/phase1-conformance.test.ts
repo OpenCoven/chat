@@ -5355,6 +5355,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       [undefined, 'unrecognized private test output', '', 'unknown'],
       [undefined, 'test discovery::tests::unselected ... FAILED\n', '', 'unknown'],
       ['stdout-limit', `test ${testName} ... FAILED\n`, 'private output', 'output-limit'],
+      ['tracking', '', '', 'tracking'],
     ]) {
       const error = new producer.CommandExecutionError(label, {
         reason,
@@ -5389,6 +5390,45 @@ describe('Phase 1 real-authority conformance harness', () => {
         stage,
       ),
     ).toBe(stage);
+  });
+
+  test.each(['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM', 'private-path'])(
+    'bounds Coven observation launch error %s',
+    (spawnCode) => {
+      const base = 'phase1.runtime-observations.coven-rust-tests.legacy-case';
+      const error = new schemaV2Producer.CommandExecutionError(
+        'Coven native trust observation tests discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+        { reason: 'spawn', spawnCode, code: null, signal: null, stdout: '', stderr: '' },
+      );
+      const expected =
+        spawnCode === 'private-path' ? `${base}.spawn` : `${base}.spawn.${spawnCode.toLowerCase()}`;
+      expect(
+        schemaV2Producer.schemaV2FailureDiagnostic(
+          error,
+          'phase1.runtime-observations.coven-rust-tests.failed',
+        ),
+      ).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(expected))).toBe(expected);
+      expect(
+        publicPhase1FailureDiagnostic(new Error(`${base}.spawn.private-path`)),
+      ).toBeUndefined();
+    },
+  );
+
+  test('retains the bounded spawn error code from a missing executable', async () => {
+    const owner = createProcessOwnedArtifactRoot({ prefix: 'p1spawn' });
+    try {
+      await expect(
+        schemaV2Producer.runSchemaV2CommandForTest(
+          owner,
+          resolve(owner.rootPath, 'missing-executable'),
+          [],
+          { cwd: owner.rootPath },
+        ),
+      ).rejects.toMatchObject({ result: { reason: 'spawn', spawnCode: 'ENOENT' } });
+    } finally {
+      await owner.cleanup();
+    }
   });
 
   test('tracks bounded schema-v2 observation substages without exposing command output', () => {

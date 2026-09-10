@@ -111,6 +111,7 @@ const schemaV2NativeFailureStages = new Set([
   'missing-keychain',
   'isolation-proof',
 ]);
+const boundedSpawnErrorCodes = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM'];
 const cargoBuildFailureCategories = [
   'timeout',
   'output-limit',
@@ -298,9 +299,13 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.runtime-observations.chat-rust-tests.failed',
   'phase1.runtime-observations.coven-rust-tests.failed',
   ...[...covenRustObservationDiagnostics.values()].flatMap((test) =>
-    [...cargoBuildFailureCategories, 'test-failed', 'not-observed'].map(
-      (category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`,
-    ),
+    [
+      ...cargoBuildFailureCategories,
+      ...boundedSpawnErrorCodes.map((code) => `spawn.${code.toLowerCase()}`),
+      'tracking',
+      'test-failed',
+      'not-observed',
+    ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
   ),
   'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
@@ -1126,6 +1131,15 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
         error instanceof CommandExecutionError &&
         error.label === `Coven native trust observation tests ${name}`
       ) {
+        if (error.result?.reason === 'tracking') {
+          return `${base}.tracking`;
+        }
+        if (
+          error.result?.reason === 'spawn' &&
+          boundedSpawnErrorCodes.includes(error.result?.spawnCode)
+        ) {
+          return `${base}.spawn.${error.result.spawnCode.toLowerCase()}`;
+        }
         const category = classifyCargoBuildFailureDiagnostic(base, error);
         if (
           category === `${base}.unknown` &&
@@ -1728,8 +1742,15 @@ function runCommand(
         fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'tracking' });
       }
     });
-    child.once('error', () => {
-      fail({ code: null, signal: null, stdout: '', stderr: '', reason: 'spawn' });
+    child.once('error', (error) => {
+      fail({
+        code: null,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        reason: 'spawn',
+        spawnCode: boundedSpawnErrorCodes.includes(error.code) ? error.code : undefined,
+      });
     });
     child.stdout.on('data', (chunk) => {
       stdoutBytes += chunk.length;

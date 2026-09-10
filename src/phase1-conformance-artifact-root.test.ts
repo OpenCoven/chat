@@ -1,4 +1,4 @@
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -200,6 +200,75 @@ describe('process-owned artifact root', () => {
     expect(() => createProcessOwnedArtifactRoot({ prefix: '../escape' })).toThrow(
       /Owned temp prefix/,
     );
+  });
+
+  test.each(['exit', 'signal'] as const)(
+    'accepts a recycled PID after the former child completes by %s',
+    async (completion) => {
+      const root = createRoot();
+      // Model PID reuse without waiting for the OS to recycle a real process ID.
+      const former = new ChildProcess();
+      Object.defineProperty(former, 'pid', { value: 987_654 });
+      root.trackChild(former);
+      if (completion === 'exit') Object.defineProperty(former, 'exitCode', { value: 0 });
+      else Object.defineProperty(former, 'signalCode', { value: 'SIGTERM' });
+
+      const later = new ChildProcess();
+      Object.defineProperty(later, 'pid', { value: 987_655 });
+      Object.defineProperty(later, 'exitCode', { value: 0 });
+      root.trackChild(later);
+      const replacement = new ChildProcess();
+      Object.defineProperty(replacement, 'pid', { value: former.pid });
+      Object.defineProperty(replacement, 'exitCode', { value: 0 });
+
+      expect(root.trackChild(replacement)).toBe(replacement);
+      await expect(root.terminateChild(former)).rejects.toThrow(/currently tracked ChildProcess/);
+      await root.cleanup();
+      expect(root.reapedChildren).toEqual([replacement.pid, later.pid]);
+    },
+  );
+
+  test.each(['terminateChild', 'cleanup'] as const)(
+    'retains a replacement registered during %s',
+    async (operation) => {
+      const root = createRoot();
+      const former = new ChildProcess();
+      Object.defineProperty(former, 'pid', { value: 987_654 });
+      Object.defineProperty(former, 'exitCode', { value: 0 });
+      root.trackChild(former);
+      const pending = operation === 'cleanup' ? root.cleanup() : root.terminateChild(former);
+      const replacement = new ChildProcess();
+      Object.defineProperty(replacement, 'pid', { value: former.pid });
+      Object.defineProperty(replacement, 'exitCode', { value: 0 });
+      root.trackChild(replacement);
+
+      if (operation === 'cleanup') {
+        await expect(pending).rejects.toThrow(/cleanup failed/);
+      } else {
+        await pending;
+      }
+      expect(existsSync(root.rootPath)).toBe(true);
+      await expect(root.terminateChild(replacement)).resolves.toBeUndefined();
+      await root.cleanup();
+      expect(existsSync(root.rootPath)).toBe(false);
+    },
+  );
+
+  test('rejects reuse of a PID while its tracked child is still live', () => {
+    const root = createRoot();
+    const live = new ChildProcess();
+    Object.defineProperty(live, 'pid', { value: 987_654 });
+    root.trackChild(live);
+    const conflicting = new ChildProcess();
+    Object.defineProperty(conflicting, 'pid', { value: live.pid });
+    Object.defineProperty(conflicting, 'exitCode', { value: 0 });
+    try {
+      expect(() => root.trackChild(conflicting)).toThrow(/different child is already tracked/);
+      expect(root.trackChild(live)).toBe(live);
+    } finally {
+      // Neither synthetic child may be signaled by teardown.
+      Object.defineProperty(live, 'exitCode', { value: 0 });
+    }
   });
 
   test('terminates and reaps only tracked child processes', async () => {
