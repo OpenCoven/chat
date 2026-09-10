@@ -34,6 +34,8 @@ import {
   assertNoNodeRuntimeInjection,
   assertPairingStatus,
   assertProductionAdapterAtRevision,
+  assertProductionChatAuthority,
+  assertSdkCandidateProvenance,
   bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
@@ -2537,6 +2539,108 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
   );
 
+  test('binds SDK candidate and evidence independently and rejects substituted authority', () => {
+    const lock = structuredClone(readPhase1ConformanceLock());
+    const root = mkdtempSync(resolve(tmpdir(), 'sdk-authority-'));
+    const roots = {
+      sdkRoot: resolve(root, 'candidate'),
+      sdkEvidenceRoot: resolve(root, 'evidence'),
+    };
+    const git = (cwd: string, args: string[]) =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    try {
+      for (const path of Object.values(roots)) {
+        mkdirSync(path);
+        git(path, ['init', '--initial-branch=main']);
+        git(path, ['config', 'user.name', 'OpenCoven test']);
+        git(path, ['config', 'user.email', 'opencoven-test@example.com']);
+        git(path, ['config', 'commit.gpgsign', 'false']);
+      }
+      for (const [directory, name] of [
+        ['core', '@opencoven/sdk-core'],
+        ['cave', '@opencoven/cave-client'],
+        ['coven', '@opencoven/coven-client'],
+        ['sdk', '@opencoven/sdk'],
+      ] as const) {
+        const path = resolve(roots.sdkRoot, 'packages', directory);
+        mkdirSync(path, { recursive: true });
+        writeFileSync(
+          resolve(path, 'package.json'),
+          JSON.stringify({ name, version: lock.release.sdkManifest.version }),
+        );
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const entry = lock.evidence[key];
+        const bytes = `fixture ${key}\n`;
+        const path = resolve(roots.sdkEvidenceRoot, entry.path);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, bytes);
+        entry.sha256 = createHash('sha256').update(bytes).digest('hex');
+      }
+      for (const path of Object.values(roots)) {
+        git(path, ['add', '.']);
+        git(path, ['commit', '-m', 'fixture authority']);
+      }
+      lock.sdk.revision = git(roots.sdkRoot, ['rev-parse', 'HEAD']);
+      lock.evidence.revision = git(roots.sdkEvidenceRoot, ['rev-parse', 'HEAD']);
+      expect(() => assertSdkCandidateProvenance(roots, lock)).not.toThrow();
+      for (const key of ['sdk', 'evidence'] as const) {
+        const wrong = structuredClone(lock);
+        wrong[key].revision = 'f'.repeat(40);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow('identity does not match');
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const wrong = structuredClone(lock);
+        wrong.evidence[key].sha256 = 'f'.repeat(64);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow();
+      }
+      appendFileSync(resolve(roots.sdkRoot, 'packages/core/package.json'), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+      git(roots.sdkRoot, ['checkout', '--', '.']);
+      appendFileSync(resolve(roots.sdkEvidenceRoot, lock.evidence.contract.path), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test.skipIf(process.platform === 'win32')(
+    'accepts exact frozen Chat production authority independently of harness ancestry',
+    () => {
+      const lock = readPhase1ConformanceLock();
+      const root = mkdtempSync(resolve(tmpdir(), 'chat-packaged-authority-'));
+      const roots = { chatRoot: resolve(root, 'chat'), chatHarnessRoot: resolve(root, 'harness') };
+      try {
+        for (const [path, revision] of [
+          [roots.chatRoot, lock.chat.revision],
+          [roots.chatHarnessRoot, lock.harness.revision],
+        ] as const) {
+          execFileSync('git', ['clone', '--quiet', '--no-checkout', projectRoot, path]);
+          execFileSync('git', ['checkout', '--quiet', '--detach', revision], { cwd: path });
+        }
+        expect(() => assertProductionChatAuthority(roots, lock)).not.toThrow();
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.harness.revision], {
+          cwd: roots.chatRoot,
+        });
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow(
+          'Production Chat identity does not match the immutable authority lock.',
+        );
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.chat.revision], {
+          cwd: roots.chatRoot,
+        });
+        appendFileSync(resolve(roots.chatRoot, 'src-tauri/src/coven.rs'), '\n// substituted\n');
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
   test('builds the conformance driver around production adapter bytes from the locked Chat commit', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
@@ -2545,7 +2649,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(source).toContain('assertProductionAdapterAtRevision');
     expect(source).toContain('assertProductionChatAuthority');
-    expect(source).toContain("'merge-base', '--is-ancestor'");
+    expect(source).toContain("assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat')");
     expect(source).toContain('lock.chatAuthority.tree');
     expect(source).toContain("'src-tauri/src/coven.rs'");
     expect(source).toContain('assertPhase1ProducerAuthority(lock, harnessRoot)');

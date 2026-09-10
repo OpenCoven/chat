@@ -22,6 +22,7 @@ import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
+  assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
@@ -29,6 +30,7 @@ import {
   createGitCheckoutEnvironment,
   createGitEnvironment,
   gitNullDevice,
+  readPhase1CheckoutIdentity,
   readPhase1ConformanceLock,
   resolveLocalGitDirectory,
   toGitSafeDirectoryPath,
@@ -2143,14 +2145,11 @@ export function assertProductionAdapterAtRevision(harnessRoot, lock) {
   }
 }
 
-function assertProductionChatAuthority(roots, lock) {
-  const tree = runSupervisedSync('git', ['rev-parse', 'HEAD^{tree}'], {
-    cwd: roots.chatRoot,
-    encoding: 'utf8',
-    env: createGitEnvironment(),
-  }).trim();
-  if (tree !== lock.chatAuthority.tree) {
-    throw new Error('Production Chat tree does not match the immutable authority lock.');
+export function assertProductionChatAuthority(roots, lock) {
+  assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat');
+  const identity = readPhase1CheckoutIdentity(roots.chatRoot, 'Production Chat');
+  if (identity.revision !== lock.chat.revision || identity.tree !== lock.chatAuthority.tree) {
+    throw new Error('Production Chat identity does not match the immutable authority lock.');
   }
   for (const file of lock.chatAuthority.files) {
     const path = resolve(roots.chatRoot, file.path);
@@ -2169,19 +2168,7 @@ function assertProductionChatAuthority(roots, lock) {
       throw new Error('Production Chat authority file does not match its locked blob.');
     }
   }
-  try {
-    runSupervisedSync(
-      'git',
-      ['merge-base', '--is-ancestor', lock.chat.revision, lock.harness.revision],
-      {
-        cwd: roots.chatHarnessRoot,
-        env: createGitEnvironment(),
-        stdio: 'ignore',
-      },
-    );
-  } catch {
-    throw new Error('Chat conformance harness must descend from the production revision.');
-  }
+  assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock);
 }
 
 function assertWindowsSupervisorSource(roots, lock) {
@@ -2215,22 +2202,22 @@ function assertWindowsSupervisorSource(roots, lock) {
   }
 }
 
-function assertSdkCandidateProvenance(roots, lock) {
-  try {
-    runSupervisedSync(
-      'git',
-      [
-        '-C',
-        roots.sdkEvidenceRoot,
-        'merge-base',
-        '--is-ancestor',
-        lock.sdk.revision,
-        lock.evidence.revision,
-      ],
-      { env: createGitEnvironment(), stdio: 'ignore' },
-    );
-  } catch {
-    throw new Error('SDK evidence authority does not descend from the package candidate.');
+export function assertSdkCandidateProvenance(roots, lock) {
+  for (const [root, revision, label] of [
+    [roots.sdkRoot, lock.sdk.revision, 'SDK candidate'],
+    [roots.sdkEvidenceRoot, lock.evidence.revision, 'SDK evidence authority'],
+  ]) {
+    assertCleanPhase1Checkout(root, label);
+    if (readPhase1CheckoutIdentity(root, label).revision !== revision) {
+      throw new Error(`${label} identity does not match the immutable authority lock.`);
+    }
+  }
+  for (const [key, label] of [
+    ['assertionRegistry', 'SDK assertion registry'],
+    ['schema', 'SDK evidence schema'],
+    ['contract', 'SDK evidence contract'],
+  ]) {
+    readLockedDigestFile(roots.sdkEvidenceRoot, lock.evidence[key], label);
   }
   const sourcePackages = [
     ['packages/core/package.json', '@opencoven/sdk-core'],
