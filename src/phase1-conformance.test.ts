@@ -34,6 +34,8 @@ import {
   assertNoNodeRuntimeInjection,
   assertPairingStatus,
   assertProductionAdapterAtRevision,
+  assertProductionChatAuthority,
+  assertSdkCandidateProvenance,
   bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
@@ -853,15 +855,14 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('keeps workflow producer HEAD distinct from the historical executable harness', () => {
     const lock = readPhase1ConformanceLock();
-    const workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+    let workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    const workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    let workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    expect(workflowRevision).not.toBe(lock.harness.revision);
     const root = resolve(projectRoot, 'test-results', 'phase1-distinct-authorities', randomUUID());
     const harnessRoot = resolve(root, 'harness');
     const producerRoot = resolve(root, 'producer');
@@ -877,6 +878,34 @@ describe('Phase 1 real-authority conformance harness', () => {
           cwd: destination,
         });
       }
+      // Use a distinct producer fixture even while a local pin update names HEAD.
+      writeFileSync(resolve(producerRoot, 'producer-fixture.txt'), 'distinct producer tree\n');
+      execFileSync('git', ['add', 'producer-fixture.txt'], { cwd: producerRoot });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=OpenCoven test',
+          '-c',
+          'user.email=opencoven-test@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'distinct producer fixture',
+        ],
+        { cwd: producerRoot },
+      );
+      workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      expect(workflowRevision).not.toBe(lock.harness.revision);
       const result = validateSchemaV2AuthorityCheckouts({
         lock,
         harnessRoot,
@@ -2537,6 +2566,108 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
   );
 
+  test('binds SDK candidate and evidence independently and rejects substituted authority', () => {
+    const lock = structuredClone(readPhase1ConformanceLock());
+    const root = mkdtempSync(resolve(tmpdir(), 'sdk-authority-'));
+    const roots = {
+      sdkRoot: resolve(root, 'candidate'),
+      sdkEvidenceRoot: resolve(root, 'evidence'),
+    };
+    const git = (cwd: string, args: string[]) =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    try {
+      for (const path of Object.values(roots)) {
+        mkdirSync(path);
+        git(path, ['init', '--initial-branch=main']);
+        git(path, ['config', 'user.name', 'OpenCoven test']);
+        git(path, ['config', 'user.email', 'opencoven-test@example.com']);
+        git(path, ['config', 'commit.gpgsign', 'false']);
+      }
+      for (const [directory, name] of [
+        ['core', '@opencoven/sdk-core'],
+        ['cave', '@opencoven/cave-client'],
+        ['coven', '@opencoven/coven-client'],
+        ['sdk', '@opencoven/sdk'],
+      ] as const) {
+        const path = resolve(roots.sdkRoot, 'packages', directory);
+        mkdirSync(path, { recursive: true });
+        writeFileSync(
+          resolve(path, 'package.json'),
+          JSON.stringify({ name, version: lock.release.sdkManifest.version }),
+        );
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const entry = lock.evidence[key];
+        const bytes = `fixture ${key}\n`;
+        const path = resolve(roots.sdkEvidenceRoot, entry.path);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, bytes);
+        entry.sha256 = createHash('sha256').update(bytes).digest('hex');
+      }
+      for (const path of Object.values(roots)) {
+        git(path, ['add', '.']);
+        git(path, ['commit', '-m', 'fixture authority']);
+      }
+      lock.sdk.revision = git(roots.sdkRoot, ['rev-parse', 'HEAD']);
+      lock.evidence.revision = git(roots.sdkEvidenceRoot, ['rev-parse', 'HEAD']);
+      expect(() => assertSdkCandidateProvenance(roots, lock)).not.toThrow();
+      for (const key of ['sdk', 'evidence'] as const) {
+        const wrong = structuredClone(lock);
+        wrong[key].revision = 'f'.repeat(40);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow('identity does not match');
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const wrong = structuredClone(lock);
+        wrong.evidence[key].sha256 = 'f'.repeat(64);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow();
+      }
+      appendFileSync(resolve(roots.sdkRoot, 'packages/core/package.json'), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+      git(roots.sdkRoot, ['checkout', '--', '.']);
+      appendFileSync(resolve(roots.sdkEvidenceRoot, lock.evidence.contract.path), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test.skipIf(process.platform === 'win32')(
+    'accepts exact frozen Chat production authority independently of harness ancestry',
+    () => {
+      const lock = readPhase1ConformanceLock();
+      const root = mkdtempSync(resolve(tmpdir(), 'chat-packaged-authority-'));
+      const roots = { chatRoot: resolve(root, 'chat'), chatHarnessRoot: resolve(root, 'harness') };
+      try {
+        for (const [path, revision] of [
+          [roots.chatRoot, lock.chat.revision],
+          [roots.chatHarnessRoot, lock.harness.revision],
+        ] as const) {
+          execFileSync('git', ['clone', '--quiet', '--no-checkout', projectRoot, path]);
+          execFileSync('git', ['checkout', '--quiet', '--detach', revision], { cwd: path });
+        }
+        expect(() => assertProductionChatAuthority(roots, lock)).not.toThrow();
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.harness.revision], {
+          cwd: roots.chatRoot,
+        });
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow(
+          'Production Chat identity does not match the immutable authority lock.',
+        );
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.chat.revision], {
+          cwd: roots.chatRoot,
+        });
+        appendFileSync(resolve(roots.chatRoot, 'src-tauri/src/coven.rs'), '\n// substituted\n');
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
   test('builds the conformance driver around production adapter bytes from the locked Chat commit', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
@@ -2545,7 +2676,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(source).toContain('assertProductionAdapterAtRevision');
     expect(source).toContain('assertProductionChatAuthority');
-    expect(source).toContain("'merge-base', '--is-ancestor'");
+    expect(source).toContain("assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat')");
     expect(source).toContain('lock.chatAuthority.tree');
     expect(source).toContain("'src-tauri/src/coven.rs'");
     expect(source).toContain('assertPhase1ProducerAuthority(lock, harnessRoot)');
@@ -5339,6 +5470,35 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['status replacement should wait for the active reader', 'early-result'],
     ['status replacement result: Timeout', 'result-timeout'],
     ['status replacement result: Disconnected', 'result-disconnected'],
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        [2, 'file-not-found'],
+        [3, 'path-not-found'],
+        [5, 'access-denied'],
+        [32, 'sharing-violation'],
+        [1307, 'invalid-owner'],
+        [1314, 'privilege-not-held'],
+      ].map(([code, category]) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: ${code}, kind: Other, message: "private message" } }`,
+        `writer-error.${operation}.${category}`,
+      ]),
+    ),
+    ...['private-operation', 'replace-status-file.extra', '', 'replace-status-file '].map(
+      (operation) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: 5, kind: Other, message: "private message" } }`,
+        'writer-error',
+      ],
+    ),
     ['replace status after reader closes: private writer error', 'writer-error'],
     [
       'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{1b}" } }',
