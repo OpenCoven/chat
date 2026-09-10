@@ -51,15 +51,15 @@ export function prepareFrozenGlibCandidate(candidatePath, maintenancePath) {
   const candidate = resolve(candidatePath);
   const maintained = resolve(maintenancePath);
   assert.notEqual(candidate, maintained, 'Source roots must differ');
-  for (const [root, identity] of [
-    [candidate, production],
-    [maintained, maintenance],
+  for (const [root, identity, label] of [
+    [candidate, production, 'Frozen GLib candidate'],
+    [maintained, maintenance, 'Frozen GLib maintained'],
   ]) {
-    assertCleanPhase1Checkout(root, 'Frozen GLib source');
+    assertCleanPhase1Checkout(root, label);
     assert.deepEqual(
-      readPhase1CheckoutIdentity(root),
+      readPhase1CheckoutIdentity(root, label),
       identity,
-      'Frozen GLib source identity mismatch',
+      `${label} identity mismatch`,
     );
   }
   const vendorFiles = vendorPaths.flatMap((path) => regularFiles(maintained, path)).sort();

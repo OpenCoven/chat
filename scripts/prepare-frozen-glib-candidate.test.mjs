@@ -46,14 +46,17 @@ test('reconstructs the exact narrow candidate and preserves its production versi
 test('rejects a substituted production revision before mutation', (t) => {
   const { candidate, maintained } = fixture(t);
   git(candidate, 'checkout', '--detach', 'c5445941750f5ac232a78f3d7c7dcecf91bd52bc');
-  assert.throws(() => prepareFrozenGlibCandidate(candidate, maintained), /identity/);
+  assert.throws(
+    () => prepareFrozenGlibCandidate(candidate, maintained),
+    /Frozen GLib candidate identity/,
+  );
   assert.equal(git(candidate, 'status', '--porcelain'), '');
 });
 
 test('rejects modified vendor input before changing candidate', (t) => {
   const { candidate, maintained } = fixture(t);
   appendFileSync(join(maintained, 'vendor/glib-0.18.5/src/variant_iter.rs'), '\n// mutation\n');
-  assert.throws(() => prepareFrozenGlibCandidate(candidate, maintained));
+  assert.throws(() => prepareFrozenGlibCandidate(candidate, maintained), /Frozen GLib maintained/);
   assert.equal(git(candidate, 'status', '--porcelain'), '');
 });
 
