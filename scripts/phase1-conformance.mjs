@@ -555,6 +555,21 @@ const publicPhase1DiagnosticIds = new Set([
       'spawn.enomem',
     ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
   ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
   'phase1.runtime-observations.cleanup.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',

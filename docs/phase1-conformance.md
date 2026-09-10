@@ -1189,20 +1189,20 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `2613523480fa8558405891979ab17ff9937f84fc801cc351564d98d020a94750` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `d2085e29912242a1991fc2d78dd0870c409417031efc26aeae93c1fcf45f5c2b` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 203,965 | `8eb673d34a8e52f3a83150c173ccafda8e89645c0cf07358422c0791284145cf` |
+| `scripts/phase1-conformance.mjs` | 204,285 | `7b5b47e1ddf7e78027fc6bd5b41085cf6b3c2769b9a68cedeaa5065d7e0ac63a` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 181,826 | `1bd6fcbd68145296171c41a1ff287a733b163d6ae6372ea3c0b1f68e89a61c54` |
+| `scripts/phase1-schema-v2-producer.mjs` | 183,519 | `b137f5d23a70a69f4bddd141f1bca3d7529ea05aca7714a780ab5e08d90b356a` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1344,3 +1344,19 @@ Protected run `34413820955` passed Linux and Darwin, including all 110 Cave,
 used the same category for launch and tracking failures. Local tests reproduce
 stale PID registration and cover its repair, but do not prove it caused this
 Windows failure. Fresh bound protected evidence is still required.
+
+Protected run `34422000259`, attempt 1, used producer `6cf479d` and validator
+`7ed9b19`. Linux and Darwin records passed provenance, scan, and exact assertion
+checks: 110 Cave, 46 SDK, and 41 Chat assertions per platform. Windows passed the
+first four selected Coven Rust tests, then reported `status-replacement.test-failed`.
+Validation, attestation, and aggregation were skipped; no aggregate was accepted.
+
+The status replacement diagnostic now recognizes fixed panic messages from the
+selected test and reports only an `assertion` category: setup, reader open, early
+result, result timeout or disconnection, writer error or join, readback, content,
+or cleanup. The matcher requires the selected test failure and its panic header
+in `discovery.rs`; unknown or unattributed output remains `test-failed`. An
+`early-result` category means the test received a result before its 20 ms wait
+expired. It does not distinguish writer success from writer failure. These
+categories require a refreshed producer binding and new protected evidence;
+they do not establish the cause of run `34422000259` retroactively.

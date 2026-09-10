@@ -307,6 +307,21 @@ const publicFailureDiagnosticSet = new Set([
       'not-observed',
     ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
   ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
   'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
@@ -1150,6 +1165,29 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
             .split(/\r?\n/u)
             .some((line) => line.trim() === `test ${name} ... FAILED`)
         ) {
+          if (test === 'status-replacement') {
+            const lines = stripVTControlCharacters(error.result.stdout ?? '').split(/\r?\n/u);
+            const panic = lines.findIndex(
+              (line) =>
+                line.startsWith(`thread '${name}' `) &&
+                /panicked at .*discovery\.rs:\d+:\d+:$/u.test(line),
+            );
+            const message = panic < 0 ? '' : (lines[panic + 1] ?? '');
+            const categories = [
+              [/^(?:create status replacement home|write current status):/u, 'setup'],
+              [/^assertion `left != right` failed: open status reader$/u, 'reader-open'],
+              [/^status replacement should wait for the active reader$/u, 'early-result'],
+              [/^status replacement result: Timeout$/u, 'result-timeout'],
+              [/^status replacement result: Disconnected$/u, 'result-disconnected'],
+              [/^replace status after reader closes:/u, 'writer-error'],
+              [/^status replacement thread:/u, 'writer-join'],
+              [/^read replaced status:/u, 'readback'],
+              [/^assertion `left == right` failed$/u, 'content'],
+              [/^remove status replacement home:/u, 'cleanup'],
+            ];
+            const match = categories.find(([pattern]) => pattern.test(message));
+            if (match) return `${base}.assertion.${match[1]}`;
+          }
           return `${base}.test-failed`;
         }
         return category;
