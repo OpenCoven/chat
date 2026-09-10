@@ -855,15 +855,14 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('keeps workflow producer HEAD distinct from the historical executable harness', () => {
     const lock = readPhase1ConformanceLock();
-    const workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+    let workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    const workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    let workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    expect(workflowRevision).not.toBe(lock.harness.revision);
     const root = resolve(projectRoot, 'test-results', 'phase1-distinct-authorities', randomUUID());
     const harnessRoot = resolve(root, 'harness');
     const producerRoot = resolve(root, 'producer');
@@ -879,6 +878,34 @@ describe('Phase 1 real-authority conformance harness', () => {
           cwd: destination,
         });
       }
+      // Use a distinct producer fixture even while a local pin update names HEAD.
+      writeFileSync(resolve(producerRoot, 'producer-fixture.txt'), 'distinct producer tree\n');
+      execFileSync('git', ['add', 'producer-fixture.txt'], { cwd: producerRoot });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=OpenCoven test',
+          '-c',
+          'user.email=opencoven-test@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'distinct producer fixture',
+        ],
+        { cwd: producerRoot },
+      );
+      workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      expect(workflowRevision).not.toBe(lock.harness.revision);
       const result = validateSchemaV2AuthorityCheckouts({
         lock,
         harnessRoot,
