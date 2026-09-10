@@ -83,18 +83,18 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `841a88f8885bc20cac2f9d5b5b6bc2a23a76e657`, tree
-  `81bbc67b3024c9c76444f7f4e84d79ac6fad1cc6`, the frozen SDK source
-  authority;
+- Chat production `0da8c4749f57e63601b29d66032f80c9bbac1cb5`, tree
+  `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
+  backport source awaiting SDK contract rebinding;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver support at the exact `harness.revision` and
-  `harnessAuthority.tree` generated from the preceding code/integration
-  commit;
+- Chat conformance driver `0207b93f4238017764e59eca4916e4c790561f77`,
+  tree `afc0cd3964866069e707fdd72d2bbc2efac6ebbb`, retained in the
+  adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -104,7 +104,8 @@ diagnostic-only change.
 SDK PR #189 froze the replacement candidate and Chat source contract. The
 current local fixture retains SDK source authority
 `c614dfe72e494d21b267b825edd5ff78da184acb`, which adopts Coven #983 and
-#985 while preserving that candidate and Chat source. The frozen
+#985 while preserving that candidate and historical Chat source. It is
+not compatible with the newly adopted Chat pin until SDK rebinding. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
