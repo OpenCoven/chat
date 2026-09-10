@@ -5341,6 +5341,42 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['status replacement result: Disconnected', 'result-disconnected'],
     ['replace status after reader closes: private writer error', 'writer-error'],
     [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{1b}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{202e}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{10ffff}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\x1b" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{d800}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{110000}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\x80" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\\\u{d800}" } }',
+      'writer-error.access-denied',
+    ],
+    [
       'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\q" } }',
       'writer-error',
     ],
