@@ -112,6 +112,25 @@ const schemaV2NativeFailureStages = new Set([
   'isolation-proof',
 ]);
 const boundedSpawnErrorCodes = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM'];
+const statusWriterFailureStages = [
+  'create-temporary-file',
+  'write-contents',
+  'write-newline',
+  'sync-temporary-file',
+  'convert-security-descriptor',
+  'open-process-token',
+  'read-process-token',
+  'apply-owner-only-security',
+  'replace-status-file',
+];
+const statusWriterErrorCategories = [
+  'access-denied',
+  'sharing-violation',
+  'privilege-not-held',
+  'invalid-owner',
+  'file-not-found',
+  'path-not-found',
+];
 const cargoBuildFailureCategories = [
   'timeout',
   'output-limit',
@@ -314,12 +333,10 @@ const publicFailureDiagnosticSet = new Set([
     'result-timeout',
     'result-disconnected',
     'writer-error',
-    'writer-error.access-denied',
-    'writer-error.sharing-violation',
-    'writer-error.privilege-not-held',
-    'writer-error.invalid-owner',
-    'writer-error.file-not-found',
-    'writer-error.path-not-found',
+    ...statusWriterErrorCategories.map((category) => `writer-error.${category}`),
+    ...statusWriterFailureStages.flatMap((stage) =>
+      statusWriterErrorCategories.map((category) => `writer-error.${stage}.${category}`),
+    ),
     'writer-join',
     'readback',
     'content',
@@ -1182,16 +1199,17 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
             // Inspect only the structured OS code at the start of this exact writer error.
             // The localized message and any private trailing output never become diagnostics.
             const writerRecord =
-              /^replace status after reader closes: Io \{ operation: "failed to write owner-only Windows daemon status", source: Os \{ code: (2|3|5|32|1307|1314), kind: [A-Za-z]+, message: "((?:[^"\\\r\n]|\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{[0-9a-fA-F]{1,6}\}))*)" \} \}$/u.exec(
+              /^replace status after reader closes: Io \{ operation: "failed to write owner-only Windows daemon status(?:: (create-temporary-file|write-contents|write-newline|sync-temporary-file|convert-security-descriptor|open-process-token|read-process-token|apply-owner-only-security|replace-status-file))?", source: Os \{ code: (2|3|5|32|1307|1314), kind: [A-Za-z]+, message: "((?:[^"\\\r\n]|\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{[0-9a-fA-F]{1,6}\}))*)" \} \}$/u.exec(
                 message,
               );
-            const writerCode = writerRecord?.[1];
+            const writerStage = writerRecord?.[1];
+            const writerCode = writerRecord?.[2];
             // Scan complete escape tokens so a literal backslash before "u" is not
             // mistaken for a Unicode escape. Rust strings exclude surrogate scalars.
             const validScalars =
               writerRecord &&
               [
-                ...writerRecord[2].matchAll(
+                ...writerRecord[3].matchAll(
                   /\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{([0-9a-fA-F]{1,6})\})/gu,
                 ),
               ].every((escapeToken) => {
@@ -1208,7 +1226,8 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
               1314: 'privilege-not-held',
             };
             if (writerCode && validScalars) {
-              return `${base}.assertion.writer-error.${writerCategories[writerCode]}`;
+              const stageCategory = writerStage ? `.${writerStage}` : '';
+              return `${base}.assertion.writer-error${stageCategory}.${writerCategories[writerCode]}`;
             }
             const categories = [
               [/^(?:create status replacement home|write current status):/u, 'setup'],

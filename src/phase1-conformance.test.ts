@@ -5413,6 +5413,46 @@ describe('Phase 1 real-authority conformance harness', () => {
       'writer-error.access-denied',
     ],
     [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: create-temporary-file", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.create-temporary-file.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: write-contents", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.write-contents.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: write-newline", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.write-newline.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: sync-temporary-file", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.sync-temporary-file.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: convert-security-descriptor", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.convert-security-descriptor.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: open-process-token", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.open-process-token.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: read-process-token", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.read-process-token.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: apply-owner-only-security", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error.apply-owner-only-security.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: replace-status-file", source: Os { code: 32, kind: Other, message: "private message" } }',
+      'writer-error.replace-status-file.sharing-violation',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: unsupported-stage", source: Os { code: 5, kind: PermissionDenied, message: "private message" } }',
+      'writer-error',
+    ],
+    [
       'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 32, kind: Other, message: "private message" } }',
       'writer-error.sharing-violation',
     ],

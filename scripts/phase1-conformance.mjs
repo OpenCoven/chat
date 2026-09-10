@@ -83,6 +83,25 @@ const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
 const rpcTimeoutMs = 10_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
+const statusWriterFailureStages = [
+  'create-temporary-file',
+  'write-contents',
+  'write-newline',
+  'sync-temporary-file',
+  'convert-security-descriptor',
+  'open-process-token',
+  'read-process-token',
+  'apply-owner-only-security',
+  'replace-status-file',
+];
+const statusWriterErrorCategories = [
+  'access-denied',
+  'sharing-violation',
+  'privilege-not-held',
+  'invalid-owner',
+  'file-not-found',
+  'path-not-found',
+];
 const approvedCommandFailureReasons = new Set([
   'spawn',
   'tracking',
@@ -562,12 +581,10 @@ const publicPhase1DiagnosticIds = new Set([
     'result-timeout',
     'result-disconnected',
     'writer-error',
-    'writer-error.access-denied',
-    'writer-error.sharing-violation',
-    'writer-error.privilege-not-held',
-    'writer-error.invalid-owner',
-    'writer-error.file-not-found',
-    'writer-error.path-not-found',
+    ...statusWriterErrorCategories.map((category) => `writer-error.${category}`),
+    ...statusWriterFailureStages.flatMap((stage) =>
+      statusWriterErrorCategories.map((category) => `writer-error.${stage}.${category}`),
+    ),
     'writer-join',
     'readback',
     'content',
