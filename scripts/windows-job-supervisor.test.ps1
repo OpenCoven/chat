@@ -95,6 +95,7 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 & (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-identity-cleanup-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-staging-binding.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-status-acl-probe.test.ps1')
 
