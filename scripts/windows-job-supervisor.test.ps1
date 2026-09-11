@@ -94,6 +94,7 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 & (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
 
 # Exercise the real diagnostic through a nested failure report without failing
 # the suite or changing any process. The observed handle is this test process.
