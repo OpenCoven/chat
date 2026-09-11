@@ -15,6 +15,29 @@ export type RootWriteReconciliation = Readonly<{
   outcome: 'committed' | 'not_committed';
 }>;
 
+export function sameRootWriteReceipt(
+  expected: RootWriteReceipt,
+  actual: RootWriteReceipt,
+): boolean {
+  if (
+    expected.id !== actual.id ||
+    expected.kind !== actual.kind ||
+    expected.familiarId !== actual.familiarId ||
+    expected.createdAt !== actual.createdAt
+  )
+    return false;
+  if (expected.kind === 'conversation') {
+    return actual.kind === 'conversation' && expected.title === actual.title;
+  }
+  return (
+    actual.kind === 'message' &&
+    expected.conversationId === actual.conversationId &&
+    expected.parentId === actual.parentId &&
+    expected.role === actual.role &&
+    expected.text === actual.text
+  );
+}
+
 export class ChatWriteRecoveryError extends Error {
   constructor(
     readonly recovery: RootWriteRecovery,

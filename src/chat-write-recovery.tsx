@@ -3,6 +3,7 @@ import type { ChatWriter } from './lib/local/chat-writer';
 import {
   type RootWriteReconciliation,
   type RootWriteRecovery,
+  sameRootWriteReceipt,
   writeRecoveryNotice,
 } from './lib/local/write-recovery';
 
@@ -25,7 +26,7 @@ export function ChatWriteRecovery({
     setError('');
     try {
       const result = await writer.reconcileWrite(recovery.receipt.id);
-      if (result.status === 'ok' && result.data.receipt.id === recovery.receipt.id) {
+      if (result.status === 'ok' && sameRootWriteReceipt(recovery.receipt, result.data.receipt)) {
         onReconciled(result.data);
       } else {
         setError(

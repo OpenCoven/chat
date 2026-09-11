@@ -96,6 +96,75 @@ test.each(['conversation', 'message'] as const)(
   },
 );
 
+test.each([
+  { kind: 'message', field: 'familiarId' },
+  { kind: 'message', field: 'conversationId' },
+  { kind: 'message', field: 'parentId' },
+  { kind: 'message', field: 'text' },
+  { kind: 'message', field: 'createdAt' },
+  { kind: 'message', field: 'role' },
+  { kind: 'conversation', field: 'familiarId' },
+  { kind: 'conversation', field: 'title' },
+  { kind: 'conversation', field: 'createdAt' },
+] as const)(
+  'App keeps $kind recovery blocked when a matching receipt ID has a different $field',
+  async ({ kind, field }) => {
+    const current = await fixture();
+    const reconcile = current.source.writer.reconcileWrite;
+    if (!reconcile) throw new Error('Missing recovery capability');
+    const mismatched = vi
+      .spyOn(current.source.writer, 'reconcileWrite')
+      .mockImplementation(async (id) => {
+        const result = await reconcile(id);
+        if (result.status !== 'ok') return result;
+        const receipt = result.data.receipt;
+        return {
+          ...result,
+          data: {
+            ...result.data,
+            receipt:
+              field === 'role'
+                ? { ...receipt, role: 'assistant' }
+                : { ...receipt, [field]: 'different receipt value' },
+          },
+        };
+      });
+    current.mount();
+    await screen.findByRole('heading', { name: 'Recovery parent' });
+    current.arm();
+    if (kind === 'message') {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'Keep the exact recovery draft' },
+      });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    } else fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    await screen.findByText(new RegExp(`The ${kind} was saved, but local history`));
+    current.allowReads();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile local save' }));
+    await screen.findByText(/Local history could not be reconciled/);
+    expect(
+      screen.getByRole('button', { name: kind === 'message' ? 'Send' : 'New' }),
+    ).toBeDisabled();
+    if (kind === 'message') {
+      expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue(
+        'Keep the exact recovery draft',
+      );
+      expect(current.send).toHaveBeenCalledOnce();
+    } else expect(current.create).toHaveBeenCalledOnce();
+    mismatched.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile local save' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Reconcile local save' })).toBeNull(),
+    );
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+    const records = await current.backend.loadAll();
+    expect(kind === 'message' ? records.messages : records.conversations).toHaveLength(
+      kind === 'message' ? 1 : 2,
+    );
+  },
+);
+
 test.each(['rejected', 'uncertain'] as const)(
   'App keeps the exact %s review copyable after external discard makes the selected side unavailable',
   async (phase) => {
