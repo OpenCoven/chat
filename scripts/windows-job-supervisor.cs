@@ -6730,16 +6730,18 @@ namespace OpenCoven
             {
                 return DirectoryQuotasExceeded(quotas, out exceededQuota);
             }
-            WindowsDirectoryQuota found = null;
-            bool exceeded = isolatedUser.RunQuotaRead(delegate
-            {
-                return DirectoryQuotasExceeded(quotas, out found);
-            });
-            exceededQuota = found;
-            return exceeded;
+            return DirectoryQuotasExceededCore(isolatedUser, quotas, out exceededQuota);
         }
 
         private static bool DirectoryQuotasExceeded(
+            WindowsDirectoryQuota[] quotas,
+            out WindowsDirectoryQuota exceededQuota)
+        {
+            return DirectoryQuotasExceededCore(null, quotas, out exceededQuota);
+        }
+
+        private static bool DirectoryQuotasExceededCore(
+            WindowsIsolatedUser isolatedUser,
             WindowsDirectoryQuota[] quotas,
             out WindowsDirectoryQuota exceededQuota)
         {
@@ -6748,18 +6750,30 @@ namespace OpenCoven
             {
                 try
                 {
-                    long total = 0;
-                    foreach (string path in ExpandQuotaPattern(quota.PathPattern))
+                    bool exceeded;
+                    if (isolatedUser == null)
                     {
-                        total = checked(
-                            total + MeasureDirectoryBytes(
-                                path,
-                                quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
-                        if (total > quota.MaxBytes)
+                        exceeded = DirectoryQuotaExceeded(quota, Path.GetPathRoot(quota.PathPattern));
+                    }
+                    else
+                    {
+                        string readRoot = ReadQuotaOperation("pattern-attributes", () =>
+                            GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
+                        // Validate the fixed prefix as the supervisor. The isolated
+                        // token can traverse an ancestor without permission to read
+                        // its attributes. Never retry denied descendant reads here.
+                        bool prefixExists = false;
+                        foreach (string prefix in ExpandQuotaPattern(readRoot))
                         {
-                            exceededQuota = quota;
-                            return true;
+                            prefixExists = true;
                         }
+                        if (!prefixExists) continue;
+                        exceeded = isolatedUser.RunQuotaRead(() => DirectoryQuotaExceeded(quota, readRoot));
+                    }
+                    if (exceeded)
+                    {
+                        exceededQuota = quota;
+                        return true;
                     }
                 }
                 catch (Exception error)
@@ -6774,9 +6788,48 @@ namespace OpenCoven
             return false;
         }
 
+        private static string GetIsolatedQuotaReadRoot(string isolatedRoot, string pattern)
+        {
+            string root = Path.GetFullPath(isolatedRoot).Replace('/', '\\').TrimEnd('\\');
+            string normalizedPattern = pattern.Replace('/', '\\').TrimEnd('\\');
+            if (root.Length < 3 || root[1] != ':' || root[2] != '\\' ||
+                !((root[0] >= 'A' && root[0] <= 'Z') || (root[0] >= 'a' && root[0] <= 'z')) ||
+                root.IndexOf('*') >= 0 ||
+                (!String.Equals(normalizedPattern, root, StringComparison.OrdinalIgnoreCase) &&
+                    !normalizedPattern.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException("Quota pattern is outside the isolated root.");
+            }
+            foreach (string segment in normalizedPattern.Substring(3).Split('\\'))
+            {
+                if (segment.Length == 0 || segment.EndsWith(".", StringComparison.Ordinal) ||
+                    segment.EndsWith(" ", StringComparison.Ordinal) || segment.IndexOf(':') >= 0)
+                {
+                    throw new ArgumentException("Quota pattern has an ambiguous path component.");
+                }
+            }
+            return root;
+        }
+
+        private static bool DirectoryQuotaExceeded(WindowsDirectoryQuota quota, string readRoot)
+        {
+            long total = 0;
+            foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot))
+            {
+                total = checked(total + MeasureDirectoryBytes(
+                    path, quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
+                if (total > quota.MaxBytes) return true;
+            }
+            return false;
+        }
+
         private static IEnumerable<string> ExpandQuotaPattern(string pattern)
         {
-            string root = Path.GetPathRoot(pattern);
+            return ExpandQuotaPatternFromRoot(pattern, Path.GetPathRoot(pattern));
+        }
+
+        private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root)
+        {
             string relative = pattern.Substring(root.Length);
             string[] segments = relative.Split(
                 new char[] { '\\', '/' },

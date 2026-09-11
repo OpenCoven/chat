@@ -1343,7 +1343,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 491,400 | `d34211f4a7b674f92b5f78e93af9461e27d0d22897f7f41a6ad74fd5f4919d46` |
+| `.github/workflows/client-v1-conformance.yml` | 494,637 | `e3af5c05b31a4a8724684690c4704738d41c7da1f50fc5f6e7573ecb78046daf` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1368,11 +1368,11 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 312,548 | `a346aa6493068fb4241b9380157ac94e33f63bcb7e6fc8b57d3ab90938617768` |
+| `scripts/windows-job-supervisor.cs` | 315,295 | `0831d87c38c290d13ec87de47dec6aac504146215302c358cf5299d4ee0e627a` |
 | `scripts/windows-job-supervisor.test.ps1` | 177,916 | `8d57c5af17e68f4ce1b241a41c27b2ec88297202acf610862ab6c58c15cbeb2c` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 13,880 | `a49c0b0fa1c5945428af605c771377f4e1053b4be582403b7d98298865c59892` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 15,454 | `f45614cf189ae0b32682653bb6bf5ddd2ebf1579490c6f7ec2f024487fc3f0c1` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,577 | `df8ef3078ee0b085abe3a81d94acb682a4f4cbc377d3945453b7917ba1b33589` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
@@ -1526,6 +1526,21 @@ categories require a refreshed producer binding and new protected evidence;
 they do not establish the cause of run `34422000259` retroactively.
 
 ## Windows quota monitor diagnostics
+
+Native run `34627213499` isolated the reader failure above the isolated root:
+ancestor index 3 denied attributes, while direct target reads returned one
+1,024-byte file. The isolated root was at index 6. This distinguishes ancestor
+metadata access from owner-directory enumeration and actual byte overflow.
+
+Production accounting validates each fixed prefix through the isolated root as
+the supervisor, preserving directory and reparse checks. It then expands and
+measures only patterns constrained to that root under the validated isolated
+user token. Outside-root and ambiguous path components fail closed; denied
+subtree reads are never retried as the supervisor. Token duplicates remain
+noninheritable and valid across account disablement, and admitted reads retain
+their handle through disposal. These attribute checks preserve the existing
+check/use behavior; they do not establish immunity to ancestor replacement.
+Native reader success and refreshed protected acceptance remain required.
 
 Protected run `34580621067` passed Linux and Darwin, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove

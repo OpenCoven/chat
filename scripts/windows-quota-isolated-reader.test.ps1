@@ -133,7 +133,19 @@ try {
   if (-not $expectedThrow -or [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne $supervisorSid) {
     throw 'Throwing quota callback did not restore supervisor identity.'
   }
-  foreach ($quota in @($under, $over)) {
+  $wildcardUnder = [OpenCoven.WindowsDirectoryQuota[]]@(
+    [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', ($directory + '*'), 2048)
+  )
+  $wildcardOver = [OpenCoven.WindowsDirectoryQuota[]]@(
+    [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', ($directory + '*'), 512)
+  )
+  $rootUnder = [OpenCoven.WindowsDirectoryQuota[]]@(
+    [OpenCoven.WindowsDirectoryQuota]::new('bootstrap aggregate', $identity.RootPath, [long]::MaxValue)
+  )
+  $rootOver = [OpenCoven.WindowsDirectoryQuota[]]@(
+    [OpenCoven.WindowsDirectoryQuota]::new('bootstrap aggregate', $identity.RootPath, 512)
+  )
+  foreach ($quota in @($under, $over, $wildcardUnder, $wildcardOver, $rootUnder, $rootOver)) {
     $result = [OpenCoven.WindowsJobRunResult]::new()
     $terminal.Invoke($null, [object[]]@($identity, $result, $quota))
     $expectOverflow = $quota[0].MaxBytes -eq 512
@@ -144,8 +156,26 @@ try {
         $control, $result.ResourceQuotaExceeded, $result.ResourceQuotaMonitorError,
         $result.ResourceQuotaMonitorCategory, $result.ResourceQuotaMonitorRoot, $result.ResourceQuotaMonitorOperation)
     }
-    if ($expectOverflow -and ($result.ExitCode -eq 0 -or $result.ResourceQuotaLabel -cne 'harness execution aggregate')) {
+    if ($expectOverflow -and ($result.ExitCode -eq 0 -or $result.ResourceQuotaLabel -cne $quota[0].Label)) {
       throw 'Isolated terminal accounting lost the actual overflow outcome.'
+    }
+  }
+  foreach ($outsidePattern in @(
+    ($identity.RootPath + '-sibling'),
+    (Join-Path $identity.RootPath '.. /outside'),
+    (Join-Path $identity.RootPath 'temp./outside'),
+    ('\\?\' + $directory)
+  )) {
+    $outside = [OpenCoven.WindowsJobRunResult]::new()
+    try {
+      $outsideQuota = [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $outsidePattern, 2048)
+    } catch [ArgumentException] {
+      continue # Constructor rejection is also a fail-closed grammar boundary.
+    }
+    $terminal.Invoke($null, [object[]]@($identity, $outside, [OpenCoven.WindowsDirectoryQuota[]]@($outsideQuota)))
+    if (-not $outside.ResourceQuotaMonitorError -or -not $outside.ResourceQuotaExceeded -or
+        $outside.ExitCode -eq 0 -or $outside.ResourceQuotaMonitorOperation -cne 'pattern-attributes') {
+      throw 'Isolated quota boundary accepted an outside or ambiguous pattern.'
     }
   }
   $unexpected = Join-Path $identity.TempPath 'phase1-conformance-run-unexpected'
