@@ -762,6 +762,15 @@ same process/ACL/membership preflight directly from the exact inline production
 source before its first download. macOS development can parse and compile the
 source but cannot claim those native Windows runtime results; native Windows
 runtime evidence is CI-only. The native suite
+also provisions a same-volume `status-staging` directory with an exact
+protected DACL. The isolated user retains modify-only access to the directory
+itself, while an object-inherit-only ACE grants created files the ACL-management
+rights needed to secure an empty Coven status temporary before moving it into
+the stricter `COVEN_HOME`; the protected child validates the directory and
+receives it through
+`COVEN_WINDOWS_STATUS_STAGING_DIR`. A 1 MiB directory quota bounds this staging
+surface independently.
+The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
 handoff fails without reading or publishing the canary. Separate cases reject
@@ -1234,7 +1243,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77` |
+| `.github/workflows/client-v1-conformance.yml` | 469,571 | `5719d2b13349cbfe4a8729ff32a05495717a95668a8ac8d407fbd8eafa05e1a8` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1259,9 +1268,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 172,760 | `cecc4c4a88ddceff68ab941798a700d2f60e18048be6373044e6c115b08bfcfe` |
-| `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
+| `scripts/windows-job-supervisor.cs` | 294,514 | `6f973847f075b538a7655e592adacad31775de40cee9f3cf4773e67167b66ea6` |
+| `scripts/windows-job-supervisor.test.ps1` | 173,600 | `ff6c673a6dcd8dc8ab1c811494e33086ce5531ddcc5f3e2b5270c6783d732731` |
+| `scripts/windows-status-acl-probe.cs` | 8,380 | `0746f185b73d2ba7bf99efbd0fb38e91f3ad3c5618be0ae0248eb02944de1b1b` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
 `harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does

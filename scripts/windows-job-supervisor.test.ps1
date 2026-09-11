@@ -1198,6 +1198,7 @@ $childEnvironment = @{
   LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
   TEMP = $isolatedUser.TempPath
   TMP = $isolatedUser.TempPath
+  COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
   GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
   OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
@@ -1218,6 +1219,7 @@ function New-IsolatedTestContext {
   $contextEnvironment.LOCALAPPDATA = Join-Path $contextUser.ProfilePath 'AppData\Local'
   $contextEnvironment.TEMP = $contextUser.TempPath
   $contextEnvironment.TMP = $contextUser.TempPath
+  $contextEnvironment.COVEN_WINDOWS_STATUS_STAGING_DIR = $contextUser.StatusStagingPath
   $contextEnvironment.GITHUB_WORKSPACE = $contextUser.WorkspacePath
   $contextEnvironment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $contextUser.RootPath
   return [pscustomobject]@{
@@ -1570,10 +1572,21 @@ Add-Type -Path '$($statusAclProbeSource.Replace("'", "''"))'
   `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
 )
 Write-Output "status-acl-probe:`n`$statusAclResult"
+`$statusStagingAclResult = [StatusAclProbe]::RunStaging(
+  `$env:COVEN_WINDOWS_STATUS_STAGING_DIR,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+if (
+  `$statusStagingAclResult -cne
+    "directory-write-dac:access-denied`ncombined:success`nowner-only:success`ndacl-only:success"
+) {
+  throw "Status staging ACL probe failed: `$statusStagingAclResult"
+}
 
 `$root = [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT)
 `$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
 `$temp = [IO.Path]::GetFullPath(`$env:TEMP)
+`$statusStaging = [IO.Path]::GetFullPath(`$env:COVEN_WINDOWS_STATUS_STAGING_DIR)
 `$workspace = [IO.Path]::GetFullPath(`$env:GITHUB_WORKSPACE)
 if (-not `$profile.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user profile is outside the isolated root.'
@@ -1584,9 +1597,16 @@ if (-not `$temp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
 if (-not `$workspace.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user workspace is outside the isolated root.'
 }
+if (-not `$statusStaging.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted status staging directory is outside the isolated root.'
+}
 foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(`$directory)
 }
+[OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsStatusStagingDirectory(
+  `$statusStaging,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
 `$operatorDenied = `$false
 try {
   [IO.File]::ReadAllText(
@@ -1694,10 +1714,9 @@ if (-not `$wmiDenied) {
     }
     $statusAclLabels = @('combined', 'owner-only', 'dacl-only')
     for ($index = 0; $index -lt 3; $index++) {
-      $pattern = '^' + $statusAclLabels[$index] +
-        ':(success|access-denied|invalid-owner|privilege-not-held|unclassified)$'
-      if ($statusAclLines[$index + 1] -cnotmatch $pattern) {
-        throw 'Status ACL probe result was outside the bounded vocabulary.'
+      $expected = $statusAclLabels[$index] + ':access-denied'
+      if ($statusAclLines[$index + 1] -cne $expected) {
+        throw "Restricted status ACL probe changed: $($statusAclLines[$index + 1])"
       }
       Write-Host "status-acl.$($statusAclLines[$index + 1])"
     }

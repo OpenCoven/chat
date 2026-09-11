@@ -1400,6 +1400,49 @@ ${source.slice(start, end)}
     expect(unixPinComplete).toBeLessThan(unixRunBody.indexOf('\n          EOF'));
   });
 
+  test('provisions a bounded same-volume staging directory for Windows daemon status files', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const bootstrap = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const statusAclProbe = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-status-acl-probe.cs'),
+      'utf8',
+    );
+    const supervisorTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+
+    for (const required of [
+      'StatusStagingPath',
+      'SecureStatusStagingDirectory',
+      'RequireCurrentIdentityOwnsStatusStagingDirectory',
+      'FILE_MODIFY_ACCESS,\n                FILE_ALL_ACCESS',
+      '"(A;OIIO;0x"',
+    ]) {
+      expect(supervisor).toContain(required);
+    }
+    expect(bootstrap).toContain(
+      'COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath',
+    );
+    expect(bootstrap).toContain('COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID = $currentSid.Value');
+    expect(bootstrap).toContain('OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $bootstrapRoot');
+    expect(childBootstrap).toContain('RequireCurrentIdentityOwnsStatusStagingDirectory(');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_DIR');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID');
+    expect(statusAclProbe).toContain('RunStaging');
+    expect(statusAclProbe).toContain('directory-write-dac:');
+    expect(supervisorTest).toContain('[StatusAclProbe]::RunStaging(');
+    expect(supervisorTest).toContain('directory-write-dac:access-denied');
+    expect(bootstrap).toContain(
+      "[OpenCoven.WindowsDirectoryQuota]::new(\n                'status staging',\n" +
+        '                $isolatedUser.StatusStagingPath,\n                1MB\n              )',
+    );
+  });
+
   test('orders the fail-closed Windows artifact boundary before capture and publication', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const sources = [
@@ -2844,9 +2887,11 @@ $ErrorActionPreference = 'Stop'
 $bootstrapRoot = $PWD.Path
 $workspace = $PWD.Path
 $childNodeRoot = $PWD.Path
+$currentSid = [pscustomobject]@{ Value = 'S-1-5-21-fixture' }
 $isolatedUser = [pscustomobject]@{
   ProfilePath = $PWD.Path
   TempPath = $PWD.Path
+  StatusStagingPath = $PWD.Path
 }
 foreach ($name in @(
   'trustedComspec', 'trustedPwsh', 'validatorRevision', 'nonce', 'jobName',
@@ -3059,7 +3104,10 @@ ${quotaClass}
 '@
 $bootstrapRoot = $PWD.Path
 $workspace = Join-Path $bootstrapRoot 'workspace'
-$isolatedUser = [pscustomobject]@{ TempPath = (Join-Path $bootstrapRoot 'temp') }
+$isolatedUser = [pscustomobject]@{
+  TempPath = (Join-Path $bootstrapRoot 'temp')
+  StatusStagingPath = (Join-Path $bootstrapRoot 'status-staging')
+}
 ${quotaAssignment}
 [Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
 `;

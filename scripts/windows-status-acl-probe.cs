@@ -20,6 +20,27 @@ public static class StatusAclProbe
         uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share,
+        IntPtr security, uint creation, uint attributes, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private static string ProbeDirectoryWriteDacl(string path)
+    {
+        IntPtr handle = CreateFileW(
+            path,
+            0x00040000,
+            0x00000001 | 0x00000002 | 0x00000004,
+            IntPtr.Zero,
+            3,
+            0x02000000,
+            IntPtr.Zero);
+        if (handle == new IntPtr(-1))
+            return Classify((uint)Marshal.GetLastWin32Error());
+        CloseHandle(handle);
+        return "success";
+    }
 
     private static string Classify(uint status)
     {
@@ -30,7 +51,10 @@ public static class StatusAclProbe
         return "unclassified";
     }
 
-    private static void VerifyInheritedSecurity(string path, string supervisorSid)
+    private static void VerifyInheritedSecurity(
+        string path,
+        string supervisorSid,
+        int isolatedAccess)
     {
         using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
         {
@@ -42,11 +66,15 @@ public static class StatusAclProbe
                 { "S-1-5-18", 0x001f01ff },
                 { "S-1-5-32-544", 0x001f01ff },
                 { supervisorSid, 0x001f01ff },
-                { identity.User.Value, 0x001301bf },
+                { identity.User.Value, isolatedAccess },
                 { "S-1-3-4", 0x00020000 }
             };
+            var actual = new Dictionary<string, int>();
             var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
-            if (descriptor.DiscretionaryAcl == null || descriptor.DiscretionaryAcl.Count != expected.Count)
+            if (descriptor.DiscretionaryAcl == null ||
+                descriptor.DiscretionaryAcl.Count < expected.Count ||
+                descriptor.DiscretionaryAcl.Count >
+                    expected.Count + (isolatedAccess == 0x001f01ff ? 1 : 0))
                 throw new InvalidOperationException("created-file-acl-count-mismatch");
             foreach (GenericAce entry in descriptor.DiscretionaryAcl)
             {
@@ -55,12 +83,18 @@ public static class StatusAclProbe
                 if (ace == null || ace.IsCallback || ace.AceQualifier != AceQualifier.AccessAllowed
                     || (ace.AceFlags & AceFlags.Inherited) == 0
                     || (ace.AceFlags & AceFlags.InheritOnly) != 0
-                    || !expected.TryGetValue(ace.SecurityIdentifier.Value, out mask)
-                    || ace.AccessMask != mask)
+                    || !expected.TryGetValue(ace.SecurityIdentifier.Value, out mask))
                     throw new InvalidOperationException("created-file-acl-mismatch");
-                expected.Remove(ace.SecurityIdentifier.Value);
+                int observed;
+                actual.TryGetValue(ace.SecurityIdentifier.Value, out observed);
+                actual[ace.SecurityIdentifier.Value] = observed | ace.AccessMask;
             }
-            if (expected.Count != 0) throw new InvalidOperationException("created-file-acl-missing");
+            foreach (KeyValuePair<string, int> entry in expected)
+            {
+                int observed;
+                if (!actual.TryGetValue(entry.Key, out observed) || observed != entry.Value)
+                    throw new InvalidOperationException("created-file-acl-mismatch");
+            }
         }
     }
 
@@ -73,10 +107,21 @@ public static class StatusAclProbe
     {
         if (string.IsNullOrEmpty(supervisorSid))
             throw new InvalidOperationException("supervisor-identity-required");
-        return RunInternal(scratchDirectory, supervisorSid);
+        return RunInternal(scratchDirectory, supervisorSid, 0x001301bf);
     }
 
-    private static string RunInternal(string scratchDirectory, string supervisorSid)
+    public static string RunStaging(string scratchDirectory, string supervisorSid)
+    {
+        if (string.IsNullOrEmpty(supervisorSid))
+            throw new InvalidOperationException("supervisor-identity-required");
+        return "directory-write-dac:" + ProbeDirectoryWriteDacl(scratchDirectory) +
+            "\n" + RunInternal(scratchDirectory, supervisorSid, 0x001f01ff);
+    }
+
+    private static string RunInternal(
+        string scratchDirectory,
+        string supervisorSid,
+        int isolatedAccess = 0)
     {
         if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("windows-required");
         if (!Directory.Exists(scratchDirectory)) throw new InvalidOperationException("scratch-required");
@@ -115,7 +160,8 @@ public static class StatusAclProbe
                     file.WriteByte(10);
                     file.Flush(true);
                 }
-                if (supervisorSid != null) VerifyInheritedSecurity(path, supervisorSid);
+                if (supervisorSid != null)
+                    VerifyInheritedSecurity(path, supervisorSid, isolatedAccess);
                 uint status = SetNamedSecurityInfoW(path, 1, flags[i],
                     i == 2 ? IntPtr.Zero : owner, IntPtr.Zero,
                     i == 1 ? IntPtr.Zero : dacl, IntPtr.Zero);
