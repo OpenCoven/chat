@@ -20,7 +20,7 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `0207b93f4238017764e59eca4916e4c790561f77` | `afc0cd3964866069e707fdd72d2bbc2efac6ebbb` |
+| Executable harness | `e0fca804e46d1a30eedcdae505c33e70d06035fb` | `ede4fff3d4cf4f193841add3c2df58aed6f8bca7` |
 
 Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
 files from its prior frozen revision. The 121 crate files are identical in both
@@ -89,11 +89,11 @@ diagnostic-only change.
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
-- Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
+- Coven daemon and observation-test source `d56021851537d62cfad9ece80583a908f20898a1`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `0207b93f4238017764e59eca4916e4c790561f77`,
-  tree `afc0cd3964866069e707fdd72d2bbc2efac6ebbb`, retained in the
+- Chat conformance driver `e0fca804e46d1a30eedcdae505c33e70d06035fb`,
+  tree `ede4fff3d4cf4f193841add3c2df58aed6f8bca7`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;

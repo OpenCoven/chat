@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '0207b93f4238017764e59eca4916e4c790561f77',
-  tree: 'afc0cd3964866069e707fdd72d2bbc2efac6ebbb',
+  revision: 'e0fca804e46d1a30eedcdae505c33e70d06035fb',
+  tree: 'ede4fff3d4cf4f193841add3c2df58aed6f8bca7',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -151,7 +151,7 @@ const expectedEntries = {
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: 'c0c979cdee96327bf24218bc7c7ecb90d719cb27',
+    revision: 'd56021851537d62cfad9ece80583a908f20898a1',
   },
   harness: {
     repository: 'OpenCoven/chat',
