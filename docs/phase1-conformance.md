@@ -1538,6 +1538,6 @@ drives the real `Dispose` path on an identity that was never provisioned with
 compiled quarantine callbacks, and verifies category order, pairing, bounded
 grammar, idempotent disposal and absence of leaked text.
 
-The diagnostic harness is pinned at `HARNESS_REVISION_PLACEHOLDER`, tree
-`HARNESS_TREE_PLACEHOLDER`. It changes only the supervisor source from the
+The diagnostic harness is pinned at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
+`b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
 status staging harness and is retained in the diagnostic branch ancestry.
