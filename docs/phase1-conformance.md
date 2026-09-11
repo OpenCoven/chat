@@ -48,6 +48,23 @@ packaged CI, an updated SDK validator binding, both protected scopes and fresh
 platform/aggregate validation remain required. Issue #188 remains open until
 those gates and advisory reconciliation are complete.
 
+## Protected validation before status staging
+
+[Run 34594407090](https://github.com/OpenCoven/chat/actions/runs/34594407090)
+used producer `4a5002011322de824f4d15676eab7769ce7975ba` and validator
+`c43b21cbeb5dfe218430345fc71eff2822810f33`. Linux and Darwin passed; each
+retained record contains 110 Cave, 46 SDK and 41 Chat passing assertions with
+unique identities, consistent Cave timing and both scans passed. Windows
+failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.apply-owner-only-security.access-denied`.
+The prior quota-monitor and identity-cleanup errors were not reported in this
+execution; their absence does not establish that they cannot recur.
+
+That run predates this combined staging harness and the merged Coven status
+writer. Artifact validation, attestation and aggregate acceptance were skipped.
+The result identifies the status-writer security operation as the next repair
+boundary; it does not validate this integration or justify changing quotas.
+
 ## Earlier protected diagnostic result
 
 [Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
