@@ -17,13 +17,26 @@ type Props = Readonly<{
   familiarId: string;
 }>;
 
-function failure(result: Exclude<WriteResult<unknown>, { status: 'ok' }>): string {
+const failureGuidance = {
+  read: 'Local side notes could not be read. Retry the read.',
+  create:
+    'The side note creation result could not be confirmed. Retry with the same operation key.',
+  state: 'The note state change could not be confirmed. Refresh the note before retrying.',
+  prepare: 'The local review could not be prepared. Retry when the source is available.',
+  review:
+    'The import result could not be confirmed. Retry the unchanged review with the same operation key.',
+};
+
+function failure(
+  result: Exclude<WriteResult<unknown>, { status: 'ok' }>,
+  context: keyof typeof failureGuidance,
+): string {
   if (result.status === 'unsupported') return result.reason;
-  if (result.code === 'conflict')
+  if (result.code === 'conflict' && context === 'review')
     return 'This operation conflicts with its earlier request. Retry the unchanged review to reconcile, or cancel explicitly.';
   if (result.code === 'not_found')
     return 'The exact parent, side note, or selected message is unavailable.';
-  return 'The local change could not be saved. Retry uses the same operation key.';
+  return failureGuidance[context];
 }
 
 export function ChatSideConversations({
@@ -87,7 +100,7 @@ export function ChatSideConversations({
         const info = await capability.get(conversationId);
         if (!alive.value) return;
         if (info.status !== 'ok') {
-          setLoadError(failure(info));
+          setLoadError(failure(info, 'read'));
           return;
         }
         setSide(info.data);
@@ -95,7 +108,7 @@ export function ChatSideConversations({
           const page = await capability.list(conversationId);
           if (!alive.value) return;
           if (page.status !== 'ok') {
-            setLoadError(failure(page));
+            setLoadError(failure(page, 'read'));
             return;
           }
           if (!walk.current.acceptRootPage(page.data)) {
@@ -107,7 +120,7 @@ export function ChatSideConversations({
         }
         setReady(true);
       } catch {
-        if (alive.value) setLoadError('Local side notes are unavailable. No content was moved.');
+        if (alive.value) setLoadError(failureGuidance.read);
       }
     })();
     return () => {
@@ -116,7 +129,11 @@ export function ChatSideConversations({
     };
   }, [capability, conversationId, loadAttempt]);
 
-  async function run<T>(operation: () => Promise<WriteResult<T>>, success: (data: T) => void) {
+  async function run<T>(
+    context: 'read' | 'create' | 'state',
+    operation: () => Promise<WriteResult<T>>,
+    success: (data: T) => void,
+  ) {
     if (pending.current) return;
     pending.current = true;
     setBusy(true);
@@ -125,10 +142,9 @@ export function ChatSideConversations({
       const result = await operation();
       if (!active.current) return;
       if (result.status === 'ok') success(result.data);
-      else setNotice(failure(result));
+      else setNotice(failure(result, context));
     } catch {
-      if (active.current)
-        setNotice('The local change could not be saved. Retry uses the same operation key.');
+      if (active.current) setNotice(failureGuidance[context]);
     } finally {
       pending.current = false;
       if (active.current) setBusy(false);
@@ -168,10 +184,7 @@ export function ChatSideConversations({
       } else {
         reviewEntry.update({
           phase: previous ? 'rejected' : 'idle',
-          notice:
-            result.status === 'error' && result.code === 'service_unavailable'
-              ? 'The local review could not be prepared. Retry when the source is available.'
-              : failure(result),
+          notice: failure(result, 'prepare'),
         });
       }
     } catch {
@@ -217,13 +230,13 @@ export function ChatSideConversations({
           notice:
             result.status === 'ok'
               ? 'The receipt did not match the exact parent. Retry to reconcile.'
-              : failure(result),
+              : failure(result, 'review'),
         });
       }
     } catch {
       reviewEntry.update({
         phase: 'uncertain',
-        notice: 'The local change could not be saved. Retry uses the same operation key.',
+        notice: failureGuidance.review,
       });
     }
   }
@@ -240,12 +253,14 @@ export function ChatSideConversations({
     if (!capability) return;
     createKey.current ??= crypto.randomUUID();
     void run(
+      'create',
       () =>
         capability.create({
           parentConversationId: conversationId,
           operationKey: createKey.current ?? '',
         }),
       (created) => {
+        createKey.current = null;
         if (created.side.state === 'discarded') {
           setNotice('This creation request refers to a discarded note.');
           return;
@@ -259,6 +274,7 @@ export function ChatSideConversations({
   function changeState(state: 'open' | 'closed' | 'discarded') {
     if (!capability || !side) return;
     void run(
+      'state',
       () =>
         capability.setState(
           {
@@ -458,6 +474,7 @@ export function ChatSideConversations({
                   return;
                 }
                 void run(
+                  'read',
                   () => capability.list(conversationId, { cursor }),
                   (page) => {
                     if (!walk.current.acceptNextPage(cursor, page)) {

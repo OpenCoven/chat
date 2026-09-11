@@ -107,6 +107,35 @@ test('a late successful create refreshes the sidebar without replacing the navig
   expect(await screen.findByText('a-new text')).toBeVisible();
 });
 
+test.each(['error', 'unsupported', 'throw'] as const)(
+  'create %s reports creation guidance rather than selection failure',
+  async (status) => {
+    const adapter = source();
+    const create = vi.fn(async (): Promise<WriteResult<CaveConversation>> => {
+      if (status === 'throw') throw new Error('acknowledgement lost');
+      return status === 'unsupported'
+        ? { status, reason: 'Creation is unavailable for this source.' }
+        : { status, code: 'service_unavailable' };
+    });
+    render(
+      <ChatShell
+        queryAdapter={adapter}
+        writer={{ canWrite: () => true, createConversation: create, sendMessage: vi.fn() }}
+        onCreateConversation={create}
+      />,
+    );
+    await screen.findByText('a-new text');
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    await screen.findByText(
+      status === 'unsupported'
+        ? 'Creation is unavailable for this source.'
+        : /creation result could not be confirmed.*storage.*before retrying/i,
+    );
+    expect(screen.queryByText(/could not be selected/)).not.toBeInTheDocument();
+    expect(screen.getByText('a-new text')).toBeVisible();
+  },
+);
+
 test('familiar return restores the exact older conversation and anchor, not newest', async () => {
   const adapter = source();
   const view = render(<ChatShell queryAdapter={adapter} />);

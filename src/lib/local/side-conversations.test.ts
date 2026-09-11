@@ -41,6 +41,56 @@ test('retained side notes use the same store, start empty, and stay out of the p
   ]);
 });
 
+test('side state timestamps stay monotonic through rollback, paging and subsequent appends', async () => {
+  let clock = Date.parse('2026-09-11T12:00:00Z');
+  const store = await openChatStore({
+    familiarId: LOCAL_FAMILIAR_ID,
+    backend: createMemoryChatBackend(),
+    now: () => clock,
+  });
+  const parent = await store.createConversation('Parent');
+  const older = await store.createSideConversation({
+    parentConversationId: parent.id,
+    operationKey: 'older',
+  });
+  clock += 1000;
+  const newer = await store.createSideConversation({
+    parentConversationId: parent.id,
+    operationKey: 'newer',
+  });
+  const target = { parentConversationId: parent.id, sideConversationId: newer.id };
+  clock -= 10000;
+  const closed = await store.setSideState(target, 'closed');
+  expect(Date.parse(closed.updatedAt)).toBeGreaterThan(Date.parse(newer.updatedAt));
+  const first = store.listSideConversations(parent.id, 1);
+  expect(first.data[0]?.id).toBe(newer.id);
+  expect(store.listSideConversations(parent.id, 1, first.cursor?.next).data[0]?.id).toBe(older.id);
+  const reopened = await store.setSideState(target, 'open');
+  expect(Date.parse(reopened.updatedAt)).toBeGreaterThan(Date.parse(closed.updatedAt));
+  await store.appendMessage(newer.id, 'user', 'After reopening');
+  expect(Date.parse(store.getConversation(newer.id)?.updatedAt ?? '')).toBeGreaterThan(
+    Date.parse(reopened.updatedAt),
+  );
+  const discarded = await store.setSideState(target, 'discarded');
+  expect(Date.parse(discarded.updatedAt)).toBeGreaterThan(Date.parse(reopened.updatedAt));
+});
+
+test('side operation replay resolves current records after append, state changes, hydration and external refresh', async () => {
+  const { store, backend, parent, side } = await setup();
+  const input = { parentConversationId: parent.id, operationKey: 'create-one' };
+  expect(await store.createSideConversation(input)).toEqual(store.getSideConversation(side.id));
+  const target = { parentConversationId: parent.id, sideConversationId: side.id };
+  const closed = await store.setSideState(target, 'closed');
+  expect(await store.createSideConversation(input)).toEqual(closed);
+  const reloaded = await openChatStore({ familiarId: LOCAL_FAMILIAR_ID, backend });
+  expect(await reloaded.createSideConversation(input)).toEqual(closed);
+  const reopened = await reloaded.setSideState(target, 'open');
+  expect(await store.createSideConversation(input)).toEqual(reopened);
+  const discarded = await reloaded.setSideState(target, 'discarded');
+  expect(await store.createSideConversation(input)).toEqual(discarded);
+  const cold = await openChatStore({ familiarId: LOCAL_FAMILIAR_ID, backend });
+  expect(await cold.createSideConversation(input)).toEqual(discarded);
+});
 test('duplicate create and Bring back requests replay once, including after reload and discard', async () => {
   const { backend, store, parent, original, side, input } = await setup();
   const creates = await Promise.all(

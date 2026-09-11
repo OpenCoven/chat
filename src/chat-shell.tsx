@@ -77,6 +77,8 @@ const AUTH_REPAIR_CODES = new Set([
   'credential_update_in_progress',
 ]);
 const INVALID_PAGINATION_CODE = 'invalid_response';
+const CREATE_FAILURE_NOTICE =
+  'The conversation creation result could not be confirmed. Check local storage and refresh the conversation list before retrying.';
 
 function toListState<T>(result: QueryResult<Page<T>>): ListResourceState<T> {
   switch (result.status) {
@@ -1118,14 +1120,20 @@ function ChatShellView({
                   if (creationPending.current) return;
                   creationPending.current = true;
                   setCreating(true);
+                  setPositionNotice('');
                   const epoch = navigationEpoch.current;
                   void Promise.resolve()
                     .then(onCreateConversation)
                     .then((result) => {
                       if (!mounted.current || !result) return;
-                      if (result.status === 'ok') onWritten();
+                      if (result.status !== 'ok') {
+                        setPositionNotice(
+                          result.status === 'unsupported' ? result.reason : CREATE_FAILURE_NOTICE,
+                        );
+                        return;
+                      }
+                      onWritten();
                       if (
-                        result.status === 'ok' &&
                         epoch === navigationEpoch.current &&
                         (selectedFamiliarId === null ||
                           result.data.familiarId === selectedFamiliarId)
@@ -1143,8 +1151,7 @@ function ChatShellView({
                       }
                     })
                     .catch(() => {
-                      if (mounted.current)
-                        setPositionNotice('The new local conversation could not be saved.');
+                      if (mounted.current) setPositionNotice(CREATE_FAILURE_NOTICE);
                     })
                     .finally(() => {
                       creationPending.current = false;

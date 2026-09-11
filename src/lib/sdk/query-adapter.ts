@@ -11,7 +11,7 @@ import {
   isCaveClientError,
 } from '@opencoven/cave-client/managed';
 import { normalizePageOptions, type Page, type PageOptions } from '@opencoven/sdk-core/browser';
-import type { ConversationChapterPage } from '../chat-chapters';
+import { type ConversationChapterPage, MAX_CHAPTER_PAGE_LIMIT } from '../chat-chapters';
 import type { CaveReadClient } from './connection-controller';
 
 export type QueryResult<T> =
@@ -414,6 +414,9 @@ export function createQueryAdapter(
   return Object.freeze({
     getSourceIdentity: getClient,
     listChapters(conversationId: string, readOptions?: PageOptions) {
+      if (readOptions?.limit !== undefined && readOptions.limit > MAX_CHAPTER_PAGE_LIMIT) {
+        return Promise.resolve(INVALID_REQUEST_RESULT);
+      }
       const normalized = normalizeBoundedPageOptions(readOptions);
       if (normalized.status === 'error') return Promise.resolve(normalized.result);
       const page = normalized.options;

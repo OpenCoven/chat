@@ -189,6 +189,7 @@ export function createChatStore(
   const conversations = new Map<string, StoredConversation>();
   const messagesByConversation = new Map<string, StoredMessage[]>();
   const importsByOperation = new Map<string, StoredMessage>();
+  const sideIdsByOperation = new Map<string, string>();
   const listeners = new Set<(change: ChatStoreChange) => void>();
   let revision = 0;
   let disposed = false;
@@ -206,6 +207,7 @@ export function createChatStore(
         conversations.clear();
         messagesByConversation.clear();
         importsByOperation.clear();
+        sideIdsByOperation.clear();
         hydrate(current);
         indexedBackendRevision = currentRevision;
       }
@@ -262,6 +264,7 @@ export function createChatStore(
     const clean = sanitizeRecords(records);
     for (const entry of clean.conversations) {
       conversations.set(entry.id, entry);
+      if (entry.side) sideIdsByOperation.set(entry.side.operationKey, entry.id);
     }
     for (const entry of clean.messages) {
       // Drop orphans: a message whose conversation was lost is unreachable and
@@ -374,7 +377,11 @@ export function createChatStore(
         const body = normalizeText(text, MAX_MESSAGE_TEXT_LENGTH, 'message');
         const previous = messagesByConversation.get(conversationId)?.at(-1);
         const timestamp = new Date(
-          Math.max(now(), previous ? Date.parse(previous.createdAt) + 1 : 0),
+          Math.max(
+            now(),
+            Date.parse(conversation.updatedAt) + 1,
+            previous ? Date.parse(previous.createdAt) + 1 : 0,
+          ),
         ).toISOString();
         const message: StoredMessage = Object.freeze({
           id: createId(),
@@ -430,9 +437,8 @@ export function createChatStore(
       return serialize(async () => {
         const parent = requireParent(input.parentConversationId);
         const key = operationKey(input.operationKey);
-        const existing = [...conversations.values()].find(
-          (entry) => entry.side?.operationKey === key,
-        );
+        const existingId = sideIdsByOperation.get(key);
+        const existing = existingId === undefined ? undefined : conversations.get(existingId);
         if (existing?.side) {
           if (existing.side.parentConversationId !== parent.id) {
             throw new ChatStoreError('conflict', 'This operation key names a different parent.');
@@ -459,6 +465,7 @@ export function createChatStore(
           absentOperationKey: key,
         });
         conversations.set(side.id, side);
+        sideIdsByOperation.set(key, side.id);
         announce();
         return side;
       });
@@ -474,7 +481,7 @@ export function createChatStore(
         const touched: SideConversation = Object.freeze({
           ...side,
           revision: (side.revision ?? 0) + 1,
-          updatedAt: new Date(now()).toISOString(),
+          updatedAt: new Date(Math.max(now(), Date.parse(side.updatedAt) + 1)).toISOString(),
           side: Object.freeze({ ...side.side, state }),
         });
         const deletedMessageIds =

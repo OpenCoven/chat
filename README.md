@@ -46,6 +46,9 @@ You can explore a separate note without changing your parent conversation:
 **Discard note** requires confirmation and removes the note's local messages;
 previously reviewed imports remain in the parent. A minimal creation tombstone
 prevents a retried create operation from recreating a discarded note.
+An uncertain creation retries with its original key. Once a replay confirms that
+the note was discarded, the next explicit **New retained side note** starts a
+fresh creation request.
 
 An attempted review keeps its operation key, selected message IDs, edited text,
 and local branch preconditions in source- and writer-scoped memory. Returning

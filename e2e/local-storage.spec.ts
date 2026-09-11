@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { loseNextWriteAcknowledgement } from './helpers/local-continuity';
 
 declare global {
   interface Window {
@@ -357,7 +358,7 @@ test('an aborted import rolls back its message, conversation and shared revision
     };
   });
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
-  await expect(page.getByText(/The local change could not be saved/)).toBeVisible();
+  await expect(page.getByText(/The import result could not be confirmed/)).toBeVisible();
   expect(await durableSummary(page)).toEqual({ count: 52, revision: 0, imported: 0 });
   await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
@@ -397,4 +398,66 @@ test('two windows racing the same reviewed key converge on one durable import', 
     await expect(review).toHaveCount(0);
   }
   expect(await durableSummary(page)).toEqual({ count: 53, revision: 1, imported: 1 });
+});
+
+test('an uncertain conversation create reports confirmation guidance without selecting a phantom result', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await loseNextWriteAcknowledgement(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(
+    page.getByText(/conversation creation result could not be confirmed.*before retrying/),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
+});
+
+test('a discarded create replay reconciles the old key before allowing a new durable side note', async ({
+  page,
+  context,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await loseNextWriteAcknowledgement(page);
+  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await expect(
+    page.getByText(/side note creation result could not be confirmed.*same operation key/),
+  ).toBeVisible();
+  const other = await context.newPage();
+  await other.goto('/');
+  await other.getByRole('button', { name: /^Retained side note/ }).click();
+  await other.getByRole('button', { name: 'Discard note', exact: false }).click();
+  await other.getByRole('button', { name: 'Discard local messages', exact: true }).click();
+  await expect(other.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await expect(page.getByText(/creation request refers to a discarded note/)).toBeVisible();
+  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
+  const creations = await page.evaluate(
+    () =>
+      new Promise<{ state: string; key: string }[]>((resolve, reject) => {
+        const request = indexedDB.open('opencoven-chat');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('conversations');
+          const records = tx.objectStore('conversations').getAll();
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+          tx.oncomplete = () => {
+            resolve(
+              records.result
+                .filter((record) => record.title === 'Retained side note')
+                .map((record) => ({ state: record.side.state, key: record.side.operationKey })),
+            );
+            db.close();
+          };
+        };
+      }),
+  );
+  expect(creations.map((entry) => entry.state).sort()).toEqual(['discarded', 'open']);
+  expect(new Set(creations.map((entry) => entry.key)).size).toBe(2);
 });

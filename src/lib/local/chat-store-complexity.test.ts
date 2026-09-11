@@ -111,6 +111,64 @@ test('import operation lookup does not flatten retained history during admission
   }
 });
 
+test('side operation admission and replay do not enumerate 20000 unrelated conversations', async () => {
+  const parent = retainedHistory(0).conversations[0];
+  if (!parent) throw new Error('Missing parent fixture');
+  const records: ChatRecords = {
+    conversations: [
+      parent,
+      ...Array.from({ length: 20000 }, (_, index) => ({
+        ...parent,
+        id: `side-${index}`,
+        side: {
+          parentConversationId: parent.id,
+          operationKey: `key-${index}`,
+          state: 'open' as const,
+        },
+      })),
+    ],
+    messages: [],
+  };
+  let revision = 0;
+  // Isolate store admission from backend persistence, which has separate real-IDB coverage.
+  const backend = {
+    isDurable: () => false,
+    loadAll: async () => records,
+    getMutationRevision: () => revision,
+    commit: vi.fn(async () => {
+      revision += 1;
+    }),
+    close: () => undefined,
+  };
+  const store = createChatStore(backend, records, { familiarId: 'local' });
+  await store.prepareBringBack({ parentConversationId: parent.id, sideConversationId: 'side-0' });
+  const original = Map.prototype.values;
+  let largeEnumerations = 0;
+  const values = vi.spyOn(Map.prototype, 'values').mockImplementation(function (
+    this: Map<unknown, unknown>,
+  ) {
+    if (this.size >= 20000) largeEnumerations += 1;
+    return original.call(this);
+  });
+  try {
+    expect(
+      (
+        await store.createSideConversation({
+          parentConversationId: parent.id,
+          operationKey: 'key-19999',
+        })
+      ).id,
+    ).toBe('side-19999');
+    const input = { parentConversationId: parent.id, operationKey: 'fresh-key' };
+    const created = await store.createSideConversation(input);
+    expect((await store.createSideConversation(input)).id).toBe(created.id);
+    expect(backend.commit).toHaveBeenCalledTimes(1);
+    expect(largeEnumerations).toBe(0);
+  } finally {
+    values.mockRestore();
+  }
+});
+
 test.skipIf(process.env.CHAT_APPEND_BENCHMARK !== '1')(
   'reports 20k retained-history append samples excluding initialization',
   async () => {

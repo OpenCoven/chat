@@ -101,6 +101,40 @@ function createReadClient(overrides: Partial<CaveReadClient> = {}): CaveReadClie
 }
 
 describe('createQueryAdapter', () => {
+  it('enforces a chapter-specific 50-header request bound without changing other pagination', async () => {
+    const listConversationChapters = vi.fn(async () => ({
+      conversationId: 'thread',
+      rule: 'utc-day-v1' as const,
+      contextStatus: 'context-unverified' as const,
+      sourceRevision: 'one',
+      status: 'complete' as const,
+      data: [],
+    }));
+    const client = createReadClient({ listConversationChapters });
+    const adapter = createQueryAdapter(() => client);
+    if (!adapter.listChapters) throw new Error('Missing chapter read port');
+    for (const limit of [51, 100]) {
+      await expect(adapter.listChapters('thread', { limit })).resolves.toEqual({
+        status: 'error',
+        code: 'invalid_request',
+      });
+    }
+    expect(listConversationChapters).not.toHaveBeenCalled();
+    await expect(adapter.listChapters('thread', { limit: 50 })).resolves.toMatchObject({
+      status: 'ok',
+    });
+    expect(listConversationChapters).toHaveBeenLastCalledWith(
+      'thread',
+      expect.objectContaining({ limit: 50 }),
+    );
+    await expect(adapter.listConversations({ limit: 100 })).resolves.toMatchObject({
+      status: 'ok',
+    });
+    expect(client.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 100 }),
+    );
+  });
+
   it('returns not_ready when no ready client is available', async () => {
     const adapter = createQueryAdapter(() => null);
 

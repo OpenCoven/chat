@@ -10,7 +10,7 @@ import {
 } from './lib/local/chat-writer';
 import { createLocalQueryAdapter } from './lib/local/local-query-adapter';
 import { createMemoryChatBackend } from './lib/local/memory-backend';
-import type { BringBackInput } from './lib/local/side-conversations';
+import type { BringBackInput, CreateSideInput } from './lib/local/side-conversations';
 
 async function fixture() {
   const backend = createMemoryChatBackend();
@@ -55,6 +55,8 @@ test.each(['get', 'list', 'throw'])(
     const writer = { ...current.writer, sideConversations: { ...capability, get, list } };
     render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
     const retry = await screen.findByRole('button', { name: 'Retry local side notes' });
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not be read.*retry/i);
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/saved|operation key|moved/);
     expect(
       screen.queryByRole('button', { name: 'New retained side note' }),
     ).not.toBeInTheDocument();
@@ -63,6 +65,96 @@ test.each(['get', 'list', 'throw'])(
     expect(await screen.findByRole('button', { name: /Retained side note · open/ })).toBeVisible();
   },
 );
+
+test.each(['error', 'throw'])(
+  'uncertain create %s keeps its key until discarded replay permits a fresh explicit create',
+  async (failure) => {
+    const current = await fixture();
+    const local = current.writer.sideConversations;
+    if (!local) throw new Error('Missing local capability');
+    const create = vi.fn(async (input: CreateSideInput) => {
+      const result = await local.create(input);
+      if (create.mock.calls.length === 1 && result.status === 'ok') {
+        await current.store.setSideState(
+          {
+            parentConversationId: current.parent.id,
+            sideConversationId: result.data.id,
+          },
+          'discarded',
+        );
+        if (failure === 'throw') throw new Error('lost acknowledgement');
+        return { status: 'error' as const, code: 'service_unavailable' };
+      }
+      return result;
+    });
+    render(
+      <ChatShell
+        queryAdapter={current.adapter}
+        writer={{ ...current.writer, sideConversations: { ...local, create } }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'New retained side note' }));
+    const uncertain = await screen.findByText(/same operation key/i);
+    expect(uncertain).toHaveTextContent(/creation result could not be confirmed/i);
+    fireEvent.click(screen.getByRole('button', { name: 'New retained side note' }));
+    await screen.findByText(/creation request refers to a discarded note/);
+    expect(create.mock.calls[1]?.[0]).toEqual(create.mock.calls[0]?.[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'New retained side note' }));
+    await screen.findByRole('button', { name: 'Close note' });
+    expect(create.mock.calls[2]?.[0].operationKey).not.toBe(create.mock.calls[0]?.[0].operationKey);
+  },
+);
+
+test.each(['error', 'throw', 'conflict'])(
+  'state transition %s does not claim an operation key or an unsaved result',
+  async (failure) => {
+    const current = await fixture();
+    const local = current.writer.sideConversations;
+    if (!local) throw new Error('Missing local capability');
+    const setState = vi.fn(local.setState);
+    if (failure !== 'throw')
+      setState.mockResolvedValueOnce({
+        status: 'error',
+        code: failure === 'conflict' ? 'conflict' : 'service_unavailable',
+      });
+    else setState.mockRejectedValueOnce(new Error('lost acknowledgement'));
+    render(
+      <ChatShell
+        queryAdapter={current.adapter}
+        writer={{ ...current.writer, sideConversations: { ...local, setState } }}
+      />,
+    );
+    await openSide();
+    fireEvent.click(screen.getByRole('button', { name: 'Close note' }));
+    const notice = await screen.findByText(
+      /state change could not be confirmed.*refresh.*before retrying/i,
+    );
+    expect(notice).not.toHaveTextContent(/operation key|not be saved/);
+  },
+);
+
+test('side pagination errors describe a retryable read, not an unsaved keyed mutation', async () => {
+  const current = await fixture();
+  const local = current.writer.sideConversations;
+  if (!local) throw new Error('Missing local capability');
+  const list = vi
+    .fn(local.list)
+    .mockResolvedValueOnce({
+      status: 'ok',
+      data: { data: [current.side], cursor: { hasMore: true, next: 'next-page' } },
+    })
+    .mockResolvedValueOnce({ status: 'error', code: 'service_unavailable' });
+  render(
+    <ChatShell
+      queryAdapter={current.adapter}
+      writer={{ ...current.writer, sideConversations: { ...local, list } }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Load more side notes' }));
+  const notice = await screen.findByText(/could not be read.*retry/i);
+  expect(notice).not.toHaveTextContent(/saved|operation key/);
+  expect(screen.getByRole('button', { name: 'Load more side notes' })).toBeEnabled();
+});
 
 test('a definitively stale review requires a fresh operation key and branch before editing', async () => {
   const current = await fixture();
@@ -195,7 +287,9 @@ test('in-flight review survives source unmount and remount without releasing its
   expect(review).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
   await act(async () => release());
-  expect(await screen.findByText(/Retry uses the same operation key/)).toBeVisible();
+  expect(
+    await screen.findByText(/Retry the unchanged review with the same operation key/),
+  ).toBeVisible();
   expect(review).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   await waitFor(() =>

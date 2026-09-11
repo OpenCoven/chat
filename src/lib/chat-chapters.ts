@@ -1,5 +1,7 @@
 import type { OperationOptions, Page, PageOptions } from '@opencoven/sdk-core/browser';
 
+export const MAX_CHAPTER_PAGE_LIMIT = 50;
+
 export type ConversationChapter = Readonly<{
   id: string;
   conversationId: string;
@@ -39,7 +41,7 @@ export function hasValidChapterHeaders(
     !page.sourceRevision ||
     !['complete', 'partial', 'unavailable'].includes(page.status) ||
     !Array.isArray(page.data) ||
-    page.data.length > 50
+    page.data.length > MAX_CHAPTER_PAGE_LIMIT
   )
     return false;
   const ids = new Set(previous.map((chapter) => chapter.id));

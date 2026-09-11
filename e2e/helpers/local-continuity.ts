@@ -1,5 +1,32 @@
 import { expect, type Page } from '@playwright/test';
 
+export async function loseNextWriteAcknowledgement(page: Page) {
+  await page.evaluate(() => {
+    const original = IDBDatabase.prototype.transaction;
+    let dropNextAcknowledgement = true;
+    IDBDatabase.prototype.transaction = function (...args) {
+      const transaction = Reflect.apply(original, this, args) as IDBTransaction;
+      if (args[1] === 'readwrite' && dropNextAcknowledgement) {
+        dropNextAcknowledgement = false;
+        // Commit really succeeds; only its acknowledgement is lost.
+        Object.defineProperty(transaction, 'oncomplete', {
+          configurable: true,
+          set() {
+            transaction.addEventListener(
+              'complete',
+              () => {
+                transaction.onerror?.call(transaction, new Event('error'));
+              },
+              { once: true },
+            );
+          },
+        });
+      }
+      return transaction;
+    };
+  });
+}
+
 export async function localContinuityJourney({
   page,
   visit = true,
@@ -32,34 +59,12 @@ export async function localContinuityJourney({
       /Pending reviews survive navigation in this app session only, not reload or restart/,
     ),
   ).toBeVisible();
-  await page.evaluate(() => {
-    const original = IDBDatabase.prototype.transaction;
-    let dropNextAcknowledgement = true;
-    IDBDatabase.prototype.transaction = function (...args) {
-      const transaction = Reflect.apply(original, this, args) as IDBTransaction;
-      if (args[1] === 'readwrite' && dropNextAcknowledgement) {
-        dropNextAcknowledgement = false;
-        // The real IndexedDB commit completes, but its acknowledgement is lost.
-        // Only this test-side wrapper turns that completion into a writer error.
-        Object.defineProperty(transaction, 'oncomplete', {
-          configurable: true,
-          set() {
-            transaction.addEventListener(
-              'complete',
-              () => {
-                transaction.onerror?.call(transaction, new Event('error'));
-              },
-              { once: true },
-            );
-          },
-        });
-      }
-      return transaction;
-    };
-  });
+  await loseNextWriteAcknowledgement(page);
   await page.getByRole('button', { name: 'Bring back reviewed excerpt' }).click();
   await expect(
-    page.getByText('The local change could not be saved. Retry uses the same operation key.'),
+    page.getByText(
+      'The import result could not be confirmed. Retry the unchanged review with the same operation key.',
+    ),
   ).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
     'Edited excerpt only',
