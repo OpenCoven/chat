@@ -39,6 +39,15 @@ async function openSide() {
   await screen.findByRole('button', { name: 'Return to parent' });
 }
 
+async function selectForReview(name = /source text/) {
+  const source = screen.getByRole('checkbox', { name });
+  fireEvent.click(source);
+  await waitFor(() => expect(source).toBeChecked());
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Review Bring back' })).toBeEnabled(),
+  );
+}
+
 test.each(['get', 'list', 'throw'])(
   'side-note %s failures offer a safe load retry',
   async (failure) => {
@@ -168,7 +177,7 @@ test('a definitively stale review requires a fresh operation key and branch befo
   };
   render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
   await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
     target: { value: 'keep the reviewed text' },
@@ -224,7 +233,7 @@ test('a generic conflict after a committed import cannot release or edit its ope
   };
   render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
   await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
@@ -254,7 +263,7 @@ test('a definitive missing-source review keeps its excerpt for explicit reselect
     />,
   );
   await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
     target: { value: 'valuable edited excerpt' },
@@ -266,7 +275,7 @@ test('a definitive missing-source review keeps its excerpt for explicit reselect
   expect(excerpt).toHaveAttribute('readonly');
   expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
   fireEvent.click(reselect);
-  fireEvent.click(screen.getByRole('checkbox', { name: /available replacement/ }));
+  await selectForReview(/available replacement/);
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   await waitFor(() => expect(excerpt).not.toHaveAttribute('readonly'));
   expect(excerpt).toHaveValue('valuable edited excerpt');
@@ -286,7 +295,7 @@ test('a discarded source failing re-review leaves the edited excerpt copyable un
   const current = await fixture();
   render(<ChatShell queryAdapter={current.adapter} writer={current.writer} />);
   await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
     target: { value: 'retain this edit' },
@@ -333,7 +342,7 @@ test('in-flight review survives source unmount and remount without releasing its
   };
   const view = render(<ChatShell queryAdapter={first.adapter} writer={writer} />);
   await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
     target: { value: 'exact edited excerpt' },
@@ -411,19 +420,36 @@ test('review references are partitioned by source, writer, familiar, parent and 
   for (const other of others) expect(other.getSnapshot().review).toBeNull();
 });
 
-test('explicit cancellation clears a review without writing an import', async () => {
-  const current = await fixture();
-  render(<ChatShell queryAdapter={current.adapter} writer={current.writer} />);
-  await openSide();
-  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
-  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
-  await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel review' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Return to parent' }));
-  await openSide();
-  expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument();
-  expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(0);
-});
+test.each(['immediate', 'deferred'] as const)(
+  'explicit cancellation clears a review without writing an import (%s notification)',
+  async (notification) => {
+    const current = await fixture();
+    const entry = sideReviewMemory(
+      continuityMemory(current.adapter.getSourceIdentity?.() ?? current.adapter, current.writer),
+      'local',
+      current.parent.id,
+      current.side.id,
+    );
+    if (notification === 'deferred') {
+      // Keep the selected store snapshot ahead of React's enabled-button render.
+      const subscribe = entry.subscribe;
+      entry.subscribe = (listener) => subscribe(() => queueMicrotask(listener));
+    }
+    render(<ChatShell queryAdapter={current.adapter} writer={current.writer} />);
+    await openSide();
+    await selectForReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+    await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel review' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Return to parent' }));
+    await openSide();
+    expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument();
+    expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(0);
+  },
+);
 
 test('an uncertain committed import cannot be cancelled into a fresh key and remains copyable across navigation', async () => {
   const current = await fixture();
@@ -445,10 +471,8 @@ test('an uncertain committed import cannot be cancelled into a fresh key and rem
   };
   render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
   await openSide();
-  const source = screen.getByRole('checkbox', { name: /source text/ });
   fireEvent.click(screen.getByRole('button', { name: 'Discard note…' }));
-  fireEvent.click(source);
-  await waitFor(() => expect(source).toBeChecked());
+  await selectForReview();
   fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
   const excerpt = await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
   fireEvent.change(excerpt, { target: { value: 'Copyable exact excerpt' } });
