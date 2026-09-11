@@ -1988,6 +1988,11 @@ namespace OpenCoven
             string path,
             string supervisorSid)
         {
+            if (String.IsNullOrWhiteSpace(supervisorSid))
+            {
+                throw new InvalidOperationException(
+                    "Status staging supervisor identity is required.");
+            }
             SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
             if (current == null)
             {
@@ -2093,7 +2098,7 @@ namespace OpenCoven
                         (isolatedChildOnlyAccess == 0 ? 5 : 6))
                 {
                     throw new InvalidOperationException(
-                        "Restricted directory DACL must contain exactly five ACEs.");
+                        "Restricted directory DACL has an unexpected ACE count.");
                 }
 
                 bool foundSystem = false;

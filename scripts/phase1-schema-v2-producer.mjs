@@ -441,6 +441,14 @@ export function windowsJobBindingEnvironment(
   const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
   const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
   const bootstrapRoot = environment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT;
+  const statusStagingDirectory = environment.COVEN_WINDOWS_STATUS_STAGING_DIR;
+  const statusStagingSupervisorSid = environment.COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID;
+  const statusStagingSidComponents =
+    typeof statusStagingSupervisorSid === 'string' &&
+    statusStagingSupervisorSid.length <= 184 &&
+    /^S-1-[0-9]+(?:-[0-9]+){1,15}$/u.test(statusStagingSupervisorSid)
+      ? statusStagingSupervisorSid.split('-').slice(2).map(BigInt)
+      : null;
   const workspace = environment.OPENCOVEN_WINDOWS_WORKSPACE;
   const artifactDirectory = environment.OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY;
   const sourceRecord = environment.OPENCOVEN_WINDOWS_SOURCE_RECORD;
@@ -460,6 +468,9 @@ export function windowsJobBindingEnvironment(
   if (
     typeof nonce !== 'string' ||
     !/^[0-9a-f]{32}$/u.test(nonce) ||
+    statusStagingSidComponents === null ||
+    statusStagingSidComponents[0] > 0xffff_ffff_ffffn ||
+    statusStagingSidComponents.slice(1).some((component) => component > 0xffff_ffffn) ||
     name !== `Local\\OpenCoven.Chat.Conformance.${nonce}`
   ) {
     throw new Error('phase1.stage.invocation.windows-job-identity');
@@ -518,6 +529,7 @@ export function windowsJobBindingEnvironment(
   };
   const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot);
   const canonicalWorkspace = requireCanonicalWindowsPath(workspace);
+  const canonicalStatusStagingDirectory = requireCanonicalWindowsPath(statusStagingDirectory);
   const canonicalArtifactDirectory = requireCanonicalWindowsPath(artifactDirectory);
   const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord);
   const canonicalPnpmCli = requireCanonicalWindowsPath(pnpmCli);
@@ -526,10 +538,13 @@ export function windowsJobBindingEnvironment(
     secondaryTemporaryDirectory,
   );
   requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
+  requireDescendant(canonicalBootstrapRoot, canonicalStatusStagingDirectory);
   requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
   requireDescendant(canonicalBootstrapRoot, canonicalPnpmCli);
   if (
     windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    canonicalStatusStagingDirectory.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'status-staging').toLowerCase() ||
     canonicalWorkspace.toLowerCase() !==
       windowsPath.join(canonicalBootstrapRoot, 'workspace').toLowerCase() ||
     canonicalTemporaryDirectory.toLowerCase() !==
@@ -574,6 +589,8 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_JOB_NAME: name,
     OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
     OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: canonicalBootstrapRoot,
+    COVEN_WINDOWS_STATUS_STAGING_DIR: canonicalStatusStagingDirectory,
+    COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: statusStagingSupervisorSid,
     OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
     OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
     OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
