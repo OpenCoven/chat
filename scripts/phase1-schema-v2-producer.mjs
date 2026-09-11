@@ -5,11 +5,16 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  constants as fsConstants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -295,6 +300,55 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.runtime-observations.sdk-install.failed',
   'phase1.runtime-observations.chat-install.failed',
   'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.sdk-tests.command.spawn',
+  'phase1.runtime-observations.sdk-tests.command.tracking',
+  'phase1.runtime-observations.sdk-tests.command.timeout',
+  'phase1.runtime-observations.sdk-tests.command.output-limit',
+  'phase1.runtime-observations.sdk-tests.command.signal',
+  'phase1.runtime-observations.sdk-tests.unknown',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enoent',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eacces',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eperm',
+  'phase1.runtime-observations.sdk-tests.command.spawn.einval',
+  'phase1.runtime-observations.sdk-tests.command.spawn.e2big',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enomem',
+  'phase1.runtime-observations.sdk-tests.report.missing',
+  'phase1.runtime-observations.sdk-tests.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.report.oversize',
+  'phase1.runtime-observations.sdk-tests.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.report.malformed',
+  'phase1.runtime-observations.sdk-tests.report.empty',
+  'phase1.runtime-observations.sdk-tests.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.report.failed.native-secret-store',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.missing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.oversize',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.malformed',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.empty',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.native-secret-store',
+
   'phase1.runtime-observations.chat-tests.failed',
   'phase1.runtime-observations.chat-rust-tests.failed',
   'phase1.runtime-observations.coven-rust-tests.failed',
@@ -1933,6 +1987,111 @@ export function runSchemaV2CommandForTest(artifactRoot, command, args, options) 
   return runCommand(artifactRoot, 'Schema-v2 test command', command, args, options);
 }
 
+const sdkObservationFiles = [
+  'cave-discovery-pairing',
+  'cave-canonical-reads',
+  'cave-hpke-bound-v1',
+  'cave-managed-native',
+  'cave-managed-native-staged',
+  'coven-discovery',
+  'health-validation',
+  'client-contract',
+  'native-secret-store',
+];
+
+function diagnoseSdkObservationReport(path, rootPath) {
+  let descriptor;
+  let report;
+  try {
+    const before = lstatSync(path);
+    if (before.isSymbolicLink() || !before.isFile()) return 'unsafe-file';
+    const limit = 4 * 1024 * 1024;
+    if (before.size > limit) return 'oversize';
+    descriptor = openSync(
+      path,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    );
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino) {
+      return 'unsafe-file';
+    }
+    if (opened.size > limit) return 'oversize';
+    const bytes = Buffer.alloc(limit + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const read = readSync(descriptor, bytes, count, bytes.length - count, null);
+      if (read === 0) break;
+      count += read;
+    }
+    if (count > limit) return 'oversize';
+    try {
+      report = JSON.parse(bytes.subarray(0, count).toString('utf8'));
+    } catch {
+      return 'invalid-json';
+    }
+  } catch (error) {
+    return error?.code === 'ENOENT' ? 'missing' : 'unreadable';
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  if (
+    !report ||
+    typeof report !== 'object' ||
+    Array.isArray(report) ||
+    typeof report.success !== 'boolean' ||
+    !Array.isArray(report.testResults)
+  )
+    return 'malformed';
+  if (report.testResults.length === 0) return 'empty';
+  if (
+    report.testResults.some(
+      (file) =>
+        !file ||
+        typeof file !== 'object' ||
+        typeof file.name !== 'string' ||
+        !Array.isArray(file.assertionResults) ||
+        typeof file.status !== 'string',
+    )
+  )
+    return 'malformed';
+  const normalize = (value) => value.replaceAll('\\', '/');
+  for (const id of sdkObservationFiles) {
+    const expected = normalize(resolve(rootPath, `tests/${id}.spec.ts`));
+    if (
+      report.testResults.some(
+        (file) =>
+          normalize(file.name) === expected &&
+          (file.status === 'failed' || file.assertionResults.some((a) => a?.status === 'failed')),
+      )
+    ) {
+      return `failed.${id}`;
+    }
+  }
+  return report.success ? 'claims-success' : 'not-successful';
+}
+
+export function classifySdkObservationFailure(error, reportPath, rootPath) {
+  let prefix = 'report';
+  if (error instanceof CommandExecutionError) {
+    const { reason, signal, code, spawnCode } = error.result ?? {};
+    if (reason === 'spawn') {
+      return boundedSpawnErrorCodes.includes(spawnCode)
+        ? `command.spawn.${spawnCode.toLowerCase()}`
+        : 'command.spawn';
+    }
+    if (reason === 'tracking' || reason === 'timeout') return `command.${reason}`;
+    if (reason === 'stdout-limit' || reason === 'stderr-limit') return 'command.output-limit';
+    if (signal) return 'command.signal';
+    if (reason || !Number.isInteger(code) || code === 0) return 'unknown';
+    prefix = 'command.nonzero.report';
+  }
+  try {
+    return `${prefix}.${diagnoseSdkObservationReport(reportPath, rootPath)}`;
+  } catch {
+    return `${prefix}.unreadable`;
+  }
+}
+
 function parseVitestObservationReport(path, label) {
   const stats = lstatSync(path);
   if (stats.isSymbolicLink() || !stats.isFile() || stats.size > 4 * 1024 * 1024) {
@@ -1965,34 +2124,36 @@ function parseVitestObservationReport(path, label) {
   return passed;
 }
 
-async function runVitestObservationSuite({
-  artifactRoot,
-  rootPath,
-  environment,
-  label,
-  files,
-  outputName,
-}) {
+export async function runVitestObservationSuite(
+  { artifactRoot, rootPath, environment, label, files, outputName },
+  executeCommand = runCommand,
+) {
   const outputPath = resolve(artifactRoot.rootPath, outputName);
-  await runCommand(
-    artifactRoot,
-    label,
-    'pnpm',
-    [
-      '--ignore-workspace',
-      'exec',
-      'vitest',
-      'run',
-      ...files,
-      '--reporter=json',
-      `--outputFile=${outputPath}`,
-    ],
-    {
-      cwd: rootPath,
-      env: environment,
-    },
-  );
-  return parseVitestObservationReport(outputPath, label);
+  try {
+    await executeCommand(
+      artifactRoot,
+      label,
+      'pnpm',
+      [
+        '--ignore-workspace',
+        'exec',
+        'vitest',
+        'run',
+        ...files,
+        '--reporter=json',
+        `--outputFile=${outputPath}`,
+      ],
+      {
+        cwd: rootPath,
+        env: environment,
+      },
+    );
+    return parseVitestObservationReport(outputPath, label);
+  } catch (error) {
+    if (label !== 'SDK schema-v2 observation tests') throw error;
+    const category = classifySdkObservationFailure(error, outputPath, rootPath);
+    throw new Error(`phase1.runtime-observations.sdk-tests.${category}`, { cause: error });
+  }
 }
 
 function parseCargoPassedTests(output) {
