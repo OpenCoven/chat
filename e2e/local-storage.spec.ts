@@ -4,96 +4,110 @@ import { loseNextWriteAcknowledgement } from './helpers/local-continuity';
 declare global {
   interface Window {
     __chatStorageReads: { full: number; writeFull: number; keyed: number; indexed: number };
+    __resumeLocalRevisionRead?: () => void;
   }
 }
 
-async function seedLegacyHistory(page: Page, count: number) {
+async function seedLegacyHistory(page: Page, count: number, sideCount = 1) {
   await page.route(
     '**/',
     (route) => route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
     { times: 1 },
   );
   await page.goto('/');
-  await page.evaluate(async (size) => {
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('opencoven-chat', 1);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        db.createObjectStore('meta', { keyPath: 'key' }).put({ key: 'schemaVersion', value: 1 });
-        db.createObjectStore('conversations', { keyPath: 'id' }).createIndex('by_updated', [
-          'updatedAt',
-          'id',
-        ]);
-        db.createObjectStore('messages', { keyPath: 'id' }).createIndex('by_conversation', [
-          'conversationId',
-          'createdAt',
-          'id',
-        ]);
-      };
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction(['conversations', 'messages'], 'readwrite');
-        tx.onabort = () => {
-          db.close();
-          reject(tx.error);
+  await page.evaluate(
+    async ({ size, sideCount }) => {
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('opencoven-chat', 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          db.createObjectStore('meta', { keyPath: 'key' }).put({ key: 'schemaVersion', value: 1 });
+          db.createObjectStore('conversations', { keyPath: 'id' }).createIndex('by_updated', [
+            'updatedAt',
+            'id',
+          ]);
+          db.createObjectStore('messages', { keyPath: 'id' }).createIndex('by_conversation', [
+            'conversationId',
+            'createdAt',
+            'id',
+          ]);
         };
-        tx.oncomplete = () => {
-          db.close();
-          resolve();
-        };
-        const timestamp = '2026-09-01T00:00:00.000Z';
-        const base = { familiarId: 'local', createdAt: timestamp, updatedAt: timestamp };
-        const conversations = tx.objectStore('conversations');
-        conversations.put({ ...base, id: 'parent', title: 'Legacy parent', revision: 1 });
-        for (const [id, state] of [
-          ['side', 'open'],
-          ['history', 'closed'],
-          ['discarded', 'discarded'],
-        ]) {
-          conversations.put({
-            ...base,
-            id,
-            title: `Legacy ${id}`,
-            revision: 1,
-            side: { parentConversationId: 'parent', operationKey: `create-${id}`, state },
-          });
-        }
-        const messages = tx.objectStore('messages');
-        messages.put({
-          id: 'source',
-          conversationId: 'side',
-          parentId: null,
-          role: 'user',
-          text: 'Legacy source',
-          createdAt: timestamp,
-        });
-        messages.put({
-          id: 'imported',
-          conversationId: 'parent',
-          parentId: null,
-          role: 'user',
-          text: 'Legacy imported excerpt',
-          createdAt: timestamp,
-          broughtBack: {
-            operationKey: 'legacy-import',
-            sideConversationId: 'side',
-            sourceMessageIds: ['source'],
-          },
-        });
-        for (let i = 0; i < size; i += 1) {
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction(['conversations', 'messages'], 'readwrite');
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          const timestamp = '2026-09-01T00:00:00.000Z';
+          const base = { familiarId: 'local', createdAt: timestamp, updatedAt: timestamp };
+          const conversations = tx.objectStore('conversations');
+          conversations.put({ ...base, id: 'parent', title: 'Legacy parent', revision: 1 });
+          for (const [id, state] of [
+            ['side', 'open'],
+            ['history', 'closed'],
+            ['discarded', 'discarded'],
+          ]) {
+            conversations.put({
+              ...base,
+              id,
+              title: `Legacy ${id}`,
+              revision: 1,
+              side: { parentConversationId: 'parent', operationKey: `create-${id}`, state },
+            });
+          }
+          const messages = tx.objectStore('messages');
           messages.put({
-            id: `history-${i}`,
-            conversationId: 'history',
-            parentId: i ? `history-${i - 1}` : null,
+            id: 'source',
+            conversationId: 'side',
+            parentId: null,
             role: 'user',
-            text: `Unrelated retained history ${i}`,
-            createdAt: new Date(Date.parse(timestamp) + i).toISOString(),
+            text: 'Legacy source',
+            createdAt: timestamp,
           });
-        }
-      };
-    });
-  }, count);
+          for (let index = 2; index <= sideCount; index += 1) {
+            messages.put({
+              id: `side-source-${index}`,
+              conversationId: 'side',
+              parentId: index === 2 ? 'source' : `side-source-${index - 1}`,
+              role: 'user',
+              text: `Side source ${index}`,
+              createdAt: new Date(Date.parse(timestamp) + index).toISOString(),
+            });
+          }
+          messages.put({
+            id: 'imported',
+            conversationId: 'parent',
+            parentId: null,
+            role: 'user',
+            text: 'Legacy imported excerpt',
+            createdAt: timestamp,
+            broughtBack: {
+              operationKey: 'legacy-import',
+              sideConversationId: 'side',
+              sourceMessageIds: ['source'],
+            },
+          });
+          for (let i = 0; i < size; i += 1) {
+            messages.put({
+              id: `history-${i}`,
+              conversationId: 'history',
+              parentId: i ? `history-${i - 1}` : null,
+              role: 'user',
+              text: `Unrelated retained history ${i}`,
+              createdAt: new Date(Date.parse(timestamp) + i).toISOString(),
+            });
+          }
+        };
+      });
+    },
+    { size: count, sideCount },
+  );
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
   await expect(
@@ -615,4 +629,130 @@ test('a discarded reviewed source keeps its edited excerpt available for copying
   expect((await durableSummary(page)).imported).toBe(0);
   await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
   await expect(excerpt).toHaveCount(0);
+});
+
+test('App observes a late IndexedDB import after the panel and parent reload finish before commit', async ({
+  page,
+  context,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await prepareFixedReview(page);
+  await page.evaluate(() => {
+    const get = IDBObjectStore.prototype.get;
+    let holdNext = true;
+    IDBObjectStore.prototype.get = function (...args) {
+      const request = Reflect.apply(get, this, args) as IDBRequest;
+      if (
+        holdNext &&
+        this.name === 'meta' &&
+        this.transaction.mode === 'readonly' &&
+        args[0] === 'mutationRevision'
+      ) {
+        holdNext = false;
+        // Pause admission before the import transaction exists, not just its UI callback.
+        Object.defineProperty(request, 'onsuccess', {
+          configurable: true,
+          set(handler: IDBRequest['onsuccess']) {
+            request.addEventListener(
+              'success',
+              (event) => {
+                window.__resumeLocalRevisionRead = () => {
+                  if (!handler) throw new Error('Missing revision read handler');
+                  handler.call(request, event);
+                };
+              },
+              { once: true },
+            );
+          },
+        });
+      }
+      return request;
+    };
+  });
+  await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => typeof window.__resumeLocalRevisionRead))
+    .toBe('function');
+  await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'New retained side note', exact: true }),
+  ).toBeVisible();
+  const other = await context.newPage();
+  await other.goto('/');
+  await other.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(other.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('list', { name: 'Messages' }).getByText('Atomic reviewed excerpt'),
+  ).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
+  await page.evaluate(() => {
+    const resume = window.__resumeLocalRevisionRead;
+    if (!resume) throw new Error('Missing admission barrier');
+    delete window.__resumeLocalRevisionRead;
+    resume();
+  });
+  await expect(
+    page
+      .getByRole('list', { name: 'Messages' })
+      .getByText('Atomic reviewed excerpt', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('option', { name: /New conversation/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+  expect((await durableSummary(page)).imported).toBe(1);
+});
+
+test('a partially unloaded selection cannot silently import only the first-page messages', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50, 51);
+  await page.getByRole('button', { name: /^Legacy side/ }).click();
+  await page.getByRole('checkbox', { name: /Legacy source/ }).check();
+  await page.getByRole('button', { name: 'Load more messages', exact: true }).click();
+  await page.getByRole('checkbox', { name: /Side source 51$/ }).check();
+  await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
+  await page.getByRole('button', { name: /^Legacy side/ }).click();
+  await expect(page.getByRole('checkbox', { name: /Side source 51$/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Review Bring back', exact: true }).click();
+  await expect(page.getByText(/Selected messages are not all loaded/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Load more messages', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: /Side source 51$/ })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: /Legacy source/ })).toBeChecked();
+  await page.getByRole('button', { name: 'Review Bring back', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
+    'Legacy source\n\nSide source 51',
+  );
+  await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
+  const selections = await page.evaluate(
+    () =>
+      new Promise<string[][]>((resolve, reject) => {
+        const request = indexedDB.open('opencoven-chat');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const tx = database.transaction('messages');
+          const messages = tx
+            .objectStore('messages')
+            .index('by_conversation')
+            .getAll(IDBKeyRange.bound(['parent'], ['parent', []]));
+          tx.onabort = () => {
+            database.close();
+            reject(tx.error);
+          };
+          tx.oncomplete = () => {
+            resolve(
+              messages.result
+                .filter(
+                  (message) =>
+                    message.broughtBack && message.broughtBack.operationKey !== 'legacy-import',
+                )
+                .map((message) => message.broughtBack.sourceMessageIds),
+            );
+            database.close();
+          };
+        };
+      }),
+  );
+  expect(selections).toEqual([['source', 'side-source-51']]);
 });

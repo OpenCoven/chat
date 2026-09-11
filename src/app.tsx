@@ -342,6 +342,13 @@ export function App({
     };
   }, [localSourceFactory]);
 
+  const subscribeLocal = useCallback(
+    (listener: () => void) => localSource?.store.subscribe(listener) ?? (() => undefined),
+    [localSource],
+  );
+  const getLocalRevision = useCallback(() => localSource?.store.getRevision() ?? 0, [localSource]);
+  const localRevision = useSyncExternalStore(subscribeLocal, getLocalRevision);
+
   const caveSource = caveStatus?.source ?? null;
   // Falling back to local rather than showing an empty Cave view: a dropped
   // connection should not look like deleted history.
@@ -433,6 +440,7 @@ export function App({
 
       <ChatShell
         key={activeSource.kind}
+        revision={activeSource.kind === 'local' ? localRevision : 0}
         isDurable={activeSource.isDurable}
         queryAdapter={activeSource.adapter}
         writer={activeSource.writer}

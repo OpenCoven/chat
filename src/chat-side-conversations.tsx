@@ -20,6 +20,7 @@ type Props = Readonly<{
   onWritten: () => void;
   memory: ContinuityMemory;
   familiarId: string;
+  metadataRevision?: number;
 }>;
 
 const failureGuidance = {
@@ -56,6 +57,7 @@ export function ChatSideConversations({
   onWritten,
   memory,
   familiarId,
+  metadataRevision = 0,
 }: Props) {
   const capability = writer?.canWrite() ? writer.sideConversations : undefined;
   const [side, setSide] = useState<SideConversation | null>(null);
@@ -103,7 +105,7 @@ export function ChatSideConversations({
   const walk = useRef(createManualPageWalk());
   const reviewId = useId();
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: loadAttempt is an explicit retry trigger for the scoped read.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadAttempt and metadataRevision explicitly refresh this scoped read.
   useEffect(() => {
     active.current = true;
     setReady(false);
@@ -145,7 +147,7 @@ export function ChatSideConversations({
       alive.value = false;
       active.current = false;
     };
-  }, [capability, conversationId, loadAttempt]);
+  }, [capability, conversationId, loadAttempt, metadataRevision]);
 
   async function run<T>(
     context: 'read' | 'state',
@@ -182,7 +184,19 @@ export function ChatSideConversations({
       return;
     const previous =
       snapshot.phase === 'rejected' || snapshot.phase === 'reselecting' ? snapshot.review : null;
-    const source = messages.filter((message) => selected.includes(message.id));
+    const source = messages.filter((message) => snapshot.selected.includes(message.id));
+    const loadedIds = new Set(source.map((message) => message.id));
+    if (
+      (!previous || snapshot.phase === 'reselecting') &&
+      (snapshot.selected.length === 0 || snapshot.selected.some((id) => !loadedIds.has(id)))
+    ) {
+      reviewEntry.update({
+        notice: snapshot.selected.length
+          ? 'Selected messages are not all loaded. Use Load more messages, or clear the selection and select available messages. Your selection and any edited excerpt are retained.'
+          : 'Select messages before preparing a review.',
+      });
+      return;
+    }
     const input: BringBackInput = {
       parentConversationId: side.side.parentConversationId,
       sideConversationId: side.id,
@@ -420,6 +434,19 @@ export function ChatSideConversations({
               >
                 Review Bring back
               </button>
+              {selected.length > 0 && (!review || phase === 'reselecting') ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    reviewEntry.update({
+                      selected: [],
+                      notice: 'Selection cleared. Choose the messages you want to review.',
+                    })
+                  }
+                >
+                  Clear message selection
+                </button>
+              ) : null}
             </fieldset>
           ) : null}
           {review ? (

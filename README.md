@@ -72,6 +72,11 @@ read-only, copyable excerpt. **Choose available messages** retains that text
 while preparing a new selection with a new key. If the note is gone, copy the
 excerpt before explicitly canceling; uncertain acknowledgements still cannot
 be edited or reselected.
+Fresh or reselected reviews require every selected message to be loaded. If
+navigation resets the loaded pages, load the missing page or use **Clear message
+selection** to choose a new exact selection; edited excerpts are retained.
+Already-captured reviews retry their unchanged payload without requiring the
+source page to be loaded again.
 
 **Pending reviews do not survive reload or restart.** Saved imports do. If you
 reload after an uncertain save, inspect the parent before starting another import;
@@ -96,6 +101,10 @@ keyed preconditions and operation-key counts, maintained across overwrites,
 deletions and discarded-note tombstones. Admission touches only the requested
 records and changed rows; loading snapshots and initial hydration still scan
 history.
+App owns the local store subscription independently of transient panels, so
+late committed writes refresh the active local transcript, sidebar and side-note
+metadata without another click. These notifications neither navigate another
+conversation nor refetch an active Cave source.
 
 These are local-only notes with **no connected familiar**, not Cave-backed side
 chats. If durable storage is unavailable, the UI discloses memory-only custody.

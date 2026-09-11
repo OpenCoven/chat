@@ -1201,6 +1201,7 @@ function ChatShellView({
           messagesState.status === 'ready' ? (
             <ChatSideConversations
               key={`side-${selectedConversationId}`}
+              metadataRevision={revision + writeRevision}
               conversationId={selectedConversationId}
               messages={messagesState.items}
               hasMoreMessages={messagesState.hasMore}

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 
 import { App } from './app';
@@ -9,6 +9,7 @@ import { createChatStore } from './lib/local/chat-store';
 import { createLocalChatWriter } from './lib/local/chat-writer';
 import { createLocalQueryAdapter, LOCAL_FAMILIAR_ID } from './lib/local/local-query-adapter';
 import { createMemoryChatBackend } from './lib/local/memory-backend';
+import type { BringBackInput } from './lib/local/side-conversations';
 import type { CaveConnectionController } from './lib/sdk/connection-controller';
 import type { QueryAdapter } from './lib/sdk/query-adapter';
 
@@ -137,6 +138,179 @@ function makeQueryAdapter(): QueryAdapter {
 }
 
 describe('App', () => {
+  it.each(['parent', 'foreign'])(
+    'a late real-store import refreshes the active %s after another write and panel unmount',
+    async (destination) => {
+      const local = createLocalSourceFactory();
+      const parent = await local.store.createConversation('Import parent');
+      const other = await local.store.createConversation('Other parent');
+      const side = await local.store.createSideConversation({
+        parentConversationId: parent.id,
+        operationKey: 'seed-side',
+      });
+      await local.store.appendMessage(side.id, 'user', 'Source text');
+      const source = await local.factory();
+      const capability = source.writer.sideConversations;
+      if (!capability) throw new Error('Missing local side capability');
+      let release!: () => void;
+      const delayed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const bringBack = vi.fn(async (input: BringBackInput) => {
+        await delayed;
+        return capability.bringBack(input);
+      });
+      const writer = { ...source.writer, sideConversations: { ...capability, bringBack } };
+      const ownedSource = { ...source, writer };
+      const controllerFactory = vi.fn();
+      render(
+        <App
+          localSourceFactory={() => Promise.resolve(ownedSource)}
+          controllerFactory={controllerFactory}
+          desktopIdentityHost={{ canUseTauriCommands: () => false, readInstallationId: vi.fn() }}
+        />,
+      );
+      fireEvent.click(await screen.findByRole('option', { name: /Import parent/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /Retained side note/ }));
+      fireEvent.click(await screen.findByRole('checkbox', { name: /Source text/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
+        target: { value: 'Late imported excerpt' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+      await waitFor(() => expect(bringBack).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole('option', { name: /Other parent/ }));
+      await screen.findByRole('heading', { name: 'Other parent' });
+      const composer = await screen.findByRole('textbox', { name: 'Message' });
+      fireEvent.change(composer, { target: { value: 'Other write completed' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await within(await screen.findByRole('list', { name: 'Messages' })).findByText(
+        'Other write completed',
+      );
+      expect(local.store.listMessages(other.id, 50).data).toHaveLength(1);
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('listbox', { name: 'Conversations' })).getAllByRole('option')[0],
+        ).toHaveTextContent('Other parent'),
+      );
+      if (destination === 'parent') {
+        fireEvent.click(screen.getByRole('option', { name: /Import parent/ }));
+        await screen.findByRole('heading', { name: 'Import parent' });
+        await screen.findByRole('button', { name: 'New retained side note' });
+      }
+      expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Late imported excerpt')).not.toBeInTheDocument();
+      await act(async () => release());
+      await waitFor(() => expect(local.store.listMessages(parent.id, 50).data).toHaveLength(1));
+      if (destination === 'parent') {
+        expect(await screen.findByText('Late imported excerpt')).toBeVisible();
+      } else {
+        expect(screen.getByRole('heading', { name: 'Other parent' })).toBeVisible();
+        expect(screen.queryByText('Late imported excerpt')).not.toBeInTheDocument();
+        await waitFor(() =>
+          expect(
+            within(screen.getByRole('listbox', { name: 'Conversations' })).getAllByRole(
+              'option',
+            )[0],
+          ).toHaveTextContent('Import parent'),
+        );
+      }
+      expect(controllerFactory).not.toHaveBeenCalled();
+    },
+  );
+
+  it('owns one local-store subscription for creation, state and append notifications and removes it on unmount', async () => {
+    const local = createLocalSourceFactory();
+    const parent = await local.store.createConversation('Visible parent');
+    const source = await local.factory();
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn<typeof local.store.subscribe>((listener) => {
+      const stop = local.store.subscribe(listener);
+      return () => {
+        unsubscribe();
+        stop();
+      };
+    });
+    const ownedSource = { ...source, store: { ...local.store, subscribe } };
+    const view = render(
+      <App
+        localSourceFactory={() => Promise.resolve(ownedSource)}
+        desktopIdentityHost={{ canUseTauriCommands: () => false, readInstallationId: vi.fn() }}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Visible parent' });
+    let side!: Awaited<ReturnType<typeof local.store.createSideConversation>>;
+    await act(async () => {
+      side = await local.store.createSideConversation({
+        parentConversationId: parent.id,
+        operationKey: 'background-create',
+      });
+    });
+    await screen.findByRole('button', { name: /Retained side note · open/ });
+    await act(async () => {
+      await local.store.setSideState(
+        { parentConversationId: parent.id, sideConversationId: side.id },
+        'closed',
+      );
+    });
+    await screen.findByRole('button', { name: /Retained side note · closed/ });
+    await act(async () => {
+      await local.store.appendMessage(parent.id, 'user', 'Owner-observed append');
+    });
+    await screen.findByText('Owner-observed append');
+    await act(async () => {
+      await local.store.createConversation('Background thread');
+    });
+    await screen.findByRole('option', { name: /Background thread/ });
+    expect(screen.getByRole('heading', { name: 'Visible parent' })).toBeVisible();
+    expect(subscribe).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('local mutation notifications do not refetch the active Cave source', async () => {
+    const local = createLocalSourceFactory();
+    const parent = await local.store.createConversation('Local parent');
+    const harness = createControllerHarness({
+      state: 'ready',
+      caveInstanceId: 'cave-1',
+      covenAvailable: false,
+    });
+    const adapter = makeQueryAdapter();
+    const readInstallationId = vi
+      .fn<DesktopHost['readInstallationId']>()
+      .mockResolvedValue(INSTALLATION_ID);
+    render(
+      <App
+        localSourceFactory={local.factory}
+        controllerFactory={() => harness.controller}
+        queryAdapterFactory={() => adapter}
+        desktopIdentityHost={{ canUseTauriCommands: () => true, readInstallationId }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect to Cave' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Coven Cave' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Coven Cave' }));
+    await screen.findByText('Hello from Cave.');
+    const reads = [
+      adapter.listFamiliars,
+      adapter.listProjects,
+      adapter.listConversations,
+      adapter.getConversation,
+      adapter.listMessages,
+    ];
+    const counts = reads.map((read) => vi.mocked(read).mock.calls.length);
+    await act(async () => {
+      await local.store.appendMessage(parent.id, 'user', 'Local background write');
+    });
+    expect(reads.map((read) => vi.mocked(read).mock.calls.length)).toEqual(counts);
+    expect(adapter.invalidate).not.toHaveBeenCalled();
+    expect(readInstallationId).toHaveBeenCalledOnce();
+    expect(screen.getByText('Hello from Cave.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'This device' }));
+    expect(await screen.findByText('Local background write')).toBeVisible();
+  });
+
   it('mounts local chat without touching Cave', async () => {
     const controllerFactory = vi.fn();
     const readInstallationId = vi.fn<DesktopHost['readInstallationId']>();
