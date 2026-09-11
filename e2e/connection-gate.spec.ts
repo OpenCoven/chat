@@ -72,4 +72,57 @@ for (const viewport of [
     expect(bounds.sendRight).toBeLessThanOrEqual(viewport.width);
     expect(bounds.threadHeight).toBeGreaterThan(0);
   });
+
+  test(`scrolls the rail and history independently at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    for (let index = 0; index < 12; index += 1) {
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+      await expect(page.locator('.chat-shell__conversation')).toHaveCount(index + 1);
+    }
+    for (let index = 0; index < 8; index += 1) {
+      await page
+        .getByRole('textbox', { name: 'Message', exact: true })
+        .fill(`Message ${index}\n${'A line of local history.\n'.repeat(4)}`);
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      await expect(page.locator('.chat-shell__message')).toHaveCount(index + 1);
+    }
+
+    const scroll = await page.evaluate(() => {
+      const rail = document.querySelector('.chat-shell__rail');
+      const history = document.querySelector('.chat-shell__thread-body');
+      if (!rail || !history) throw new Error('Chat regions are missing');
+      const dimensions = () => ({
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight,
+        x: window.scrollX,
+        y: window.scrollY,
+      });
+      rail.scrollTop = 0;
+      history.scrollTop = 0;
+      const before = dimensions();
+      rail.scrollTop = rail.scrollHeight;
+      const afterRail = { rail: rail.scrollTop, history: history.scrollTop };
+      history.scrollTop = history.scrollHeight;
+      return {
+        before,
+        after: dimensions(),
+        afterRail,
+        afterHistory: { rail: rail.scrollTop, history: history.scrollTop },
+        railOverflow: getComputedStyle(rail).overflowY,
+        historyOverflow: getComputedStyle(history).overflowY,
+      };
+    });
+    expect(scroll.railOverflow).toBe('auto');
+    expect(scroll.historyOverflow).toBe('auto');
+    expect(scroll.afterRail.rail).toBeGreaterThan(0);
+    expect(scroll.afterRail.history).toBe(0);
+    expect(scroll.afterHistory.rail).toBe(scroll.afterRail.rail);
+    expect(scroll.afterHistory.history).toBeGreaterThan(0);
+    expect(scroll.after).toEqual(scroll.before);
+    expect(scroll.after.width).toBeLessThanOrEqual(viewport.width);
+    expect(scroll.after.height).toBeLessThanOrEqual(viewport.height);
+    expect(scroll.after.x).toBe(0);
+    expect(scroll.after.y).toBe(0);
+  });
 }
