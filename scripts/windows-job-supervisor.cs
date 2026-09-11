@@ -2717,8 +2717,23 @@ namespace OpenCoven
                 }
                 else
                 {
-                    entry.Attributes = FileAttributes.Normal;
-                    entry.Delete();
+                    if (!DeleteFileW(entry.FullName))
+                    {
+                        int deleteError = Marshal.GetLastWin32Error();
+                        if (deleteError != ERROR_ACCESS_DENIED)
+                        {
+                            throw new Win32Exception(
+                                deleteError,
+                                "Cleanup file could not be removed.");
+                        }
+                        entry.Attributes = FileAttributes.Normal;
+                        if (!DeleteFileW(entry.FullName))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "Cleanup read-only file could not be removed.");
+                        }
+                    }
                 }
             }
         }
@@ -6582,14 +6597,14 @@ namespace OpenCoven
                     }
                     if (segment.IndexOf('*') >= 0)
                     {
-                        List<string> matches = ReadBoundedDirectorySnapshot(
+                        List<FileSystemInfo> matches = ReadBoundedDirectorySnapshot(
                             candidate,
                             segment,
                             true,
                             MaximumQuotaEntries - next.Count);
-                        foreach (string matched in matches)
+                        foreach (FileSystemInfo matched in matches)
                         {
-                            next.Add(matched);
+                            next.Add(matched.FullName);
                         }
                     }
                     else
@@ -6624,23 +6639,25 @@ namespace OpenCoven
             return candidates;
         }
 
-        private static List<string> ReadBoundedDirectorySnapshot(
+        private static List<FileSystemInfo> ReadBoundedDirectorySnapshot(
             string directory,
             string searchPattern,
             bool directoriesOnly,
             int maximumEntries)
         {
-            List<string> snapshot = new List<string>();
-            IEnumerable<string> entries;
-            IEnumerator<string> enumerator;
+            List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+            IEnumerable<FileSystemInfo> entries;
+            IEnumerator<FileSystemInfo> enumerator;
             try
             {
+                DirectoryInfo directoryInfo = new DirectoryInfo(directory);
                 entries = directoriesOnly
-                    ? Directory.EnumerateDirectories(
-                        directory,
+                    ? directoryInfo.EnumerateDirectories(
                         searchPattern,
                         SearchOption.TopDirectoryOnly)
-                    : Directory.EnumerateFileSystemEntries(directory);
+                    : directoryInfo.EnumerateFileSystemInfos(
+                        "*",
+                        SearchOption.TopDirectoryOnly);
                 enumerator = entries.GetEnumerator();
             }
             catch (FileNotFoundException)
@@ -6709,18 +6726,18 @@ namespace OpenCoven
                 {
                     continue;
                 }
-                List<string> snapshot = ReadBoundedDirectorySnapshot(
+                List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshot(
                     directory,
                     null,
                     false,
                     MaximumQuotaEntries - entries);
                 entries = checked(entries + snapshot.Count);
-                foreach (string entry in snapshot)
+                foreach (FileSystemInfo entry in snapshot)
                 {
                     FileAttributes attributes;
                     try
                     {
-                        attributes = File.GetAttributes(entry);
+                        attributes = entry.Attributes;
                     }
                     catch (FileNotFoundException)
                     {
@@ -6736,14 +6753,20 @@ namespace OpenCoven
                     }
                     if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        directories.Push(entry);
+                        directories.Push(entry.FullName);
                     }
                     else
                     {
                         long length;
                         try
                         {
-                            length = new FileInfo(entry).Length;
+                            FileInfo file = entry as FileInfo;
+                            if (file == null)
+                            {
+                                throw new IOException(
+                                    "Directory quota file metadata was unavailable.");
+                            }
+                            length = file.Length;
                         }
                         catch (FileNotFoundException)
                         {

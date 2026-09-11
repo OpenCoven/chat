@@ -815,7 +815,12 @@ rights needed to secure an empty Coven status temporary before moving it into
 the stricter `COVEN_HOME`; the protected child validates the directory and
 receives it through
 `COVEN_WINDOWS_STATUS_STAGING_DIR`. A 1 MiB directory quota bounds this staging
-surface independently.
+surface independently. Quota accounting consumes metadata returned by bounded
+directory enumeration instead of reopening owner-only staging children, and
+bootstrap cleanup first deletes files through the supervisor-controlled parent
+before attempting a read-only-attribute fallback. The native timeout case
+leaves an owner-only staging file in place while quota monitoring runs and
+proves terminal cleanup still removes the complete bootstrap root.
 The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
@@ -1289,7 +1294,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 469,571 | `5719d2b13349cbfe4a8729ff32a05495717a95668a8ac8d407fbd8eafa05e1a8` |
+| `.github/workflows/client-v1-conformance.yml` | 471,028 | `6f2e83d4ff00c7ed7c3a7b81a593cb973bbf7aceb954183c655bfa970a01f932` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1314,8 +1319,8 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 294,514 | `6f973847f075b538a7655e592adacad31775de40cee9f3cf4773e67167b66ea6` |
-| `scripts/windows-job-supervisor.test.ps1` | 175,930 | `fb2e2619e517ce5d573065df7be1994a9b5654a9dde244b36770f166499661e0` |
+| `scripts/windows-job-supervisor.cs` | 295,741 | `cf0bb0cba4b7d784e8611db313e046007e21e7ed49e0d30fd3c8fc15d8f2aee0` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,096 | `4662469fcddf51726ff897d2c0088594b56f282c85bfe16dae577599194c507f` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-status-acl-probe.cs` | 8,380 | `0746f185b73d2ba7bf99efbd0fb38e91f3ad3c5618be0ae0248eb02944de1b1b` |

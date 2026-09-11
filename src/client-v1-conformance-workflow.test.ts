@@ -1181,7 +1181,7 @@ ${source.slice(start, end)}
         'ResourceQuotaLabel',
         'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
-        'Directory.EnumerateFileSystemEntries',
+        'directoryInfo.EnumerateFileSystemInfos',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1250,9 +1250,11 @@ ${source.slice(start, end)}
       expect(quotaScanner).not.toContain('Directory.Exists(');
       expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
       expect(quotaScanner).not.toContain('Directory.GetDirectories');
-      expect(quotaScanner).toContain('Directory.EnumerateFileSystemEntries');
-      expect(quotaScanner).toContain('Directory.EnumerateDirectories');
       expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateDirectories(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateFileSystemInfos(');
+      expect(quotaScanner).not.toContain('File.GetAttributes(entry)');
+      expect(quotaScanner).not.toContain('new FileInfo(entry).Length');
       expect(
         countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
@@ -1274,6 +1276,19 @@ ${source.slice(start, end)}
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
       expect(source).not.toContain('private static extern bool CreateProcessW(');
       expect(source).not.toContain('Process.GetProcesses(');
+      const directoryCleanupStart = source.indexOf(
+        'private static void DeleteDirectoryContents(DirectoryInfo directory)',
+      );
+      const directoryCleanup = source.slice(
+        directoryCleanupStart,
+        source.indexOf('\n        private static IntPtr ConvertSid(', directoryCleanupStart),
+      );
+      const directDelete = directoryCleanup.indexOf('DeleteFileW(entry.FullName)');
+      const attributeFallback = directoryCleanup.indexOf(
+        'entry.Attributes = FileAttributes.Normal;',
+      );
+      expect(directDelete).toBeGreaterThan(-1);
+      expect(attributeFallback).toBeGreaterThan(directDelete);
       const usersMembership = source.slice(
         source.indexOf('private static void EnsureUsersGroupMembership'),
         source.indexOf('private static void ValidateStandardUserSnapshot'),

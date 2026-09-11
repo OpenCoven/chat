@@ -4554,12 +4554,27 @@ Start-Sleep -Seconds 300
 
   $timeoutContext = New-IsolatedTestContext -Label 'terminal-timeout'
   $timeoutJob = $null
+  $timeoutRoot = $timeoutContext.User.RootPath
+  $timeoutStatusFile = Join-Path `
+    $timeoutContext.User.StatusStagingPath `
+    'owner-only-timeout.tmp'
   try {
     $timeoutPids = Join-Path $timeoutContext.User.RootPath 'timeout-pids.txt'
     $timeoutScript = Join-Path $timeoutContext.User.RootPath 'timeout.ps1'
     [IO.File]::WriteAllText(
       $timeoutScript,
       @"
+`$statusFile = '$($timeoutStatusFile.Replace("'", "''"))'
+[IO.File]::WriteAllBytes(`$statusFile, [byte[]](1, 2, 3, 4))
+`$statusSecurity = [Security.AccessControl.FileSecurity]::new()
+`$statusSecurity.SetSecurityDescriptorSddlForm(
+  'D:P(A;;GA;;;OW)',
+  [Security.AccessControl.AccessControlSections]::Access
+)
+[IO.FileSystemAclExtensions]::SetAccessControl(
+  [IO.FileInfo]::new(`$statusFile),
+  `$statusSecurity
+)
 `$grandchild = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText('$($timeoutPids.Replace("'", "''"))', "`$PID`n`$(`$grandchild.Id)`n")
 Start-Sleep -Seconds 300
@@ -4578,10 +4593,23 @@ Start-Sleep -Seconds 300
       $timeoutContext.Environment,
       [TimeSpan]::FromSeconds(8),
       1MB,
-      1MB
+      1MB,
+      [OpenCoven.WindowsDirectoryQuota[]]@(
+        [OpenCoven.WindowsDirectoryQuota]::new(
+          'timeout status staging',
+          $timeoutContext.User.StatusStagingPath,
+          1MB
+        )
+      )
     )
     if (-not $result.TimedOut -or $result.ExitCode -eq 0) {
       throw 'Timed-out supervised tree did not fail closed.'
+    }
+    if ($result.ResourceQuotaMonitorError) {
+      throw 'Owner-only status file blocked directory quota accounting.'
+    }
+    if (-not [IO.File]::Exists($timeoutStatusFile)) {
+      throw 'Timed-out producer did not leave the owner-only status file.'
     }
     if (-not $timeoutJob.IsQuarantineComplete) {
       throw 'Timed-out producer terminal quarantine did not complete.'
@@ -4596,6 +4624,9 @@ Start-Sleep -Seconds 300
       $timeoutJob.Dispose()
     }
     Remove-IsolatedTestContext -Context $timeoutContext
+    if ([IO.Directory]::Exists($timeoutRoot)) {
+      throw 'Owner-only status file prevented isolated root cleanup.'
+    }
   }
 
   $closePid = Join-Path $root 'close-pid.txt'
