@@ -1340,7 +1340,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 483,228 | `b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18` |
+| `.github/workflows/client-v1-conformance.yml` | 488,849 | `73707057e4a8bcf5055301245d49a23cba2d5b7730e01a0cf1f5e7fd4df727f0` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1365,11 +1365,12 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 305,876 | `b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,785 | `c0044f2ba955ff901fcbee3568a3dc081e590a5f880c0bb00fc4d2eedf2a3cf1` |
+| `scripts/windows-job-supervisor.cs` | 310,437 | `802afa50fdfc5c989c837c653e724588124c44dc1ade18b6924789347542e23c` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,859 | `c8805aad43f691175f299b96fd196d8bca23acf26ad5f7d750d908b618cb8975` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,343 | `cb642a675e39d6052827edc01658466b41b3f590e6e52931f257eaf5fd64ba3e` |
+| `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,425 | `c728710dc3aab80c5bff91af0036860e9a7648994c3dc168d7b60a374f1b0329` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -1585,3 +1586,30 @@ a later cleanup failure. Final lock tests passed 92 cases with one platform
 skip; workflow/specification tests passed 128 cases with 19 platform skips.
 Independent specification, quality and final binding reviews passed. These
 local results do not replace native Windows CI or protected execution.
+
+## Windows cleanup delete diagnostics
+
+Protected run `34611963297` disclosed the first cleanup categories:
+`root-delete:win32-3,root-survived:invalid-operation`. Win32 status 3 is
+`ERROR_PATH_NOT_FOUND` and, inside `DeleteDirectoryTree`, only the raw
+`DeleteFileW`/`RemoveDirectoryW` calls raise it as a `Win32Exception`; the
+managed enumerator had just returned the entry. The native calls now receive
+the extended-length (`\\?\`) form of the managed full path so both layers
+resolve the same entry regardless of `MAX_PATH` or trailing dot/space
+normalization. A not-found status (2 or 3) is accepted only when the managed
+layer confirms the entry is gone; every other disagreement still fails closed.
+The retained `Win32Exception` carries fixed, path-free context appended to the
+category as `win32-<status>[op=<operation>;kind=<entry>;depth=<bucket>;len=<bucket>;entry=present|gone;parent=present|gone]`.
+Operations are `delete-file`, `delete-read-only-file`, `remove-reparse-file`
+or `remove-reparse-directory`; depth buckets are `le4`, `le16`, `le64`, `gt64`;
+length buckets are `lt260`, `lt1024`, `ge1024`. No names, paths or exception
+text are recorded. Cleanup order, reparse rejection, read-only handling and the
+`root-survived` invariant are unchanged.
+
+`scripts/windows-cleanup-delete-diagnostics.test.ps1` checks the extended-path
+forms, the bounded context grammar, the classifier suffix, the fail-closed
+boundary for present and missing entries, and, on Windows, removes a real
+tree containing a path longer than 260 characters, a trailing-dot component,
+a read-only file and a directory junction whose target must survive.
+
+The cleanup delete diagnostic harness pin is recorded below once frozen.

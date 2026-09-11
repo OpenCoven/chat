@@ -1283,12 +1283,23 @@ ${source.slice(start, end)}
         directoryCleanupStart,
         source.indexOf('\n        private static IntPtr ConvertSid(', directoryCleanupStart),
       );
-      const directDelete = directoryCleanup.indexOf('DeleteFileW(entry.FullName)');
+      const directDelete = directoryCleanup.indexOf('DeleteFileW(ToExtendedPath(entry.FullName))');
       const attributeFallback = directoryCleanup.indexOf(
         'entry.Attributes = FileAttributes.Normal;',
       );
       expect(directDelete).toBeGreaterThan(-1);
       expect(attributeFallback).toBeGreaterThan(directDelete);
+      expect(directoryCleanup).not.toContain('DeleteFileW(entry.FullName)');
+      expect(directoryCleanup).not.toContain('RemoveDirectoryW(entry.FullName)');
+      expect(directoryCleanup).toContain(
+        'if (fullPath.StartsWith(@"\\\\?\\", StringComparison.Ordinal))',
+      );
+      expect(directoryCleanup).toContain(
+        'error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND',
+      );
+      expect(directoryCleanup).toContain(
+        'internal sealed class CleanupDeleteException : Win32Exception',
+      );
       const usersMembership = source.slice(
         source.indexOf('private static void EnsureUsersGroupMembership'),
         source.indexOf('private static void ValidateStandardUserSnapshot'),
@@ -2368,6 +2379,7 @@ ${source.slice(start, end)}
       'scripts/windows-quota-diagnostics.test.ps1',
       'scripts/windows-owner-directory-quota.test.ps1',
       'scripts/windows-identity-cleanup-diagnostics.test.ps1',
+      'scripts/windows-cleanup-delete-diagnostics.test.ps1',
       'scripts/windows-staging-binding.test.ps1',
       'scripts/windows-status-acl-probe.test.ps1',
       'scripts/windows-status-acl-probe.cs',
