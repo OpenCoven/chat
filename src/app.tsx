@@ -360,7 +360,7 @@ export function App({
   }
 
   return (
-    <>
+    <div className="app-chat">
       {caveEnabled ? (
         <CaveHost
           controllerFactory={controllerFactory}
@@ -452,6 +452,6 @@ export function App({
           void caveStatus?.controller?.retry();
         }}
       />
-    </>
+    </div>
   );
 }
