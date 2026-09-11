@@ -3030,9 +3030,12 @@ ${pathAssignment}
       overrides: {
         ResourceQuotaExceeded: true,
         ResourceQuotaMonitorError: true,
-        ResourceQuotaMonitorCategory: 'entry-bound',
+        ResourceQuotaMonitorCategory: 'access-denied',
+        ResourceQuotaMonitorRoot: 'status-staging',
+        ResourceQuotaMonitorOperation: 'directory-enumeration',
       },
-      diagnostic: 'Supervised Windows resource quota monitor failed closed: entry-bound.',
+      diagnostic:
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; operation=directory-enumeration.',
     },
     {
       name: 'unidentified quota',
@@ -3202,7 +3205,7 @@ ${quotaAssignment}
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain(
-      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory).',
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); operation=$($result.ResourceQuotaMonitorOperation).',
     );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
