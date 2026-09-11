@@ -13,18 +13,10 @@ $instanceFlags = [Reflection.BindingFlags]'NonPublic,Instance'
 $terminal = [OpenCoven.WindowsJobSupervisor].GetMethod('ApplyTerminalDirectoryQuotaCheck', $staticFlags)
 $monitor = [OpenCoven.WindowsJobSupervisor].GetMethod('MonitorDirectoryQuotasAsync', $staticFlags)
 $stateType = [OpenCoven.WindowsJobSupervisor].GetNestedType('DirectoryQuotaFailureState', [Reflection.BindingFlags]'NonPublic')
-$secureDirectory = [OpenCoven.WindowsJobSupervisor].GetMethod(
-  'SecureIsolatedDirectory', $staticFlags, $null,
-  [type[]]@([string], [string], [string]), $null
-)
 $enablePrivilege = [OpenCoven.WindowsJobSupervisor].GetMethod('EnablePrivilege', $staticFlags)
-foreach ($method in @($terminal, $monitor, $stateType, $secureDirectory, $enablePrivilege)) {
+foreach ($method in @($terminal, $monitor, $stateType, $enablePrivilege)) {
   if ($null -eq $method) { throw 'Native owner-directory fixture contract is missing.' }
 }
-# PowerShell path/SID values can retain PSObject wrappers. A typed delegate
-# binds those strings before entering the native restoration method.
-$restoreDirectory = [Delegate]::CreateDelegate([Action[string,string,string]], $secureDirectory)
-
 if (-not ('OpenCoven.Tests.OwnerDirectoryQuotaFixture' -as [type])) {
   Add-Type -Language CSharp -TypeDefinition @'
 using System;
@@ -33,11 +25,90 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 namespace OpenCoven.Tests
 {
-    public static class OwnerDirectoryQuotaFixture
+    public sealed class OwnerDirectoryQuotaFixture : IDisposable
     {
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetFileSecurityW(string path, uint information, byte[] descriptor);
+
+        // Retain access before revoking the supervisor's directory permissions.
+        // A null SECURITY_ATTRIBUTES pointer makes this handle noninheritable.
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(string path, uint access, uint share,
+            IntPtr attributes, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
+        [DllImport("advapi32.dll")]
+        private static extern uint GetSecurityInfo(IntPtr handle, uint type, uint information,
+            out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorControl(IntPtr descriptor, out ushort control, out uint revision);
+        [DllImport("advapi32.dll")]
+        private static extern uint SetSecurityInfo(IntPtr handle, uint type, uint information,
+            IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+
+        private IntPtr handle;
+        private IntPtr descriptor;
+        private IntPtr owner;
+        private IntPtr dacl;
+        private uint restoreInformation;
+        private bool restored;
+        private bool disposed;
+
+        public OwnerDirectoryQuotaFixture(string path)
+        {
+            // READ_CONTROL | WRITE_DAC | WRITE_OWNER; share read/write/delete;
+            // OPEN_EXISTING; BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
+            handle = CreateFileW(path, 0x000E0000u, 7, IntPtr.Zero, 3, 0x02200000u, IntPtr.Zero);
+            if (handle == new IntPtr(-1))
+            {
+                handle = IntPtr.Zero;
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture restoration handle could not be opened.");
+            }
+            try
+            {
+                IntPtr group, sacl;
+                uint error = GetSecurityInfo(handle, 1, 5, out owner, out group, out dacl, out sacl, out descriptor);
+                if (error != 0) throw new Win32Exception((int)error, "Fixture security could not be captured.");
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture security control could not be read.");
+                // OWNER | DACL and the original DACL inheritance protection.
+                restoreInformation = 5u | ((control & 0x1000) != 0 ? 0x80000000u : 0x20000000u);
+            }
+            catch
+            {
+                Release();
+                throw;
+            }
+        }
+
+        public void Restore()
+        {
+            if (disposed) throw new ObjectDisposedException(nameof(OwnerDirectoryQuotaFixture));
+            if (restored) return;
+            uint error = SetSecurityInfo(handle, 1, restoreInformation, owner, IntPtr.Zero, dacl, IntPtr.Zero);
+            if (error != 0) throw new Win32Exception((int)error, "Fixture security restoration failed.");
+            restored = true;
+        }
+
+        private void Release()
+        {
+            if (descriptor != IntPtr.Zero) { LocalFree(descriptor); descriptor = IntPtr.Zero; }
+            if (handle != IntPtr.Zero) { CloseHandle(handle); handle = IntPtr.Zero; }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            try { Restore(); }
+            finally { disposed = true; Release(); }
+        }
 
         public static void Protect(string path, string ownerSid)
         {
@@ -57,7 +128,7 @@ namespace OpenCoven.Tests
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-owner-directory-' + [Guid]::NewGuid().ToString('N'))
 $identity = $null
 $directory = $null
-$directoryCreated = $false
+$securityLease = $null
 $state = $null
 $cancellation = $null
 $monitorTask = $null
@@ -68,7 +139,7 @@ try {
   if ($identity.Sid -ceq $supervisorSid) { throw 'Fixture identities must differ.' }
   $directory = Join-Path $identity.TempPath 'phase1-conformance-run-fixture'
   [IO.Directory]::CreateDirectory($directory) | Out-Null
-  $directoryCreated = $true
+  $securityLease = [OpenCoven.Tests.OwnerDirectoryQuotaFixture]::new($directory)
   [IO.File]::WriteAllBytes((Join-Path $directory 'payload.bin'), [byte[]]::new(1024))
   $quota = [OpenCoven.WindowsDirectoryQuota[]]@(
     [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $directory, 2048)
@@ -106,7 +177,7 @@ try {
   }
 
   # Restore only this test fixture. Production private ACLs remain untouched.
-  $restoreDirectory.Invoke($directory, $identity.Sid, $supervisorSid)
+  $securityLease.Restore()
   $overflow = [OpenCoven.WindowsJobRunResult]::new()
   $terminal.Invoke($null, [object[]]@($overflow, [OpenCoven.WindowsDirectoryQuota[]]@(
     [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $directory, 512)
@@ -136,10 +207,7 @@ try {
   }
   if ($null -ne $identity) {
     try {
-      # Existence queries can hide access denial; creation state owns teardown.
-      if ($directoryCreated) {
-        $restoreDirectory.Invoke($directory, $identity.Sid, $supervisorSid)
-      }
+      if ($null -ne $securityLease) { $securityLease.Dispose() }
     } catch { $failures.Add($_.Exception) }
     try { $identity.Dispose() }
     catch { $failures.Add($_.Exception) }

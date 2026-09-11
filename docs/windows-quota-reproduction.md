@@ -27,7 +27,9 @@ known-size file. It checks readable-directory accounting, assigns the isolated
 account as owner with Coven's protected owner-only directory DACL, and calls the
 real terminal and background quota paths. The expected characterization is the
 same bounded access-denial signature above. After restoring the fixture ACL, a
-smaller quota must report an actual byte breach. Teardown restores fixture access
+smaller quota must report an actual byte breach. A noninheritable directory handle
+opened before ACL restriction retains restoration access and the original owner,
+DACL and inheritance protection. Teardown restores fixture access
 and removes the account and root, retaining any failures.
 
 A matching result proves that this ACL shape can cause the observed monitor
