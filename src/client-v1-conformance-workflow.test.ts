@@ -1259,7 +1259,7 @@ ${source.slice(start, end)}
       expect(
         countOccurrences(quotaScanner, 'catch (DirectoryNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
-      expect(quotaScanner).toContain('failure.RecordMonitorError();');
+      expect(quotaScanner).toContain('failure.RecordMonitorError(error);');
       expect(quotaScanner).toContain('failure.RecordQuotaExceeded(exceededQuota.Label);');
       const finalTeardown = source.indexOf(
         'TerminateJobAndWaitForZero(\n                    jobHandle',
@@ -2963,8 +2963,12 @@ ${pathAssignment}
     },
     {
       name: 'quota monitor failed',
-      overrides: { ResourceQuotaExceeded: true, ResourceQuotaMonitorError: true },
-      diagnostic: 'Supervised Windows resource quota monitor failed closed.',
+      overrides: {
+        ResourceQuotaExceeded: true,
+        ResourceQuotaMonitorError: true,
+        ResourceQuotaMonitorCategory: 'entry-bound',
+      },
+      diagnostic: 'Supervised Windows resource quota monitor failed closed: entry-bound.',
     },
     {
       name: 'unidentified quota',
@@ -3130,7 +3134,9 @@ ${quotaAssignment}
     }
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
-    expect(bootstrap).toContain('Supervised Windows resource quota monitor failed closed.');
+    expect(bootstrap).toContain(
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory).',
+    );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
     );
