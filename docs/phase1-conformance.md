@@ -1366,8 +1366,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 305,876 | `b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,716 | `a3b67a5b6130bc695ebd15cbf55718b40bd594409106e106b70b50c8840b3ffe` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,785 | `c0044f2ba955ff901fcbee3568a3dc081e590a5f880c0bb00fc4d2eedf2a3cf1` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |

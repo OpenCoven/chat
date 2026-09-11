@@ -1,6 +1,55 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-10 UTC
+## Consolidation checkpoint, 2026-09-11 UTC
+
+This checkpoint supersedes the pending landing and validation claims in the
+historical snapshots below. The latest terminal protected attempt is
+[34611963297](https://github.com/OpenCoven/chat/actions/runs/34611963297), using
+Chat producer `37e6984d83835f8994392d35d28fc98813746716` and SDK validator
+`7f53b74c1c2be2719c87a1c0592d1c13a6a641cf`. Both validator scopes matched that
+revision. Linux and macOS passed; each retained record passed independent ZIP
+digest, SDK parser/scanner, exact source identity, Cave timing, and ordered
+110 Cave / 46 SDK / 41 Chat assertion checks.
+
+Windows failed with bounded quota-monitor context:
+
+```text
+access-denied; root=harness-execution-aggregate; operation=directory-enumeration
+```
+
+Cleanup separately reported
+`root-delete:win32-3,root-survived:invalid-operation`. Artifact validation,
+attestation, and aggregation were skipped. This establishes neither quota
+exhaustion nor the identity of the denied descendant.
+
+| Work | Delivered evidence | Remaining work |
+| --- | --- | --- |
+| Frozen Linux backport adoption | Chat #210 and the prepared #207–#209 follow-ups landed. The production backport remains frozen at `0da8c4749f57e63601b29d66032f80c9bbac1cb5`; subsequent harness bindings retain the reviewed source ancestry. | [#188](https://github.com/OpenCoven/chat/issues/188) remains open for complete protected acceptance and advisory reconciliation. |
+| Windows staging and diagnostics | Coven #988 and Chat #211 landed. Chat #216 adds bounded cleanup categories; #218 adds quota-root/operation context. All ten final #218 CI jobs passed, including native Windows tests. | Protected status-staging success remains unproven. [#219](https://github.com/OpenCoven/chat/issues/219) owns the quota enumeration repair and separate cleanup investigation. #211 review-thread disposition remains unverified. |
+| Native quota reproduction | [Draft #220](https://github.com/OpenCoven/chat/pull/220) adds an isolated-owner directory fixture with readable and byte-overflow controls. See [the reproduction contract](windows-quota-reproduction.md). | Inspect native execution before selecting a repair. A matching fixture signature does not identify the protected run's denied descendant. |
+| SDK binding | [SDK #204](https://github.com/OpenCoven/sdk/pull/204) landed at `7f53b74c1c2be2719c87a1c0592d1c13a6a641cf`, binding the exact #218 producer/workflow/bootstrap bytes. Both scopes were rotated and read back before the protected attempt. | Rebind any subsequent governed source change. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) and the final release gate remain open. |
+| Process-identity investigation | Chat #207's bounded test-only diagnostics landed. | [#206](https://github.com/OpenCoven/chat/issues/206) still requires causal evidence; later successful jobs do not classify its original failure. |
+
+Diagnostic [#217](https://github.com/OpenCoven/chat/issues/217) and Bead
+`cave-k0aqq.1` are complete on verified protected root/operation disclosure.
+Repair Bead `cave-k0aqq.2` is active. The root Bead `cave-k0aqq`, final gate
+`cave-ilh1h`, and authorized Teamwork root retain the outstanding release work.
+
+The branch audit inspected 32 previously unattached Chat/SDK branches: 21 have
+exact trees retained by merged commits in fetched main. Two additional branches
+have no unmatched non-merge patches; that is weaker than complete delivery
+proof. SDK PR #90 already delivered the canonicalize change; its local repair
+branch's older dependency lock is not missing implementation to restore.
+Alternate and unmatched histories still need individual disposition.
+
+No branches or worktrees were removed in this checkpoint. Exact-tree retention
+does not establish retirement of active or reserved ownership. Preserve dirty,
+active, and ambiguous work, including Chat #214 and parked #86. The minimum
+working set remains unestablished. Machine-readable delivery, branch, and
+protected-run receipts remain in the external
+`chat-consolidation-20260907/audit` directory.
+
+## Historical consolidation checkpoint, 2026-09-10 UTC
 
 This checkpoint supersedes the pending repair and validation claims below.
 The latest verified protected attempt is
