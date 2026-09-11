@@ -101,15 +101,23 @@ export function ChatSideConversations({
     if (changed) onWritten();
   }, [reviewEntry, writes, onWritten]);
   const active = useRef(false);
-  const pending = useRef(false);
+  const readGeneration = useRef(0);
+  const pending = useRef<{ context: 'read' | 'state'; generation: number } | null>(null);
   const walk = useRef(createManualPageWalk());
   const reviewId = useId();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: loadAttempt and metadataRevision explicitly refresh this scoped read.
   useEffect(() => {
     active.current = true;
+    readGeneration.current += 1;
+    // A write can trigger this refresh before its acknowledgement arrives.
+    if (pending.current?.context === 'read') {
+      pending.current = null;
+      setBusy(false);
+    }
     setReady(false);
     setLoadError('');
+    setNotice('');
     const alive = { value: true };
     if (!capability)
       return () => {
@@ -155,19 +163,26 @@ export function ChatSideConversations({
     success: (data: T) => void,
   ) {
     if (pending.current) return;
-    pending.current = true;
+    const request = { context, generation: readGeneration.current };
+    pending.current = request;
+    const ownsRequest = () =>
+      active.current &&
+      pending.current === request &&
+      (context === 'state' || readGeneration.current === request.generation);
     setBusy(true);
     setNotice('');
     try {
       const result = await operation();
-      if (!active.current) return;
+      if (!ownsRequest()) return;
       if (result.status === 'ok') success(result.data);
       else setNotice(failure(result, context));
     } catch {
-      if (active.current) setNotice(failureGuidance[context]);
+      if (ownsRequest()) setNotice(failureGuidance[context]);
     } finally {
-      pending.current = false;
-      if (active.current) setBusy(false);
+      if (pending.current === request) {
+        pending.current = null;
+        if (active.current) setBusy(false);
+      }
     }
   }
 

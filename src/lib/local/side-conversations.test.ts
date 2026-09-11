@@ -41,6 +41,79 @@ test('retained side notes use the same store, start empty, and stay out of the p
   ]);
 });
 
+test('side APIs isolate two familiar stores sharing a backend, including exact-ID metadata', async () => {
+  const backend = createMemoryChatBackend();
+  const records = [];
+  for (const familiarId of ['alpha', 'beta']) {
+    const store = await openChatStore({ familiarId, backend });
+    const parent = await store.createConversation(`${familiarId} parent`);
+    const side = await store.createSideConversation({
+      parentConversationId: parent.id,
+      operationKey: `${familiarId}-side`,
+    });
+    records.push({ familiarId, parent, side });
+  }
+  for (const own of records) {
+    const store = await openChatStore({ familiarId: own.familiarId, backend });
+    const api = createLocalChatWriter(store).sideConversations;
+    if (!api) throw new Error('Missing local side capability');
+    expect(store.getSideConversation(own.side.id)).toEqual(own.side);
+    expect(await api.get(own.side.id)).toEqual({ status: 'ok', data: own.side });
+    expect((await api.list(own.parent.id)).status).toBe('ok');
+    for (const foreign of records.filter((entry) => entry !== own)) {
+      expect(store.getSideConversation(foreign.side.id)).toBeUndefined();
+      expect(await api.get(foreign.side.id)).toEqual({ status: 'ok', data: null });
+      expect(await api.get(foreign.parent.id)).toEqual({ status: 'ok', data: null });
+      const target = {
+        parentConversationId: foreign.parent.id,
+        sideConversationId: foreign.side.id,
+      };
+      const missing = { status: 'error', code: 'not_found' };
+      expect(await api.list(foreign.parent.id)).toEqual(missing);
+      expect(
+        await api.create({ parentConversationId: foreign.parent.id, operationKey: 'foreign' }),
+      ).toEqual(missing);
+      expect(await api.setState(target, 'closed')).toEqual(missing);
+      expect(await api.prepareBringBack(target)).toEqual(missing);
+      expect(
+        await api.bringBack({
+          ...target,
+          sourceMessageIds: ['unavailable'],
+          excerpt: 'Do not import',
+          operationKey: 'foreign-import',
+        }),
+      ).toEqual(missing);
+    }
+  }
+});
+
+test.each(['foreign-parent', 'foreign-side'] as const)(
+  'side metadata and creation replay do not expose persisted %s links',
+  async (link) => {
+    const { backend, parent, side } = await setup();
+    const beta = await openChatStore({ familiarId: 'beta', backend });
+    const foreignParent = await beta.createConversation('Foreign parent');
+    const mismatched = {
+      ...side,
+      familiarId: link === 'foreign-side' ? 'beta' : side.familiarId,
+      side: {
+        ...side.side,
+        parentConversationId: link === 'foreign-parent' ? foreignParent.id : parent.id,
+      },
+    };
+    await backend.commit({ conversations: [mismatched], messages: [] });
+    const local = await openChatStore({ familiarId: LOCAL_FAMILIAR_ID, backend });
+    expect(local.getSideConversation(side.id)).toBeUndefined();
+    expect(local.listSideConversations(parent.id, 20).data).toEqual([]);
+    await expect(
+      local.createSideConversation({
+        parentConversationId: parent.id,
+        operationKey: side.side.operationKey,
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+  },
+);
+
 test('side state timestamps stay monotonic through rollback, paging and subsequent appends', async () => {
   let clock = Date.parse('2026-09-11T12:00:00Z');
   const store = await openChatStore({

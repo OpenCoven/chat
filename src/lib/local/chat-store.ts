@@ -420,7 +420,12 @@ export function createChatStore(
 
     getSideConversation(conversationId) {
       const entry = conversations.get(conversationId);
-      return entry?.side && entry.side.state !== 'discarded'
+      const parent = entry?.side ? conversations.get(entry.side.parentConversationId) : undefined;
+      return entry?.side &&
+        entry.side.state !== 'discarded' &&
+        entry.familiarId === options.familiarId &&
+        parent?.familiarId === options.familiarId &&
+        !parent.side
         ? (entry as SideConversation)
         : undefined;
     },
@@ -447,8 +452,14 @@ export function createChatStore(
         const existingId = sideIdsByOperation.get(key);
         const existing = existingId === undefined ? undefined : conversations.get(existingId);
         if (existing?.side) {
-          if (existing.side.parentConversationId !== parent.id) {
-            throw new ChatStoreError('conflict', 'This operation key names a different parent.');
+          if (
+            existing.side.parentConversationId !== parent.id ||
+            existing.familiarId !== options.familiarId
+          ) {
+            throw new ChatStoreError(
+              'conflict',
+              'This operation key names a different local side note.',
+            );
           }
           return existing as SideConversation;
         }
