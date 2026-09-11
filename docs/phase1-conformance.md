@@ -1321,7 +1321,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 472,838 | `5789ab5653e36226bd459bc7ebe62bbb802d8c11fbfbddc6fc5d0ae9481c1a80` |
+| `.github/workflows/client-v1-conformance.yml` | 475,438 | `1c1ecca38e7339132b55e16743ff2732a01e7d4ab8ce4f8165755c318f6bc526` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1346,9 +1346,10 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 297,230 | `4081f1765e8daf3e7c0405a34403cc098dca4cfc34a1578e6d857561c3d425ec` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,640 | `85fc918df4c8b23346a1a873adf4bd1440350adf86d4d85e35ab88e5e67f810f` |
+| `scripts/windows-job-supervisor.cs` | 299,390 | `d6540786d6cf4f9c702d1e2074e89ae25084a50b45f2f33f71118e36d469080c` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,716 | `a3b67a5b6130bc695ebd15cbf55718b40bd594409106e106b70b50c8840b3ffe` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 5,628 | `999c246d0bd7ecf519683399469487909102778ba14873e885beb16476f0a682` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -1512,3 +1513,31 @@ and protected validation are required before this diagnostic change is adopted.
 The diagnostic harness is pinned at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
 `ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
 from the adopted GLib harness and is retained in the diagnostic branch ancestry.
+
+## Windows identity cleanup diagnostics
+
+The same run `34580621067` reported `Trusted Windows identity cleanup failed`
+wrapping `Ephemeral Windows identity cleanup failed.` with no visible cause.
+`WindowsIsolatedUser.Dispose` collects independent failures from up to eight
+steps into one `AggregateException`, and PowerShell surfaces only the outer
+message. The supervisor now names each failed step with a fixed category in
+the message: `quarantine-check`, `quarantine`, `profile-delete`, `root-delete`,
+`user-delete`, `user-survived`, `profile-survived`, or `root-survived`, each
+paired with `win32-<status>`, `access-denied`, `not-found`, `io`,
+`invalid-operation`, `timeout`, or `unexpected`. Categories are recorded in
+step order and pair one-to-one with the retained inner exceptions. No exception
+text, account name or path is recorded. The local user survival query now runs
+even when deletion failed, so a refused deletion and a surviving account are
+reported separately. Fail-closed behaviour, cleanup order and the disposed
+state are unchanged. Whether cleanup failure is downstream of the preceding
+quota termination cannot be established until both categories are disclosed in
+one protected run.
+
+`scripts/windows-identity-cleanup-diagnostics.test.ps1` checks the classifier,
+drives the real `Dispose` path on an identity that was never provisioned with
+compiled quarantine callbacks, and verifies category order, pairing, bounded
+grammar, idempotent disposal and absence of leaked text.
+
+The diagnostic harness is pinned at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
+`b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
+status staging harness and is retained in the diagnostic branch ancestry.
