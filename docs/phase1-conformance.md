@@ -92,8 +92,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `94b0a11af07d561110d57bf84a5c92a26e118a4d`,
-  tree `c984e7d12ca942285ca0e887071ed55afba6a580`, retained in the
+- Chat conformance driver `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`,
+  tree `ec79cb1416b2e443d0a413a309383099e18ce889`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1466,6 +1466,6 @@ The first monitor category survives terminal rechecks. Limits, failure exit
 status and cleanup requirements remain unchanged. Fresh SDK workflow binding
 and protected validation are required before this diagnostic change is adopted.
 
-The diagnostic harness is pinned at `94b0a11af07d561110d57bf84a5c92a26e118a4d`, tree
-`c984e7d12ca942285ca0e887071ed55afba6a580`. It changes only the supervisor source
+The diagnostic harness is pinned at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
+`ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
 from the adopted GLib harness and is retained in the diagnostic branch ancestry.
