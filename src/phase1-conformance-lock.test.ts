@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '220e9aa1e2a83ccd9ed32279fda26fe09ac98894',
-  tree: 'ec79cb1416b2e443d0a413a309383099e18ce889',
+  revision: 'e8fe64b4d2b9bd38a03d8c23a28432518b41c187',
+  tree: 'b8934b32dc6a1352df55bab36af6e261d0aa9e86',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'a5f2e7868c2f64a2f1a413e8375eba864375ba38',
-      sha256: '4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6',
+      blob: 'c84efc415d43a7bc26c435edcb692d6cdf63a358',
+      sha256: '372bba3fb6be8af72907a2dd8a0c8acd81ab3bd89bcb4e0ec8dfe85cea4ff431',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '99c82d02893fd019a7c565d400466d492904c279',
-      sha256: 'b7f874d92ee85a9a854a9437497fa9ba1dd19b46bb64adf7af32545c9f05f8ed',
+      blob: '377b863811cef86f69738b2e0ec86855c31756b3',
+      sha256: 'b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'b8221c595c2a97755bd6d506fc90059543556114',
-      sha256: '8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77',
+      blob: '955049c339aa26286df4ecf2e6dde2dee67114c1',
+      sha256: 'b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -151,7 +151,7 @@ const expectedEntries = {
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: 'c0c979cdee96327bf24218bc7c7ecb90d719cb27',
+    revision: 'd56021851537d62cfad9ece80583a908f20898a1',
   },
   harness: {
     repository: 'OpenCoven/chat',

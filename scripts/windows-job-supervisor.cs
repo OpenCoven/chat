@@ -107,6 +107,7 @@ namespace OpenCoven
             string rootPath,
             string profilePath,
             string tempPath,
+            string statusStagingPath,
             string workspacePath,
             string operatingSystemProfilePath,
             string validationSummary)
@@ -117,6 +118,7 @@ namespace OpenCoven
             RootPath = rootPath;
             ProfilePath = profilePath;
             TempPath = tempPath;
+            StatusStagingPath = statusStagingPath;
             WorkspacePath = workspacePath;
             OperatingSystemProfilePath = operatingSystemProfilePath;
             ValidationSummary = validationSummary;
@@ -127,6 +129,7 @@ namespace OpenCoven
         public string RootPath { get; private set; }
         public string ProfilePath { get; private set; }
         public string TempPath { get; private set; }
+        public string StatusStagingPath { get; private set; }
         public string WorkspacePath { get; private set; }
         public string OperatingSystemProfilePath { get; private set; }
         public string ValidationSummary { get; private set; }
@@ -216,12 +219,14 @@ namespace OpenCoven
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
+                string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                 string workspacePath = Path.Combine(fullRoot, "workspace");
                 Directory.CreateDirectory(fullRoot);
                 Directory.CreateDirectory(profilePath);
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Local"));
                 Directory.CreateDirectory(tempPath);
+                Directory.CreateDirectory(statusStagingPath);
                 Directory.CreateDirectory(workspacePath);
 
                 SecurityIdentifier supervisor =
@@ -246,6 +251,10 @@ namespace OpenCoven
                         sid,
                         supervisor.Value);
                 }
+                WindowsJobSupervisor.SecureStatusStagingDirectory(
+                    statusStagingPath,
+                    sid,
+                    supervisor.Value);
                 WindowsJobSupervisor.ProtectCurrentProcess(
                     sid,
                     supervisor.Value);
@@ -257,6 +266,7 @@ namespace OpenCoven
                     fullRoot,
                     profilePath,
                     tempPath,
+                    statusStagingPath,
                     workspacePath,
                     Path.Combine(GetProfilesRoot(), userName),
                     validationSummary);
@@ -1066,6 +1076,7 @@ namespace OpenCoven
                 return;
             }
             List<Exception> cleanupFailures = new List<Exception>();
+            List<string> cleanupCategories = new List<string>();
             if (quarantineIsolatedIdentity != null)
             {
                 bool quarantineComplete = false;
@@ -1075,7 +1086,7 @@ namespace OpenCoven
                 }
                 catch (Exception error)
                 {
-                    cleanupFailures.Add(error);
+                    RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine-check", error);
                 }
                 if (!quarantineComplete)
                 {
@@ -1085,7 +1096,7 @@ namespace OpenCoven
                     }
                     catch (Exception error)
                     {
-                        cleanupFailures.Add(error);
+                        RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine", error);
                     }
                 }
             }
@@ -1098,7 +1109,7 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-delete", error);
             }
             try
             {
@@ -1106,7 +1117,7 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "root-delete", error);
             }
             try
             {
@@ -1117,40 +1128,85 @@ namespace OpenCoven
                         unchecked((int)status),
                         "Ephemeral local user deletion failed.");
                 }
+            }
+            catch (Exception error)
+            {
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-delete", error);
+            }
+            try
+            {
                 IntPtr information;
-                status = NetUserGetInfo(null, UserName, 1, out information);
+                uint status = NetUserGetInfo(null, UserName, 1, out information);
                 if (information != IntPtr.Zero)
                 {
                     NetApiBufferFree(information);
                 }
                 if (status != NERR_USER_NOT_FOUND)
                 {
-                    throw new InvalidOperationException(
+                    throw new Win32Exception(
+                        unchecked((int)status),
                         "Ephemeral local user survived cleanup.");
                 }
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-survived", error);
             }
             password = null;
             if (Directory.Exists(OperatingSystemProfilePath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral Windows profile survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "profile-survived",
+                    new InvalidOperationException(
+                        "Ephemeral Windows profile survived cleanup."));
             }
             if (Directory.Exists(RootPath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral bootstrap root survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "root-survived",
+                    new InvalidOperationException(
+                        "Ephemeral bootstrap root survived cleanup."));
             }
             GC.SuppressFinalize(this);
             if (cleanupFailures.Count != 0)
             {
                 throw new InvalidOperationException(
-                    "Ephemeral Windows identity cleanup failed.",
+                    "Ephemeral Windows identity cleanup failed: " +
+                        String.Join(",", cleanupCategories.ToArray()) + ".",
                     new AggregateException(cleanupFailures.ToArray()));
             }
+        }
+
+        // Records one bounded cleanup step failure. The category is a fixed
+        // step label plus an exception kind and, for native failures, the
+        // numeric Win32/NetAPI status. No exception text or paths are recorded.
+        private static void RecordCleanupFailure(
+            List<Exception> failures,
+            List<string> categories,
+            string step,
+            Exception error)
+        {
+            failures.Add(error);
+            categories.Add(step + ":" + ClassifyCleanupError(error));
+        }
+
+        internal static string ClassifyCleanupError(Exception error)
+        {
+            Win32Exception native = error as Win32Exception;
+            if (native != null)
+            {
+                return "win32-" + native.NativeErrorCode.ToString(CultureInfo.InvariantCulture);
+            }
+            if (error is UnauthorizedAccessException) return "access-denied";
+            if (error is DirectoryNotFoundException) return "not-found";
+            if (error is IOException) return "io";
+            if (error is InvalidOperationException) return "invalid-operation";
+            if (error is TimeoutException) return "timeout";
+            return "unexpected";
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -1349,6 +1405,8 @@ namespace OpenCoven
         public string ResourceQuotaLabel { get; internal set; }
         public bool ResourceQuotaMonitorError { get; internal set; }
         public string ResourceQuotaMonitorCategory { get; internal set; }
+        public string ResourceQuotaMonitorRoot { get; internal set; }
+        public string ResourceQuotaMonitorOperation { get; internal set; }
         public string Stdout { get; internal set; }
         public string Stderr { get; internal set; }
     }
@@ -1834,12 +1892,44 @@ namespace OpenCoven
             string isolatedSid,
             string supervisorSid)
         {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS);
+        }
+
+        internal static void SecureStatusStagingDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
+        }
+
+        private static void SecureIsolatedDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess = 0)
+        {
             EnablePrivilege("SeRestorePrivilege");
             string sddl = "O:" + isolatedSid + "D:P" +
                 "(A;OICI;0x001f01ff;;;SY)" +
                 "(A;OICI;0x001f01ff;;;BA)" +
                 "(A;OICI;0x001f01ff;;;" + supervisorSid + ")" +
-                "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                "(A;OICI;0x" + isolatedAccess.ToString("x8") + ";;;" + isolatedSid + ")" +
+                (isolatedChildOnlyAccess == 0
+                    ? String.Empty
+                    : "(A;OIIO;0x" +
+                        isolatedChildOnlyAccess.ToString("x8") +
+                        ";;;" + isolatedSid + ")") +
                 "(A;OICI;0x00020000;;;S-1-3-4)";
             IntPtr securityDescriptor;
             uint securityDescriptorLength;
@@ -1871,7 +1961,12 @@ namespace OpenCoven
             {
                 LocalFree(securityDescriptor);
             }
-            ValidateIsolatedDirectory(path, isolatedSid, supervisorSid);
+            ValidateIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                isolatedAccess,
+                isolatedChildOnlyAccess);
         }
 
         public static void ProtectSupervisorDirectory(string path)
@@ -1934,13 +2029,38 @@ namespace OpenCoven
                 throw new InvalidOperationException(
                     "Restricted Windows identity SID is unavailable.");
             }
-            ValidateIsolatedDirectory(path, current.Value, null);
+            ValidateIsolatedDirectory(path, current.Value, null, FILE_MODIFY_ACCESS, 0);
+        }
+
+        public static void RequireCurrentIdentityOwnsStatusStagingDirectory(
+            string path,
+            string supervisorSid)
+        {
+            if (String.IsNullOrWhiteSpace(supervisorSid))
+            {
+                throw new InvalidOperationException(
+                    "Status staging supervisor identity is required.");
+            }
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Restricted Windows identity SID is unavailable.");
+            }
+            ValidateIsolatedDirectory(
+                path,
+                current.Value,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
         }
 
         private static void ValidateIsolatedDirectory(
             string path,
             string isolatedSid,
-            string supervisorSid)
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess)
         {
             if (String.IsNullOrWhiteSpace(path) ||
                 !Path.IsPathRooted(path) ||
@@ -2022,16 +2142,18 @@ namespace OpenCoven
                         out aclInformation,
                         (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
                         AclSizeInformation) ||
-                    aclInformation.AceCount != 5)
+                    aclInformation.AceCount !=
+                        (isolatedChildOnlyAccess == 0 ? 5 : 6))
                 {
                     throw new InvalidOperationException(
-                        "Restricted directory DACL must contain exactly five ACEs.");
+                        "Restricted directory DACL has an unexpected ACE count.");
                 }
 
                 bool foundSystem = false;
                 bool foundAdministrators = false;
                 bool foundSupervisor = false;
                 bool foundOwner = false;
+                bool foundOwnerChildOnly = isolatedChildOnlyAccess == 0;
                 bool foundOwnerRights = false;
                 byte directoryFlags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
                 for (uint index = 0; index < aclInformation.AceCount; index++)
@@ -2052,37 +2174,49 @@ namespace OpenCoven
                         Marshal.OffsetOf(
                             typeof(ACCESS_ALLOWED_ACE),
                             "SidStart").ToInt64());
-                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
-                        ace.Header.AceFlags != directoryFlags)
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
                     {
                         throw new InvalidOperationException(
                             "Restricted directory DACL contains an unexpected ACE.");
                     }
-                    if (EqualSid(aceSid, expectedSystem) &&
+                    if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedSystem) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundSystem)
                     {
                         foundSystem = true;
                     }
-                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedAdministrators) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundAdministrators)
                     {
                         foundAdministrators = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwner) &&
-                        ace.Mask == FILE_MODIFY_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedAccess &&
                         !foundOwner)
                     {
                         foundOwner = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwnerRights) &&
+                    else if (ace.Header.AceFlags ==
+                            (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE) &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedChildOnlyAccess &&
+                        !foundOwnerChildOnly)
+                    {
+                        foundOwnerChildOnly = true;
+                    }
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwnerRights) &&
                         ace.Mask == READ_CONTROL &&
                         !foundOwnerRights)
                     {
                         foundOwnerRights = true;
                     }
-                    else if (ace.Mask == FILE_ALL_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        ace.Mask == FILE_ALL_ACCESS &&
                         !foundSupervisor &&
                         !EqualSid(aceSid, forbiddenEveryone) &&
                         !EqualSid(aceSid, forbiddenAuthenticatedUsers) &&
@@ -2102,6 +2236,7 @@ namespace OpenCoven
                     !foundAdministrators ||
                     !foundSupervisor ||
                     !foundOwner ||
+                    !foundOwnerChildOnly ||
                     !foundOwnerRights)
                 {
                     throw new InvalidOperationException(
@@ -2636,8 +2771,23 @@ namespace OpenCoven
                 }
                 else
                 {
-                    entry.Attributes = FileAttributes.Normal;
-                    entry.Delete();
+                    if (!DeleteFileW(entry.FullName))
+                    {
+                        int deleteError = Marshal.GetLastWin32Error();
+                        if (deleteError != ERROR_ACCESS_DENIED)
+                        {
+                            throw new Win32Exception(
+                                deleteError,
+                                "Cleanup file could not be removed.");
+                        }
+                        entry.Attributes = FileAttributes.Normal;
+                        if (!DeleteFileW(entry.FullName))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "Cleanup read-only file could not be removed.");
+                        }
+                    }
                 }
             }
         }
@@ -6311,6 +6461,8 @@ namespace OpenCoven
                     ResourceQuotaLabel = quotaFailure.QuotaLabel,
                     ResourceQuotaMonitorError = quotaFailure.MonitorError,
                     ResourceQuotaMonitorCategory = quotaFailure.MonitorErrorCategory,
+                    ResourceQuotaMonitorRoot = quotaFailure.MonitorErrorRoot,
+                    ResourceQuotaMonitorOperation = quotaFailure.MonitorErrorOperation,
                     Stdout = stdout.Text,
                     Stderr = stderr.Text,
                 };
@@ -6451,18 +6603,29 @@ namespace OpenCoven
             exceededQuota = null;
             foreach (WindowsDirectoryQuota quota in quotas)
             {
-                long total = 0;
-                foreach (string path in ExpandQuotaPattern(quota.PathPattern))
+                try
                 {
-                    total = checked(
-                        total + MeasureDirectoryBytes(
-                            path,
-                            quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
-                    if (total > quota.MaxBytes)
+                    long total = 0;
+                    foreach (string path in ExpandQuotaPattern(quota.PathPattern))
                     {
-                        exceededQuota = quota;
-                        return true;
+                        total = checked(
+                            total + MeasureDirectoryBytes(
+                                path,
+                                quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
+                        if (total > quota.MaxBytes)
+                        {
+                            exceededQuota = quota;
+                            return true;
+                        }
                     }
+                }
+                catch (Exception error)
+                {
+                    QuotaMonitorContextException context = error as QuotaMonitorContextException;
+                    throw new QuotaMonitorContextException(
+                        quota == null ? null : quota.Label,
+                        context == null ? null : context.Operation,
+                        error);
                 }
             }
             return false;
@@ -6485,7 +6648,7 @@ namespace OpenCoven
                     FileAttributes candidateAttributes;
                     try
                     {
-                        candidateAttributes = File.GetAttributes(candidate);
+                        candidateAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(candidate));
                     }
                     catch (FileNotFoundException)
                     {
@@ -6502,14 +6665,14 @@ namespace OpenCoven
                     }
                     if (segment.IndexOf('*') >= 0)
                     {
-                        List<string> matches = ReadBoundedDirectorySnapshot(
+                        List<FileSystemInfo> matches = ReadBoundedDirectorySnapshot(
                             candidate,
                             segment,
                             true,
                             MaximumQuotaEntries - next.Count);
-                        foreach (string matched in matches)
+                        foreach (FileSystemInfo matched in matches)
                         {
-                            next.Add(matched);
+                            next.Add(matched.FullName);
                         }
                     }
                     else
@@ -6518,7 +6681,7 @@ namespace OpenCoven
                         FileAttributes childAttributes;
                         try
                         {
-                            childAttributes = File.GetAttributes(child);
+                            childAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(child));
                         }
                         catch (FileNotFoundException)
                         {
@@ -6544,62 +6707,74 @@ namespace OpenCoven
             return candidates;
         }
 
-        private static List<string> ReadBoundedDirectorySnapshot(
+        private static List<FileSystemInfo> ReadBoundedDirectorySnapshot(
             string directory,
             string searchPattern,
             bool directoriesOnly,
             int maximumEntries)
         {
-            List<string> snapshot = new List<string>();
-            IEnumerable<string> entries;
-            IEnumerator<string> enumerator;
             try
             {
-                entries = directoriesOnly
-                    ? Directory.EnumerateDirectories(
-                        directory,
-                        searchPattern,
-                        SearchOption.TopDirectoryOnly)
-                    : Directory.EnumerateFileSystemEntries(directory);
-                enumerator = entries.GetEnumerator();
-            }
-            catch (FileNotFoundException)
-            {
-                return snapshot;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return snapshot;
-            }
-            using (enumerator)
-            {
-                while (true)
+                List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+                IEnumerable<FileSystemInfo> entries;
+                IEnumerator<FileSystemInfo> enumerator;
+                try
                 {
-                    bool moved;
-                    try
-                    {
-                        moved = enumerator.MoveNext();
-                    }
-                    catch (FileNotFoundException)
-                    {
-                        break;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        break;
-                    }
-                    if (!moved)
-                    {
-                        break;
-                    }
-                    if (snapshot.Count >= maximumEntries)
-                    {
-                        throw new QuotaEntryBoundException();
-                    }
-                    snapshot.Add(enumerator.Current);
+                    DirectoryInfo directoryInfo = new DirectoryInfo(directory);
+                    entries = directoriesOnly
+                        ? directoryInfo.EnumerateDirectories(
+                            searchPattern,
+                            SearchOption.TopDirectoryOnly)
+                        : directoryInfo.EnumerateFileSystemInfos(
+                            "*",
+                            SearchOption.TopDirectoryOnly);
+                    enumerator = entries.GetEnumerator();
                 }
+                catch (FileNotFoundException)
+                {
+                    return snapshot;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return snapshot;
+                }
+                using (enumerator)
+                {
+                    while (true)
+                    {
+                        bool moved;
+                        try
+                        {
+                            moved = enumerator.MoveNext();
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            break;
+                        }
+                        catch (DirectoryNotFoundException)
+                        {
+                            break;
+                        }
+                        if (!moved)
+                        {
+                            break;
+                        }
+                        if (snapshot.Count >= maximumEntries)
+                        {
+                            throw new QuotaEntryBoundException();
+                        }
+                        snapshot.Add(enumerator.Current);
+                    }
+                }
+                return snapshot;
             }
-            return snapshot;
+            catch (Exception error)
+            {
+                throw new QuotaMonitorContextException(
+                    null,
+                    directoriesOnly ? "pattern-enumeration" : "directory-enumeration",
+                    error);
+            }
         }
 
         private static long MeasureDirectoryBytes(string root, long remaining)
@@ -6614,7 +6789,7 @@ namespace OpenCoven
                 FileAttributes directoryAttributes;
                 try
                 {
-                    directoryAttributes = File.GetAttributes(directory);
+                    directoryAttributes = ReadQuotaOperation("directory-attributes", () => File.GetAttributes(directory));
                 }
                 catch (FileNotFoundException)
                 {
@@ -6628,18 +6803,18 @@ namespace OpenCoven
                 {
                     continue;
                 }
-                List<string> snapshot = ReadBoundedDirectorySnapshot(
+                List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshot(
                     directory,
                     null,
                     false,
                     MaximumQuotaEntries - entries);
                 entries = checked(entries + snapshot.Count);
-                foreach (string entry in snapshot)
+                foreach (FileSystemInfo entry in snapshot)
                 {
                     FileAttributes attributes;
                     try
                     {
-                        attributes = File.GetAttributes(entry);
+                        attributes = ReadQuotaOperation("entry-attributes", () => entry.Attributes);
                     }
                     catch (FileNotFoundException)
                     {
@@ -6655,14 +6830,20 @@ namespace OpenCoven
                     }
                     if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        directories.Push(entry);
+                        directories.Push(entry.FullName);
                     }
                     else
                     {
                         long length;
                         try
                         {
-                            length = new FileInfo(entry).Length;
+                            FileInfo file = entry as FileInfo;
+                            if (file == null)
+                            {
+                                throw new IOException(
+                                    "Directory quota file metadata was unavailable.");
+                            }
+                            length = ReadQuotaOperation("file-length", () => file.Length);
                         }
                         catch (FileNotFoundException)
                         {
@@ -6715,6 +6896,8 @@ namespace OpenCoven
                 if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
                 {
                     result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                    result.ResourceQuotaMonitorRoot = QuotaMonitorRoot(error);
+                    result.ResourceQuotaMonitorOperation = QuotaMonitorOperation(error);
                     result.ResourceQuotaMonitorError = true;
                     result.ResourceQuotaLabel = null;
                 }
@@ -6935,8 +7118,97 @@ namespace OpenCoven
             internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
         }
 
+        // Carry only bounded context across quota catch boundaries. Never retain
+        // the original exception, whose message may contain producer-owned paths.
+        private sealed class QuotaMonitorContextException : Exception
+        {
+            internal string Category { get; private set; }
+            internal string Root { get; private set; }
+            internal string Operation { get; private set; }
+
+            internal QuotaMonitorContextException(string root, string operation, Exception error)
+                : base("Directory quota monitor failed.")
+            {
+                Category = ClassifyQuotaMonitorError(error);
+                Root = NormalizeQuotaRoot(root);
+                Operation = NormalizeQuotaOperation(operation);
+            }
+        }
+
+        private static string NormalizeQuotaRoot(string label)
+        {
+            switch (label)
+            {
+                case "bootstrap aggregate": return "bootstrap-aggregate";
+                case "status staging": return "status-staging";
+                case "workspace aggregate": return "workspace-aggregate";
+                case "direct downloads": return "direct-downloads";
+                case "PortableGit extraction": return "portablegit-extraction";
+                case "Node extraction": return "node-extraction";
+                case "pnpm installation": return "pnpm-installation";
+                case "rustup toolchains": return "rustup-toolchains";
+                case "bootstrap Cargo registry": return "bootstrap-cargo-registry";
+                case "bootstrap Cargo git": return "bootstrap-cargo-git";
+                case "bootstrap pnpm store": return "bootstrap-pnpm-store";
+                case "bootstrap npm cache": return "bootstrap-npm-cache";
+                case "protected Chat Git objects": return "protected-chat-git-objects";
+                case "SDK checkout": return "sdk-checkout";
+                case "Chat checkout": return "chat-checkout";
+                case "Cave checkout": return "cave-checkout";
+                case "Coven checkout": return "coven-checkout";
+                case "validator checkout": return "validator-checkout";
+                case "producer checkout": return "producer-checkout";
+                case "harness Cargo registry": return "harness-cargo-registry";
+                case "harness Cargo git": return "harness-cargo-git";
+                case "harness pnpm store": return "harness-pnpm-store";
+                case "harness build roots": return "harness-build-roots";
+                case "harness execution aggregate": return "harness-execution-aggregate";
+                default: return "unknown";
+            }
+        }
+
+        private static string NormalizeQuotaOperation(string operation)
+        {
+            switch (operation)
+            {
+                case "pattern-attributes":
+                case "pattern-enumeration":
+                case "directory-attributes":
+                case "directory-enumeration":
+                case "entry-attributes":
+                case "file-length":
+                    return operation;
+                default: return "unknown";
+            }
+        }
+
+        private static T ReadQuotaOperation<T>(string operation, Func<T> read)
+        {
+            try { return read(); }
+            catch (FileNotFoundException) { throw; }
+            catch (DirectoryNotFoundException) { throw; }
+            catch (Exception error)
+            {
+                throw new QuotaMonitorContextException(null, operation, error);
+            }
+        }
+
+        private static string QuotaMonitorRoot(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Root;
+        }
+
+        private static string QuotaMonitorOperation(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Operation;
+        }
+
         private static string ClassifyQuotaMonitorError(Exception error)
         {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            if (context != null) return context.Category;
             if (error is QuotaEntryBoundException) return "entry-bound";
             if (error is UnauthorizedAccessException) return "access-denied";
             if (error is OverflowException) return "arithmetic-overflow";
@@ -6952,6 +7224,19 @@ namespace OpenCoven
             private string quotaLabel;
             private bool monitorError;
             private string monitorErrorCategory;
+            private string monitorErrorRoot;
+            private string monitorErrorOperation;
+
+            internal string MonitorErrorRoot
+            {
+                get { lock (syncRoot) { return monitorErrorRoot; } }
+            }
+
+            internal string MonitorErrorOperation
+            {
+                get { lock (syncRoot) { return monitorErrorOperation; } }
+            }
+
 
             internal string MonitorErrorCategory
             {
@@ -7008,6 +7293,8 @@ namespace OpenCoven
                     {
                         monitorError = true;
                         monitorErrorCategory = ClassifyQuotaMonitorError(error);
+                        monitorErrorRoot = QuotaMonitorRoot(error);
+                        monitorErrorOperation = QuotaMonitorOperation(error);
                         signal.Set();
                     }
                 }

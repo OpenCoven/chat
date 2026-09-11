@@ -20,26 +20,72 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `0207b93f4238017764e59eca4916e4c790561f77` | `afc0cd3964866069e707fdd72d2bbc2efac6ebbb` |
+| Executable harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
 
-Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
-files from its prior frozen revision. The 121 crate files are identical in both
-snapshots. The existing whole-checkout checks cover vendor files; no authority
-file list or cleanliness check is relaxed. Only the two Cargo-file bindings
-change within the production authority and native delta tables. All 25 pinned
-harness files retain their previous bytes.
+The production snapshot changes only two Cargo files and 123 reviewed
+vendor/provenance files from its prior frozen revision. The executable harness
+retains those adoption bytes and additionally updates the Windows supervisor
+and its byte-for-byte workflow copy for owner-only status staging files and
+bounded quota diagnostics that preserve the first failure. The schema-v2
+producer retains the validated staging path and supervisor SID through its
+restricted child environment. Staging validators reject missing identity, and
+the ACL probe checks exact inherited ACEs on direct temporary files. The
+existing whole-checkout checks cover vendor files; no authority file list or
+cleanliness check is relaxed. Only the two Cargo-file bindings change within
+the production authority and native delta tables; 22 of the 25 pinned harness
+files retain their bytes from staging harness
+`14775ce396f73112ff95205e4e97303740748e13`.
 
 [Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
-validated both exact trees: production passed 128 native tests and the harness
-passed 158. Both passed the optimized desktop build, 11 patched iterator tests,
-Linux dependency-graph checks and final source consistency. The source commits
-have verified signatures and are retained as parents of the adoption branch.
-This adoption must land with an actual merge commit to preserve their ancestry.
+validated the exact production tree and the earlier GLib-adoption harness at
+`e0fca804e46d1a30eedcdae505c33e70d06035fb`: production passed 128 native
+tests and that harness passed 158. Both passed the optimized desktop build, 11
+patched iterator tests, Linux dependency-graph checks and final source
+consistency. That run predates the status staging and quota diagnostic changes and does not
+validate the current executable harness. The source commits have verified
+signatures and are retained as parents of the adoption branch. This adoption
+must land with an actual merge commit to preserve their ancestry.
 
 Native candidate validation does not establish protected acceptance. Full
 packaged CI, an updated SDK validator binding, both protected scopes and fresh
 platform/aggregate validation remain required. Issue #188 remains open until
 those gates and advisory reconciliation are complete.
+
+## Fresh protected status-staging result
+
+[Run 34603676876](https://github.com/OpenCoven/chat/actions/runs/34603676876)
+used merged Chat `3d5af5b3441991e0314c4f2dfa91bfe9b450e9a7` and SDK validator
+`2e14473b1c0ee888411f769484616332e68514ea`. Linux and Darwin passed, and
+both retained records passed the matching SDK parser/scanner, exact source
+identities, Cave timing and ordered assertion sets: 110 Cave, 46 SDK and 41 Chat.
+Windows failed with `resource quota monitor failed closed: access-denied`, then
+a separate ephemeral identity-cleanup failure. Artifact validation, attestation
+and aggregation were skipped. The earlier status-writer assertion was not
+reported; that does not prove the protected status-staging repair complete.
+
+Issue #217 narrows the remaining quota diagnostic to fixed root and filesystem
+operation identifiers. Issue #215's merged cleanup diagnostics identify the
+separate cleanup subphase. Neither changes limits, authority checks, dependency
+settings or first-failure precedence. The new combined diagnostic requires a
+reviewed frozen harness, matching SDK binding and fresh protected execution
+before any ACL repair or aggregate acceptance can be established.
+
+## Protected validation before status staging
+
+[Run 34594407090](https://github.com/OpenCoven/chat/actions/runs/34594407090)
+used producer `4a5002011322de824f4d15676eab7769ce7975ba` and validator
+`c43b21cbeb5dfe218430345fc71eff2822810f33`. Linux and Darwin passed; each
+retained record contains 110 Cave, 46 SDK and 41 Chat passing assertions with
+unique identities, consistent Cave timing and both scans passed. Windows
+failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.apply-owner-only-security.access-denied`.
+The prior quota-monitor and identity-cleanup errors were not reported in this
+execution; their absence does not establish that they cannot recur.
+
+That run predates this combined staging harness and the merged Coven status
+writer. Artifact validation, attestation and aggregate acceptance were skipped.
+The result identifies the status-writer security operation as the next repair
+boundary; it does not validate this integration or justify changing quotas.
 
 ## Earlier protected diagnostic result
 
@@ -89,11 +135,11 @@ diagnostic-only change.
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
-- Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
+- Coven daemon and observation-test source `d56021851537d62cfad9ece80583a908f20898a1`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`,
-  tree `ec79cb1416b2e443d0a413a309383099e18ce889`, retained in the
+- Chat conformance driver `19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9`,
+  tree `3ba4956c89278313c8b107e96521fa561dfbe339`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -808,6 +854,20 @@ same process/ACL/membership preflight directly from the exact inline production
 source before its first download. macOS development can parse and compile the
 source but cannot claim those native Windows runtime results; native Windows
 runtime evidence is CI-only. The native suite
+also provisions a same-volume `status-staging` directory with an exact
+protected DACL. The isolated user retains modify-only access to the directory
+itself, while an object-inherit-only ACE grants created files the ACL-management
+rights needed to secure an empty Coven status temporary before moving it into
+the stricter `COVEN_HOME`; the protected child validates the directory and
+receives it through
+`COVEN_WINDOWS_STATUS_STAGING_DIR`. A 1 MiB directory quota bounds this staging
+surface independently. Quota accounting consumes metadata returned by bounded
+directory enumeration instead of reopening owner-only staging children, and
+bootstrap cleanup first deletes files through the supervisor-controlled parent
+before attempting a read-only-attribute fallback. The native timeout case
+leaves an owner-only staging file in place while quota monitoring runs and
+proves terminal cleanup still removes the complete bootstrap root.
+The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
 handoff fails without reading or publishing the canary. Separate cases reject
@@ -1280,7 +1340,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 466,597 | `e0ff99a7a5b9f9729dd22c428c2e530896f35e9ddd3e9f7cddf43dd101a9edc4` |
+| `.github/workflows/client-v1-conformance.yml` | 483,228 | `b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1293,7 +1353,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 186,285 | `4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6` |
+| `scripts/phase1-schema-v2-producer.mjs` | 187,394 | `372bba3fb6be8af72907a2dd8a0c8acd81ab3bd89bcb4e0ec8dfe85cea4ff431` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1305,12 +1365,15 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 292,610 | `b7f874d92ee85a9a854a9437497fa9ba1dd19b46bb64adf7af32545c9f05f8ed` |
-| `scripts/windows-job-supervisor.test.ps1` | 175,155 | `e83dfa11cbb430342d4c71a9840383d03f3a1080180f23b0760aa0b2c4d853dc` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 5,628 | `999c246d0bd7ecf519683399469487909102778ba14873e885beb16476f0a682` |
+| `scripts/windows-job-supervisor.cs` | 305,876 | `b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,716 | `a3b67a5b6130bc695ebd15cbf55718b40bd594409106e106b70b50c8840b3ffe` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
-| `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
+| `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
+| `scripts/windows-status-acl-probe.test.ps1` | 3,980 | `8ef6032dd38921238d2d860bfa76ba79a53ff549c1e6b1cb8901698e0ca08e3c` |
+| `scripts/windows-status-acl-probe.cs` | 10,118 | `93fe7fd44286f8cb9b3944a7e66257181d0153ed81eec94cd56b79662e620638` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
 `harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
@@ -1462,10 +1525,62 @@ Protected run `34580621067` passed Linux and Darwin, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove
 a byte quota was exceeded. The supervisor now retains only fixed categories:
 `entry-bound`, `access-denied`, `arithmetic-overflow`, `io`, or `unexpected`.
-The first monitor category survives terminal rechecks. Limits, failure exit
-status and cleanup requirements remain unchanged. Fresh SDK workflow binding
-and protected validation are required before this diagnostic change is adopted.
+The first monitor failure retains its category, normalized quota-root identifier
+and filesystem operation through background monitoring and terminal rechecks.
+Operation codes distinguish pattern attributes/enumeration, directory
+attributes/enumeration, entry attributes and file length. Quota roots come from
+an exact label allowlist; unknown labels and operations become `unknown`.
+Original exception messages and paths are not retained in this context.
+The workflow prints these bounded fields before cleanup can mask the primary
+failure. Limits, failure exit status and cleanup requirements remain unchanged.
+Fresh SDK workflow binding and protected validation are required before this
+diagnostic change is adopted.
 
-The diagnostic harness is pinned at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
+The initial category-only diagnostic was introduced at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
 `ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
 from the adopted GLib harness and is retained in the diagnostic branch ancestry.
+
+## Windows identity cleanup diagnostics
+
+The same run `34580621067` reported `Trusted Windows identity cleanup failed`
+wrapping `Ephemeral Windows identity cleanup failed.` with no visible cause.
+`WindowsIsolatedUser.Dispose` collects independent failures from up to eight
+steps into one `AggregateException`, and PowerShell surfaces only the outer
+message. The supervisor now names each failed step with a fixed category in
+the message: `quarantine-check`, `quarantine`, `profile-delete`, `root-delete`,
+`user-delete`, `user-survived`, `profile-survived`, or `root-survived`, each
+paired with `win32-<status>`, `access-denied`, `not-found`, `io`,
+`invalid-operation`, `timeout`, or `unexpected`. Categories are recorded in
+step order and pair one-to-one with the retained inner exceptions. No exception
+text, account name or path is recorded. The local user survival query now runs
+even when deletion failed, so a refused deletion and a surviving account are
+reported separately. Fail-closed behaviour, cleanup order and the disposed
+state are unchanged. Whether cleanup failure is downstream of the preceding
+quota termination cannot be established until both categories are disclosed in
+one protected run.
+
+`scripts/windows-identity-cleanup-diagnostics.test.ps1` checks the classifier,
+drives the real `Dispose` path on an identity that was never provisioned with
+compiled quarantine callbacks, and verifies category order, pairing, bounded
+grammar, idempotent disposal and absence of leaked text.
+
+The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
+`b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
+status staging harness and is retained in the diagnostic branch ancestry.
+
+
+The combined quota-context harness is pinned at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
+`b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
+Only the supervisor and its embedded workflow authority bytes change from
+the cleanup harness; all production inputs, native deltas and limits remain
+unchanged. Native Windows validation and a fresh SDK/protected binding remain
+required.
+
+Local validation of the combined quota-context diagnostic passed eight
+PowerShell regression groups, including real denied enumeration, wildcard
+enumeration, long-path failure, unknown-value sanitization and first-failure
+propagation. The workflow regression confirms the primary diagnostic survives
+a later cleanup failure. Final lock tests passed 92 cases with one platform
+skip; workflow/specification tests passed 128 cases with 19 platform skips.
+Independent specification, quality and final binding reviews passed. These
+local results do not replace native Windows CI or protected execution.

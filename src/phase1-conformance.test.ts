@@ -957,6 +957,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
       OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
+      COVEN_WINDOWS_STATUS_STAGING_DIR: `${bootstrapRoot}\\status-staging`,
+      COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
@@ -981,6 +983,48 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(windowsJobBindingEnvironment(binding, 'win32')).toEqual(binding);
     expect(windowsJobBindingEnvironment(binding, 'linux')).toEqual({});
+    for (const supervisorSid of [
+      undefined,
+      '',
+      ' ',
+      'not-a-sid',
+      'S-1-5-4294967296',
+      'S-1-281474976710656-1',
+    ]) {
+      expect(() =>
+        windowsJobBindingEnvironment(
+          {
+            ...binding,
+            COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: supervisorSid,
+          },
+          'win32',
+        ),
+      ).toThrow('phase1.stage.invocation.windows-job-identity');
+    }
+    for (const stagingPath of [
+      workspace,
+      `${bootstrapRoot}\\temp`,
+      'C:\\ambient\\status-staging',
+    ]) {
+      expect(() =>
+        windowsJobBindingEnvironment(
+          {
+            ...binding,
+            COVEN_WINDOWS_STATUS_STAGING_DIR: stagingPath,
+          },
+          'win32',
+        ),
+      ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+    }
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          COVEN_WINDOWS_STATUS_STAGING_DIR: undefined,
+        },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-path');
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, OPENCOVEN_WINDOWS_JOB_REQUIRED: '0' }, 'win32'),
     ).toThrow('phase1.stage.invocation.windows-job-required');
@@ -1313,6 +1357,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
       OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
+      COVEN_WINDOWS_STATUS_STAGING_DIR: `${bootstrapRoot}\\status-staging`,
+      COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
@@ -1370,6 +1416,8 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
 
     expect(projected).toMatchObject({
+      COVEN_WINDOWS_STATUS_STAGING_DIR: `${bootstrapRoot}\\status-staging`,
+      COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
       OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
       OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
@@ -5302,7 +5350,12 @@ describe('Phase 1 real-authority conformance harness', () => {
   test('isolates Cargo credentials while using the resolved Rust toolchain', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-safe-environment-'));
     try {
-      const environment = safeEnvironment(root);
+      const staging = {
+        COVEN_WINDOWS_STATUS_STAGING_DIR: 'C:\\bound\\status-staging',
+        COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
+      };
+      const environment = safeEnvironment(root, staging);
+      expect(environment).toMatchObject(staging);
 
       expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
       expect(environment.RUSTUP_HOME).toBeUndefined();

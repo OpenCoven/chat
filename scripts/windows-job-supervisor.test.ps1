@@ -95,6 +95,9 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 & (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-identity-cleanup-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-staging-binding.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-status-acl-probe.test.ps1')
 
 # Exercise the real diagnostic through a nested failure report without failing
 # the suite or changing any process. The observed handle is this test process.
@@ -1243,6 +1246,7 @@ $childEnvironment = @{
   LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
   TEMP = $isolatedUser.TempPath
   TMP = $isolatedUser.TempPath
+  COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
   GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
   OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
@@ -1263,6 +1267,7 @@ function New-IsolatedTestContext {
   $contextEnvironment.LOCALAPPDATA = Join-Path $contextUser.ProfilePath 'AppData\Local'
   $contextEnvironment.TEMP = $contextUser.TempPath
   $contextEnvironment.TMP = $contextUser.TempPath
+  $contextEnvironment.COVEN_WINDOWS_STATUS_STAGING_DIR = $contextUser.StatusStagingPath
   $contextEnvironment.GITHUB_WORKSPACE = $contextUser.WorkspacePath
   $contextEnvironment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $contextUser.RootPath
   return [pscustomobject]@{
@@ -1592,7 +1597,7 @@ public static class ScmDenialProbe
     (Join-Path $PSScriptRoot 'windows-status-acl-probe.cs'),
     $statusAclProbeSource
   )
-  Add-Type -Path $statusAclProbeSource
+  if (-not ('StatusAclProbe' -as [type])) { Add-Type -Path $statusAclProbeSource }
   $statusAclControl = [StatusAclProbe]::RunControl([IO.Path]::GetTempPath())
   if ($statusAclControl -cne "combined:success`nowner-only:success`ndacl-only:success") {
     throw "Ordinary-directory status ACL control failed: $statusAclControl"
@@ -1615,10 +1620,21 @@ Add-Type -Path '$($statusAclProbeSource.Replace("'", "''"))'
   `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
 )
 Write-Output "status-acl-probe:`n`$statusAclResult"
+`$statusStagingAclResult = [StatusAclProbe]::RunStaging(
+  `$env:COVEN_WINDOWS_STATUS_STAGING_DIR,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+if (
+  `$statusStagingAclResult -cne
+    "directory-write-dac:access-denied`ncombined:success`nowner-only:success`ndacl-only:success"
+) {
+  throw "Status staging ACL probe failed: `$statusStagingAclResult"
+}
 
 `$root = [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT)
 `$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
 `$temp = [IO.Path]::GetFullPath(`$env:TEMP)
+`$statusStaging = [IO.Path]::GetFullPath(`$env:COVEN_WINDOWS_STATUS_STAGING_DIR)
 `$workspace = [IO.Path]::GetFullPath(`$env:GITHUB_WORKSPACE)
 if (-not `$profile.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user profile is outside the isolated root.'
@@ -1629,9 +1645,16 @@ if (-not `$temp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
 if (-not `$workspace.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user workspace is outside the isolated root.'
 }
+if (-not `$statusStaging.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted status staging directory is outside the isolated root.'
+}
 foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(`$directory)
 }
+[OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsStatusStagingDirectory(
+  `$statusStaging,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
 `$operatorDenied = `$false
 try {
   [IO.File]::ReadAllText(
@@ -1739,10 +1762,9 @@ if (-not `$wmiDenied) {
     }
     $statusAclLabels = @('combined', 'owner-only', 'dacl-only')
     for ($index = 0; $index -lt 3; $index++) {
-      $pattern = '^' + $statusAclLabels[$index] +
-        ':(success|access-denied|invalid-owner|privilege-not-held|unclassified)$'
-      if ($statusAclLines[$index + 1] -cnotmatch $pattern) {
-        throw 'Status ACL probe result was outside the bounded vocabulary.'
+      $expected = $statusAclLabels[$index] + ':access-denied'
+      if ($statusAclLines[$index + 1] -cne $expected) {
+        throw "Restricted status ACL probe changed: $($statusAclLines[$index + 1])"
       }
       Write-Host "status-acl.$($statusAclLines[$index + 1])"
     }
@@ -4536,12 +4558,27 @@ Start-Sleep -Seconds 300
 
   $timeoutContext = New-IsolatedTestContext -Label 'terminal-timeout'
   $timeoutJob = $null
+  $timeoutRoot = $timeoutContext.User.RootPath
+  $timeoutStatusFile = Join-Path `
+    $timeoutContext.User.StatusStagingPath `
+    'owner-only-timeout.tmp'
   try {
     $timeoutPids = Join-Path $timeoutContext.User.RootPath 'timeout-pids.txt'
     $timeoutScript = Join-Path $timeoutContext.User.RootPath 'timeout.ps1'
     [IO.File]::WriteAllText(
       $timeoutScript,
       @"
+`$statusFile = '$($timeoutStatusFile.Replace("'", "''"))'
+[IO.File]::WriteAllBytes(`$statusFile, [byte[]](1, 2, 3, 4))
+`$statusSecurity = [Security.AccessControl.FileSecurity]::new()
+`$statusSecurity.SetSecurityDescriptorSddlForm(
+  'D:P(A;;GA;;;OW)',
+  [Security.AccessControl.AccessControlSections]::Access
+)
+[IO.FileSystemAclExtensions]::SetAccessControl(
+  [IO.FileInfo]::new(`$statusFile),
+  `$statusSecurity
+)
 `$grandchild = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText('$($timeoutPids.Replace("'", "''"))', "`$PID`n`$(`$grandchild.Id)`n")
 Start-Sleep -Seconds 300
@@ -4560,10 +4597,34 @@ Start-Sleep -Seconds 300
       $timeoutContext.Environment,
       [TimeSpan]::FromSeconds(8),
       1MB,
-      1MB
+      1MB,
+      [OpenCoven.WindowsDirectoryQuota[]]@(
+        [OpenCoven.WindowsDirectoryQuota]::new(
+          'timeout status staging',
+          $timeoutContext.User.StatusStagingPath,
+          1MB
+        )
+      )
     )
     if (-not $result.TimedOut -or $result.ExitCode -eq 0) {
       throw 'Timed-out supervised tree did not fail closed.'
+    }
+    if ($result.ResourceQuotaMonitorError) {
+      throw 'Owner-only status file blocked directory quota accounting.'
+    }
+    $timeoutStatusEntries = @(
+      [IO.DirectoryInfo]::new(
+        $timeoutContext.User.StatusStagingPath
+      ).EnumerateFileSystemInfos(
+        'owner-only-timeout.tmp',
+        [IO.SearchOption]::TopDirectoryOnly
+      )
+    )
+    if (
+      $timeoutStatusEntries.Count -ne 1 -or
+      $timeoutStatusEntries[0].Name -cne 'owner-only-timeout.tmp'
+    ) {
+      throw 'Timed-out producer did not leave the owner-only status file.'
     }
     if (-not $timeoutJob.IsQuarantineComplete) {
       throw 'Timed-out producer terminal quarantine did not complete.'
@@ -4578,6 +4639,9 @@ Start-Sleep -Seconds 300
       $timeoutJob.Dispose()
     }
     Remove-IsolatedTestContext -Context $timeoutContext
+    if ([IO.Directory]::Exists($timeoutRoot)) {
+      throw 'Owner-only status file prevented isolated root cleanup.'
+    }
   }
 
   $closePid = Join-Path $root 'close-pid.txt'

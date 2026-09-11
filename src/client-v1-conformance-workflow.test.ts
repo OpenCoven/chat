@@ -1181,7 +1181,7 @@ ${source.slice(start, end)}
         'ResourceQuotaLabel',
         'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
-        'Directory.EnumerateFileSystemEntries',
+        'directoryInfo.EnumerateFileSystemInfos',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1250,9 +1250,11 @@ ${source.slice(start, end)}
       expect(quotaScanner).not.toContain('Directory.Exists(');
       expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
       expect(quotaScanner).not.toContain('Directory.GetDirectories');
-      expect(quotaScanner).toContain('Directory.EnumerateFileSystemEntries');
-      expect(quotaScanner).toContain('Directory.EnumerateDirectories');
       expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateDirectories(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateFileSystemInfos(');
+      expect(quotaScanner).not.toContain('File.GetAttributes(entry)');
+      expect(quotaScanner).not.toContain('new FileInfo(entry).Length');
       expect(
         countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
@@ -1274,6 +1276,19 @@ ${source.slice(start, end)}
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
       expect(source).not.toContain('private static extern bool CreateProcessW(');
       expect(source).not.toContain('Process.GetProcesses(');
+      const directoryCleanupStart = source.indexOf(
+        'private static void DeleteDirectoryContents(DirectoryInfo directory)',
+      );
+      const directoryCleanup = source.slice(
+        directoryCleanupStart,
+        source.indexOf('\n        private static IntPtr ConvertSid(', directoryCleanupStart),
+      );
+      const directDelete = directoryCleanup.indexOf('DeleteFileW(entry.FullName)');
+      const attributeFallback = directoryCleanup.indexOf(
+        'entry.Attributes = FileAttributes.Normal;',
+      );
+      expect(directDelete).toBeGreaterThan(-1);
+      expect(attributeFallback).toBeGreaterThan(directDelete);
       const usersMembership = source.slice(
         source.indexOf('private static void EnsureUsersGroupMembership'),
         source.indexOf('private static void ValidateStandardUserSnapshot'),
@@ -1398,6 +1413,49 @@ ${source.slice(start, end)}
     expect(unixPinStart).toBeGreaterThan(-1);
     expect(unixPinComplete).toBeGreaterThan(unixPinStart);
     expect(unixPinComplete).toBeLessThan(unixRunBody.indexOf('\n          EOF'));
+  });
+
+  test('provisions a bounded same-volume staging directory for Windows daemon status files', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const bootstrap = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const statusAclProbe = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-status-acl-probe.cs'),
+      'utf8',
+    );
+    const supervisorTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+
+    for (const required of [
+      'StatusStagingPath',
+      'SecureStatusStagingDirectory',
+      'RequireCurrentIdentityOwnsStatusStagingDirectory',
+      'FILE_MODIFY_ACCESS,\n                FILE_ALL_ACCESS',
+      '"(A;OIIO;0x"',
+    ]) {
+      expect(supervisor).toContain(required);
+    }
+    expect(bootstrap).toContain(
+      'COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath',
+    );
+    expect(bootstrap).toContain('COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID = $currentSid.Value');
+    expect(bootstrap).toContain('OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $bootstrapRoot');
+    expect(childBootstrap).toContain('RequireCurrentIdentityOwnsStatusStagingDirectory(');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_DIR');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID');
+    expect(statusAclProbe).toContain('RunStaging');
+    expect(statusAclProbe).toContain('directory-write-dac:');
+    expect(supervisorTest).toContain('[StatusAclProbe]::RunStaging(');
+    expect(supervisorTest).toContain('directory-write-dac:access-denied');
+    expect(bootstrap).toContain(
+      "[OpenCoven.WindowsDirectoryQuota]::new(\n                'status staging',\n" +
+        '                $isolatedUser.StatusStagingPath,\n                1MB\n              )',
+    );
   });
 
   test('orders the fail-closed Windows artifact boundary before capture and publication', () => {
@@ -2308,6 +2366,9 @@ ${source.slice(start, end)}
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
       'scripts/windows-quota-diagnostics.test.ps1',
+      'scripts/windows-identity-cleanup-diagnostics.test.ps1',
+      'scripts/windows-staging-binding.test.ps1',
+      'scripts/windows-status-acl-probe.test.ps1',
       'scripts/windows-status-acl-probe.cs',
     ];
     for (const relativePath of [...new Set(metadataPaths)]) {
@@ -2845,9 +2906,11 @@ $ErrorActionPreference = 'Stop'
 $bootstrapRoot = $PWD.Path
 $workspace = $PWD.Path
 $childNodeRoot = $PWD.Path
+$currentSid = [pscustomobject]@{ Value = 'S-1-5-21-fixture' }
 $isolatedUser = [pscustomobject]@{
   ProfilePath = $PWD.Path
   TempPath = $PWD.Path
+  StatusStagingPath = $PWD.Path
 }
 foreach ($name in @(
   'trustedComspec', 'trustedPwsh', 'validatorRevision', 'nonce', 'jobName',
@@ -2967,9 +3030,12 @@ ${pathAssignment}
       overrides: {
         ResourceQuotaExceeded: true,
         ResourceQuotaMonitorError: true,
-        ResourceQuotaMonitorCategory: 'entry-bound',
+        ResourceQuotaMonitorCategory: 'access-denied',
+        ResourceQuotaMonitorRoot: 'status-staging',
+        ResourceQuotaMonitorOperation: 'directory-enumeration',
       },
-      diagnostic: 'Supervised Windows resource quota monitor failed closed: entry-bound.',
+      diagnostic:
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; operation=directory-enumeration.',
     },
     {
       name: 'unidentified quota',
@@ -3064,7 +3130,10 @@ ${quotaClass}
 '@
 $bootstrapRoot = $PWD.Path
 $workspace = Join-Path $bootstrapRoot 'workspace'
-$isolatedUser = [pscustomobject]@{ TempPath = (Join-Path $bootstrapRoot 'temp') }
+$isolatedUser = [pscustomobject]@{
+  TempPath = (Join-Path $bootstrapRoot 'temp')
+  StatusStagingPath = (Join-Path $bootstrapRoot 'status-staging')
+}
 ${quotaAssignment}
 [Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
 `;
@@ -3136,7 +3205,7 @@ ${quotaAssignment}
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain(
-      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory).',
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); operation=$($result.ResourceQuotaMonitorOperation).',
     );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
