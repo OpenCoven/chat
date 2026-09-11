@@ -21,6 +21,9 @@ $enablePrivilege = [OpenCoven.WindowsJobSupervisor].GetMethod('EnablePrivilege',
 foreach ($method in @($terminal, $monitor, $stateType, $secureDirectory, $enablePrivilege)) {
   if ($null -eq $method) { throw 'Native owner-directory fixture contract is missing.' }
 }
+# PowerShell path/SID values can retain PSObject wrappers. A typed delegate
+# binds those strings before entering the native restoration method.
+$restoreDirectory = [Delegate]::CreateDelegate([Action[string,string,string]], $secureDirectory)
 
 if (-not ('OpenCoven.Tests.OwnerDirectoryQuotaFixture' -as [type])) {
   Add-Type -Language CSharp -TypeDefinition @'
@@ -103,7 +106,7 @@ try {
   }
 
   # Restore only this test fixture. Production private ACLs remain untouched.
-  $secureDirectory.Invoke($null, [object[]]@($directory, $identity.Sid, $supervisorSid))
+  $restoreDirectory.Invoke($directory, $identity.Sid, $supervisorSid)
   $overflow = [OpenCoven.WindowsJobRunResult]::new()
   $terminal.Invoke($null, [object[]]@($overflow, [OpenCoven.WindowsDirectoryQuota[]]@(
     [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $directory, 512)
@@ -135,7 +138,7 @@ try {
     try {
       # Existence queries can hide access denial; creation state owns teardown.
       if ($directoryCreated) {
-        $secureDirectory.Invoke($null, [object[]]@($directory, $identity.Sid, $supervisorSid))
+        $restoreDirectory.Invoke($directory, $identity.Sid, $supervisorSid)
       }
     } catch { $failures.Add($_.Exception) }
     try { $identity.Dispose() }
