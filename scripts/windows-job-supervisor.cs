@@ -1358,6 +1358,7 @@ namespace OpenCoven
         public bool ResourceQuotaExceeded { get; internal set; }
         public string ResourceQuotaLabel { get; internal set; }
         public bool ResourceQuotaMonitorError { get; internal set; }
+        public string ResourceQuotaMonitorCategory { get; internal set; }
         public string Stdout { get; internal set; }
         public string Stderr { get; internal set; }
     }
@@ -6366,9 +6367,9 @@ namespace OpenCoven
                             quotaExceeded = true;
                         }
                     }
-                    catch
+                    catch (Exception error)
                     {
-                        quotaFailure.RecordMonitorError();
+                        quotaFailure.RecordMonitorError(error);
                         quotaExceeded = true;
                     }
                 }
@@ -6406,6 +6407,7 @@ namespace OpenCoven
                     ResourceQuotaExceeded = quotaExceeded,
                     ResourceQuotaLabel = quotaFailure.QuotaLabel,
                     ResourceQuotaMonitorError = quotaFailure.MonitorError,
+                    ResourceQuotaMonitorCategory = quotaFailure.MonitorErrorCategory,
                     Stdout = stdout.Text,
                     Stderr = stderr.Text,
                 };
@@ -6526,9 +6528,9 @@ namespace OpenCoven
                             return;
                         }
                     }
-                    catch
+                    catch (Exception error)
                     {
-                        failure.RecordMonitorError();
+                        failure.RecordMonitorError(error);
                         return;
                     }
                     if (cancellationToken.WaitHandle.WaitOne(1000))
@@ -6691,8 +6693,7 @@ namespace OpenCoven
                     }
                     if (snapshot.Count >= maximumEntries)
                     {
-                        throw new IOException(
-                            "Directory quota entry bound exceeded.");
+                        throw new QuotaEntryBoundException();
                     }
                     snapshot.Add(enumerator.Current);
                 }
@@ -6814,11 +6815,15 @@ namespace OpenCoven
                     result.ExitCode = SupervisorFailureExitCode;
                 }
             }
-            catch
+            catch (Exception error)
             {
+                if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
+                {
+                    result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                    result.ResourceQuotaMonitorError = true;
+                    result.ResourceQuotaLabel = null;
+                }
                 result.ResourceQuotaExceeded = true;
-                result.ResourceQuotaMonitorError = true;
-                result.ResourceQuotaLabel = null;
                 result.ExitCode = SupervisorFailureExitCode;
             }
         }
@@ -7030,6 +7035,20 @@ namespace OpenCoven
             internal string Text;
         }
 
+        private sealed class QuotaEntryBoundException : IOException
+        {
+            internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
+        }
+
+        private static string ClassifyQuotaMonitorError(Exception error)
+        {
+            if (error is QuotaEntryBoundException) return "entry-bound";
+            if (error is UnauthorizedAccessException) return "access-denied";
+            if (error is OverflowException) return "arithmetic-overflow";
+            if (error is IOException) return "io";
+            return "unexpected";
+        }
+
         private sealed class DirectoryQuotaFailureState : IDisposable
         {
             private readonly object syncRoot = new object();
@@ -7037,6 +7056,12 @@ namespace OpenCoven
                 new ManualResetEventSlim(false);
             private string quotaLabel;
             private bool monitorError;
+            private string monitorErrorCategory;
+
+            internal string MonitorErrorCategory
+            {
+                get { lock (syncRoot) { return monitorErrorCategory; } }
+            }
 
             internal bool IsSet
             {
@@ -7080,13 +7105,14 @@ namespace OpenCoven
                 }
             }
 
-            internal void RecordMonitorError()
+            internal void RecordMonitorError(Exception error)
             {
                 lock (syncRoot)
                 {
                     if (!signal.IsSet)
                     {
                         monitorError = true;
+                        monitorErrorCategory = ClassifyQuotaMonitorError(error);
                         signal.Set();
                     }
                 }

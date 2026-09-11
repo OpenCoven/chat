@@ -1810,6 +1810,7 @@ jobs:
                   public bool ResourceQuotaExceeded { get; internal set; }
                   public string ResourceQuotaLabel { get; internal set; }
                   public bool ResourceQuotaMonitorError { get; internal set; }
+                  public string ResourceQuotaMonitorCategory { get; internal set; }
                   public string Stdout { get; internal set; }
                   public string Stderr { get; internal set; }
               }
@@ -6818,9 +6819,9 @@ jobs:
                                       quotaExceeded = true;
                                   }
                               }
-                              catch
+                              catch (Exception error)
                               {
-                                  quotaFailure.RecordMonitorError();
+                                  quotaFailure.RecordMonitorError(error);
                                   quotaExceeded = true;
                               }
                           }
@@ -6858,6 +6859,7 @@ jobs:
                               ResourceQuotaExceeded = quotaExceeded,
                               ResourceQuotaLabel = quotaFailure.QuotaLabel,
                               ResourceQuotaMonitorError = quotaFailure.MonitorError,
+                              ResourceQuotaMonitorCategory = quotaFailure.MonitorErrorCategory,
                               Stdout = stdout.Text,
                               Stderr = stderr.Text,
                           };
@@ -6978,9 +6980,9 @@ jobs:
                                       return;
                                   }
                               }
-                              catch
+                              catch (Exception error)
                               {
-                                  failure.RecordMonitorError();
+                                  failure.RecordMonitorError(error);
                                   return;
                               }
                               if (cancellationToken.WaitHandle.WaitOne(1000))
@@ -7143,8 +7145,7 @@ jobs:
                               }
                               if (snapshot.Count >= maximumEntries)
                               {
-                                  throw new IOException(
-                                      "Directory quota entry bound exceeded.");
+                                  throw new QuotaEntryBoundException();
                               }
                               snapshot.Add(enumerator.Current);
                           }
@@ -7266,11 +7267,15 @@ jobs:
                               result.ExitCode = SupervisorFailureExitCode;
                           }
                       }
-                      catch
+                      catch (Exception error)
                       {
+                          if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
+                          {
+                              result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                              result.ResourceQuotaMonitorError = true;
+                              result.ResourceQuotaLabel = null;
+                          }
                           result.ResourceQuotaExceeded = true;
-                          result.ResourceQuotaMonitorError = true;
-                          result.ResourceQuotaLabel = null;
                           result.ExitCode = SupervisorFailureExitCode;
                       }
                   }
@@ -7482,6 +7487,20 @@ jobs:
                       internal string Text;
                   }
 
+                  private sealed class QuotaEntryBoundException : IOException
+                  {
+                      internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
+                  }
+
+                  private static string ClassifyQuotaMonitorError(Exception error)
+                  {
+                      if (error is QuotaEntryBoundException) return "entry-bound";
+                      if (error is UnauthorizedAccessException) return "access-denied";
+                      if (error is OverflowException) return "arithmetic-overflow";
+                      if (error is IOException) return "io";
+                      return "unexpected";
+                  }
+
                   private sealed class DirectoryQuotaFailureState : IDisposable
                   {
                       private readonly object syncRoot = new object();
@@ -7489,6 +7508,12 @@ jobs:
                           new ManualResetEventSlim(false);
                       private string quotaLabel;
                       private bool monitorError;
+                      private string monitorErrorCategory;
+
+                      internal string MonitorErrorCategory
+                      {
+                          get { lock (syncRoot) { return monitorErrorCategory; } }
+                      }
 
                       internal bool IsSet
                       {
@@ -7532,13 +7557,14 @@ jobs:
                           }
                       }
 
-                      internal void RecordMonitorError()
+                      internal void RecordMonitorError(Exception error)
                       {
                           lock (syncRoot)
                           {
                               if (!signal.IsSet)
                               {
                                   monitorError = true;
+                                  monitorErrorCategory = ClassifyQuotaMonitorError(error);
                                   signal.Set();
                               }
                           }
@@ -9382,7 +9408,7 @@ jobs:
               $productionFailureMessage = "Supervised Windows production failed with exit code $($result.ExitCode)."
               if ($result.ResourceQuotaExceeded) {
                 if ($result.ResourceQuotaMonitorError) {
-                  $productionFailureMessage = 'Supervised Windows resource quota monitor failed closed.'
+                  $productionFailureMessage = "Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory)."
                 } elseif ([string]::IsNullOrWhiteSpace($result.ResourceQuotaLabel)) {
                   $productionFailureMessage = 'Supervised Windows production exceeded an unidentified resource quota.'
                 } else {
