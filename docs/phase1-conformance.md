@@ -92,8 +92,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `0207b93f4238017764e59eca4916e4c790561f77`,
-  tree `afc0cd3964866069e707fdd72d2bbc2efac6ebbb`, retained in the
+- Chat conformance driver `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`,
+  tree `ec79cb1416b2e443d0a413a309383099e18ce889`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1280,7 +1280,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77` |
+| `.github/workflows/client-v1-conformance.yml` | 466,597 | `e0ff99a7a5b9f9729dd22c428c2e530896f35e9ddd3e9f7cddf43dd101a9edc4` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1305,8 +1305,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 175,090 | `8d4ae0914a65f4648523c161c3a212e7d8926bc878ce8e54eeaab102c29b25d7` |
+| `scripts/windows-job-supervisor.cs` | 292,610 | `b7f874d92ee85a9a854a9437497fa9ba1dd19b46bb64adf7af32545c9f05f8ed` |
+| `scripts/windows-job-supervisor.test.ps1` | 175,155 | `e83dfa11cbb430342d4c71a9840383d03f3a1080180f23b0760aa0b2c4d853dc` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 5,628 | `999c246d0bd7ecf519683399469487909102778ba14873e885beb16476f0a682` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
@@ -1454,3 +1455,17 @@ in `discovery.rs`; unknown or unattributed output remains `test-failed`. An
 expired. It does not distinguish writer success from writer failure. These
 categories require a refreshed producer binding and new protected evidence;
 they do not establish the cause of run `34422000259` retroactively.
+
+## Windows quota monitor diagnostics
+
+Protected run `34580621067` passed Linux and Darwin, while Windows reported a
+quota-monitor error followed by identity-cleanup failure. That does not prove
+a byte quota was exceeded. The supervisor now retains only fixed categories:
+`entry-bound`, `access-denied`, `arithmetic-overflow`, `io`, or `unexpected`.
+The first monitor category survives terminal rechecks. Limits, failure exit
+status and cleanup requirements remain unchanged. Fresh SDK workflow binding
+and protected validation are required before this diagnostic change is adopted.
+
+The diagnostic harness is pinned at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
+`ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
+from the adopted GLib harness and is retained in the diagnostic branch ancestry.
