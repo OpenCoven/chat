@@ -26,7 +26,11 @@ The September 9 full inventory includes 68 records: 30 closed, one open, and
 37 blocked. Teamwork card text, board Status fields, and missing mirrors are
 being reconciled separately. Preserve `until` gates when projecting blocking
 dependencies. The roadmap records the current protected run and unresolved
-release acceptance; historical phase closures do not satisfy that gate.
+release acceptance; historical phase closures do not satisfy that gate. The latest
+candidate/binding checkpoint records the merged SDK #186 identity repair,
+replacement candidate `1597835325cf3762b51408ff0a565037eeb25f64`, and the
+paired Chat/SDK #189 changes. Their reviewed artifacts and source pins still
+require final producer binding and fresh protected acceptance.
 
 ## Tracker Summary
 

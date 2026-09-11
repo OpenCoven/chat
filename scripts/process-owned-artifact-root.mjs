@@ -290,7 +290,12 @@ export function createProcessOwnedArtifactRoot(options) {
 
       const existing = trackedChildren.get(child.pid);
       if (existing !== undefined && existing !== child) {
-        throw new Error(`A different child is already tracked for PID ${child.pid}.`);
+        if (existing.exitCode === null && existing.signalCode === null) {
+          throw new Error(`A different child is already tracked for PID ${child.pid}.`);
+        }
+        // A completed child's PID may be recycled. Register the new process at
+        // the end so reverse-order cleanup still follows registration order.
+        trackedChildren.delete(child.pid);
       }
       trackedChildren.set(child.pid, child);
       return child;
@@ -301,7 +306,9 @@ export function createProcessOwnedArtifactRoot(options) {
         throw new Error('terminateChild requires a currently tracked ChildProcess.');
       }
       await terminateAndReapChild(tracked, terminationGraceMs);
-      trackedChildren.delete(child.pid);
+      if (trackedChildren.get(child.pid) === tracked) {
+        trackedChildren.delete(child.pid);
+      }
       cleanedChildren.push(child.pid);
       reapedChildren.push(child.pid);
     },
@@ -348,12 +355,17 @@ export function createProcessOwnedArtifactRoot(options) {
           await terminateAndReapChild(child, terminationGraceMs);
           cleanedChildren.push(pid);
           reapedChildren.push(pid);
-          trackedChildren.delete(pid);
+          if (trackedChildren.get(pid) === child) {
+            trackedChildren.delete(pid);
+          }
         } catch (error) {
           failures.push(error);
         }
       }
 
+      if (trackedChildren.size > 0 && failures.length === 0) {
+        failures.push(new Error('Tracked children changed during cleanup; retry cleanup.'));
+      }
       if (trackedChildren.size === 0) {
         try {
           cleanupOwnedTempRoot(owned);

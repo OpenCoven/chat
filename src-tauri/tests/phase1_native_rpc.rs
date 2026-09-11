@@ -264,7 +264,7 @@ fn subprocess_rejects_missing_malformed_and_production_keyring_services_before_c
         command
             .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
             .env("HOME", &home)
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(service) = service {
@@ -272,15 +272,7 @@ fn subprocess_rejects_missing_malformed_and_production_keyring_services_before_c
         } else {
             command.env_remove(CONFORMANCE_SERVICE_ENV);
         }
-        let mut child = command.spawn().expect("phase1-native-rpc must start");
-        {
-            let mut stdin = child.stdin.take().expect("child stdin must be piped");
-            writeln!(
-                stdin,
-                r#"{{"id":"installation","command":"app_installation_id"}}"#
-            )
-            .expect("installation request must be written");
-        }
+        let child = command.spawn().expect("phase1-native-rpc must start");
         let output = child
             .wait_with_output()
             .expect("phase1-native-rpc must reject its configuration");

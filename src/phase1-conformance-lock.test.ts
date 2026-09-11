@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '97fc19619f4524c6a7c36d684c2adcdb40ff491b',
-  tree: 'cf4e58f010111b450d4399d250688154546e8359',
+  revision: '0207b93f4238017764e59eca4916e4c790561f77',
+  tree: 'afc0cd3964866069e707fdd72d2bbc2efac6ebbb',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '229f2f1287b739478a14b608668a8b593083722e',
-      sha256: '9cc3231270be8ba244c59c4047b9e9c75003e79633801b19b6ee17eb29e6f1a0',
+      blob: 'cd0795bc144761f6706899c1e3d41ac7dbcb79d8',
+      sha256: '7dfe2cc2bf7deafec6749e3801075e238cb2d3fe5ccff6ad60e2fa9a36277c4d',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'fbbec2edc5c4c4e343d4b26507dd6c54c147a42e',
-      sha256: 'ae694058306de451de1cc8dd5dd5bf8a26e3e57693481aa2975d5eb53571d570',
+      blob: 'a5f2e7868c2f64a2f1a413e8375eba864375ba38',
+      sha256: '4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -125,8 +125,13 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'abd028e9499e51626a24b9eb80bf0bbf166bd18d',
-      sha256: '05a5c22bacaa9dbde5ff4d462f9f2d4171b82cc6221080f71c626e6e1a60f015',
+      blob: 'b8221c595c2a97755bd6d506fc90059543556114',
+      sha256: '8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77',
+    },
+    {
+      path: 'scripts/process-owned-artifact-root.mjs',
+      blob: '72363bad5b70f5c8fa040707415218ef32fb9863',
+      sha256: '426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624',
     },
   ],
 } as const;
@@ -134,11 +139,11 @@ const expectedBehaviorAuthority = {
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: '5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c',
+    revision: '0da8c4749f57e63601b29d66032f80c9bbac1cb5',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
-    revision: '6526b56b30c9a9c1c072caf2f0022d3427ae18db',
+    revision: '1597835325cf3762b51408ff0a565037eeb25f64',
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
@@ -146,7 +151,7 @@ const expectedEntries = {
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: '721437b84026c042e431b0882dcd14fdb29ac07d',
+    revision: 'c0c979cdee96327bf24218bc7c7ecb90d719cb27',
   },
   harness: {
     repository: 'OpenCoven/chat',
@@ -154,17 +159,17 @@ const expectedEntries = {
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
-    tree: '10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a',
+    tree: '7be1737c4aae02493660d39a2d6f6fdf4dd9e696',
     files: [
       {
         path: 'src-tauri/Cargo.toml',
-        blob: '75a54c604d5d8b88b661f5a2427c3f9494e3a374',
-        sha256: '92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf',
+        blob: '50bb635ce23e25fd6b460e0cacc247b2eee947c7',
+        sha256: 'c1971ef226315e6ec57cfd6c11d91f4fdd1c77ae80a1c537b62960c837d825de',
       },
       {
         path: 'src-tauri/Cargo.lock',
-        blob: '4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a',
-        sha256: '50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca',
+        blob: '77f6ae3bd7c439228bea4e37a149dcd8536538ec',
+        sha256: 'af0805758f12cc36c92e21e195a5b33313062db9ca3fcc3b298332c25d22acc7',
       },
       {
         path: 'src-tauri/src/bin/phase1-native-rpc.rs',
@@ -225,7 +230,7 @@ const expectedEntries = {
   release: {
     sdkManifest: {
       version: '0.1.0',
-      sha256: 'addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41',
+      sha256: 'a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5',
     },
     sdkArtifacts: [
       {
@@ -239,8 +244,8 @@ const expectedEntries = {
         packageName: '@opencoven/cave-client',
         releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
         vendorFile: 'cave-client-0.1.0.tgz',
-        size: 81543,
-        sha256: '5718ff2964e5e897d54c01d785530df4d6ac4642b96209d6d5d0713fb0e4459d',
+        size: 82000,
+        sha256: '21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858',
       },
       {
         packageName: '@opencoven/coven-client',
@@ -262,7 +267,7 @@ const expectedEntries = {
     consumerLock: {
       path: 'pnpm-lock.yaml',
       size: 56222,
-      sha256: 'fd5ee257005c81071bec2b4f0fbc33c18debc25e4ae57b72e60d3837663b4bd2',
+      sha256: 'aa514bcde77a8e572ceb25d06ce500a897e39d2ed0095ad1557572c04e0ae95b',
     },
     caveArtifacts: {
       assertionEngine: {

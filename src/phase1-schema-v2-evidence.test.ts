@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -35,7 +36,7 @@ import {
 } from '../scripts/phase1-schema-v2-evidence.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-bed0d36f');
+const sdkSourceFixtureRoot = resolve(projectRoot, 'src', 'test', 'fixtures', 'sdk-c614dfe7');
 const sdkSourceLockFixturePath = resolve(
   sdkSourceFixtureRoot,
   'client-v1-cross-repository-lock.json.fixture',
@@ -61,8 +62,8 @@ const validatorTree = validatorAvailable
     }).trim()
   : '';
 const phase1CompatibilityValidator = {
-  commit: 'bed0d36f9ccfcf22fd8dde355c2f677d3d4ee996',
-  tree: 'ef533da466a3a9cf5b3052857d354367b0fb2ccf',
+  commit: 'c614dfe72e494d21b267b825edd5ff78da184acb',
+  tree: '3668a30c3291f3b7ac248fc0473ffae70e9aca4d',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -595,8 +596,9 @@ function expectFixtureLoaderFailure(
 }
 
 async function fixture() {
-  const contract = await import(
-    pathToFileURL(resolve(validatorRoot, 'scripts', 'conformance-contract.mjs')).href
+  // Load the external committed validator with Node, outside Vite's module resolver.
+  const contract = createRequire(import.meta.url)(
+    resolve(validatorRoot, 'scripts', 'conformance-contract.mjs'),
   );
   const schemaText = readFileSync(
     resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-evidence.schema.json'),
@@ -640,6 +642,7 @@ async function fixture() {
     command: 'test:phase1-conformance',
     recordSchemaVersion: 2,
     workflow: {
+      ...((frozenLock.evidenceProducer as JsonRecord).workflow as JsonRecord),
       name: 'client-v1 conformance',
       path: '.github/workflows/client-v1-conformance.yml',
       size: 4_000,
@@ -1516,16 +1519,16 @@ describe('Phase 1 SDK source contract authority', () => {
     }
   });
 
-  test('matches the immutable SDK portable Cave source contract while retaining its pre-rebind producer', () => {
+  test('preserves the historical SDK source contract and rejects it for the adopted GLib source', () => {
     const provenance = JSON.parse(readFileSync(sdkSourceLockProvenancePath, 'utf8')) as JsonRecord;
     expect(provenance).toEqual({
       repository: 'OpenCoven/sdk',
       revision: phase1CompatibilityValidator.commit,
       tree: phase1CompatibilityValidator.tree,
       path: 'conformance/client-v1-cross-repository-lock.json',
-      blob: 'c49c13fbc728a3a2e502d1088c864caca7a907b9',
+      blob: 'c4355017545fe8fbb6db34a84846ba66d6fe4fb8',
       size: 10942,
-      sha256: 'd16281ba0ff786e354d8d9d7a5f04598858c2f26fd299330916263f62013133c',
+      sha256: '896e9a46162f5a82fdbc1e502da7c5f614d6493fc4787273d791213a88471e4b',
     });
 
     const frozenLockBytes = readFileSync(sdkSourceLockFixturePath);
@@ -1534,7 +1537,19 @@ describe('Phase 1 SDK source contract authority', () => {
     const frozenLock = JSON.parse(frozenLockBytes.toString('utf8')) as JsonRecord;
     const phase1Lock = readPhase1ConformanceLock();
 
-    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).not.toThrow();
+    const historicalPhase1Lock = {
+      ...phase1Lock,
+      chat: {
+        repository: 'OpenCoven/chat',
+        revision: '841a88f8885bc20cac2f9d5b5b6bc2a23a76e657',
+      },
+    };
+    expect(() =>
+      assertSdkContractMatchesPhase1Lock({ frozenLock }, historicalPhase1Lock),
+    ).not.toThrow();
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).toThrow(
+      'Phase 1 chat pin does not match the SDK frozen contract.',
+    );
     expect(frozenLock.sources).toMatchObject({
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -1546,7 +1561,7 @@ describe('Phase 1 SDK source contract authority', () => {
       },
       chat: {
         repository: 'OpenCoven/chat',
-        commit: phase1Lock.chat.revision,
+        commit: historicalPhase1Lock.chat.revision,
       },
     });
     expect(frozenLock.candidate).toMatchObject({
@@ -1556,8 +1571,8 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'f6eba8af1f71d4251583cf39d4e5fb5b4797d209',
-      tree: '1b6ea72f0edc18c6f54e4bdcf96df68e46dc7a17',
+      commit: '724690e64c4be820bdf4e0e1f8c568db516ba490',
+      tree: 'd04b68843f534ef992642e4de281a0a3071c4f09',
     });
   });
 });
@@ -1886,8 +1901,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
     expect(loaded.producer).toMatchObject({
       status: 'compatible',
       repository: 'OpenCoven/chat',
-      commit: 'b2d63e5fcea3b307d4d97fd560621dc84d659755',
-      tree: '9ca3bedf95729d3dfdc01b4b4435fe335184ec6b',
+      commit: '724690e64c4be820bdf4e0e1f8c568db516ba490',
+      tree: 'd04b68843f534ef992642e4de281a0a3071c4f09',
       workflow: {
         environmentId: '20863036831',
       },

@@ -22,6 +22,7 @@ import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
 import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
+  assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
@@ -29,6 +30,7 @@ import {
   createGitCheckoutEnvironment,
   createGitEnvironment,
   gitNullDevice,
+  readPhase1CheckoutIdentity,
   readPhase1ConformanceLock,
   resolveLocalGitDirectory,
   toGitSafeDirectoryPath,
@@ -375,6 +377,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.chat-native-build.resource.memory',
   'phase1.packaging.chat-native-build.resource.disk',
   'phase1.packaging.chat-native-build.resource.killed',
+  'phase1.packaging.chat-native-build.process.crash',
+  'phase1.packaging.chat-native-build.no-output',
   'phase1.packaging.chat-native-build.linker',
   'phase1.packaging.chat-native-build.build-script',
   'phase1.packaging.chat-native-build.compile',
@@ -389,6 +393,8 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.coven-build.resource.memory',
   'phase1.packaging.coven-build.resource.disk',
   'phase1.packaging.coven-build.resource.killed',
+  'phase1.packaging.coven-build.process.crash',
+  'phase1.packaging.coven-build.no-output',
   'phase1.packaging.coven-build.linker',
   'phase1.packaging.coven-build.build-script',
   'phase1.packaging.coven-build.compile',
@@ -509,6 +515,90 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.coven-identity.failed',
   ...covenIdentityDiagnosticIds,
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  ...[
+    'legacy-case',
+    'pipe-shapes',
+    'profile-pipe',
+    'inspection-wait',
+    'status-replacement',
+  ].flatMap((test) =>
+    [
+      ...[
+        'timeout',
+        'output-limit',
+        'spawn',
+        'supervisor',
+        'native-dependency',
+        'dependency-fetch',
+        'resource.memory',
+        'resource.disk',
+        'resource.killed',
+        'process.crash',
+        'no-output',
+        'linker',
+        'build-script',
+        'compile',
+        'unknown',
+      ],
+      'test-failed',
+      'not-observed',
+      'tracking',
+      'spawn.enoent',
+      'spawn.eacces',
+      'spawn.eperm',
+      'spawn.einval',
+      'spawn.e2big',
+      'spawn.enomem',
+    ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
+  ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-error.access-denied',
+    'writer-error.sharing-violation',
+    'writer-error.privilege-not-held',
+    'writer-error.invalid-owner',
+    'writer-error.file-not-found',
+    'writer-error.path-not-found',
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        'file-not-found',
+        'path-not-found',
+        'access-denied',
+        'sharing-violation',
+        'invalid-owner',
+        'privilege-not-held',
+      ].map((category) => `writer-error.${operation}.${category}`),
+    ),
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
+  'phase1.runtime-observations.cleanup.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
   'phase1.stage.isolation-proof.failed',
@@ -1229,8 +1319,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     }
   });
 
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1262,6 +1352,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of [
     'SYSTEMROOT',
@@ -2053,14 +2145,11 @@ export function assertProductionAdapterAtRevision(harnessRoot, lock) {
   }
 }
 
-function assertProductionChatAuthority(roots, lock) {
-  const tree = runSupervisedSync('git', ['rev-parse', 'HEAD^{tree}'], {
-    cwd: roots.chatRoot,
-    encoding: 'utf8',
-    env: createGitEnvironment(),
-  }).trim();
-  if (tree !== lock.chatAuthority.tree) {
-    throw new Error('Production Chat tree does not match the immutable authority lock.');
+export function assertProductionChatAuthority(roots, lock) {
+  assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat');
+  const identity = readPhase1CheckoutIdentity(roots.chatRoot, 'Production Chat');
+  if (identity.revision !== lock.chat.revision || identity.tree !== lock.chatAuthority.tree) {
+    throw new Error('Production Chat identity does not match the immutable authority lock.');
   }
   for (const file of lock.chatAuthority.files) {
     const path = resolve(roots.chatRoot, file.path);
@@ -2079,19 +2168,7 @@ function assertProductionChatAuthority(roots, lock) {
       throw new Error('Production Chat authority file does not match its locked blob.');
     }
   }
-  try {
-    runSupervisedSync(
-      'git',
-      ['merge-base', '--is-ancestor', lock.chat.revision, lock.harness.revision],
-      {
-        cwd: roots.chatHarnessRoot,
-        env: createGitEnvironment(),
-        stdio: 'ignore',
-      },
-    );
-  } catch {
-    throw new Error('Chat conformance harness must descend from the production revision.');
-  }
+  assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock);
 }
 
 function assertWindowsSupervisorSource(roots, lock) {
@@ -2125,22 +2202,22 @@ function assertWindowsSupervisorSource(roots, lock) {
   }
 }
 
-function assertSdkCandidateProvenance(roots, lock) {
-  try {
-    runSupervisedSync(
-      'git',
-      [
-        '-C',
-        roots.sdkEvidenceRoot,
-        'merge-base',
-        '--is-ancestor',
-        lock.sdk.revision,
-        lock.evidence.revision,
-      ],
-      { env: createGitEnvironment(), stdio: 'ignore' },
-    );
-  } catch {
-    throw new Error('SDK evidence authority does not descend from the package candidate.');
+export function assertSdkCandidateProvenance(roots, lock) {
+  for (const [root, revision, label] of [
+    [roots.sdkRoot, lock.sdk.revision, 'SDK candidate'],
+    [roots.sdkEvidenceRoot, lock.evidence.revision, 'SDK evidence authority'],
+  ]) {
+    assertCleanPhase1Checkout(root, label);
+    if (readPhase1CheckoutIdentity(root, label).revision !== revision) {
+      throw new Error(`${label} identity does not match the immutable authority lock.`);
+    }
+  }
+  for (const [key, label] of [
+    ['assertionRegistry', 'SDK assertion registry'],
+    ['schema', 'SDK evidence schema'],
+    ['contract', 'SDK evidence contract'],
+  ]) {
+    readLockedDigestFile(roots.sdkEvidenceRoot, lock.evidence[key], label);
   }
   const sourcePackages = [
     ['packages/core/package.json', '@opencoven/sdk-core'],

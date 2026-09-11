@@ -36,17 +36,38 @@ function Write-ExceptionChain {
     $Failure
   }
   $depth = 0
-  while ($null -ne $exception -and $depth -lt 12) {
+  $sidProbeAttempted = $false
+  $pending = [Collections.Generic.Queue[Exception]]::new()
+  if ($null -ne $exception) { $pending.Enqueue($exception) }
+  while ($pending.Count -gt 0 -and $depth -lt 12) {
+    $exception = $pending.Dequeue()
     Write-Host "cause[$depth] $($exception.GetType().FullName): $($exception.Message)"
-    if ($exception -is [AggregateException]) {
-      $index = 0
-      foreach ($inner in $exception.InnerExceptions) {
-        Write-Host "  aggregate[$index] $($inner.GetType().FullName): $($inner.Message)"
-        $index++
+    if (-not $sidProbeAttempted -and
+        $exception.Message -match '^WTS process primary token SID query was ambiguous for process ([0-9]+) in session ([0-9]+)\.$') {
+      $sidProbeAttempted = $true
+      # One observation only, after failure; no SID output or acceptance change.
+      try {
+        $processId = [uint32]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+        $queryMethod = [OpenCoven.WindowsJobSupervisor].GetMethod(
+          'QueryProcessPrimaryTokenSid', [Reflection.BindingFlags]'NonPublic,Static'
+        )
+        $querySid = [Delegate]::CreateDelegate([Func[IntPtr, string]], $queryMethod)
+        $observation = [OpenCoven.WindowsProcessSidDiagnostics]::Describe($processId, $querySid)
+        Write-Host "wts-null-sid-observation: $observation"
+      } catch {
+        Write-Host 'wts-null-sid-observation: probe-failed'
       }
     }
-    $exception = $exception.InnerException
     $depth++
+    if ($exception -is [AggregateException]) {
+      foreach ($inner in $exception.InnerExceptions) {
+        if ($pending.Count -ge (12 - $depth)) { break }
+        $pending.Enqueue($inner)
+      }
+    } elseif ($null -ne $exception.InnerException -and
+              $pending.Count -lt (12 - $depth)) {
+      $pending.Enqueue($exception.InnerException)
+    }
   }
 }
 
@@ -72,6 +93,29 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
   throw 'Reviewed Windows Job Object supervisor source is missing.'
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
+& (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
+
+# Exercise the real diagnostic through a nested failure report without failing
+# the suite or changing any process. The observed handle is this test process.
+$diagnosticFailure = [InvalidOperationException]::new(
+  'Synthetic terminal quarantine failure.',
+  [AggregateException]::new([Exception[]]@(
+    [InvalidOperationException]::new('Synthetic producer failure.'),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    ),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    )
+  ))
+)
+$diagnosticOutput = @(Write-ExceptionChain -Failure $diagnosticFailure 6>&1)
+$observations = @($diagnosticOutput | ForEach-Object { $_.ToString() } |
+  Where-Object { $_.StartsWith('wts-null-sid-observation:') })
+if ($observations.Count -ne 1 -or
+    $observations[0] -cne 'wts-null-sid-observation: live-token-readable') {
+  throw 'Nested WTS failure reporting did not observe the live test process exactly once.'
+}
 
 $createProcessWithLogon = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'CreateProcessWithLogonW',
@@ -1542,6 +1586,16 @@ public static class ScmDenialProbe
 '@,
     [Text.UTF8Encoding]::new($false)
   )
+  $statusAclProbeSource = Join-Path $root 'windows-status-acl-probe.cs'
+  [IO.File]::Copy(
+    (Join-Path $PSScriptRoot 'windows-status-acl-probe.cs'),
+    $statusAclProbeSource
+  )
+  Add-Type -Path $statusAclProbeSource
+  $statusAclControl = [StatusAclProbe]::RunControl([IO.Path]::GetTempPath())
+  if ($statusAclControl -cne "combined:success`nowner-only:success`ndacl-only:success") {
+    throw "Ordinary-directory status ACL control failed: $statusAclControl"
+  }
   $accessProbeScript = Join-Path $root 'job-access-probe.ps1'
   [IO.File]::WriteAllText(
     $accessProbeScript,
@@ -1554,6 +1608,13 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("
   [long]`$env:OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE
 )
 [JobAccessProbe]::Run(`$env:OPENCOVEN_ACCESS_PROBE_JOB)
+Add-Type -Path '$($statusAclProbeSource.Replace("'", "''"))'
+`$statusAclResult = [StatusAclProbe]::Run(
+  `$env:TEMP,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+Write-Output "status-acl-probe:`n`$statusAclResult"
+
 `$root = [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT)
 `$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
 `$temp = [IO.Path]::GetFullPath(`$env:TEMP)
@@ -1645,6 +1706,13 @@ if (-not `$wmiDenied) {
     "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment = $childEnvironment.Clone()
   $accessEnvironment.OPENCOVEN_ACCESS_PROBE_JOB = $accessJobName
+  $statusAclIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  try {
+    $accessEnvironment.OPENCOVEN_STATUS_ACL_SUPERVISOR_SID = $statusAclIdentity.User.Value
+  } finally {
+    $statusAclIdentity.Dispose()
+  }
+
   $accessEnvironment.OPENCOVEN_DENIAL_SERVICE_NAME =
     "OpenCovenSupervisorTest$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment.OPENCOVEN_DENIAL_WMI_FILTER_NAME =
@@ -1664,6 +1732,20 @@ if (-not `$wmiDenied) {
     if ($accessResult.ExitCode -ne 0) {
       throw "Protected Job Object DACL runtime probe failed: $($accessResult.Stderr)"
     }
+    $statusAclLines = $accessResult.Stdout.Trim() -split '\r?\n'
+    if ($statusAclLines.Count -ne 4 -or $statusAclLines[0] -cne 'status-acl-probe:') {
+      throw 'Status ACL probe result shape was invalid.'
+    }
+    $statusAclLabels = @('combined', 'owner-only', 'dacl-only')
+    for ($index = 0; $index -lt 3; $index++) {
+      $pattern = '^' + $statusAclLabels[$index] +
+        ':(success|access-denied|invalid-owner|privilege-not-held|unclassified)$'
+      if ($statusAclLines[$index + 1] -cnotmatch $pattern) {
+        throw 'Status ACL probe result was outside the bounded vocabulary.'
+      }
+      Write-Host "status-acl.$($statusAclLines[$index + 1])"
+    }
+
   } finally {
     $accessJob.Dispose()
   }
@@ -4271,7 +4353,9 @@ Start-Sleep -Seconds 300
             $directoryQuotas
           )
         } catch {
-          throw "Terminal failure '$Label' producer attempt failed: $($_.Exception.ToString())"
+          throw [InvalidOperationException]::new(
+            "Terminal failure '$Label' producer attempt failed.", $_.Exception
+          )
         }
         if (
           $Mode -eq 'stdout-overflow' -and

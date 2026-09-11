@@ -1,9 +1,13 @@
 # OpenCoven Chat
 
-OpenCoven Chat is a local-first desktop client. **This device** notes work
-without Cave. Connecting to Cave adds bounded, read-only conversation views
-through a least-privilege native SDK adapter. Explicit demo routes remain
-separate from the production app.
+OpenCoven Chat opens on local conversations you can write and save on this
+device. Local messages persist in IndexedDB when available; the UI reports when
+storage falls back to memory. No familiar is connected to local chat, so saving
+a message does not produce an AI reply.
+
+The desktop app can also connect or pair with Cave through a least-privilege
+native adapter and render bounded, read-only canonical chat data. Explicit demo
+routes remain available for design exploration.
 
 ## Conversation chapters
 
@@ -184,8 +188,8 @@ The current application renders:
 - the familiar switcher at the top of the left rail
 - explicit `?demo=chat`, `?demo=messages`, and `?demo=minimal` local mock surfaces
 
-Sending messages to Cave and other canonical write operations remain deferred
-to later phases. Local notes use the separate device-only writer described above.
+Local messages are saved on this device. Sending to Cave or a familiar, and
+other remote write operations, remain deferred to later phases.
 
 ## Proof-of-concept chat demo
 

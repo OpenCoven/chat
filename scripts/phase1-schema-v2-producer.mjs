@@ -11,6 +11,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -109,6 +111,7 @@ const schemaV2NativeFailureStages = new Set([
   'missing-keychain',
   'isolation-proof',
 ]);
+const boundedSpawnErrorCodes = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM'];
 const cargoBuildFailureCategories = [
   'timeout',
   'output-limit',
@@ -119,11 +122,35 @@ const cargoBuildFailureCategories = [
   'resource.memory',
   'resource.disk',
   'resource.killed',
+  'process.crash',
+  'no-output',
   'linker',
   'build-script',
   'compile',
   'unknown',
 ];
+const covenRustObservationDiagnostics = new Map([
+  [
+    'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+    'legacy-case',
+  ],
+  [
+    'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
+    'pipe-shapes',
+  ],
+  [
+    'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
+    'profile-pipe',
+  ],
+  [
+    'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+    'inspection-wait',
+  ],
+  [
+    'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
+    'status-replacement',
+  ],
+]);
 const cleanupGrantFailureCategories = [
   'service-unavailable',
   'process-secret-unavailable',
@@ -265,6 +292,63 @@ const publicFailureDiagnosticSet = new Set([
   ),
   'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  ...[...covenRustObservationDiagnostics.values()].flatMap((test) =>
+    [
+      ...cargoBuildFailureCategories,
+      ...boundedSpawnErrorCodes.map((code) => `spawn.${code.toLowerCase()}`),
+      'tracking',
+      'test-failed',
+      'not-observed',
+    ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
+  ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-error.access-denied',
+    'writer-error.sharing-violation',
+    'writer-error.privilege-not-held',
+    'writer-error.invalid-owner',
+    'writer-error.file-not-found',
+    'writer-error.path-not-found',
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        'file-not-found',
+        'path-not-found',
+        'access-denied',
+        'sharing-violation',
+        'invalid-owner',
+        'privilege-not-held',
+      ].map((category) => `writer-error.${operation}.${category}`),
+    ),
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
+  'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
@@ -983,7 +1067,7 @@ function classifyCaveBuildFailureDiagnostic(error) {
   return `phase1.packaging.cave-build.phase.${phase}`;
 }
 
-export function classifyCargoBuildFailureDiagnostic(baseId, error) {
+export function classifyCargoBuildFailureDiagnostic(baseId, error, platform = process.platform) {
   if (!(error instanceof CommandExecutionError)) {
     return `${baseId}.unknown`;
   }
@@ -1004,6 +1088,36 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
   const output = stripVTControlCharacters(
     `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
   ).toLowerCase();
+  const exitCode = error.result?.code;
+  const signal = error.result?.signal;
+  if (signal === 'SIGKILL') {
+    return `${baseId}.resource.killed`;
+  }
+  if (typeof signal === 'string' && signal.length > 0) {
+    return `${baseId}.process.crash`;
+  }
+  if (typeof exitCode === 'number' && (exitCode < 0 || exitCode >= 0x80000000)) {
+    return `${baseId}.process.crash`;
+  }
+  if (output.trim().length === 0) {
+    return `${baseId}.no-output`;
+  }
+  if (
+    output.includes('out of memory') ||
+    output.includes('failed to allocate memory') ||
+    output.includes('cannot allocate memory') ||
+    output.includes('enomem')
+  ) {
+    return `${baseId}.resource.memory`;
+  }
+  if (
+    output.includes('no space left on device') ||
+    output.includes('not enough space on the disk') ||
+    (platform === 'win32' && output.includes('os error 112')) ||
+    output.includes('enospc')
+  ) {
+    return `${baseId}.resource.disk`;
+  }
   if (
     /system library .* required by crate .* was not found/u.test(output) ||
     output.includes('pkg-config exited with status code') ||
@@ -1019,17 +1133,6 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error) {
     output.includes('could not resolve host')
   ) {
     return `${baseId}.dependency-fetch`;
-  }
-  if (
-    output.includes('out of memory') ||
-    output.includes('failed to allocate memory') ||
-    output.includes('cannot allocate memory') ||
-    output.includes('enomem')
-  ) {
-    return `${baseId}.resource.memory`;
-  }
-  if (output.includes('no space left on device') || output.includes('enospc')) {
-    return `${baseId}.resource.disk`;
   }
   if (output.includes('killed: 9') || /signal: 9\b/u.test(output)) {
     return `${baseId}.resource.killed`;
@@ -1055,6 +1158,101 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
     publicFailureDiagnosticSet.has(error.message)
   ) {
     return error.message;
+  }
+  if (activeStage === 'phase1.runtime-observations.coven-rust-tests.failed') {
+    for (const [name, test] of covenRustObservationDiagnostics) {
+      const base = `phase1.runtime-observations.coven-rust-tests.${test}`;
+      if (
+        error instanceof Error &&
+        error.message === `Coven native trust observation tests did not execute ${name}.`
+      ) {
+        return `${base}.not-observed`;
+      }
+      if (
+        error instanceof CommandExecutionError &&
+        error.label === `Coven native trust observation tests ${name}`
+      ) {
+        if (error.result?.reason === 'tracking') {
+          return `${base}.tracking`;
+        }
+        if (
+          error.result?.reason === 'spawn' &&
+          boundedSpawnErrorCodes.includes(error.result?.spawnCode)
+        ) {
+          return `${base}.spawn.${error.result.spawnCode.toLowerCase()}`;
+        }
+        const category = classifyCargoBuildFailureDiagnostic(base, error);
+        if (
+          category === `${base}.unknown` &&
+          error.result?.reason === undefined &&
+          typeof error.result?.code === 'number' &&
+          error.result.code !== 0 &&
+          stripVTControlCharacters(error.result?.stdout ?? '')
+            .split(/\r?\n/u)
+            .some((line) => line.trim() === `test ${name} ... FAILED`)
+        ) {
+          if (test === 'status-replacement') {
+            const lines = stripVTControlCharacters(error.result.stdout ?? '').split(/\r?\n/u);
+            const panic = lines.findIndex(
+              (line) =>
+                line.startsWith(`thread '${name}' `) &&
+                /panicked at .*discovery\.rs:\d+:\d+:$/u.test(line),
+            );
+            const message = panic < 0 ? '' : (lines[panic + 1] ?? '');
+            // Inspect only the structured OS code at the start of this exact writer error.
+            // The localized message and any private trailing output never become diagnostics.
+            const writerRecord =
+              /^replace status after reader closes: Io \{ operation: "failed to write owner-only Windows daemon status(?:: (create-temporary-file|write-contents|write-newline|sync-temporary-file|convert-security-descriptor|open-process-token|read-process-token|apply-owner-only-security|replace-status-file))?", source: Os \{ code: (2|3|5|32|1307|1314), kind: [A-Za-z]+, message: "((?:[^"\\\r\n]|\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{[0-9a-fA-F]{1,6}\}))*)" \} \}$/u.exec(
+                message,
+              );
+            const writerOperation = writerRecord?.[1];
+            const writerCode = writerRecord?.[2];
+            // Scan complete escape tokens so a literal backslash before "u" is not
+            // mistaken for a Unicode escape. Rust strings exclude surrogate scalars.
+            const validScalars =
+              writerRecord &&
+              [
+                ...writerRecord[3].matchAll(
+                  /\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{([0-9a-fA-F]{1,6})\})/gu,
+                ),
+              ].every((escapeToken) => {
+                if (!escapeToken[1]) return true;
+                const scalar = Number.parseInt(escapeToken[1], 16);
+                return scalar <= 0x10ffff && (scalar < 0xd800 || scalar > 0xdfff);
+              });
+            const writerCategories = {
+              2: 'file-not-found',
+              3: 'path-not-found',
+              5: 'access-denied',
+              32: 'sharing-violation',
+              1307: 'invalid-owner',
+              1314: 'privilege-not-held',
+            };
+            if (writerCode && validScalars) {
+              const operation = writerOperation ? `${writerOperation}.` : '';
+              return `${base}.assertion.writer-error.${operation}${writerCategories[writerCode]}`;
+            }
+            const categories = [
+              [/^(?:create status replacement home|write current status):/u, 'setup'],
+              [/^assertion `left != right` failed: open status reader$/u, 'reader-open'],
+              [/^status replacement should wait for the active reader$/u, 'early-result'],
+              [/^status replacement result: Timeout$/u, 'result-timeout'],
+              [/^status replacement result: Disconnected$/u, 'result-disconnected'],
+              [/^replace status after reader closes:/u, 'writer-error'],
+              [/^status replacement thread:/u, 'writer-join'],
+              [/^read replaced status:/u, 'readback'],
+              [/^assertion `left == right` failed$/u, 'content'],
+              [/^remove status replacement home:/u, 'cleanup'],
+            ];
+            const match = categories.find(([pattern]) => pattern.test(message));
+            if (match) return `${base}.assertion.${match[1]}`;
+          }
+          return `${base}.test-failed`;
+        }
+        return category;
+      }
+    }
+    return activeStage;
   }
   if (activeStage === 'phase1.packaging.cave-build.failed') {
     return classifyCaveBuildFailureDiagnostic(error);
@@ -1529,9 +1727,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     chmodSync(path, 0o700);
   }
 
-  const inheritedPath = process.env.PATH ?? '';
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1562,6 +1759,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of ['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT']) {
     if (process.env[name] !== undefined) {
@@ -1640,8 +1839,15 @@ function runCommand(
         fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'tracking' });
       }
     });
-    child.once('error', () => {
-      fail({ code: null, signal: null, stdout: '', stderr: '', reason: 'spawn' });
+    child.once('error', (error) => {
+      fail({
+        code: null,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        reason: 'spawn',
+        spawnCode: boundedSpawnErrorCodes.includes(error.code) ? error.code : undefined,
+      });
     });
     child.stdout.on('data', (chunk) => {
       stdoutBytes += chunk.length;
@@ -1831,7 +2037,13 @@ export function normalizeSchemaV2ObservationTests(value) {
   });
 }
 
-export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+export async function runSchemaV2ObservationSuites(
+  artifactRoot,
+  roots,
+  environment,
+  platform,
+  onStage = () => {},
+) {
   const shortRoot =
     process.platform === 'win32'
       ? undefined
@@ -1849,9 +2061,14 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
         };
+  let observations;
+  let observationFailure;
   try {
+    onStage('phase1.runtime-observations.sdk-install.failed');
     await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    onStage('phase1.runtime-observations.chat-install.failed');
     await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    onStage('phase1.runtime-observations.sdk-tests.failed');
     const sdkTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.sdkRoot,
@@ -1870,6 +2087,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       ],
       outputName: 'sdk-observation-tests.json',
     });
+    onStage('phase1.runtime-observations.chat-tests.failed');
     const chatTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1892,6 +2110,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       'phase1-conformance',
       '--lib',
     ];
+    onStage('phase1.runtime-observations.chat-rust-tests.failed');
     const chatRustTests = await runExactCargoObservationTests({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1908,6 +2127,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
         },
       ],
     });
+    onStage('phase1.runtime-observations.coven-rust-tests.failed');
     const covenLibraryTests =
       platform === 'win32-x64'
         ? [
@@ -1945,17 +2165,35 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
             ]),
       ],
     });
-    return normalizeSchemaV2ObservationTests({
+    observations = normalizeSchemaV2ObservationTests({
       sdk: sdkTests,
       chat: chatTests,
       chatRust: chatRustTests,
       covenRust: covenRustTests,
     });
-  } finally {
-    if (shortRoot !== undefined) {
+  } catch (error) {
+    observationFailure = error;
+  }
+  if (shortRoot !== undefined) {
+    if (observationFailure === undefined) {
+      onStage('phase1.runtime-observations.cleanup.failed');
+    }
+    try {
       await shortRoot.cleanup();
+    } catch (cleanupError) {
+      if (observationFailure !== undefined) {
+        throw new AggregateError(
+          [observationFailure, cleanupError],
+          'Schema-v2 observation suite and temporary-root cleanup failed.',
+        );
+      }
+      throw cleanupError;
     }
   }
+  if (observationFailure !== undefined) {
+    throw observationFailure;
+  }
+  return observations;
 }
 
 function sha256File(path) {
@@ -2558,6 +2796,17 @@ async function packageLockedArtifacts(
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
+  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+  const nativeBinRoot = resolve(artifactRoot.rootPath, 'bin');
+  mkdirSync(nativeBinRoot, { recursive: true, mode: 0o700 });
+  const nativeRpcPath = resolve(nativeBinRoot, `phase1-native-rpc${executableSuffix}`);
+  const builtNativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
+  const nativeRpcStats = lstatSync(builtNativeRpcPath);
+  if (nativeRpcStats.isSymbolicLink() || !nativeRpcStats.isFile()) {
+    throw new Error('Chat native RPC package is not a regular file.');
+  }
+  renameSync(builtNativeRpcPath, nativeRpcPath);
+  rmSync(chatTarget, { recursive: true });
 
   onStage('phase1.packaging.coven-build.failed');
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
@@ -2574,9 +2823,15 @@ async function packageLockedArtifacts(
     },
   );
 
-  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
-  const nativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
-  const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryPath = resolve(nativeBinRoot, `coven${executableSuffix}`);
+  const builtCovenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryStats = lstatSync(builtCovenBinaryPath);
+  if (covenBinaryStats.isSymbolicLink() || !covenBinaryStats.isFile()) {
+    throw new Error('Coven CLI package is not a regular file.');
+  }
+  renameSync(builtCovenBinaryPath, covenBinaryPath);
+  rmSync(covenTarget, { recursive: true });
+
   onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],
@@ -4898,6 +5153,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         roots,
         environment,
         options.platform,
+        (stage) => {
+          activeStage = stage;
+        },
       );
     }
 

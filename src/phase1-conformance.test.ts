@@ -34,6 +34,8 @@ import {
   assertNoNodeRuntimeInjection,
   assertPairingStatus,
   assertProductionAdapterAtRevision,
+  assertProductionChatAuthority,
+  assertSdkCandidateProvenance,
   bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
@@ -93,65 +95,80 @@ const { bindMacosKeychainSessionEnvironment, cloneExactCheckout: cloneSchemaV2Ex
   schemaV2Producer;
 const projectRoot = resolve(import.meta.dirname, '..');
 
-test('Windows Chat fetches retain the frozen production history for local clones', () => {
-  const workflow = readFileSync(
-    resolve(projectRoot, '.github/workflows/client-v1-conformance.yml'),
-    'utf8',
-  );
-  const fetchArguments = (label: string, revision: string) => {
-    const end = workflow.indexOf(`-Label '${label}'`);
-    expect(end).toBeGreaterThan(-1);
-    const start = workflow.lastIndexOf('-ArgumentList @(', end);
-    expect(start).toBeGreaterThan(-1);
-    return [...workflow.slice(start, end).matchAll(/^\s*'([^']*)',?\s*$/gm)]
-      .map((match) => {
-        if (match[1] === undefined) throw new Error('Missing fetch argument');
-        return match[1];
-      })
-      .concat(revision);
-  };
-  const root = mkdtempSync(join(tmpdir(), 'phase1-windows-chat-history-'));
-  const remote = join(root, 'remote');
-  const source = join(root, 'source');
-  const destination = join(root, 'consumer');
-  const git = (args: string[], cwd = root) =>
-    execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      stdio: 'pipe',
-      timeout: 10_000,
-    }).trim();
-  try {
-    git(['init', '--initial-branch=main', remote]);
-    git(['config', 'user.name', 'OpenCoven Test'], remote);
-    git(['config', 'user.email', 'opencoven-test@example.com'], remote);
-    git(['config', 'commit.gpgsign', 'false'], remote);
-    const revisions = ['production', 'harness', 'producer'].map((name) => {
-      writeFileSync(join(remote, 'tracked.txt'), `${name}\n`);
-      git(['add', 'tracked.txt'], remote);
-      git(['commit', '-m', name], remote);
-      return git(['rev-parse', 'HEAD'], remote);
-    });
-    const [production, harness, producer] = revisions;
-    if (!production || !harness || !producer) throw new Error('Missing fixture revision');
-    git(['init', source]);
-    git(['remote', 'add', 'origin', pathToFileURL(remote).href], source);
-    git(fetchArguments('Chat exact-SHA fetch', producer), source);
-    git(['checkout', '--detach', 'FETCH_HEAD'], source);
-    // The workflow also passes -C $workspace; cwd already selects that repository.
-    const harnessFetch = fetchArguments('Chat harness exact-SHA fetch', harness);
-    expect(harnessFetch.shift()).toBe('-C');
-    git(harnessFetch, source);
-    git(['update-ref', 'refs/tags/opencoven-phase1-harness', harness], source);
-    git(['clone', '--local', '--no-hardlinks', '--no-checkout', '--quiet', source, destination]);
-    git(['checkout', '--detach', '--force', production], destination);
-    expect(git(['rev-parse', 'HEAD'], destination)).toBe(production);
-    expect(readFileSync(join(destination, 'tracked.txt'), 'utf8')).toBe('production\n');
-    expect(git(['rev-parse', '--is-shallow-repository'], source)).toBe('false');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}, 30_000);
+test.each([false, true])(
+  'Windows Chat fetches retain frozen production for local clones (separate branch: %s)',
+  (separateBranch) => {
+    const workflow = readFileSync(
+      resolve(projectRoot, '.github/workflows/client-v1-conformance.yml'),
+      'utf8',
+    );
+    const fetchArguments = (label: string, revision: string) => {
+      const end = workflow.indexOf(`-Label '${label}'`);
+      expect(end).toBeGreaterThan(-1);
+      const start = workflow.lastIndexOf('-ArgumentList @(', end);
+      expect(start).toBeGreaterThan(-1);
+      return [...workflow.slice(start, end).matchAll(/^\s*'([^']*)',?\s*$/gm)]
+        .map((match) => {
+          if (match[1] === undefined) throw new Error('Missing fetch argument');
+          return match[1];
+        })
+        .concat(revision);
+    };
+    const root = mkdtempSync(join(tmpdir(), 'phase1-windows-chat-history-'));
+    const remote = join(root, 'remote');
+    const source = join(root, 'source');
+    const destination = join(root, 'consumer');
+    const git = (args: string[], cwd = root) =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: 10_000,
+      }).trim();
+    try {
+      git(['init', '--initial-branch=main', remote]);
+      git(['config', 'user.name', 'OpenCoven Test'], remote);
+      git(['config', 'user.email', 'opencoven-test@example.com'], remote);
+      git(['config', 'commit.gpgsign', 'false'], remote);
+      const revisions = ['production', 'harness', 'producer'].map((name) => {
+        if (separateBranch && name === 'harness') {
+          git(['checkout', '--orphan', 'producer-history'], remote);
+        }
+        writeFileSync(join(remote, 'tracked.txt'), `${name}\n`);
+        git(['add', 'tracked.txt'], remote);
+        git(['commit', '-m', name], remote);
+        return git(['rev-parse', 'HEAD'], remote);
+      });
+      const [production, harness, producer] = revisions;
+      if (!production || !harness || !producer) throw new Error('Missing fixture revision');
+      git(['init', source]);
+      git(['remote', 'add', 'origin', pathToFileURL(remote).href], source);
+      git(fetchArguments('Chat exact-SHA fetch', producer), source);
+      git(['checkout', '--detach', 'FETCH_HEAD'], source);
+      // The workflow also passes -C $workspace; cwd already selects that repository.
+      const harnessFetch = fetchArguments('Chat harness exact-SHA fetch', harness);
+      expect(harnessFetch.shift()).toBe('-C');
+      git(harnessFetch, source);
+      git(['update-ref', 'refs/tags/opencoven-phase1-harness', harness], source);
+      // Replay the workflow's frozen-source fetch when present. Without it the
+      // separate production branch is unavailable to the restricted local clone.
+      if (workflow.includes("-Label 'Chat frozen source exact-SHA fetch'")) {
+        const productionFetch = fetchArguments('Chat frozen source exact-SHA fetch', production);
+        expect(productionFetch.shift()).toBe('-C');
+        git(productionFetch, source);
+        git(['update-ref', 'refs/tags/opencoven-phase1-chat-source', production], source);
+      }
+      git(['clone', '--local', '--no-hardlinks', '--no-checkout', '--quiet', source, destination]);
+      git(['checkout', '--detach', '--force', production], destination);
+      expect(git(['rev-parse', 'HEAD'], destination)).toBe(production);
+      expect(readFileSync(join(destination, 'tracked.txt'), 'utf8')).toBe('production\n');
+      expect(git(['rev-parse', '--is-shallow-repository'], source)).toBe('false');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 function resolvePowerShellPath() {
   try {
@@ -838,15 +855,14 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('keeps workflow producer HEAD distinct from the historical executable harness', () => {
     const lock = readPhase1ConformanceLock();
-    const workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+    let workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    const workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    let workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
       cwd: projectRoot,
       encoding: 'utf8',
     }).trim();
-    expect(workflowRevision).not.toBe(lock.harness.revision);
     const root = resolve(projectRoot, 'test-results', 'phase1-distinct-authorities', randomUUID());
     const harnessRoot = resolve(root, 'harness');
     const producerRoot = resolve(root, 'producer');
@@ -862,6 +878,34 @@ describe('Phase 1 real-authority conformance harness', () => {
           cwd: destination,
         });
       }
+      // Use a distinct producer fixture even while a local pin update names HEAD.
+      writeFileSync(resolve(producerRoot, 'producer-fixture.txt'), 'distinct producer tree\n');
+      execFileSync('git', ['add', 'producer-fixture.txt'], { cwd: producerRoot });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=OpenCoven test',
+          '-c',
+          'user.email=opencoven-test@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'distinct producer fixture',
+        ],
+        { cwd: producerRoot },
+      );
+      workflowRevision = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      workflowTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+        cwd: producerRoot,
+        encoding: 'utf8',
+      }).trim();
+      expect(workflowRevision).not.toBe(lock.harness.revision);
       const result = validateSchemaV2AuthorityCheckouts({
         lock,
         harnessRoot,
@@ -1787,7 +1831,11 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.packaging.chat-install.failed',
     'phase1.packaging.chat-web-build.failed',
     'phase1.packaging.chat-native-build.failed',
+    'phase1.packaging.chat-native-build.process.crash',
+    'phase1.packaging.chat-native-build.no-output',
     'phase1.packaging.coven-build.failed',
+    'phase1.packaging.coven-build.process.crash',
+    'phase1.packaging.coven-build.no-output',
     'phase1.packaging.outputs.failed',
   ])('publishes bounded schema-v2 packaging diagnostic %s', (diagnostic) => {
     const wrapped = wrapInfrastructureFailure(
@@ -1859,7 +1907,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       source.indexOf('mkdirSync(chatTarget'),
     );
     expect(source.indexOf("onStage('phase1.packaging.coven-build.failed')")).toBeLessThan(
-      source.indexOf('mkdirSync(covenTarget'),
+      source.indexOf("'Coven CLI package'"),
     );
   });
 
@@ -2518,6 +2566,108 @@ describe('Phase 1 real-authority conformance harness', () => {
     },
   );
 
+  test('binds SDK candidate and evidence independently and rejects substituted authority', () => {
+    const lock = structuredClone(readPhase1ConformanceLock());
+    const root = mkdtempSync(resolve(tmpdir(), 'sdk-authority-'));
+    const roots = {
+      sdkRoot: resolve(root, 'candidate'),
+      sdkEvidenceRoot: resolve(root, 'evidence'),
+    };
+    const git = (cwd: string, args: string[]) =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    try {
+      for (const path of Object.values(roots)) {
+        mkdirSync(path);
+        git(path, ['init', '--initial-branch=main']);
+        git(path, ['config', 'user.name', 'OpenCoven test']);
+        git(path, ['config', 'user.email', 'opencoven-test@example.com']);
+        git(path, ['config', 'commit.gpgsign', 'false']);
+      }
+      for (const [directory, name] of [
+        ['core', '@opencoven/sdk-core'],
+        ['cave', '@opencoven/cave-client'],
+        ['coven', '@opencoven/coven-client'],
+        ['sdk', '@opencoven/sdk'],
+      ] as const) {
+        const path = resolve(roots.sdkRoot, 'packages', directory);
+        mkdirSync(path, { recursive: true });
+        writeFileSync(
+          resolve(path, 'package.json'),
+          JSON.stringify({ name, version: lock.release.sdkManifest.version }),
+        );
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const entry = lock.evidence[key];
+        const bytes = `fixture ${key}\n`;
+        const path = resolve(roots.sdkEvidenceRoot, entry.path);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, bytes);
+        entry.sha256 = createHash('sha256').update(bytes).digest('hex');
+      }
+      for (const path of Object.values(roots)) {
+        git(path, ['add', '.']);
+        git(path, ['commit', '-m', 'fixture authority']);
+      }
+      lock.sdk.revision = git(roots.sdkRoot, ['rev-parse', 'HEAD']);
+      lock.evidence.revision = git(roots.sdkEvidenceRoot, ['rev-parse', 'HEAD']);
+      expect(() => assertSdkCandidateProvenance(roots, lock)).not.toThrow();
+      for (const key of ['sdk', 'evidence'] as const) {
+        const wrong = structuredClone(lock);
+        wrong[key].revision = 'f'.repeat(40);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow('identity does not match');
+      }
+      for (const key of ['assertionRegistry', 'schema', 'contract'] as const) {
+        const wrong = structuredClone(lock);
+        wrong.evidence[key].sha256 = 'f'.repeat(64);
+        expect(() => assertSdkCandidateProvenance(roots, wrong)).toThrow();
+      }
+      appendFileSync(resolve(roots.sdkRoot, 'packages/core/package.json'), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+      git(roots.sdkRoot, ['checkout', '--', '.']);
+      appendFileSync(resolve(roots.sdkEvidenceRoot, lock.evidence.contract.path), '\n');
+      expect(() => assertSdkCandidateProvenance(roots, lock)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test.skipIf(process.platform === 'win32')(
+    'accepts exact frozen Chat production authority independently of harness ancestry',
+    () => {
+      const lock = readPhase1ConformanceLock();
+      const root = mkdtempSync(resolve(tmpdir(), 'chat-packaged-authority-'));
+      const roots = { chatRoot: resolve(root, 'chat'), chatHarnessRoot: resolve(root, 'harness') };
+      try {
+        for (const [path, revision] of [
+          [roots.chatRoot, lock.chat.revision],
+          [roots.chatHarnessRoot, lock.harness.revision],
+        ] as const) {
+          execFileSync('git', ['clone', '--quiet', '--no-checkout', projectRoot, path]);
+          execFileSync('git', ['checkout', '--quiet', '--detach', revision], { cwd: path });
+        }
+        expect(() => assertProductionChatAuthority(roots, lock)).not.toThrow();
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.harness.revision], {
+          cwd: roots.chatRoot,
+        });
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow(
+          'Production Chat identity does not match the immutable authority lock.',
+        );
+        execFileSync('git', ['checkout', '--quiet', '--detach', lock.chat.revision], {
+          cwd: roots.chatRoot,
+        });
+        appendFileSync(resolve(roots.chatRoot, 'src-tauri/src/coven.rs'), '\n// substituted\n');
+        expect(() => assertProductionChatAuthority(roots, lock)).toThrow();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
   test('builds the conformance driver around production adapter bytes from the locked Chat commit', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '..', 'scripts', 'phase1-conformance.mjs'),
@@ -2526,7 +2676,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(source).toContain('assertProductionAdapterAtRevision');
     expect(source).toContain('assertProductionChatAuthority');
-    expect(source).toContain("'merge-base', '--is-ancestor'");
+    expect(source).toContain("assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat')");
     expect(source).toContain('lock.chatAuthority.tree');
     expect(source).toContain("'src-tauri/src/coven.rs'");
     expect(source).toContain('assertPhase1ProducerAuthority(lock, harnessRoot)');
@@ -3705,6 +3855,13 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.packaging.chat-native-build.dependency-fetch',
     ],
     [
+      'Windows disk exhaustion',
+      'error: failed to write /private/output: There is not enough space on the disk. (os error 112)',
+      'phase1.packaging.chat-native-build.resource.disk',
+    ],
+    ['native process crash', '', 'phase1.packaging.chat-native-build.process.crash', 0xc0000005],
+    ['silent nonzero exit', '', 'phase1.packaging.chat-native-build.no-output'],
+    [
       'linker failure',
       'error: linking with `cc` failed: exit status: 1\n/private/object.o',
       'phase1.packaging.chat-native-build.linker',
@@ -3736,7 +3893,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
   ])(
     'classifies bounded Cargo %s failures without exposing output',
-    async (_, stderr, expected) => {
+    async (_, stderr, expected, code = 1) => {
       // @ts-expect-error The executable script intentionally has no declaration file.
       const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
         string,
@@ -3759,7 +3916,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
       const diagnostic = diagnose(
         new SchemaV2CommandExecutionError('private cargo command', {
-          code: 1,
+          code,
           signal: null,
           stdout: '',
           stderr,
@@ -3771,6 +3928,81 @@ describe('Phase 1 real-authority conformance harness', () => {
       expect(diagnostic).not.toContain('private');
     },
   );
+
+  test.each([
+    ['win32', 'phase1.packaging.chat-native-build.resource.disk'],
+    ['linux', 'phase1.packaging.chat-native-build.dependency-fetch'],
+  ])('interprets numeric os error 112 for %s', async (platform, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const classify = producer.classifyCargoBuildFailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number;
+        signal: null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(classify).toBeTypeOf('function');
+    if (typeof classify !== 'function') {
+      return;
+    }
+
+    expect(
+      classify(
+        'phase1.packaging.chat-native-build',
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: 1,
+          signal: null,
+          stdout: '',
+          stderr: 'error: failed to download /private/crate\nCaused by: os error 112',
+        }),
+        platform,
+      ),
+    ).toBe(expected);
+  });
+
+  test.each([
+    ['SIGKILL', 'phase1.packaging.chat-native-build.resource.killed'],
+    ['SIGSEGV', 'phase1.packaging.chat-native-build.process.crash'],
+  ])('classifies Cargo %s termination before empty output', async (signal, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2FailureDiagnostic;
+    const SchemaV2CommandExecutionError = producer.CommandExecutionError as new (
+      label: string,
+      result: {
+        code: number | null;
+        signal: string | null;
+        stdout: string;
+        stderr: string;
+      },
+    ) => Error;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    expect(
+      diagnose(
+        new SchemaV2CommandExecutionError('private cargo command', {
+          code: null,
+          signal,
+          stdout: '',
+          stderr: '',
+        }),
+        'phase1.packaging.chat-native-build.failed',
+      ),
+    ).toBe(expected);
+  });
 
   test('classifies an actual pnpm Cave prebuild header with its workspace path', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
@@ -5080,6 +5312,40 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
   });
 
+  test.each([
+    ['schema-v1', 'supervisor'],
+    ['schema-v1', 'empty'],
+    ['schema-v2', 'supervisor'],
+    ['schema-v2', 'empty'],
+  ] as const)('%s preserves resolved Cargo ahead of the %s PATH', (schema, pathKind) => {
+    const root = mkdtempSync(join(tmpdir(), 'phase1-cargo-path-'));
+    try {
+      const cargoPath = realpathSync(
+        execFileSync('rustup', ['which', 'cargo'], { encoding: 'utf8' }).trim(),
+      );
+      const supervisorPath = pathKind === 'empty' ? '' : resolve(root, 'supervisor-tools');
+      if (supervisorPath !== '') mkdirSync(supervisorPath);
+      const buildEnvironment: typeof safeEnvironment =
+        schema === 'schema-v1' ? safeEnvironment : schemaV2Producer.safeEnvironment;
+      const environment = buildEnvironment(root, { PATH: supervisorPath });
+      const expectedPath = [dirname(cargoPath), supervisorPath].filter(Boolean).join(delimiter);
+      expect(environment.PATH).toBe(expectedPath);
+      expect(environment.RUSTUP_HOME).toBeUndefined();
+      expect(environment.CARGO_HOME).toBe(resolve(root, 'cargo-home'));
+      const result = spawnSync('cargo', ['--version'], {
+        cwd: root,
+        env: environment,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(execFileSync(cargoPath, ['--version'], { encoding: 'utf8' }));
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+  });
+
   test('uses fixed resource limits for the Cave release build', () => {
     expect(
       caveBuildEnvironment({
@@ -5188,8 +5454,334 @@ describe('Phase 1 real-authority conformance harness', () => {
         `env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: ${target} }`,
       );
     }
+    expect(packaging).toContain('renameSync(builtNativeRpcPath, nativeRpcPath);');
+    expect(packaging).toContain('rmSync(chatTarget, { recursive: true });');
+    expect(packaging).toContain('renameSync(builtCovenBinaryPath, covenBinaryPath);');
+    expect(packaging).toContain('rmSync(covenTarget, { recursive: true });');
     expect(source).toMatch(
       /const observationEnvironment = \{\s*\.\.\.schemaV2NativeBuildEnvironment\(environment\),\s*CARGO_TARGET_DIR:/u,
+    );
+  });
+
+  test.each([
+    ['create status replacement home: private error', 'setup'],
+    ['write current status: private error', 'setup'],
+    ['assertion `left != right` failed: open status reader', 'reader-open'],
+    ['status replacement should wait for the active reader', 'early-result'],
+    ['status replacement result: Timeout', 'result-timeout'],
+    ['status replacement result: Disconnected', 'result-disconnected'],
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        [2, 'file-not-found'],
+        [3, 'path-not-found'],
+        [5, 'access-denied'],
+        [32, 'sharing-violation'],
+        [1307, 'invalid-owner'],
+        [1314, 'privilege-not-held'],
+      ].map(([code, category]) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: ${code}, kind: Other, message: "private message" } }`,
+        `writer-error.${operation}.${category}`,
+      ]),
+    ),
+    ...['private-operation', 'replace-status-file.extra', '', 'replace-status-file '].map(
+      (operation) => [
+        `replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status: ${operation}", source: Os { code: 5, kind: Other, message: "private message" } }`,
+        'writer-error',
+      ],
+    ),
+    ['replace status after reader closes: private writer error', 'writer-error'],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{1b}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{202e}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{10ffff}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\x1b" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{d800}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{110000}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\x80" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\\\u{d800}" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\q" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "private\\u{zz}" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: PermissionDenied, message: "path C:\\\\private\\\\file and \\"quote\\"" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: ',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "unterminated',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private" }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private" } } trailing',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 5, kind: Other, message: "private message" } }',
+      'writer-error.access-denied',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 32, kind: Other, message: "private message" } }',
+      'writer-error.sharing-violation',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 1314, kind: Other, message: "private message" } }',
+      'writer-error.privilege-not-held',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 1307, kind: Other, message: "private message" } }',
+      'writer-error.invalid-owner',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 2, kind: Other, message: "private message" } }',
+      'writer-error.file-not-found',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 3, kind: Other, message: "private message" } }',
+      'writer-error.path-not-found',
+    ],
+    ['replace status after reader closes: private writer error code: 5', 'writer-error'],
+    [
+      'replace status after reader closes: Io { operation: "wrong operation", source: Os { code: 5, kind: Other, message: "private" } }',
+      'writer-error',
+    ],
+    [
+      'replace status after reader closes: Io { operation: "failed to write owner-only Windows daemon status", source: Os { code: 999999, kind: Other, message: "code: 5" } }',
+      'writer-error',
+    ],
+    ['status replacement thread: private join error', 'writer-join'],
+    ['read replaced status: private error', 'readback'],
+    ['assertion `left == right` failed', 'content'],
+    ['remove status replacement home: private error', 'cleanup'],
+  ])('classifies bounded status replacement panic %s', async (message, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const name = 'discovery::tests::status_file_reader_allows_an_atomic_status_replacement';
+    const error = new producer.CommandExecutionError(
+      `Coven native trust observation tests ${name}`,
+      {
+        code: 101,
+        signal: null,
+        stdout: `test ${name} ... FAILED\n\n---- ${name} stdout ----\nthread '${name}' (3156804) panicked at crates/coven-client/src/discovery.rs:2084:9:\n${message}\nprivate trailing payload\n`,
+        stderr: '',
+      },
+    );
+    const actual = producer.schemaV2FailureDiagnostic(
+      error,
+      'phase1.runtime-observations.coven-rust-tests.failed',
+    );
+    expect(actual).toBe(
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(actual))).toBe(actual);
+    expect(actual).not.toContain('private');
+  });
+
+  test.each(['wrong-thread', 'wrong-file', 'unknown-message', 'unattributed-message'])(
+    'keeps status replacement panic %s unclassified',
+    async (variant) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const name = 'discovery::tests::status_file_reader_allows_an_atomic_status_replacement';
+      const thread = variant === 'wrong-thread' ? 'unrelated_test' : name;
+      const file = variant === 'wrong-file' ? 'status.rs' : 'discovery.rs';
+      const header =
+        variant === 'unattributed-message'
+          ? ''
+          : `thread '${thread}' (3156804) panicked at crates/coven-client/src/${file}:2084:9:\n`;
+      const message =
+        variant === 'unknown-message'
+          ? 'private unknown message'
+          : 'status replacement should wait for the active reader';
+      const error = new producer.CommandExecutionError(
+        `Coven native trust observation tests ${name}`,
+        {
+          code: 101,
+          signal: null,
+          stdout: `test ${name} ... FAILED\n${header}${message}\n`,
+          stderr: '',
+        },
+      );
+      expect(
+        producer.schemaV2FailureDiagnostic(
+          error,
+          'phase1.runtime-observations.coven-rust-tests.failed',
+        ),
+      ).toBe('phase1.runtime-observations.coven-rust-tests.status-replacement.test-failed');
+    },
+  );
+
+  test.each([
+    ['legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors', 'legacy-case'],
+    ['recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes', 'pipe-shapes'],
+    ['recorded_daemon_status_rejects_a_stable_pipe_for_another_profile', 'profile-pipe'],
+    [
+      'windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+      'inspection-wait',
+    ],
+    ['status_file_reader_allows_an_atomic_status_replacement', 'status-replacement'],
+  ])('identifies bounded Coven observation failure for %s', async (name, category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const stage = 'phase1.runtime-observations.coven-rust-tests.failed';
+    const testName = `discovery::tests::${name}`;
+    const label = `Coven native trust observation tests ${testName}`;
+    const base = `phase1.runtime-observations.coven-rust-tests.${category}`;
+    for (const [reason, stdout, stderr, expected] of [
+      [undefined, `test ${testName} ... FAILED\n`, 'private assertion payload', 'test-failed'],
+      [undefined, '', 'error[E0308]: private compiler payload', 'compile'],
+      ['timeout', `test ${testName} ... FAILED\n`, 'private timeout payload', 'timeout'],
+      [undefined, 'unrecognized private test output', '', 'unknown'],
+      [undefined, 'test discovery::tests::unselected ... FAILED\n', '', 'unknown'],
+      ['stdout-limit', `test ${testName} ... FAILED\n`, 'private output', 'output-limit'],
+      ['tracking', '', '', 'tracking'],
+    ]) {
+      const error = new producer.CommandExecutionError(label, {
+        reason,
+        code: 101,
+        signal: null,
+        stdout,
+        stderr,
+      });
+      const actual = producer.schemaV2FailureDiagnostic(error, stage);
+      expect(actual).toBe(`${base}.${expected}`);
+      expect(publicPhase1FailureDiagnostic(new Error(actual, { cause: error }))).toBe(actual);
+      expect(actual).not.toContain('private');
+    }
+    const missing = new Error(`Coven native trust observation tests did not execute ${testName}.`);
+    expect(producer.schemaV2FailureDiagnostic(missing, stage)).toBe(`${base}.not-observed`);
+    expect(publicPhase1FailureDiagnostic(new Error(`${base}.not-observed`))).toBe(
+      `${base}.not-observed`,
+    );
+    expect(publicPhase1FailureDiagnostic(new Error(`${base}.private-payload`))).toBeUndefined();
+    expect(producer.schemaV2FailureDiagnostic(new Error('private arbitrary failure'), stage)).toBe(
+      stage,
+    );
+    expect(
+      producer.schemaV2FailureDiagnostic(
+        new producer.CommandExecutionError('private unknown test', {
+          reason: undefined,
+          code: 101,
+          signal: null,
+          stdout: `test ${testName} ... FAILED\n`,
+          stderr: '',
+        }),
+        stage,
+      ),
+    ).toBe(stage);
+  });
+
+  test.each(['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM', 'private-path'])(
+    'bounds Coven observation launch error %s',
+    (spawnCode) => {
+      const base = 'phase1.runtime-observations.coven-rust-tests.legacy-case';
+      const error = new schemaV2Producer.CommandExecutionError(
+        'Coven native trust observation tests discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+        { reason: 'spawn', spawnCode, code: null, signal: null, stdout: '', stderr: '' },
+      );
+      const expected =
+        spawnCode === 'private-path' ? `${base}.spawn` : `${base}.spawn.${spawnCode.toLowerCase()}`;
+      expect(
+        schemaV2Producer.schemaV2FailureDiagnostic(
+          error,
+          'phase1.runtime-observations.coven-rust-tests.failed',
+        ),
+      ).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(expected))).toBe(expected);
+      expect(
+        publicPhase1FailureDiagnostic(new Error(`${base}.spawn.private-path`)),
+      ).toBeUndefined();
+    },
+  );
+
+  test('retains the bounded spawn error code from a missing executable', async () => {
+    const owner = createProcessOwnedArtifactRoot({ prefix: 'p1spawn' });
+    try {
+      await expect(
+        schemaV2Producer.runSchemaV2CommandForTest(
+          owner,
+          resolve(owner.rootPath, 'missing-executable'),
+          [],
+          { cwd: owner.rootPath },
+        ),
+      ).rejects.toMatchObject({ result: { reason: 'spawn', spawnCode: 'ENOENT' } });
+    } finally {
+      await owner.cleanup();
+    }
+  });
+
+  test('tracks bounded schema-v2 observation substages without exposing command output', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+
+    for (const stage of [
+      'phase1.runtime-observations.sdk-install.failed',
+      'phase1.runtime-observations.chat-install.failed',
+      'phase1.runtime-observations.sdk-tests.failed',
+      'phase1.runtime-observations.chat-tests.failed',
+      'phase1.runtime-observations.chat-rust-tests.failed',
+      'phase1.runtime-observations.coven-rust-tests.failed',
+      'phase1.runtime-observations.cleanup.failed',
+    ]) {
+      expect(publicPhase1FailureDiagnostic(new Error(stage))).toBe(stage);
+      expect(source).toContain(`onStage('${stage}')`);
+    }
+    expect(source).toContain(
+      ['        (stage) => {', '          activeStage = stage;', '        },'].join('\n'),
     );
   });
 

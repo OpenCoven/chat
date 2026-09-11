@@ -235,6 +235,10 @@ export function assertExecutingHarnessAuthority(
   environment?: NodeJS.ProcessEnv,
 ): void;
 export function assertProductionAdapterAtRevision(harnessRoot: string, lock: unknown): void;
+export function assertProductionChatAuthority(
+  roots: { chatRoot: string; chatHarnessRoot: string },
+  lock: unknown,
+): void;
 export function finalizeOperatorSafety(options: {
   primaryFailure?: unknown;
   cleanupFailure?: unknown;
@@ -337,3 +341,8 @@ export function withOwnedArtifactRoot<T>(
 export function recordCaveMatrixFailure(results: Map<string, unknown>, error: unknown): unknown;
 export function wrapInfrastructureFailure(error: unknown, report: unknown): CommandExecutionError;
 export function runPhase1Conformance(options?: ReturnType<typeof parseArgs>): Promise<unknown>;
+
+export function assertSdkCandidateProvenance(
+  roots: { sdkRoot: string; sdkEvidenceRoot: string },
+  lock: unknown,
+): void;

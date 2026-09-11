@@ -1030,7 +1030,9 @@ function ChatShellView({
       ? titleForConversation(conversationState.data)
       : selectedConversation !== null
         ? titleForConversation(selectedConversation)
-        : 'Read-only chat';
+        : canWrite
+          ? 'Local chat'
+          : 'Read-only chat';
 
   return (
     <div className="chat-shell">
@@ -1156,7 +1158,7 @@ function ChatShellView({
         </section>
       </aside>
 
-      <main className="chat-shell__thread">
+      <main className={`chat-shell__thread${canWrite ? ' chat-shell__thread--writable' : ''}`}>
         <header className="chat-shell__thread-header">
           <div>
             <p className="chat-shell__thread-eyebrow">OpenCoven chat</p>

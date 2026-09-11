@@ -13,49 +13,144 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
+## Frozen GLib source adoption
+
+The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
+
+| Source | Revision | Tree |
+| --- | --- | --- |
+| Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
+| Executable harness | `0207b93f4238017764e59eca4916e4c790561f77` | `afc0cd3964866069e707fdd72d2bbc2efac6ebbb` |
+
+Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
+files from its prior frozen revision. The 121 crate files are identical in both
+snapshots. The existing whole-checkout checks cover vendor files; no authority
+file list or cleanliness check is relaxed. Only the two Cargo-file bindings
+change within the production authority and native delta tables. All 25 pinned
+harness files retain their previous bytes.
+
+[Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
+validated both exact trees: production passed 128 native tests and the harness
+passed 158. Both passed the optimized desktop build, 11 patched iterator tests,
+Linux dependency-graph checks and final source consistency. The source commits
+have verified signatures and are retained as parents of the adoption branch.
+This adoption must land with an actual merge commit to preserve their ancestry.
+
+Native candidate validation does not establish protected acceptance. Full
+packaged CI, an updated SDK validator binding, both protected scopes and fresh
+platform/aggregate validation remain required. Issue #188 remains open until
+those gates and advisory reconciliation are complete.
+
+## Earlier protected diagnostic result
+
+[Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
+attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
+#196 validator `a5c7e38ecc905a6fdb9c9a3e704c6395ec2df02a`. Linux artifact
+`10136315804` and Darwin artifact `10136396539` passed identity, digest, timing,
+scan, and all 197 assertion checks. Windows failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
+This establishes OS code 5 from the writer, but does not identify the failing
+operation. Final validation, attestation, and aggregation were skipped. No
+aggregate is accepted.
+
+[Coven #984](https://github.com/OpenCoven/coven/issues/984) tracks fixed operation
+labels; [#985](https://github.com/OpenCoven/coven/pull/985) is the diagnostic
+implementation. The Chat classifier recognizes nine fixed operation labels and
+six fixed OS codes only within an attributed, structurally valid writer panic.
+Old operation strings retain their previous categories; unknown labels, codes,
+or malformed records retain the generic category. Raw messages are never emitted.
+Source adoption, harness authority, workflow digests, a matching SDK binding,
+and fresh protected validation remain required. This diagnostic work does not
+change writer security, retry limits, or observation selection.
+
+Coven #985 head `367e670a01379799d89b6802e1a00bea7a0e20ef` passed native
+Windows CI, including the new failure-path tests. Its Linux retry passed in
+[run 34437695364, attempt 2](https://github.com/OpenCoven/coven/actions/runs/34437695364/attempts/2).
+The initial Linux failure was SQLite exit-persistence contention, tracked in
+[Coven #986](https://github.com/OpenCoven/coven/issues/986); a passing retry does
+not establish a persistence fix. Val merged #985 as
+`c0c979cdee96327bf24218bc7c7ecb90d719cb27`; its tree matches the reviewed head.
+These CI results do not replace protected conformance validation.
+
+The proposed Coven update also includes merged
+[#983](https://github.com/OpenCoven/coven/pull/983), which changes CLI authority
+refusal receipts and store initialization. Source adoption therefore includes
+production CLI changes as well as diagnostic metadata. The frozen Chat native
+client remains separately pinned; do not describe the complete adoption as a
+diagnostic-only change.
+
 ## Exact inputs
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `5d5cb69ce12c6581a6afd0074e55296f9a2d5b4c`, tree
-  `10b268f706b2a9b97c48c973dfcc0a71dc1a2a0a`, the frozen SDK source
-  authority;
-- SDK package candidate `6526b56b30c9a9c1c072caf2f0022d3427ae18db`;
+- Chat production `0da8c4749f57e63601b29d66032f80c9bbac1cb5`, tree
+  `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
+  backport source awaiting SDK contract rebinding;
+- SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
-- Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
-- Chat conformance driver support at the exact `harness.revision` and
-  `harnessAuthority.tree` generated from the preceding code/integration
-  commit;
+- Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
+- Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
+  in its frozen Cargo manifest and lock;
+- Chat conformance driver `0207b93f4238017764e59eca4916e4c790561f77`,
+  tree `afc0cd3964866069e707fdd72d2bbc2efac6ebbb`, retained in the
+  adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `addec3436daf8e99633ea3216b0ed80ad856d244e1676823cf338adfdb1cbc41`;
+  `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
-contract committed in SDK source authority
-`eb1e8f7113ebe9e63364d5255ca976bf076c886d`. This is source-authority
-compatibility only. That authority still names Chat producer
-`b2d63e5fcea3b307d4d97fd560621dc84d659755`, not the final producer
-identity for this fix. Full producer compatibility and provenance remain
-blocked until this Chat change merges, a reachable authority commit pins the
-final behavior commit, and the SDK validator is rebound to that final
-post-merge Chat authority commit.
+SDK PR #189 froze the replacement candidate and Chat source contract. The
+current local fixture retains SDK source authority
+`c614dfe72e494d21b267b825edd5ff78da184acb`, which adopts Coven #983 and
+#985 while preserving that candidate and historical Chat source. It is
+not compatible with the newly adopted Chat pin until SDK rebinding. The frozen
+Chat source preserves all ten native file differences required by
+`harnessAuthority.productionDeltas`. Pinning the
+producer-derived `8a63ff1` source would remove those differences and fail the
+existing authority check.
 
-Protected run `34345365355` proved the repaired frozen-consumer boundary and
-completed Linux. Darwin then failed during plugin evaluation, while Windows
-exceeded the aggregate bootstrap quota. The Cave build now uses two reported
-CPUs as a conservative contention experiment, not a proven fix for that generic
-plugin error. Windows uses the measured working-tree allocation and compact
-native builds described below, with the original aggregate ceilings preserved.
+Chat #191 merged the source-fetch repair at
+`3f2302da7dc2b39adb8042853b64aa58c406de08`. SDK #191 binds that producer at
+`0d480eb72e00d5e0f915dbe0cb289ef12cbb9ebd`. Both validator variable scopes were
+verified at that SDK revision before protected run `34406621503`, attempt 1.
+Linux and macOS passed all 110 Cave, 46 SDK, and 41 Chat assertions. Windows
+completed the SDK, Chat, and Chat Rust observations, then failed at
+`phase1.runtime-observations.coven-rust-tests.failed`. The label does not
+identify which Coven test failed or distinguish compilation from execution.
+Final validation, attestation, and aggregation were skipped. Publishing remains
+disabled and no three-platform aggregate is accepted.
+
+Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
+and Darwin passed, while Windows failed at
+`phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
+identified by that stage label. The replacement candidate requires a fresh
+protected attempt with the complete observation suite and existing resource
+ceilings.
+
+Protected run `34401360323` validates merged Chat `4f5cbf8` against SDK
+validator `9dd5890`, with both validator variable scopes rotated to that revision.
+Windows passed the image bootstrap but failed at
+`phase1.stage.checkouts.chat.failed`, before SDK observations. Fetching only the
+producer and harness revisions omits frozen Chat `841a88f`, which is outside
+their ancestry. A cold fetch reproduced the missing commit; an explicit fetch
+of the locked Chat SHA restored it. The Windows bootstrap therefore validates
+and fetches that exact source and retains a tag for nested local clones.
+The later #191 binding and run `34406621503` exercised this repair and reached
+Coven Rust observations. Local Git regression tests alone do not establish
+Windows platform conformance.
+Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
+assertions. Windows failed before those observations, so final validation,
+attestation, and aggregation were skipped. No three-platform aggregate is accepted.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
-The runner verifies that the evidence-authority commit descends from the
-candidate and that all four candidate source package identities match the
-frozen manifest. It never rebuilds replacement per-platform SDK tarballs.
+The runner verifies both exact revisions and clean checkouts independently,
+checks the locked evidence registry, schema, and contract digests, and requires
+all four candidate source package identities to match the frozen manifest.
+The evidence authority and package candidate do not require shared ancestry. It never rebuilds replacement per-platform SDK tarballs.
 
 After reading the lock and configuring the frozen Windows supervisor, the
 verified entrypoint authenticates its own Chat revision, tree, and every
@@ -144,9 +239,11 @@ the same trust boundary used by the desktop application.
 Before building the conformance driver, the runner requires the production
 adapter, RPC entrypoint, Cargo manifest, and Cargo lock bytes to match the
 locked Chat production commit. The conformance-only Rust support is built from
-the separate immutable descendant harness revision in the lock. The production
-tree plus selected adapter/custody Git blobs and SHA-256 values are checked
-before packaging.
+the separate immutable harness revision in the lock. Before packaging, the
+runner verifies the exact production revision and tree, clean source, selected
+adapter/custody Git blobs and SHA-256 values, and the harness authority with its
+allowlisted native changes. The production adapter bytes must agree; ancestry
+between the independently frozen revisions is not required.
 
 The runner never calls `coven daemon status`, duplicates Unix peer or Windows
 pipe identity logic, or adds a pathname/shell fallback. Missing authority and
@@ -609,12 +706,20 @@ dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
-the watchdog. Each scan materializes only a bounded number of entries through
+the watchdog. After preserving the built Chat RPC executable, schema-v2 removes
+the no-longer-needed Chat Cargo target before building Coven so peak disk usage
+stays within those unchanged bounds. Each scan materializes only a bounded
+number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
-closed. Failures report either the fixed reviewed quota label or a path-free
-quota-monitor error.
+closed. After preserving the built Coven executable, schema-v2 also removes the
+Coven Cargo target before starting the observation suite, so neither packaging
+target remains at the next peak. Observation failures expose only the fixed SDK
+install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
+tests substage, plus a distinct temporary-root cleanup substage on Unix;
+command output and private paths remain suppressed. Failures report either the
+fixed reviewed quota label or a path-free quota-monitor error.
 
 The Cave allowance accounts for a measured frozen `d20d83c` build with
 3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
@@ -663,6 +768,23 @@ profile from `https://static.rust-lang.org`; rustup verifies the exact
 toolchain component hashes from that release manifest. The workflow then
 requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
+
+When the ordinary Windows test suite reports a non-system null WTS SID, its
+failure reporter makes one bounded observation without changing the failure.
+The test-only `scripts/windows-process-sid-diagnostics.cs` opens one
+query/synchronize handle, performs at most two zero-time waits and one token
+query, and closes the handle. Fixed labels and numeric OS codes distinguish
+open-not-found, open failure, exited, live readable/unreadable token, invalid
+token, and wait failure without emitting a SID. The observation describes the
+newly opened handle; it cannot establish continuity or reuse relative to the
+original WTS row. Chat #206 remains open until native evidence explains the
+ambiguity. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
+exercise states and call/cleanup bounds and also run in the native suite.
+The native suite additionally checks one real self-process observation through a
+nested failure report; terminal-attempt wrapping preserves the inner exception
+chain so a real WTS failure reaches the same reporter. The reporter traverses
+aggregate children within a twelve-exception total bound and shares one probe
+budget across all branches, including producer-plus-quarantine failures.
 
 `scripts/windows-job-supervisor.test.ps1` is also run by the ordinary elevated
 `windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
@@ -1148,25 +1270,31 @@ conformance aggregate first. Checkout, manifest, package-content, and isolated
 consumer checks remain mandatory. This does not enable publication or qualify a
 release.
 
+Both harness schemas prepend the resolved Rust toolchain directory after applying
+the supervisor's PATH. The supervisor PATH must not replace that directory with
+Rustup shims: isolated builds intentionally do not inherit `RUSTUP_HOME` or a
+global default toolchain, and Coven does not have a local toolchain override.
+Cargo credentials remain isolated; no global Rust default is configured.
+
 The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 463,942 | `05a5c22bacaa9dbde5ff4d462f9f2d4171b82cc6221080f71c626e6e1a60f015` |
+| `.github/workflows/client-v1-conformance.yml` | 465,045 | `8548c1f6b1f5ef3f0a2cb9b5692546d6dd39160cdb598443199201c233b26b77` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 202,423 | `9cc3231270be8ba244c59c4047b9e9c75003e79633801b19b6ee17eb29e6f1a0` |
+| `scripts/phase1-conformance.mjs` | 205,138 | `7dfe2cc2bf7deafec6749e3801075e238cb2d3fe5ccff6ad60e2fa9a36277c4d` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 176,029 | `ae694058306de451de1cc8dd5dd5bf8a26e3e57693481aa2975d5eb53571d570` |
-| `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
+| `scripts/phase1-schema-v2-producer.mjs` | 186,285 | `4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6` |
+| `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
@@ -1178,7 +1306,10 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 171,179 | `55e9cf065e2dc7cc656c6aa8cc9ea53542259d3d7eee55c368c6cf0fc6356ab9` |
+| `scripts/windows-job-supervisor.test.ps1` | 175,090 | `8d4ae0914a65f4648523c161c3a212e7d8926bc878ce8e54eeaab102c29b25d7` |
+| `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
+| `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
+| `scripts/windows-status-acl-probe.cs` | 6,559 | `aeb7fec2d8becf63b5e94e93d2f8b56cf761ea76d4a714a33f6457a3c65dabe7` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
 `harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
@@ -1229,7 +1360,7 @@ after this commit is created; no SDK validator SHA is committed into Chat.
 
 The governed loader behavior is committed first. A separate Chat authority
 commit then pins that prior behavior commit, its tree, and every changed
-governed blob and SHA-256. After the Chat fix merges, SDK #100 must freeze the
+governed blob and SHA-256. After a Chat fix merges, a later SDK validator must freeze the
 final reachable Chat authority commit/tree, package manifest, harness,
 workflow, environment ID, and source/signer digests in a later validator
 commit. Operators dispatch the already-committed Chat workflow with that full
@@ -1246,8 +1377,8 @@ to the historical harness checkout, is rejected rather than accepted as an
 alternate SHA.
 
 The pre-rebind SDK validator remains authoritative for its old producer and is
-not evidence that this PR head is producer-compatible. Chat's always-on frozen
-fixture proves only that the local Phase 1 lock matches SDK 933's committed
+not evidence that a changed producer is compatible. Chat's always-on frozen
+fixture proves only that the local Phase 1 lock matches the committed SDK
 source contract, while the optional real-checkout integration continues to
 exercise the exact SDK loader. The later SDK change must replace the producer
 workflow size/SHA-256 and producer commit/tree metadata and retain the
@@ -1278,3 +1409,48 @@ producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
 build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
 directories. This path correction preserves every reviewed byte limit. It does
 not by itself identify the subtree responsible for an aggregate quota failure.
+
+Windows Coven Rust observation failures report only a fixed test category and
+failure category. The five test categories are `legacy-case`, `pipe-shapes`,
+`profile-pipe`, `inspection-wait`, and `status-replacement`. Cargo compilation,
+linking, resource, and process failures retain their existing bounded categories.
+`tracking` identifies a child-ownership registration failure. Launch failures
+report `spawn.enoent`, `spawn.eacces`, `spawn.eperm`, `spawn.einval`,
+`spawn.e2big`, or `spawn.enomem` only when Node supplies that exact error code;
+other launch errors retain `spawn` without disclosing their text.
+`test-failed` requires a failed result for the exact selected test;
+`not-observed` means a successful command did not report that test as passed.
+Unknown command labels retain the generic stage. Raw stdout, stderr, assertion
+messages, and private paths are never included. The selected tests, command
+arguments, deadlines, and production limits are unchanged. These diagnostics
+need a subsequent producer binding and protected run before the Windows cause
+can be identified.
+
+Child ownership accepts a recycled PID only after its former child has exited
+or been signaled. A live PID collision remains an error. Termination removes
+only the child instance it reaped, so an overlapping registration cannot lose
+ownership. Cleanup retains the root and fails if children registered during
+cleanup remain; an explicit cleanup retry handles those children.
+
+Protected run `34413820955` passed Linux and Darwin, including all 110 Cave,
+46 SDK, and 41 Chat assertions per platform. Windows stopped at
+`phase1.runtime-observations.coven-rust-tests.legacy-case.spawn`; that producer
+used the same category for launch and tracking failures. Local tests reproduce
+stale PID registration and cover its repair, but do not prove it caused this
+Windows failure. Fresh bound protected evidence is still required.
+
+Protected run `34422000259`, attempt 1, used producer `6cf479d` and validator
+`7ed9b19`. Linux and Darwin records passed provenance, scan, and exact assertion
+checks: 110 Cave, 46 SDK, and 41 Chat assertions per platform. Windows passed the
+first four selected Coven Rust tests, then reported `status-replacement.test-failed`.
+Validation, attestation, and aggregation were skipped; no aggregate was accepted.
+
+The status replacement diagnostic now recognizes fixed panic messages from the
+selected test and reports only an `assertion` category: setup, reader open, early
+result, result timeout or disconnection, writer error or join, readback, content,
+or cleanup. The matcher requires the selected test failure and its panic header
+in `discovery.rs`; unknown or unattributed output remains `test-failed`. An
+`early-result` category means the test received a result before its 20 ms wait
+expired. It does not distinguish writer success from writer failure. These
+categories require a refreshed producer binding and new protected evidence;
+they do not establish the cause of run `34422000259` retroactively.
