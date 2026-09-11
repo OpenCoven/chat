@@ -1,4 +1,13 @@
+.app-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 .app-source-bar {
+  flex-shrink: 0;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -92,6 +101,8 @@
 
 .chat-composer__input {
   flex: 1;
+  min-width: 0;
+  max-height: 8rem;
   resize: vertical;
   min-height: 2.75rem;
   padding: 0.5rem 0.75rem;
