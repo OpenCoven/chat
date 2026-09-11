@@ -309,7 +309,7 @@ describe('storage fallback', () => {
     store.dispose();
   });
 
-  it('starts empty when the backend cannot be read', async () => {
+  it('rejects unreadable storage rather than presenting an empty successful store', async () => {
     const unreadable = Object.freeze({
       isDurable: () => true,
       loadAll: () => Promise.reject(new Error('corrupt')),
@@ -317,8 +317,9 @@ describe('storage fallback', () => {
       close: () => undefined,
     });
 
-    const store = await openChatStore({ familiarId: LOCAL_FAMILIAR_ID, backend: unreadable });
-    expect(store.listConversations(10).data).toHaveLength(0);
+    await expect(
+      openChatStore({ familiarId: LOCAL_FAMILIAR_ID, backend: unreadable }),
+    ).rejects.toThrow('corrupt');
   });
 });
 

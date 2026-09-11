@@ -26,6 +26,7 @@ import { createQueryAdapter, type QueryAdapter } from './lib/sdk/query-adapter';
 
 type ControllerFactory = (installationId: string) => CaveConnectionController;
 type QueryAdapterFactory = (getClient: () => CaveReadClient | null) => QueryAdapter;
+/** A successful call transfers a source to App; failed factories clean up resources they opened. */
 type LocalSourceFactory = () => Promise<LocalChatSource>;
 type InstallationIdReader = DesktopHost['readInstallationId'];
 type InstallationBootstrapState =
@@ -281,22 +282,35 @@ function CaveHost({
   );
 }
 
-function LocalStartup() {
+function LocalStartup({ failed, onRetry }: { failed: boolean; onRetry: () => void }) {
   return (
-    <section className="connection-gate" data-state="local_initializing">
+    <section
+      className="connection-gate"
+      data-state={failed ? 'local_unavailable' : 'local_initializing'}
+    >
       <div className="connection-gate__panel">
         <p className="connection-gate__eyebrow">OpenCoven desktop chat</p>
         <h1 className="connection-gate__title">OpenCoven Chat</h1>
         <div className="connection-gate__summary">
-          <span className="connection-gate__spinner" aria-hidden="true" />
+          {!failed ? <span className="connection-gate__spinner" aria-hidden="true" /> : null}
           <output
-            className="connection-gate__status connection-gate__status--info"
+            className={`connection-gate__status connection-gate__status--${failed ? 'error' : 'info'}`}
             aria-label="Startup state"
             aria-live="polite"
+            role={failed ? 'alert' : 'status'}
           >
-            {LOCAL_PREPARING}
+            {failed
+              ? 'Local chat storage could not be opened. Retry to load your existing history.'
+              : LOCAL_PREPARING}
           </output>
         </div>
+        {failed ? (
+          <div className="connection-gate__actions">
+            <button className="connection-gate__button" type="button" onClick={onRetry}>
+              Retry local storage
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -309,6 +323,8 @@ export function App({
   localSourceFactory = defaultLocalSourceFactory,
 }: AppProps) {
   const [localSource, setLocalSource] = useState<LocalChatSource | null>(null);
+  const [localFailed, setLocalFailed] = useState(false);
+  const [localAttempt, setLocalAttempt] = useState(0);
   const [caveEnabled, setCaveEnabled] = useState(false);
   const [caveSurfaceOpen, setCaveSurfaceOpen] = useState(false);
   const [caveStatus, setCaveStatus] = useState<CaveStatus | null>(null);
@@ -323,24 +339,38 @@ export function App({
     setCaveStatus(status);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: localAttempt explicitly retries local-source opening.
   useEffect(() => {
     let mounted = true;
     let created: LocalChatSource | null = null;
+    setLocalSource(null);
+    setLocalFailed(false);
 
-    void localSourceFactory().then((source) => {
-      if (!mounted) {
-        source.store.dispose();
-        return;
-      }
-      created = source;
-      setLocalSource(source);
-    });
+    void Promise.resolve()
+      .then(() => (mounted ? localSourceFactory() : undefined))
+      .then(
+        (source) => {
+          if (!mounted) {
+            source?.store.dispose();
+            return;
+          }
+          if (!source) {
+            setLocalFailed(true);
+            return;
+          }
+          created = source;
+          setLocalSource(source);
+        },
+        () => {
+          if (mounted) setLocalFailed(true);
+        },
+      );
 
     return () => {
       mounted = false;
       created?.store.dispose();
     };
-  }, [localSourceFactory]);
+  }, [localSourceFactory, localAttempt]);
 
   const subscribeLocal = useCallback(
     (listener: () => void) => localSource?.store.subscribe(listener) ?? (() => undefined),
@@ -362,7 +392,15 @@ export function App({
   }, [activeKind, caveSource]);
 
   if (activeSource === null) {
-    return <LocalStartup />;
+    return (
+      <LocalStartup
+        failed={localFailed}
+        onRetry={() => {
+          setLocalFailed(false);
+          setLocalAttempt((attempt) => attempt + 1);
+        }}
+      />
+    );
   }
 
   return (

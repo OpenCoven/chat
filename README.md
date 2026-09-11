@@ -34,6 +34,9 @@ It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
 
 ## Local save recovery
 
+If local storage cannot be read during startup, **Retry local storage** retries
+opening it without starting Cave or substituting an empty successful session.
+
 Conversation creation and ordinary message saves distinguish a confirmed commit
 followed by a failed history refresh from an unconfirmed commit acknowledgement.
 Neither outcome invites a second write. **Reconcile local save** reads the exact

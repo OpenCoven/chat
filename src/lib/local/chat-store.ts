@@ -4,7 +4,6 @@ import {
   type ChatBackend,
   ChatConflictError,
   type ChatRecords,
-  EMPTY_RECORDS,
   type StoredConversation,
   type StoredMessage,
   type StoredMessageRole,
@@ -782,23 +781,23 @@ function createHydratedChatStore(
  * Opens the durable backend when the platform provides one and falls back to a
  * memory backend otherwise. The fallback is never silent: `store.isDurable()`
  * stays false so the UI can say that nothing is being saved.
+ * Failed opening closes only internally created backends. Injected backends
+ * remain caller-owned on failure. On success, the returned store closes its
+ * backend when disposed.
  */
 export async function openChatStore(
   options: ChatStoreOptions & { backend?: ChatBackend },
 ): Promise<ChatStore> {
+  const injectedBackend = options.backend;
   const backend =
-    options.backend ?? (await openIndexedDbChatBackend()) ?? createMemoryChatBackend();
-
-  // A pre-snapshot bound detects concurrent commits; a later revision could certify stale data.
-  const revisionBeforeSnapshot = await backend.getMutationRevision?.();
-  let records: ChatRecords = EMPTY_RECORDS;
-  let initialRevision: number | undefined;
+    injectedBackend ?? (await openIndexedDbChatBackend()) ?? createMemoryChatBackend();
   try {
-    records = await backend.loadAll();
-    initialRevision = revisionBeforeSnapshot;
-  } catch {
-    records = EMPTY_RECORDS;
+    // A pre-snapshot bound detects concurrent commits; a later revision could certify stale data.
+    const revisionBeforeSnapshot = await backend.getMutationRevision?.();
+    const records = await backend.loadAll();
+    return createHydratedChatStore(backend, records, options, revisionBeforeSnapshot);
+  } catch (error) {
+    if (injectedBackend === undefined) backend.close();
+    throw error;
   }
-
-  return createHydratedChatStore(backend, records, options, initialRevision);
 }

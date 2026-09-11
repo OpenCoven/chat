@@ -87,9 +87,12 @@ test('a backend without revisions still reloads before the first write', async (
   expect(loadAll).toHaveBeenCalledTimes(2);
 });
 
-test('failed initial hydration never stamps the empty fallback with a trusted revision', async () => {
+test('failed initial hydration rejects and retry binds only a successfully loaded snapshot', async () => {
   const backend = createMemoryChatBackend(retainedHistory(50));
   const loadAll = vi.fn(backend.loadAll).mockRejectedValueOnce(new Error('initial read failed'));
+  await expect(
+    openChatStore({ backend: { ...backend, loadAll }, familiarId: 'local' }),
+  ).rejects.toThrow('initial read failed');
   const store = await openChatStore({ backend: { ...backend, loadAll }, familiarId: 'local' });
   await store.appendMessage('empty', 'user', 'First write');
   expect(loadAll).toHaveBeenCalledTimes(2);
