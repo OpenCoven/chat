@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '878c89a3798f2c00e8b303e7af6d1109c09e600e',
-  tree: '61e97bb0f9c126adb7c695b4306c76a9326fa82e',
+  revision: '0207b93f4238017764e59eca4916e4c790561f77',
+  tree: 'afc0cd3964866069e707fdd72d2bbc2efac6ebbb',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -139,7 +139,7 @@ const expectedBehaviorAuthority = {
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: '841a88f8885bc20cac2f9d5b5b6bc2a23a76e657',
+    revision: '0da8c4749f57e63601b29d66032f80c9bbac1cb5',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
@@ -159,17 +159,17 @@ const expectedEntries = {
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
-    tree: '81bbc67b3024c9c76444f7f4e84d79ac6fad1cc6',
+    tree: '7be1737c4aae02493660d39a2d6f6fdf4dd9e696',
     files: [
       {
         path: 'src-tauri/Cargo.toml',
-        blob: '75a54c604d5d8b88b661f5a2427c3f9494e3a374',
-        sha256: '92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf',
+        blob: '50bb635ce23e25fd6b460e0cacc247b2eee947c7',
+        sha256: 'c1971ef226315e6ec57cfd6c11d91f4fdd1c77ae80a1c537b62960c837d825de',
       },
       {
         path: 'src-tauri/Cargo.lock',
-        blob: '4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a',
-        sha256: '50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca',
+        blob: '77f6ae3bd7c439228bea4e37a149dcd8536538ec',
+        sha256: 'af0805758f12cc36c92e21e195a5b33313062db9ca3fcc3b298332c25d22acc7',
       },
       {
         path: 'src-tauri/src/bin/phase1-native-rpc.rs',

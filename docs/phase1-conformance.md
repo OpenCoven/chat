@@ -13,7 +13,35 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
-## Latest protected result
+## Frozen GLib source adoption
+
+The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
+
+| Source | Revision | Tree |
+| --- | --- | --- |
+| Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
+| Executable harness | `0207b93f4238017764e59eca4916e4c790561f77` | `afc0cd3964866069e707fdd72d2bbc2efac6ebbb` |
+
+Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
+files from its prior frozen revision. The 121 crate files are identical in both
+snapshots. The existing whole-checkout checks cover vendor files; no authority
+file list or cleanliness check is relaxed. Only the two Cargo-file bindings
+change within the production authority and native delta tables. All 25 pinned
+harness files retain their previous bytes.
+
+[Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
+validated both exact trees: production passed 128 native tests and the harness
+passed 158. Both passed the optimized desktop build, 11 patched iterator tests,
+Linux dependency-graph checks and final source consistency. The source commits
+have verified signatures and are retained as parents of the adoption branch.
+This adoption must land with an actual merge commit to preserve their ancestry.
+
+Native candidate validation does not establish protected acceptance. Full
+packaged CI, an updated SDK validator binding, both protected scopes and fresh
+platform/aggregate validation remain required. Issue #188 remains open until
+those gates and advisory reconciliation are complete.
+
+## Earlier protected diagnostic result
 
 [Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
 attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
@@ -55,18 +83,18 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `841a88f8885bc20cac2f9d5b5b6bc2a23a76e657`, tree
-  `81bbc67b3024c9c76444f7f4e84d79ac6fad1cc6`, the frozen SDK source
-  authority;
+- Chat production `0da8c4749f57e63601b29d66032f80c9bbac1cb5`, tree
+  `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
+  backport source awaiting SDK contract rebinding;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
 - Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
   `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
 - Coven daemon and observation-test source `c0c979cdee96327bf24218bc7c7ecb90d719cb27`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver support at the exact `harness.revision` and
-  `harnessAuthority.tree` generated from the preceding code/integration
-  commit;
+- Chat conformance driver `0207b93f4238017764e59eca4916e4c790561f77`,
+  tree `afc0cd3964866069e707fdd72d2bbc2efac6ebbb`, retained in the
+  adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -76,7 +104,8 @@ diagnostic-only change.
 SDK PR #189 froze the replacement candidate and Chat source contract. The
 current local fixture retains SDK source authority
 `c614dfe72e494d21b267b825edd5ff78da184acb`, which adopts Coven #983 and
-#985 while preserving that candidate and Chat source. The frozen
+#985 while preserving that candidate and historical Chat source. It is
+not compatible with the newly adopted Chat pin until SDK rebinding. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
@@ -740,6 +769,23 @@ toolchain component hashes from that release manifest. The workflow then
 requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
 
+When the ordinary Windows test suite reports a non-system null WTS SID, its
+failure reporter makes one bounded observation without changing the failure.
+The test-only `scripts/windows-process-sid-diagnostics.cs` opens one
+query/synchronize handle, performs at most two zero-time waits and one token
+query, and closes the handle. Fixed labels and numeric OS codes distinguish
+open-not-found, open failure, exited, live readable/unreadable token, invalid
+token, and wait failure without emitting a SID. The observation describes the
+newly opened handle; it cannot establish continuity or reuse relative to the
+original WTS row. Chat #206 remains open until native evidence explains the
+ambiguity. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
+exercise states and call/cleanup bounds and also run in the native suite.
+The native suite additionally checks one real self-process observation through a
+nested failure report; terminal-attempt wrapping preserves the inner exception
+chain so a real WTS failure reaches the same reporter. The reporter traverses
+aggregate children within a twelve-exception total bound and shares one probe
+budget across all branches, including producer-plus-quarantine failures.
+
 `scripts/windows-job-supervisor.test.ps1` is also run by the ordinary elevated
 `windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
 user and scoped profile/temp/workspace ACLs, launches every supervised probe as
@@ -1269,7 +1315,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 294,514 | `6f973847f075b538a7655e592adacad31775de40cee9f3cf4773e67167b66ea6` |
-| `scripts/windows-job-supervisor.test.ps1` | 173,600 | `ff6c673a6dcd8dc8ab1c811494e33086ce5531ddcc5f3e2b5270c6783d732731` |
+| `scripts/windows-job-supervisor.test.ps1` | 175,930 | `fb2e2619e517ce5d573065df7be1994a9b5654a9dde244b36770f166499661e0` |
+| `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
+| `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-status-acl-probe.cs` | 8,380 | `0746f185b73d2ba7bf99efbd0fb38e91f3ad3c5618be0ae0248eb02944de1b1b` |
 
 The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s

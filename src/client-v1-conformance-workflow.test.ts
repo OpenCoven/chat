@@ -1896,7 +1896,7 @@ ${source.slice(start, end)}
       'Unstable SID-wide process drain did not fail closed.',
       'Artifact ACL sealing failure did not fail closed.',
       "Live root '$Label' terminal quarantine failed:",
-      "Terminal failure '$Label' producer attempt failed:",
+      `"Terminal failure '$Label' producer attempt failed.", $_.Exception`,
       "Terminal failure '$Label' cleanup failed:",
       'Windows supervisor test cleanup failed:',
       'Service creation unexpectedly succeeded for the restricted identity.',

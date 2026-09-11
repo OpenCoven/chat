@@ -36,17 +36,38 @@ function Write-ExceptionChain {
     $Failure
   }
   $depth = 0
-  while ($null -ne $exception -and $depth -lt 12) {
+  $sidProbeAttempted = $false
+  $pending = [Collections.Generic.Queue[Exception]]::new()
+  if ($null -ne $exception) { $pending.Enqueue($exception) }
+  while ($pending.Count -gt 0 -and $depth -lt 12) {
+    $exception = $pending.Dequeue()
     Write-Host "cause[$depth] $($exception.GetType().FullName): $($exception.Message)"
-    if ($exception -is [AggregateException]) {
-      $index = 0
-      foreach ($inner in $exception.InnerExceptions) {
-        Write-Host "  aggregate[$index] $($inner.GetType().FullName): $($inner.Message)"
-        $index++
+    if (-not $sidProbeAttempted -and
+        $exception.Message -match '^WTS process primary token SID query was ambiguous for process ([0-9]+) in session ([0-9]+)\.$') {
+      $sidProbeAttempted = $true
+      # One observation only, after failure; no SID output or acceptance change.
+      try {
+        $processId = [uint32]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+        $queryMethod = [OpenCoven.WindowsJobSupervisor].GetMethod(
+          'QueryProcessPrimaryTokenSid', [Reflection.BindingFlags]'NonPublic,Static'
+        )
+        $querySid = [Delegate]::CreateDelegate([Func[IntPtr, string]], $queryMethod)
+        $observation = [OpenCoven.WindowsProcessSidDiagnostics]::Describe($processId, $querySid)
+        Write-Host "wts-null-sid-observation: $observation"
+      } catch {
+        Write-Host 'wts-null-sid-observation: probe-failed'
       }
     }
-    $exception = $exception.InnerException
     $depth++
+    if ($exception -is [AggregateException]) {
+      foreach ($inner in $exception.InnerExceptions) {
+        if ($pending.Count -ge (12 - $depth)) { break }
+        $pending.Enqueue($inner)
+      }
+    } elseif ($null -ne $exception.InnerException -and
+              $pending.Count -lt (12 - $depth)) {
+      $pending.Enqueue($exception.InnerException)
+    }
   }
 }
 
@@ -72,6 +93,29 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
   throw 'Reviewed Windows Job Object supervisor source is missing.'
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
+& (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
+
+# Exercise the real diagnostic through a nested failure report without failing
+# the suite or changing any process. The observed handle is this test process.
+$diagnosticFailure = [InvalidOperationException]::new(
+  'Synthetic terminal quarantine failure.',
+  [AggregateException]::new([Exception[]]@(
+    [InvalidOperationException]::new('Synthetic producer failure.'),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    ),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    )
+  ))
+)
+$diagnosticOutput = @(Write-ExceptionChain -Failure $diagnosticFailure 6>&1)
+$observations = @($diagnosticOutput | ForEach-Object { $_.ToString() } |
+  Where-Object { $_.StartsWith('wts-null-sid-observation:') })
+if ($observations.Count -ne 1 -or
+    $observations[0] -cne 'wts-null-sid-observation: live-token-readable') {
+  throw 'Nested WTS failure reporting did not observe the live test process exactly once.'
+}
 
 $createProcessWithLogon = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'CreateProcessWithLogonW',
@@ -4328,7 +4372,9 @@ Start-Sleep -Seconds 300
             $directoryQuotas
           )
         } catch {
-          throw "Terminal failure '$Label' producer attempt failed: $($_.Exception.ToString())"
+          throw [InvalidOperationException]::new(
+            "Terminal failure '$Label' producer attempt failed.", $_.Exception
+          )
         }
         if (
           $Mode -eq 'stdout-overflow' -and

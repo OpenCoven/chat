@@ -1,0 +1,152 @@
+name: Frozen GLib native validation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/frozen-glib-validation.yml
+      - scripts/prepare-frozen-glib-candidate.mjs
+      - scripts/prepare-frozen-glib-candidate.test.mjs
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-native:
+    name: Frozen ${{ matrix.source }} GLib (Linux x64)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: production
+            revision: 841a88f8885bc20cac2f9d5b5b6bc2a23a76e657
+          - source: harness
+            revision: c5445941750f5ac232a78f3d7c7dcecf91bd52bc
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/opencoven/chat-ci@sha256:d477f7c7d7b1893426459b3835c12d5aff1300c6c6299ec8c5e00779c9fcf779
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out reconstruction tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out reviewed maintained source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: 7ca56c5c8c95fc1be4efecf22554cb4f3cc08e22
+          path: maintained
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out frozen ${{ matrix.source }} source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ matrix.revision }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.1
+      - name: Test reconstruction rejection cases
+        run: node --test tooling/scripts/prepare-frozen-glib-candidate.test.mjs
+      # Reconstruct before dependency installation can dirty either source checkout.
+      - name: Reconstruct and verify the narrow frozen candidate
+        id: reconstruct
+        run: >-
+          node tooling/scripts/prepare-frozen-glib-candidate.mjs candidate maintained ${{ matrix.source }}
+          > "$RUNNER_TEMP/frozen-glib-candidate-receipt.json"
+      - name: Retain source identity and delta receipt
+        if: always() && steps.reconstruct.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frozen-glib-${{ matrix.source }}-candidate-receipt
+          path: ${{ runner.temp }}/frozen-glib-candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.0
+          run_install: false
+          package_json_file: candidate/package.json
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - name: Install frozen candidate dependencies
+        working-directory: candidate
+        run: pnpm install --frozen-lockfile
+      # The helper verifies that the candidate contains these exact maintained bytes.
+      - name: Verify GLib provenance and optimized iterator regression
+        working-directory: maintained
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          curl --proto '=https' --tlsv1.2 --fail --location \
+            https://static.crates.io/crates/glib/glib-0.18.5.crate \
+            --output "$RUNNER_TEMP/glib-0.18.5.crate"
+          node scripts/verify-glib-backport.mjs "$RUNNER_TEMP/glib-0.18.5.crate" --test
+      - name: Verify the patched Linux dependency graph
+        working-directory: candidate
+        run: |
+          set -eu
+          cargo metadata --manifest-path src-tauri/Cargo.toml --locked \
+            --filter-platform x86_64-unknown-linux-gnu --format-version 1 \
+            > "$RUNNER_TEMP/chat-native-metadata.json"
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync, realpathSync } from 'node:fs';
+          import { resolve } from 'node:path';
+
+          const metadata = JSON.parse(readFileSync(
+            resolve(process.env.RUNNER_TEMP, 'chat-native-metadata.json'), 'utf8',
+          ));
+          const glib = metadata.packages.filter((entry) => entry.name === 'glib');
+          assert.equal(glib.length, 1, 'The native graph must contain exactly one GLib');
+          assert.equal(glib[0].version, '0.18.5');
+          assert.equal(glib[0].source, null, 'GLib must resolve to the maintained source');
+          assert.equal(realpathSync(glib[0].manifest_path),
+            realpathSync('vendor/glib-0.18.5/Cargo.toml'));
+          for (const name of ['glib-sys', 'glib-macros', 'gobject-sys', 'gio-sys']) {
+            const siblings = metadata.packages.filter((entry) => entry.name === name);
+            assert.equal(siblings.length, 1, `Unexpected ${name} source graph`);
+            assert.equal(siblings[0].source, 'registry+https://github.com/rust-lang/crates.io-index');
+          }
+          console.log('Linux graph: one maintained glib 0.18.5; sys/macro siblings remain registry packages.');
+          EOF
+      - name: Build frozen candidate desktop
+        working-directory: candidate
+        run: pnpm app:build
+      - name: Run optimized Linux native regressions
+        working-directory: candidate
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --release
+          --features phase1-conformance --lib
+          --test coven_health_process_boundary --test phase1_native_rpc
+
+      - name: Recheck candidate source after build and tests
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          node --input-type=module <<'EOF_NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          const receipt = JSON.parse(readFileSync(
+            `${process.env.RUNNER_TEMP}/frozen-glib-candidate-receipt.json`, 'utf8',
+          ));
+          assert.equal(execFileSync('git', ['write-tree'], { encoding: 'utf8' }).trim(),
+            receipt.candidateTree, 'Candidate index changed during validation');
+          EOF_NODE
