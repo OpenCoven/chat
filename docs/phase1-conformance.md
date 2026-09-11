@@ -15,12 +15,15 @@ the final bytes.
 
 ## Frozen GLib source adoption
 
-The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
+The production binding and prior diagnostic harness below retain the reviewed
+GLib iterator backport. The current executable harness commit and tree are
+recorded in `phase1-conformance.lock.json` under `harnessAuthority`; the isolated
+quota-reader repair advances that binding through the two-commit process below.
 
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
+| Prior diagnostic harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
@@ -1340,7 +1343,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 483,228 | `b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18` |
+| `.github/workflows/client-v1-conformance.yml` | 491,400 | `d34211f4a7b674f92b5f78e93af9461e27d0d22897f7f41a6ad74fd5f4919d46` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1365,11 +1368,13 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 305,876 | `b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,785 | `c0044f2ba955ff901fcbee3568a3dc081e590a5f880c0bb00fc4d2eedf2a3cf1` |
+| `scripts/windows-job-supervisor.cs` | 312,548 | `a346aa6493068fb4241b9380157ac94e33f63bcb7e6fc8b57d3ab90938617768` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,916 | `8d57c5af17e68f4ce1b241a41c27b2ec88297202acf610862ab6c58c15cbeb2c` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 11,203 | `53f4a530ee873a0eefebb061269fa42ac2f9e8964ed278684e51eea4c46e23c4` |
+| `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,577 | `df8ef3078ee0b085abe3a81d94acb682a4f4cbc377d3945453b7917ba1b33589` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -1570,7 +1575,7 @@ The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608b
 status staging harness and is retained in the diagnostic branch ancestry.
 
 
-The combined quota-context harness is pinned at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
+The combined quota-context harness was introduced at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
 `b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
 Only the supervisor and its embedded workflow authority bytes change from
 the cleanup harness; all production inputs, native deltas and limits remain
@@ -1585,3 +1590,18 @@ a later cleanup failure. Final lock tests passed 92 cases with one platform
 skip; workflow/specification tests passed 128 cases with 19 platform skips.
 Independent specification, quality and final binding reviews passed. These
 local results do not replace native Windows CI or protected execution.
+
+
+## Isolated-user quota accounting
+
+The scoped reader retains the validated standard-user token and duplicates a
+noninheritable handle for each synchronous quota scan. It covers background,
+final process and post-quarantine terminal accounting without extending the
+account lifetime or changing directory ACLs. Active reads own their handles
+across identity disposal; surviving monitors retain their state until the task
+finishes. See [the native regression contract](windows-quota-reproduction.md).
+
+The earlier owner-directory reproduction landed in #220 with full native CI.
+This accounting implementation requires its own native Windows run, reviewed
+SDK rebinding and fresh protected validation. The denied protected descendant
+and separate cleanup `win32-3` remain open under #219.

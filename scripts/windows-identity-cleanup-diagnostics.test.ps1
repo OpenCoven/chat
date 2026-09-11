@@ -28,6 +28,9 @@ Write-Host 'Bounded identity cleanup classification passed.'
 # categories; each must still pair with exactly one retained inner exception.
 $instanceFlags = [Reflection.BindingFlags]'NonPublic,Instance'
 $identity = [Runtime.Serialization.FormatterServices]::GetUninitializedObject($identityType)
+# Constructor bypass also skips field initializers. Keep the lifetime gate real
+# while leaving the absent account/token unprovisioned for this cleanup probe.
+$identityType.GetField('quotaTokenSync', $instanceFlags).SetValue($identity, [object]::new())
 $secret = 'ocv-secret-' + [Guid]::NewGuid().ToString('N')
 $missingRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-missing-' + [Guid]::NewGuid().ToString('N'))
 foreach ($assignment in @(

@@ -1237,10 +1237,14 @@ ${source.slice(start, end)}
       );
       const terminalProducer = source.slice(terminalProducerStart, terminalProducerEnd);
       expect(terminalProducer.indexOf('QuarantineIsolatedIdentity();')).toBeLessThan(
-        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+        terminalProducer.indexOf(
+          'ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);',
+        ),
       );
       expect(
-        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+        terminalProducer.indexOf(
+          'ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);',
+        ),
       ).toBeLessThan(terminalProducer.lastIndexOf('terminalProducerSucceeded ='));
       const quotaScannerStart = source.indexOf('private static Task MonitorDirectoryQuotasAsync(');
       const quotaScanner = source.slice(
@@ -1266,7 +1270,7 @@ ${source.slice(start, end)}
       const finalTeardown = source.indexOf(
         'TerminateJobAndWaitForZero(\n                    jobHandle',
       );
-      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceeded(', finalTeardown);
+      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceededAsUser(', finalTeardown);
       const finalOutputCheck = source.indexOf('Task.WaitAll(ioTasks.ToArray()', finalQuotaCheck);
       expect(finalTeardown).toBeGreaterThan(-1);
       expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
@@ -2367,6 +2371,8 @@ ${source.slice(start, end)}
       'scripts/windows-job-supervisor.test.ps1',
       'scripts/windows-quota-diagnostics.test.ps1',
       'scripts/windows-owner-directory-quota.test.ps1',
+      'scripts/windows-quota-lifetime.test.ps1',
+      'scripts/windows-quota-isolated-reader.test.ps1',
       'scripts/windows-identity-cleanup-diagnostics.test.ps1',
       'scripts/windows-staging-binding.test.ps1',
       'scripts/windows-status-acl-probe.test.ps1',

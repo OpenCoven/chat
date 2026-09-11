@@ -53,3 +53,29 @@ that the owned root is actually removed.
 The reproduction changes no production quota limits, private ACL rules, frozen
 source bindings or validator scopes. A repair still requires native regression
 proof, reviewed source and SDK binding updates, and fresh protected acceptance.
+
+## Isolated quota reader
+
+The accounting repair retains the standard-user token after its existing SID,
+account, group, integrity and privilege validation. Each synchronous filesystem
+scan duplicates that private token into a noninheritable handle, impersonates
+only for the scan, then disposes the duplicate. Background, final process and
+post-quarantine terminal scans use the same bounded directory walker.
+
+The retained token supports terminal accounting after account disablement; no
+new logon or delayed quarantine is needed. Identity disposal closes admission to
+new reads, while an already admitted read owns its handle through completion.
+If a monitor survives its existing bounded teardown wait, its cancellation and
+failure state are disposed only when that task finishes.
+
+`scripts/windows-quota-isolated-reader.test.ps1` checks owner-only directories
+below and above quota, the actual terminal producer path, post-disable reads,
+exception restoration, an unreadable supervisor-private directory, and a read
+held across identity disposal. `scripts/windows-quota-lifetime.test.ps1` checks
+state lifetime with an incomplete monitor and an already completed monitor.
+The unimpersonated characterization still requires supervisor access denial;
+private directory permissions are not expanded.
+
+Native Windows results and a fresh protected run are required before treating
+this repair as accepted. The separate protected cleanup `win32-3` failure and
+the exact denied descendant remain unresolved by this change.
