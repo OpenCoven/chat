@@ -17,6 +17,9 @@ export const MESSAGE_STORE = 'messages';
  */
 export const CHAT_SCHEMA_VERSION = 2;
 
+// IndexedDB cannot cancel a blocked open. Do not queue more opens while it awaits cleanup.
+const blockedOpenings = new WeakMap<IDBFactory, Error>();
+
 function mutationRevision(record: unknown): number {
   if (
     typeof record !== 'object' ||
@@ -39,18 +42,30 @@ function requestAsPromise<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
+  const pendingFailure = blockedOpenings.get(factory);
+  if (pendingFailure) return Promise.reject(pendingFailure);
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = factory.open(CHAT_DATABASE_NAME, CHAT_DATABASE_VERSION);
-    let blocked = false;
+    let blocked: Error | undefined;
+    let openingDatabase: IDBDatabase | null = null;
+    const closeOpening = () => {
+      openingDatabase?.close();
+      openingDatabase = null;
+    };
+    const clearBlocked = () => {
+      if (blocked && blockedOpenings.get(factory) === blocked) blockedOpenings.delete(factory);
+    };
 
     request.onupgradeneeded = (event) => {
       const database = request.result;
+      openingDatabase = database;
       const transaction = request.transaction;
       if (transaction === null) {
         return;
       }
       if (blocked) {
         transaction.abort();
+        closeOpening();
         return;
       }
 
@@ -81,15 +96,23 @@ function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
       const database = request.result;
       if (blocked) {
         database.close();
+        openingDatabase = null;
+        clearBlocked();
         return;
       }
+      openingDatabase = null;
       database.onversionchange = () => database.close();
       resolve(database);
     };
-    request.onerror = () => reject(request.error ?? new Error('The chat database failed to open.'));
+    request.onerror = () => {
+      closeOpening();
+      clearBlocked();
+      reject(request.error ?? new Error('The chat database failed to open.'));
+    };
     request.onblocked = () => {
-      blocked = true;
-      reject(new Error('The chat database is blocked by another tab.'));
+      blocked = new Error('The chat database is blocked by another tab.');
+      blockedOpenings.set(factory, blocked);
+      reject(blocked);
     };
   });
 }
@@ -216,9 +239,5 @@ export async function openIndexedDbChatBackend(
     return null;
   }
 
-  try {
-    return createIndexedDbChatBackend(await openDatabase(factory));
-  } catch {
-    return null;
-  }
+  return createIndexedDbChatBackend(await openDatabase(factory));
 }

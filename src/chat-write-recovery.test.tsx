@@ -276,9 +276,12 @@ test.each(['rejected', 'uncertain'] as const)(
     await current.source.store.appendMessage(side.id, 'user', 'Original source');
     const capability = current.source.writer.sideConversations;
     if (!capability) throw new Error('Missing local side capability');
-    const bringBack = vi.fn(capability.bringBack).mockResolvedValueOnce({
-      status: 'error',
-      code: phase === 'rejected' ? 'stale_review' : 'service_unavailable',
+    const bringBack = vi.fn(async (input: Parameters<typeof capability.bringBack>[0]) => {
+      if (phase === 'uncertain') await capability.bringBack(input);
+      return {
+        status: 'error' as const,
+        code: phase === 'rejected' ? 'stale_review' : 'service_unavailable',
+      };
     });
     const owned = {
       ...current.source,
@@ -328,7 +331,23 @@ test.each(['rejected', 'uncertain'] as const)(
       bringBack.mock.calls[0]?.[0],
     );
     expect(screen.queryByRole('heading', { name: 'Recovery parent' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel unavailable review' }));
-    expect(screen.queryByRole('textbox', { name: 'Unavailable reviewed excerpt' })).toBeNull();
+    const cancel = screen.getByRole('button', { name: 'Cancel unavailable review' });
+    if (phase === 'uncertain') {
+      expect(cancel).toBeDisabled();
+      fireEvent.click(cancel);
+      expect(excerpt).toHaveValue('Keep my carefully edited excerpt');
+      expect(
+        sideReviewMemory(memory, 'local', current.parent.id, side.id).getSnapshot().review,
+      ).toBe(bringBack.mock.calls[0]?.[0]);
+      expect(
+        within(screen.getByRole('region', { name: 'Unavailable local review' })).queryByText(
+          /Retry the unchanged review/,
+        ),
+      ).toBeNull();
+      expect(current.source.store.listMessages(current.parent.id, 50).data).toHaveLength(1);
+    } else {
+      fireEvent.click(cancel);
+      expect(screen.queryByRole('textbox', { name: 'Unavailable reviewed excerpt' })).toBeNull();
+    }
   },
 );

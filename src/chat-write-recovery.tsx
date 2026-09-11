@@ -44,9 +44,11 @@ export function ChatWriteRecovery({
         else onReconciled(result.data);
       } else {
         setError(
-          result.status === 'error' && result.code === 'not_found'
-            ? 'The original save or note is unavailable. Its outcome remains unresolved; do not resend it.'
-            : failed,
+          result.status === 'error' && result.code === 'absence_unproven'
+            ? 'This storage provider cannot prove that this save is absent. Its outcome remains unresolved; do not resend. Copy the content or check again for the exact saved record.'
+            : result.status === 'error' && result.code === 'not_found'
+              ? 'The original save or note is unavailable. Its outcome remains unresolved; do not resend it.'
+              : failed,
         );
       }
     } catch {
@@ -62,31 +64,29 @@ export function ChatWriteRecovery({
           ? 'This save committed, but its record is no longer available. A later deletion or discard does not undo that commit. Copy the saved content before dismissing; nothing will be resubmitted.'
           : writeRecoveryNotice(recovery)}
       </p>
+      <label htmlFor={contentId}>
+        {unavailable ? 'Unavailable saved content' : 'Unresolved save content'}
+      </label>
+      <textarea
+        id={contentId}
+        readOnly
+        value={recovery.receipt.kind === 'message' ? recovery.receipt.text : recovery.receipt.title}
+      />
       {unavailable ? (
-        <>
-          <label htmlFor={contentId}>Unavailable saved content</label>
-          <textarea
-            id={contentId}
-            readOnly
-            value={
-              recovery.receipt.kind === 'message' ? recovery.receipt.text : recovery.receipt.title
-            }
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (
-                matchesRecovery(unavailable) &&
-                unavailable.outcome === 'committed' &&
-                unavailable.availability === 'unavailable'
-              )
-                onReconciled(unavailable);
-              else setError(failed);
-            }}
-          >
-            Dismiss unavailable save
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => {
+            if (
+              matchesRecovery(unavailable) &&
+              unavailable.outcome === 'committed' &&
+              unavailable.availability === 'unavailable'
+            )
+              onReconciled(unavailable);
+            else setError(failed);
+          }}
+        >
+          Dismiss unavailable save
+        </button>
       ) : (
         <button
           type="button"

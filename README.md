@@ -36,6 +36,12 @@ It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
 
 If local storage cannot be read during startup, **Retry local storage** retries
 opening it without starting Cave or substituting an empty successful session.
+Memory-only fallback applies only when the IndexedDB API is genuinely absent.
+If a present API denies or fails an open, or an older window blocks its upgrade,
+startup stays at the retry gate. Close the older windows before retrying.
+Retries do not queue additional opens behind an already-blocked request; once
+unblocked, that abandoned upgrade is aborted and closed without migrating in the
+background. A subsequent explicit retry opens the retained history.
 
 Conversation creation and ordinary message saves distinguish a confirmed commit
 followed by a failed history refresh from an unconfirmed commit acknowledgement.
@@ -50,6 +56,12 @@ resubmits or recreates deleted data. Read failures stay visible and keep the ret
 blocked. If an
 unavailable note prevents determining an unconfirmed message's outcome, it is
 not treated as an unsaved message.
+Recovery content remains read-only and copyable while the outcome is unresolved.
+A backend without a shared revision cannot prove an unconfirmed save absent:
+the save stays blocked, even if a read returns no record. A later exact positive
+receipt can resolve it, and a known commit remains committed if its content is
+missing. The default atomic IndexedDB and memory providers retain revision-based
+absence reconciliation; no background retry loop or alternate write is added.
 
 Pending save receipts and completed reconciliation results are scoped to the
 live local store. They survive navigation within this app session, not reload
@@ -96,14 +108,16 @@ old key. Failed side-note metadata reads offer **Retry local side notes** withou
 enabling mutations against unknown metadata.
 If the exact source is missing, the rejected review stays available as a
 read-only, copyable excerpt. **Choose available messages** retains that text
-while preparing a new selection with a new key. If the note is gone, copy the
-excerpt before explicitly canceling; uncertain acknowledgements still cannot
-be edited or reselected.
+while preparing a new selection with a new key. If the note is gone, a definitively
+rejected review can be dismissed after copying; uncertain acknowledgements cannot
+be edited, canceled, or reselected.
 If the selected note itself becomes unavailable, its exact stored review remains
 in a read-only recovery panel with **Cancel unavailable review**. That panel
-cannot import, reselect, or navigate another familiar. Its explicit dismissal
-only forgets inaccessible recovery text; it does not undo a commit or authorize
-resubmission. Copy valuable text and inspect the parent before dismissing.
+cannot import, reselect, or navigate another familiar. Cancellation is also
+disabled there for uncertain or in-flight reviews: the original key and excerpt
+remain retained and copyable, without offering reconciliation against an
+unavailable target. Only an unattempted or definitively rejected review can be
+explicitly dismissed; dismissal neither undoes a commit nor authorizes resubmission.
 Fresh or reselected reviews require every selected message to be loaded. If
 navigation resets the loaded pages, load the missing page or use **Clear message
 selection** to choose a new exact selection; edited excerpts are retained.

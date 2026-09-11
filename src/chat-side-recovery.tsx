@@ -30,16 +30,37 @@ export function ChatSideRecovery({
     <section className="chat-side" aria-label="Unavailable local review">
       <p role="alert">
         This exact local side note is unavailable. The stored review remains copyable, but no import
-        can be attempted here. An uncertain save may already have committed; inspect the parent
-        before starting another review.
+        can be attempted here.
       </p>
-      {snapshot.notice ? <output>{snapshot.notice}</output> : null}
+      {snapshot.phase === 'uncertain' ? (
+        <p>
+          This save may already have committed. Its original retry identity is retained, so
+          cancellation is unavailable. You can copy the excerpt or navigate away; no save is undone
+          and no reconciliation can be attempted from this unavailable target.
+        </p>
+      ) : snapshot.notice ? (
+        <output>{snapshot.notice}</output>
+      ) : null}
       <label htmlFor={id}>Unavailable reviewed excerpt</label>
       <textarea id={id} readOnly value={snapshot.review.excerpt} />
       <button
         type="button"
-        disabled={snapshot.phase === 'sending' || snapshot.phase === 'preparing'}
-        onClick={() => entry.update({ review: null, selected: [], phase: 'idle', notice: '' })}
+        disabled={
+          snapshot.phase === 'sending' ||
+          snapshot.phase === 'preparing' ||
+          snapshot.phase === 'uncertain'
+        }
+        onClick={() => {
+          const current = entry.getSnapshot();
+          if (
+            current.phase === 'editing' ||
+            current.phase === 'rejected' ||
+            current.phase === 'unavailable' ||
+            current.phase === 'reselecting'
+          ) {
+            entry.update({ review: null, selected: [], phase: 'idle', notice: '' });
+          }
+        }}
       >
         Cancel unavailable review
       </button>

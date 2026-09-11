@@ -464,6 +464,12 @@ function createHydratedChatStore(
             'The note is unavailable; an unconfirmed message may have been removed.',
           );
         }
+        if (!record && !knownCommitted && (before === undefined || after === undefined)) {
+          throw new ChatStoreError(
+            'absence_unproven',
+            'This backend cannot prove that an unconfirmed save is absent.',
+          );
+        }
         const result: RootWriteReconciliation =
           record || knownCommitted
             ? Object.freeze({

@@ -101,6 +101,28 @@ test('a synchronous factory failure also becomes a local startup error', async (
   expect(props.controllerFactory).not.toHaveBeenCalled();
 });
 
+test('present IndexedDB opening failures reach App without empty memory success or Cave calls', async () => {
+  const open = vi.fn(() => {
+    throw new DOMException('Storage denied', 'SecurityError');
+  });
+  vi.stubGlobal('indexedDB', { open });
+  const props = appProps();
+  const view = render(<App {...props} localSourceFactory={() => createLocalChatSource()} />);
+  try {
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('button', { name: 'New' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry local storage' }));
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+    await screen.findByRole('alert');
+    expect(props.desktopIdentityHost.readInstallationId).not.toHaveBeenCalled();
+    expect(props.controllerFactory).not.toHaveBeenCalled();
+    expect(props.queryAdapterFactory).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    vi.unstubAllGlobals();
+  }
+});
+
 test.each(['resolve', 'reject'] as const)(
   'an obsolete factory %s cannot replace or fail the current local source',
   async (outcome) => {
