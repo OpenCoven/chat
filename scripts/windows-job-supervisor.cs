@@ -1199,7 +1199,14 @@ namespace OpenCoven
             Win32Exception native = error as Win32Exception;
             if (native != null)
             {
-                return "win32-" + native.NativeErrorCode.ToString(CultureInfo.InvariantCulture);
+                string kind = "win32-" + native.NativeErrorCode.ToString(CultureInfo.InvariantCulture);
+                WindowsJobSupervisor.CleanupDeleteException deletion =
+                    error as WindowsJobSupervisor.CleanupDeleteException;
+                if (deletion != null)
+                {
+                    kind += "[" + deletion.Context + "]";
+                }
+                return kind;
             }
             if (error is UnauthorizedAccessException) return "access-denied";
             if (error is DirectoryNotFoundException) return "not-found";
@@ -2742,23 +2749,36 @@ namespace OpenCoven
 
         private static void DeleteDirectoryContents(DirectoryInfo directory)
         {
+            DeleteDirectoryContents(directory, 1);
+        }
+
+        private static void DeleteDirectoryContents(DirectoryInfo directory, int depth)
+        {
             foreach (FileSystemInfo entry in directory.GetFileSystemInfos())
             {
                 if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     if ((entry.Attributes & FileAttributes.Directory) != 0)
                     {
-                        if (!RemoveDirectoryW(entry.FullName))
+                        if (!RemoveDirectoryW(ToExtendedPath(entry.FullName)))
                         {
-                            throw new Win32Exception(
+                            ThrowUnlessDeleted(
                                 Marshal.GetLastWin32Error(),
+                                "remove-reparse-directory",
+                                "reparse-directory",
+                                entry,
+                                depth,
                                 "Cleanup reparse directory could not be removed.");
                         }
                     }
-                    else if (!DeleteFileW(entry.FullName))
+                    else if (!DeleteFileW(ToExtendedPath(entry.FullName)))
                     {
-                        throw new Win32Exception(
+                        ThrowUnlessDeleted(
                             Marshal.GetLastWin32Error(),
+                            "remove-reparse-file",
+                            "reparse-file",
+                            entry,
+                            depth,
                             "Cleanup reparse file could not be removed.");
                     }
                     continue;
@@ -2766,30 +2786,122 @@ namespace OpenCoven
                 DirectoryInfo childDirectory = entry as DirectoryInfo;
                 if (childDirectory != null)
                 {
-                    DeleteDirectoryContents(childDirectory);
+                    DeleteDirectoryContents(childDirectory, depth + 1);
                     childDirectory.Delete(false);
                 }
                 else
                 {
-                    if (!DeleteFileW(entry.FullName))
+                    if (!DeleteFileW(ToExtendedPath(entry.FullName)))
                     {
                         int deleteError = Marshal.GetLastWin32Error();
                         if (deleteError != ERROR_ACCESS_DENIED)
                         {
-                            throw new Win32Exception(
+                            ThrowUnlessDeleted(
                                 deleteError,
+                                "delete-file",
+                                "file",
+                                entry,
+                                depth,
                                 "Cleanup file could not be removed.");
+                            continue;
                         }
                         entry.Attributes = FileAttributes.Normal;
-                        if (!DeleteFileW(entry.FullName))
+                        if (!DeleteFileW(ToExtendedPath(entry.FullName)))
                         {
-                            throw new Win32Exception(
+                            ThrowUnlessDeleted(
                                 Marshal.GetLastWin32Error(),
+                                "delete-read-only-file",
+                                "file",
+                                entry,
+                                depth,
                                 "Cleanup read-only file could not be removed.");
                         }
                     }
                 }
             }
+        }
+
+        // Win32 delete calls receive the extended-length form of the managed
+        // enumerator's already-normalized full path so both layers resolve the
+        // same entry: no MAX_PATH truncation and no trailing dot/space
+        // normalization on the native side.
+        internal static string ToExtendedPath(string fullPath)
+        {
+            if (fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                return fullPath;
+            }
+            if (fullPath.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return @"\\?\UNC\" + fullPath.Substring(2);
+            }
+            return @"\\?\" + fullPath;
+        }
+
+        // A not-found status is only accepted when the managed layer agrees the
+        // entry is gone; any other disagreement fails closed with bounded,
+        // path-free context describing the operation, entry class, depth,
+        // path-length bucket and post-failure existence.
+        private static void ThrowUnlessDeleted(
+            int error,
+            string operation,
+            string entryKind,
+            FileSystemInfo entry,
+            int depth,
+            string message)
+        {
+            bool isDirectory = (entry.Attributes & FileAttributes.Directory) != 0;
+            bool entryExists = isDirectory
+                ? Directory.Exists(entry.FullName)
+                : File.Exists(entry.FullName);
+            if ((error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) &&
+                !entryExists &&
+                !Directory.Exists(entry.FullName) &&
+                !File.Exists(entry.FullName))
+            {
+                return;
+            }
+            string parent = Path.GetDirectoryName(entry.FullName);
+            bool parentExists = !String.IsNullOrEmpty(parent) && Directory.Exists(parent);
+            throw new CleanupDeleteException(
+                error,
+                message,
+                DescribeCleanupDeleteContext(
+                    operation,
+                    entryKind,
+                    depth,
+                    entry.FullName.Length,
+                    entryExists,
+                    parentExists));
+        }
+
+        internal static string DescribeCleanupDeleteContext(
+            string operation,
+            string entryKind,
+            int depth,
+            int pathLength,
+            bool entryExists,
+            bool parentExists)
+        {
+            string depthBucket = depth <= 4 ? "le4" : depth <= 16 ? "le16" : depth <= 64 ? "le64" : "gt64";
+            string lengthBucket = pathLength < 260 ? "lt260" : pathLength < 1024 ? "lt1024" : "ge1024";
+            return "op=" + operation +
+                ";kind=" + entryKind +
+                ";depth=" + depthBucket +
+                ";len=" + lengthBucket +
+                ";entry=" + (entryExists ? "present" : "gone") +
+                ";parent=" + (parentExists ? "present" : "gone");
+        }
+
+        internal sealed class CleanupDeleteException : Win32Exception
+        {
+            internal CleanupDeleteException(int error, string message, string context)
+                : base(error, message)
+            {
+                Context = context;
+            }
+
+            internal string Context { get; private set; }
         }
 
         private static IntPtr ConvertSid(string sid, string failureMessage)
