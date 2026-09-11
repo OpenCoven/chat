@@ -1405,6 +1405,8 @@ namespace OpenCoven
         public string ResourceQuotaLabel { get; internal set; }
         public bool ResourceQuotaMonitorError { get; internal set; }
         public string ResourceQuotaMonitorCategory { get; internal set; }
+        public string ResourceQuotaMonitorRoot { get; internal set; }
+        public string ResourceQuotaMonitorOperation { get; internal set; }
         public string Stdout { get; internal set; }
         public string Stderr { get; internal set; }
     }
@@ -6459,6 +6461,8 @@ namespace OpenCoven
                     ResourceQuotaLabel = quotaFailure.QuotaLabel,
                     ResourceQuotaMonitorError = quotaFailure.MonitorError,
                     ResourceQuotaMonitorCategory = quotaFailure.MonitorErrorCategory,
+                    ResourceQuotaMonitorRoot = quotaFailure.MonitorErrorRoot,
+                    ResourceQuotaMonitorOperation = quotaFailure.MonitorErrorOperation,
                     Stdout = stdout.Text,
                     Stderr = stderr.Text,
                 };
@@ -6599,18 +6603,29 @@ namespace OpenCoven
             exceededQuota = null;
             foreach (WindowsDirectoryQuota quota in quotas)
             {
-                long total = 0;
-                foreach (string path in ExpandQuotaPattern(quota.PathPattern))
+                try
                 {
-                    total = checked(
-                        total + MeasureDirectoryBytes(
-                            path,
-                            quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
-                    if (total > quota.MaxBytes)
+                    long total = 0;
+                    foreach (string path in ExpandQuotaPattern(quota.PathPattern))
                     {
-                        exceededQuota = quota;
-                        return true;
+                        total = checked(
+                            total + MeasureDirectoryBytes(
+                                path,
+                                quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
+                        if (total > quota.MaxBytes)
+                        {
+                            exceededQuota = quota;
+                            return true;
+                        }
                     }
+                }
+                catch (Exception error)
+                {
+                    QuotaMonitorContextException context = error as QuotaMonitorContextException;
+                    throw new QuotaMonitorContextException(
+                        quota == null ? null : quota.Label,
+                        context == null ? null : context.Operation,
+                        error);
                 }
             }
             return false;
@@ -6633,7 +6648,7 @@ namespace OpenCoven
                     FileAttributes candidateAttributes;
                     try
                     {
-                        candidateAttributes = File.GetAttributes(candidate);
+                        candidateAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(candidate));
                     }
                     catch (FileNotFoundException)
                     {
@@ -6666,7 +6681,7 @@ namespace OpenCoven
                         FileAttributes childAttributes;
                         try
                         {
-                            childAttributes = File.GetAttributes(child);
+                            childAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(child));
                         }
                         catch (FileNotFoundException)
                         {
@@ -6698,58 +6713,68 @@ namespace OpenCoven
             bool directoriesOnly,
             int maximumEntries)
         {
-            List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
-            IEnumerable<FileSystemInfo> entries;
-            IEnumerator<FileSystemInfo> enumerator;
             try
             {
-                DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-                entries = directoriesOnly
-                    ? directoryInfo.EnumerateDirectories(
-                        searchPattern,
-                        SearchOption.TopDirectoryOnly)
-                    : directoryInfo.EnumerateFileSystemInfos(
-                        "*",
-                        SearchOption.TopDirectoryOnly);
-                enumerator = entries.GetEnumerator();
-            }
-            catch (FileNotFoundException)
-            {
-                return snapshot;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return snapshot;
-            }
-            using (enumerator)
-            {
-                while (true)
+                List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+                IEnumerable<FileSystemInfo> entries;
+                IEnumerator<FileSystemInfo> enumerator;
+                try
                 {
-                    bool moved;
-                    try
-                    {
-                        moved = enumerator.MoveNext();
-                    }
-                    catch (FileNotFoundException)
-                    {
-                        break;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        break;
-                    }
-                    if (!moved)
-                    {
-                        break;
-                    }
-                    if (snapshot.Count >= maximumEntries)
-                    {
-                        throw new QuotaEntryBoundException();
-                    }
-                    snapshot.Add(enumerator.Current);
+                    DirectoryInfo directoryInfo = new DirectoryInfo(directory);
+                    entries = directoriesOnly
+                        ? directoryInfo.EnumerateDirectories(
+                            searchPattern,
+                            SearchOption.TopDirectoryOnly)
+                        : directoryInfo.EnumerateFileSystemInfos(
+                            "*",
+                            SearchOption.TopDirectoryOnly);
+                    enumerator = entries.GetEnumerator();
                 }
+                catch (FileNotFoundException)
+                {
+                    return snapshot;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return snapshot;
+                }
+                using (enumerator)
+                {
+                    while (true)
+                    {
+                        bool moved;
+                        try
+                        {
+                            moved = enumerator.MoveNext();
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            break;
+                        }
+                        catch (DirectoryNotFoundException)
+                        {
+                            break;
+                        }
+                        if (!moved)
+                        {
+                            break;
+                        }
+                        if (snapshot.Count >= maximumEntries)
+                        {
+                            throw new QuotaEntryBoundException();
+                        }
+                        snapshot.Add(enumerator.Current);
+                    }
+                }
+                return snapshot;
             }
-            return snapshot;
+            catch (Exception error)
+            {
+                throw new QuotaMonitorContextException(
+                    null,
+                    directoriesOnly ? "pattern-enumeration" : "directory-enumeration",
+                    error);
+            }
         }
 
         private static long MeasureDirectoryBytes(string root, long remaining)
@@ -6764,7 +6789,7 @@ namespace OpenCoven
                 FileAttributes directoryAttributes;
                 try
                 {
-                    directoryAttributes = File.GetAttributes(directory);
+                    directoryAttributes = ReadQuotaOperation("directory-attributes", () => File.GetAttributes(directory));
                 }
                 catch (FileNotFoundException)
                 {
@@ -6789,7 +6814,7 @@ namespace OpenCoven
                     FileAttributes attributes;
                     try
                     {
-                        attributes = entry.Attributes;
+                        attributes = ReadQuotaOperation("entry-attributes", () => entry.Attributes);
                     }
                     catch (FileNotFoundException)
                     {
@@ -6818,7 +6843,7 @@ namespace OpenCoven
                                 throw new IOException(
                                     "Directory quota file metadata was unavailable.");
                             }
-                            length = file.Length;
+                            length = ReadQuotaOperation("file-length", () => file.Length);
                         }
                         catch (FileNotFoundException)
                         {
@@ -6871,6 +6896,8 @@ namespace OpenCoven
                 if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
                 {
                     result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                    result.ResourceQuotaMonitorRoot = QuotaMonitorRoot(error);
+                    result.ResourceQuotaMonitorOperation = QuotaMonitorOperation(error);
                     result.ResourceQuotaMonitorError = true;
                     result.ResourceQuotaLabel = null;
                 }
@@ -7091,8 +7118,97 @@ namespace OpenCoven
             internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
         }
 
+        // Carry only bounded context across quota catch boundaries. Never retain
+        // the original exception, whose message may contain producer-owned paths.
+        private sealed class QuotaMonitorContextException : Exception
+        {
+            internal string Category { get; private set; }
+            internal string Root { get; private set; }
+            internal string Operation { get; private set; }
+
+            internal QuotaMonitorContextException(string root, string operation, Exception error)
+                : base("Directory quota monitor failed.")
+            {
+                Category = ClassifyQuotaMonitorError(error);
+                Root = NormalizeQuotaRoot(root);
+                Operation = NormalizeQuotaOperation(operation);
+            }
+        }
+
+        private static string NormalizeQuotaRoot(string label)
+        {
+            switch (label)
+            {
+                case "bootstrap aggregate": return "bootstrap-aggregate";
+                case "status staging": return "status-staging";
+                case "workspace aggregate": return "workspace-aggregate";
+                case "direct downloads": return "direct-downloads";
+                case "PortableGit extraction": return "portablegit-extraction";
+                case "Node extraction": return "node-extraction";
+                case "pnpm installation": return "pnpm-installation";
+                case "rustup toolchains": return "rustup-toolchains";
+                case "bootstrap Cargo registry": return "bootstrap-cargo-registry";
+                case "bootstrap Cargo git": return "bootstrap-cargo-git";
+                case "bootstrap pnpm store": return "bootstrap-pnpm-store";
+                case "bootstrap npm cache": return "bootstrap-npm-cache";
+                case "protected Chat Git objects": return "protected-chat-git-objects";
+                case "SDK checkout": return "sdk-checkout";
+                case "Chat checkout": return "chat-checkout";
+                case "Cave checkout": return "cave-checkout";
+                case "Coven checkout": return "coven-checkout";
+                case "validator checkout": return "validator-checkout";
+                case "producer checkout": return "producer-checkout";
+                case "harness Cargo registry": return "harness-cargo-registry";
+                case "harness Cargo git": return "harness-cargo-git";
+                case "harness pnpm store": return "harness-pnpm-store";
+                case "harness build roots": return "harness-build-roots";
+                case "harness execution aggregate": return "harness-execution-aggregate";
+                default: return "unknown";
+            }
+        }
+
+        private static string NormalizeQuotaOperation(string operation)
+        {
+            switch (operation)
+            {
+                case "pattern-attributes":
+                case "pattern-enumeration":
+                case "directory-attributes":
+                case "directory-enumeration":
+                case "entry-attributes":
+                case "file-length":
+                    return operation;
+                default: return "unknown";
+            }
+        }
+
+        private static T ReadQuotaOperation<T>(string operation, Func<T> read)
+        {
+            try { return read(); }
+            catch (FileNotFoundException) { throw; }
+            catch (DirectoryNotFoundException) { throw; }
+            catch (Exception error)
+            {
+                throw new QuotaMonitorContextException(null, operation, error);
+            }
+        }
+
+        private static string QuotaMonitorRoot(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Root;
+        }
+
+        private static string QuotaMonitorOperation(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Operation;
+        }
+
         private static string ClassifyQuotaMonitorError(Exception error)
         {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            if (context != null) return context.Category;
             if (error is QuotaEntryBoundException) return "entry-bound";
             if (error is UnauthorizedAccessException) return "access-denied";
             if (error is OverflowException) return "arithmetic-overflow";
@@ -7108,6 +7224,19 @@ namespace OpenCoven
             private string quotaLabel;
             private bool monitorError;
             private string monitorErrorCategory;
+            private string monitorErrorRoot;
+            private string monitorErrorOperation;
+
+            internal string MonitorErrorRoot
+            {
+                get { lock (syncRoot) { return monitorErrorRoot; } }
+            }
+
+            internal string MonitorErrorOperation
+            {
+                get { lock (syncRoot) { return monitorErrorOperation; } }
+            }
+
 
             internal string MonitorErrorCategory
             {
@@ -7164,6 +7293,8 @@ namespace OpenCoven
                     {
                         monitorError = true;
                         monitorErrorCategory = ClassifyQuotaMonitorError(error);
+                        monitorErrorRoot = QuotaMonitorRoot(error);
+                        monitorErrorOperation = QuotaMonitorOperation(error);
                         signal.Set();
                     }
                 }

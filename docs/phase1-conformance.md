@@ -20,7 +20,7 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9` | `3ba4956c89278313c8b107e96521fa561dfbe339` |
+| Executable harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
@@ -50,6 +50,25 @@ Native candidate validation does not establish protected acceptance. Full
 packaged CI, an updated SDK validator binding, both protected scopes and fresh
 platform/aggregate validation remain required. Issue #188 remains open until
 those gates and advisory reconciliation are complete.
+
+## Fresh protected status-staging result
+
+[Run 34603676876](https://github.com/OpenCoven/chat/actions/runs/34603676876)
+used merged Chat `3d5af5b3441991e0314c4f2dfa91bfe9b450e9a7` and SDK validator
+`2e14473b1c0ee888411f769484616332e68514ea`. Linux and Darwin passed, and
+both retained records passed the matching SDK parser/scanner, exact source
+identities, Cave timing and ordered assertion sets: 110 Cave, 46 SDK and 41 Chat.
+Windows failed with `resource quota monitor failed closed: access-denied`, then
+a separate ephemeral identity-cleanup failure. Artifact validation, attestation
+and aggregation were skipped. The earlier status-writer assertion was not
+reported; that does not prove the protected status-staging repair complete.
+
+Issue #217 narrows the remaining quota diagnostic to fixed root and filesystem
+operation identifiers. Issue #215's merged cleanup diagnostics identify the
+separate cleanup subphase. Neither changes limits, authority checks, dependency
+settings or first-failure precedence. The new combined diagnostic requires a
+reviewed frozen harness, matching SDK binding and fresh protected execution
+before any ACL repair or aggregate acceptance can be established.
 
 ## Protected validation before status staging
 
@@ -1321,7 +1340,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 475,438 | `1c1ecca38e7339132b55e16743ff2732a01e7d4ab8ce4f8165755c318f6bc526` |
+| `.github/workflows/client-v1-conformance.yml` | 483,228 | `b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1346,9 +1365,9 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 299,390 | `d6540786d6cf4f9c702d1e2074e89ae25084a50b45f2f33f71118e36d469080c` |
+| `scripts/windows-job-supervisor.cs` | 305,876 | `b034c6dd3c7af0724733259a1257cf6b2885c97ee08b3f9b1e2bba0abca9c3a1` |
 | `scripts/windows-job-supervisor.test.ps1` | 177,716 | `a3b67a5b6130bc695ebd15cbf55718b40bd594409106e106b70b50c8840b3ffe` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 5,628 | `999c246d0bd7ecf519683399469487909102778ba14873e885beb16476f0a682` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,324 | `f0dd69a9aadc6ca662fc7d33091986f40771d6ce3c10a57cda2e73f70c0e0417` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
@@ -1506,11 +1525,18 @@ Protected run `34580621067` passed Linux and Darwin, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove
 a byte quota was exceeded. The supervisor now retains only fixed categories:
 `entry-bound`, `access-denied`, `arithmetic-overflow`, `io`, or `unexpected`.
-The first monitor category survives terminal rechecks. Limits, failure exit
-status and cleanup requirements remain unchanged. Fresh SDK workflow binding
-and protected validation are required before this diagnostic change is adopted.
+The first monitor failure retains its category, normalized quota-root identifier
+and filesystem operation through background monitoring and terminal rechecks.
+Operation codes distinguish pattern attributes/enumeration, directory
+attributes/enumeration, entry attributes and file length. Quota roots come from
+an exact label allowlist; unknown labels and operations become `unknown`.
+Original exception messages and paths are not retained in this context.
+The workflow prints these bounded fields before cleanup can mask the primary
+failure. Limits, failure exit status and cleanup requirements remain unchanged.
+Fresh SDK workflow binding and protected validation are required before this
+diagnostic change is adopted.
 
-The diagnostic harness is pinned at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
+The initial category-only diagnostic was introduced at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
 `ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
 from the adopted GLib harness and is retained in the diagnostic branch ancestry.
 
@@ -1538,6 +1564,23 @@ drives the real `Dispose` path on an identity that was never provisioned with
 compiled quarantine callbacks, and verifies category order, pairing, bounded
 grammar, idempotent disposal and absence of leaked text.
 
-The diagnostic harness is pinned at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
+The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
 `b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
 status staging harness and is retained in the diagnostic branch ancestry.
+
+
+The combined quota-context harness is pinned at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
+`b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
+Only the supervisor and its embedded workflow authority bytes change from
+the cleanup harness; all production inputs, native deltas and limits remain
+unchanged. Native Windows validation and a fresh SDK/protected binding remain
+required.
+
+Local validation of the combined quota-context diagnostic passed eight
+PowerShell regression groups, including real denied enumeration, wildcard
+enumeration, long-path failure, unknown-value sanitization and first-failure
+propagation. The workflow regression confirms the primary diagnostic survives
+a later cleanup failure. Final lock tests passed 92 cases with one platform
+skip; workflow/specification tests passed 128 cases with 19 platform skips.
+Independent specification, quality and final binding reviews passed. These
+local results do not replace native Windows CI or protected execution.

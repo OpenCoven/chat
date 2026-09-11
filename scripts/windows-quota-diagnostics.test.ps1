@@ -48,6 +48,9 @@ foreach ($prior in @($false, $true)) {
     throw 'Terminal quota failure lost its category or fail-closed outcome.'
   }
 }
+$unknownResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($unknownResult, $malformed))
+if ($unknownResult.ResourceQuotaMonitorRoot -cne 'unknown' -or $unknownResult.ResourceQuotaMonitorOperation -cne 'unknown') { throw 'Unattributed terminal failure did not use fixed unknown context.' }
 Write-Host 'Terminal quota failure propagation passed.'
 # Exercise the background monitor's real catch and signal path.
 $asyncState = [Activator]::CreateInstance($stateType, $true)
@@ -86,3 +89,101 @@ if (-not $breachedResult.ResourceQuotaExceeded -or $breachedResult.ResourceQuota
   throw 'Terminal monitor error replaced the first quota-breach result.'
 }
 Write-Host 'Terminal recheck preserves the first quota breach.'
+
+# Context is an allowlisted diagnostic, never an exception message or caller label.
+$contextType = [OpenCoven.WindowsJobSupervisor].GetNestedType('QuotaMonitorContextException', [Reflection.BindingFlags]'NonPublic')
+if ($null -eq $contextType) { throw 'Missing bounded quota root and operation context.' }
+$constructor = $contextType.GetConstructor($instanceFlags, $null, [type[]]@([string], [string], [Exception]), $null)
+$context = $constructor.Invoke([object[]]@('bootstrap aggregate', 'directory-enumeration', [UnauthorizedAccessException]::new('secret-path')))
+$contextState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $record.Invoke($contextState, [object[]]@($context))
+  $record.Invoke($contextState, [object[]]@([IO.IOException]::new('later-secret')))
+  foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'bootstrap-aggregate'), @('MonitorErrorOperation', 'directory-enumeration'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($contextState) -cne $pair[1]) { throw "Lost first context: $($pair[0])" }
+  }
+  if ($context.ToString().Contains('secret-path')) { throw 'Context exception retained raw exception text.' }
+} finally { $contextState.Dispose() }
+$unknown = $constructor.Invoke([object[]]@('secret-label', 'secret-operation', [UnauthorizedAccessException]::new('secret-message')))
+foreach ($property in @('Root', 'Operation')) {
+  if ($contextType.GetProperty($property, $instanceFlags).GetValue($unknown) -cne 'unknown') { throw "Unbounded $property" }
+}
+foreach ($operation in @('pattern-attributes', 'pattern-enumeration', 'directory-attributes', 'directory-enumeration', 'entry-attributes', 'file-length')) {
+  $operationContext = $constructor.Invoke([object[]]@('status staging', $operation, [IO.IOException]::new('secret-message')))
+  if ($contextType.GetProperty('Operation', $instanceFlags).GetValue($operationContext) -cne $operation) { throw 'Lost allowed operation.' }
+}
+foreach ($errorCase in $cases) {
+  $classifiedContext = $constructor.Invoke([object[]]@($null, $null, $errorCase[0]))
+  if ($classify.Invoke($null, [object[]]@($classifiedContext)) -cne $errorCase[1]) { throw 'Context changed an existing error category.' }
+}
+Write-Host 'Root and operation sanitization and first-failure preservation passed.'
+
+# A real overlong filesystem name exercises the terminal/background catches on
+# every platform, including exact operation context at the attribute read.
+$invalidPath = [IO.Path]::Combine($PSScriptRoot, ('q' * 1024))
+$invalidQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('bootstrap aggregate', $invalidPath, 1MB))
+$contextResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($contextResult, $invalidQuotas))
+if (-not $contextResult.ResourceQuotaMonitorError -or $contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or
+    $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or $contextResult.ResourceQuotaMonitorCategory -cne 'io') {
+  throw 'Real terminal filesystem failure lost bounded context.'
+}
+$terminal.Invoke($null, [object[]]@($contextResult, $malformed))
+if ($contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes') { throw 'Terminal recheck replaced first context.' }
+$backgroundContext = [Activator]::CreateInstance($stateType, $true)
+try {
+  $task = $monitor.Invoke($null, [object[]]@($invalidQuotas, $backgroundContext, [Threading.CancellationToken]::None))
+  if (-not $task.Wait(5000) -or $stateType.GetProperty('MonitorErrorRoot', $instanceFlags).GetValue($backgroundContext) -cne 'bootstrap-aggregate' -or
+      $stateType.GetProperty('MonitorErrorOperation', $instanceFlags).GetValue($backgroundContext) -cne 'pattern-attributes') { throw 'Background filesystem failure lost bounded context.' }
+} finally { $backgroundContext.Dispose() }
+Write-Host 'Real filesystem terminal and background context propagation passed.'
+
+# Deny enumeration on a fresh fixture only; restore its original access before
+# deleting it. This exercises real access-denied on Windows and Unix hosts.
+$deniedPath = Join-Path $PSScriptRoot ('.quota-denied-' + [guid]::NewGuid().ToString('N'))
+$null = [IO.Directory]::CreateDirectory($deniedPath)
+$originalAcl = $null
+try {
+  [IO.File]::WriteAllText((Join-Path $deniedPath 'payload'), 'quota')
+  if ($IsWindows) {
+    $originalAcl = Get-Acl -LiteralPath $deniedPath
+    $deniedAcl = Get-Acl -LiteralPath $deniedPath
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::ListDirectory, [Security.AccessControl.AccessControlType]::Deny)
+    $deniedAcl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $deniedPath -AclObject $deniedAcl
+  } else {
+    & chmod 000 $deniedPath
+    if ($LASTEXITCODE -ne 0) { throw 'Could not deny quota fixture access.' }
+  }
+  $deniedQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('status staging', $deniedPath, 1MB))
+  $deniedResult = [OpenCoven.WindowsJobRunResult]::new()
+  $terminal.Invoke($null, [object[]]@($deniedResult, $deniedQuotas))
+  if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
+      $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
+      $deniedResult.ResourceQuotaMonitorOperation -cne 'directory-enumeration') { throw 'Native access-denied fixture lost its category/root/operation.' }
+  # Wildcard discovery has a distinct enumeration seam; a caller label that
+  # happens to be valid quota grammar still must not enter diagnostics.
+  $wildcardQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('private-user-label', (Join-Path $deniedPath '*'), 1MB))
+  $wildcardResult = [OpenCoven.WindowsJobRunResult]::new()
+  $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
+  if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
+      $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
+  $deniedState = [Activator]::CreateInstance($stateType, $true)
+  try {
+    $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
+    if (-not $task.Wait(5000)) { throw 'Native access-denied background check did not terminate.' }
+    foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'status-staging'), @('MonitorErrorOperation', 'directory-enumeration'))) {
+      if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
+    }
+  } finally { $deniedState.Dispose() }
+} finally {
+  if ($IsWindows) {
+    if ($null -ne $originalAcl) { Set-Acl -LiteralPath $deniedPath -AclObject $originalAcl }
+  } else {
+    & chmod 700 $deniedPath
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restore quota fixture access.' }
+  }
+  Remove-Item -LiteralPath $deniedPath -Recurse -Force
+}
+Write-Host 'Native access-denied terminal and background quota context passed.'
