@@ -24,6 +24,41 @@ using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 namespace OpenCoven.Tests {
+    public static class QuotaReadPathProbe {
+        private static string ReadOutcome(Action read) {
+            try { read(); return "ok"; }
+            catch (UnauthorizedAccessException) { return "access-denied"; }
+            catch (System.IO.FileNotFoundException) { return "file-missing"; }
+            catch (System.IO.DirectoryNotFoundException) { return "directory-missing"; }
+            catch (System.IO.IOException) { return "io-error"; }
+            catch { return "other-error"; }
+        }
+        public static string Inspect(object identity, MethodInfo method, string target) {
+            return (string)method.Invoke(identity, new object[] { new Func<string>(() => {
+                string root = System.IO.Path.GetPathRoot(target);
+                string[] segments = target.Substring(root.Length).Split(new char[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                string candidate = root;
+                int firstFailure = -1;
+                string category = "none";
+                for (int index = 0; index <= segments.Length; index++) {
+                    string outcome = ReadOutcome(() => { System.IO.File.GetAttributes(candidate); });
+                    if (firstFailure < 0 && outcome != "ok") { firstFailure = index; category = outcome; }
+                    if (index < segments.Length) candidate = System.IO.Path.Combine(candidate, segments[index]);
+                }
+                string targetAttributes = ReadOutcome(() => { System.IO.File.GetAttributes(target); });
+                int count = 0;
+                long bytes = 0;
+                string targetRead = ReadOutcome(() => {
+                    foreach (System.IO.FileInfo entry in new System.IO.DirectoryInfo(target).GetFiles()) {
+                        if (++count > 4) throw new System.IO.IOException();
+                        bytes += entry.Length;
+                    }
+                });
+                return String.Format("components={0}; first-failed-index={1}; category={2}; target-attributes={3}; target-read={4}; files={5}; bytes={6}",
+                    segments.Length + 1, firstFailure, category, targetAttributes, targetRead, count, bytes);
+            }) });
+        }
+    }
     public sealed class QuotaReadDisposalProbe : IDisposable {
         private readonly ManualResetEventSlim entered = new ManualResetEventSlim(false);
         private readonly ManualResetEventSlim release = new ManualResetEventSlim(false);
@@ -104,6 +139,7 @@ try {
     $expectOverflow = $quota[0].MaxBytes -eq 512
     if ($result.ResourceQuotaMonitorError -or $result.ResourceQuotaExceeded -ne $expectOverflow) {
       $control = if ($expectOverflow) { 'overflow' } else { 'under-limit' }
+      Write-Host ('Isolated quota path probe: ' + [OpenCoven.Tests.QuotaReadPathProbe]::Inspect($identity, $readString, $directory))
       throw ("Isolated terminal quota control failed: case={0}; exceeded={1}; monitor={2}; category={3}; root={4}; operation={5}." -f
         $control, $result.ResourceQuotaExceeded, $result.ResourceQuotaMonitorError,
         $result.ResourceQuotaMonitorCategory, $result.ResourceQuotaMonitorRoot, $result.ResourceQuotaMonitorOperation)
