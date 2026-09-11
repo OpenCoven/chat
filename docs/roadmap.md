@@ -1,6 +1,44 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-11 20:28 UTC
+## Consolidation checkpoint, 2026-09-11
+
+Chat [#225](https://github.com/OpenCoven/chat/pull/225) landed as
+`e7dfc135bb7341d4cfc5b7f0fcf4004843868809`, preserving frozen harness source
+`79e6dd2b3f4e59b20ce6bb7a1f209e2dd26d2c3a`. SDK
+[#206](https://github.com/OpenCoven/sdk/pull/206) landed as
+`c774ba4ba473dae99ea8fe712989ae33ef5d5184`, binding that exact producer.
+Both validator scopes were read back at this SDK revision.
+
+Protected [run 34647484742](https://github.com/OpenCoven/chat/actions/runs/34647484742)
+is terminal failed. Linux and macOS passed; each retained record passed ZIP
+digest, schema, scans, exact source/validator identities, Cave timing and all
+110 Cave / 46 SDK / 41 Chat ordered assertion checks. Windows progressed past
+SDK and Chat observations, then failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.apply-owner-only-security.access-denied`.
+The prior SDK failure did not recur; its cause remains unclassified. Artifact
+validation, attestation and aggregation were skipped.
+
+In that failed run, the frozen Coven sharing fixture called the default library
+writer under restricted TEMP, bypassing the CLI's configured staging directory.
+The newly adopted fixture passes configured staging explicitly and retains
+separate default-path coverage. Coven
+[#1015](https://github.com/OpenCoven/coven/pull/1015) landed as
+`8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`; local workspace tests passed
+3,619 tests with five ignored. Both fixture cases passed native Windows CI at
+the current-main integration head `abb49dab` in
+[run 34653018557](https://github.com/OpenCoven/coven/actions/runs/34653018557).
+Frozen Chat/SDK rebinding and fresh protected acceptance remain outstanding.
+Adopting current
+Coven also includes intervening merged authority and dependency changes; the
+binding review must account for that source delta.
+
+Chat #219, Coven #984, SDK #38 and the final release gate remain open. Chat #188
+retains protected/advisory reconciliation, Chat #206 retains causal identity
+investigation, and Chat #211's thread disposition remains unverified. Chat #86
+remains parked on SDK 0.1. Active and uncertain worktrees are preserved; the
+minimum working set and safe retirement decisions remain incomplete.
+
+## Historical consolidation checkpoint, 2026-09-11 20:28 UTC
 
 Chat [#221](https://github.com/OpenCoven/chat/pull/221) landed as
 `0c7bcc2032691c91a98b1e1326d0dc0b4b6781a6`, preserving frozen executable harness
