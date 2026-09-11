@@ -4,16 +4,18 @@ export async function localContinuityJourney({
   page,
   visit = true,
   screenshotSuffix = 'local',
+  viewport = { width: 390, height: 844 },
 }: {
   page: Page;
   visit?: boolean;
   screenshotSuffix?: string;
+  viewport?: { width: number; height: number };
 }) {
   const mutations: string[] = [];
   page.on('request', (request) => {
     if (request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
   });
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize(viewport);
   if (visit) await page.goto('/');
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'New conversation' })).toBeVisible();
@@ -73,6 +75,24 @@ export async function localContinuityJourney({
     'Edited excerpt only',
   );
   await expect(page.getByRole('checkbox', { name: /retained raw source/ })).toBeChecked();
+  const reviewBounds = await page.evaluate(() => {
+    const history = document.querySelector('.chat-shell__thread-body');
+    const composer = document.querySelector('.chat-composer');
+    if (!history || !composer) throw new Error('Local review regions are missing');
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      documentHeight: document.documentElement.scrollHeight,
+      historyWidth: history.clientWidth,
+      historyScrollWidth: history.scrollWidth,
+      historyHeight: history.clientHeight,
+      composerBottom: composer.getBoundingClientRect().bottom,
+    };
+  });
+  expect(reviewBounds.documentWidth).toBeLessThanOrEqual(viewport.width);
+  expect(reviewBounds.documentHeight).toBeLessThanOrEqual(viewport.height);
+  expect(reviewBounds.historyScrollWidth).toBeLessThanOrEqual(reviewBounds.historyWidth);
+  expect(reviewBounds.historyHeight).toBeGreaterThan(0);
+  expect(reviewBounds.composerBottom).toBeLessThanOrEqual(viewport.height);
   if (process.env.CONTINUITY_SCREENSHOT_PATH) {
     await page.screenshot({
       path: process.env.CONTINUITY_SCREENSHOT_PATH.replace(
@@ -127,7 +147,7 @@ export async function localContinuityJourney({
       ),
       fullPage: true,
     });
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize(viewport);
   }
   await page.getByRole('button', { name: 'Discard note…' }).click();
   await page.getByRole('button', { name: 'Discard local messages' }).click();

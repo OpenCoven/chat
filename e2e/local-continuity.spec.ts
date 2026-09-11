@@ -1,11 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { localContinuityJourney } from './helpers/local-continuity';
 
-test('local retained notes and reviewed import retries survive reload with distinct close and discard', async ({
-  page,
-}) => {
-  await localContinuityJourney({ page });
-});
+for (const viewport of [
+  { width: 1180, height: 780 },
+  { width: 820, height: 600 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 844, height: 390 },
+]) {
+  test(`local retained notes and reviewed import retries survive reload at ${viewport.width}x${viewport.height}`, async ({
+    page,
+  }) => {
+    await localContinuityJourney({ page, viewport });
+  });
+}
 
 test('a parent changed in another window cannot silently accept an earlier reviewed branch', async ({
   page,
@@ -14,6 +22,7 @@ test('a parent changed in another window cannot silently accept an earlier revie
   await page.goto('/');
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('button', { name: 'New retained side note' }).click();
+  await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Original side text');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('checkbox', { name: /Original side text/ }).check();
@@ -22,11 +31,16 @@ test('a parent changed in another window cannot silently accept an earlier revie
 
   const other = await context.newPage();
   await other.goto('/');
+  await expect(other.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
   await other
     .getByRole('textbox', { name: 'Message', exact: true })
     .fill('Other window parent edit');
   await other.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(other.getByText('Other window parent edit', { exact: true })).toBeVisible();
+  await expect(
+    other
+      .getByRole('list', { name: 'Messages' })
+      .getByText('Other window parent edit', { exact: true }),
+  ).toBeVisible();
 
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
   await expect(page.getByText(/This operation conflicts with its earlier request/)).toBeVisible();
