@@ -85,6 +85,13 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
       },
     };
     const NATIVE_HANDLE = 'mock-native-handle';
+    const NEXT_FAMILIARS = 'ZmFtaWxpYXJzLXBhZ2UtMg';
+    const laterConversation = {
+      id: 'conversation-51',
+      familiarId: 'familiar-51',
+      title: 'Later-page familiar thread',
+      updatedAt: '2026-08-25T00:00:00.000Z',
+    };
 
     function isPlainObject(value: unknown): value is Record<string, unknown> {
       return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -179,27 +186,48 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
                 access: 'chat:read',
                 health,
               });
-            case 'cave_list_familiars':
+            case 'cave_list_familiars': {
+              const laterPage =
+                isPlainObject(args) &&
+                isPlainObject(args.page) &&
+                args.page.cursor === NEXT_FAMILIARS;
               assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
-                page: { limit: 50 },
+                page: { limit: 50, ...(laterPage ? { cursor: NEXT_FAMILIARS } : {}) },
               });
               return Promise.resolve({
                 ...health,
                 data: {
-                  familiars: [
-                    {
-                      id: 'familiar-1',
-                      displayName: 'Mara',
-                      role: 'Guide',
+                  familiars: laterPage
+                    ? [
+                        {
+                          id: 'familiar-51',
+                          displayName: 'Familiar 51',
+                          role: 'Guide',
+                        },
+                      ]
+                    : [
+                        {
+                          id: 'familiar-1',
+                          displayName: 'Mara',
+                          role: 'Guide',
+                        },
+                        ...Array.from({ length: 49 }, (_, index) => ({
+                          id: `familiar-${index + 2}`,
+                          displayName: `Familiar ${index + 2}`,
+                          role: 'Guide',
+                        })),
+                      ],
+                },
+                cursor: laterPage
+                  ? { current: NEXT_FAMILIARS, hasMore: false }
+                  : {
+                      current: 'cursor-familiars',
+                      hasMore: true,
+                      next: NEXT_FAMILIARS,
                     },
-                  ],
-                },
-                cursor: {
-                  current: 'cursor-familiars',
-                  hasMore: false,
-                },
               });
+            }
             case 'cave_list_projects':
               assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
@@ -238,6 +266,7 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
                       title: 'Mocked native thread',
                       updatedAt: '2026-08-25T00:00:00.000Z',
                     },
+                    laterConversation,
                   ],
                 },
                 cursor: {
@@ -245,69 +274,88 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
                   hasMore: false,
                 },
               });
-            case 'cave_get_conversation':
+            case 'cave_get_conversation': {
+              const later = isPlainObject(args) && args.conversationId === laterConversation.id;
               assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
-                conversationId: 'conversation-1',
+                conversationId: later ? laterConversation.id : 'conversation-1',
               });
               return Promise.resolve({
                 ...health,
                 data: {
-                  conversation: {
-                    id: 'conversation-1',
-                    familiarId: 'familiar-1',
-                    title: 'Mocked native thread',
-                    updatedAt: '2026-08-25T00:00:00.000Z',
-                  },
+                  conversation: later
+                    ? laterConversation
+                    : {
+                        id: 'conversation-1',
+                        familiarId: 'familiar-1',
+                        title: 'Mocked native thread',
+                        updatedAt: '2026-08-25T00:00:00.000Z',
+                      },
                 },
               });
-            case 'cave_list_conversation_messages':
+            }
+            case 'cave_list_conversation_messages': {
+              const later = isPlainObject(args) && args.conversationId === laterConversation.id;
               assertOperationArgs(command, args, {
                 handle: NATIVE_HANDLE,
-                conversationId: 'conversation-1',
+                conversationId: later ? laterConversation.id : 'conversation-1',
                 page: { limit: 50 },
               });
               return Promise.resolve({
                 ...health,
                 data: {
-                  messages: [
-                    {
-                      id: 'message-1',
-                      conversationId: 'conversation-1',
-                      parentId: null,
-                      role: 'assistant',
-                      text: 'Hello from mocked Cave.',
-                      createdAt: '2026-08-25T00:00:00.000Z',
-                      attachmentCount: 0,
-                      toolCount: 0,
-                    },
-                    {
-                      id: 'message-2',
-                      conversationId: 'conversation-1',
-                      parentId: 'message-1',
-                      role: 'user',
-                      text: 'Keep the original thread. Pick up where we left off.',
-                      createdAt: '2026-08-26T09:00:00.000Z',
-                      attachmentCount: 0,
-                      toolCount: 0,
-                    },
-                    {
-                      id: 'message-3',
-                      conversationId: 'conversation-1',
-                      parentId: 'message-2',
-                      role: 'assistant',
-                      text: 'Same conversation, a new day. The earlier chapter stays exactly where it was.',
-                      createdAt: '2026-08-26T09:01:00.000Z',
-                      attachmentCount: 0,
-                      toolCount: 0,
-                    },
-                  ],
+                  messages: later
+                    ? [
+                        {
+                          id: 'message-51',
+                          conversationId: laterConversation.id,
+                          parentId: null,
+                          role: 'assistant',
+                          text: 'Exact later-page familiar transcript.',
+                          createdAt: laterConversation.updatedAt,
+                          attachmentCount: 0,
+                          toolCount: 0,
+                        },
+                      ]
+                    : [
+                        {
+                          id: 'message-1',
+                          conversationId: 'conversation-1',
+                          parentId: null,
+                          role: 'assistant',
+                          text: 'Hello from mocked Cave.',
+                          createdAt: '2026-08-25T00:00:00.000Z',
+                          attachmentCount: 0,
+                          toolCount: 0,
+                        },
+                        {
+                          id: 'message-2',
+                          conversationId: 'conversation-1',
+                          parentId: 'message-1',
+                          role: 'user',
+                          text: 'Keep the original thread. Pick up where we left off.',
+                          createdAt: '2026-08-26T09:00:00.000Z',
+                          attachmentCount: 0,
+                          toolCount: 0,
+                        },
+                        {
+                          id: 'message-3',
+                          conversationId: 'conversation-1',
+                          parentId: 'message-2',
+                          role: 'assistant',
+                          text: 'Same conversation, a new day. The earlier chapter stays exactly where it was.',
+                          createdAt: '2026-08-26T09:01:00.000Z',
+                          attachmentCount: 0,
+                          toolCount: 0,
+                        },
+                      ],
                 },
                 cursor: {
                   current: 'cursor-messages',
                   hasMore: false,
                 },
               });
+            }
             default:
               return Promise.reject(new Error(`Unhandled mock Tauri command: ${command}`));
           }
@@ -377,6 +425,25 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
   for (const command of expectedCommands) {
     expect(callCounts[command], `expected ${command} to be invoked exactly once`).toBe(1);
   }
+
+  const familiar = page.getByRole('combobox', { name: 'Familiar' });
+  await expect(familiar.locator('option')).toHaveCount(50);
+  await page.getByRole('button', { name: 'Load more familiars' }).click();
+  await familiar.selectOption('familiar-51');
+  await expect(page.getByRole('heading', { name: 'Later-page familiar thread' })).toBeVisible();
+  await expect(page.getByText('Exact later-page familiar transcript.')).toBeVisible();
+  await page.getByRole('button', { name: 'This device' }).click();
+  await page.getByRole('button', { name: 'Coven Cave' }).click();
+  await expect(page.getByRole('heading', { name: 'Later-page familiar thread' })).toBeVisible();
+  await expect(page.getByText('Exact later-page familiar transcript.')).toBeVisible();
+  await expect(familiar).toHaveValue('familiar-51');
+  await expect(familiar.locator('option:checked')).toHaveText(
+    'Saved familiar familiar-51 — not loaded',
+  );
+  await page.getByRole('button', { name: 'Load more familiars' }).click();
+  await expect(familiar.locator('option:checked')).toHaveText('Familiar 51 — Guide');
+  await expect(familiar.locator('option')).toHaveCount(51);
+  await expect(page.getByText('Exact later-page familiar transcript.')).toBeVisible();
 
   const beforeLocalJourney = [...invokedCommands];
   await page.getByRole('button', { name: 'This device' }).click();

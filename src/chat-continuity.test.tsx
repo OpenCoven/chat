@@ -70,6 +70,64 @@ test('familiar return restores the exact older conversation and anchor, not newe
   expect(await screen.findByText('a-old text')).toBeVisible();
 });
 
+test.each(['not loaded', 'unavailable'])(
+  'a remembered later-page familiar stays represented when its roster entry is %s',
+  async (availability) => {
+    const adapter = source();
+    const other = source();
+    const first = { id: 'a', displayName: 'First familiar', role: 'Guide' };
+    const later = { id: 'b', displayName: 'Later familiar', role: 'Guide' };
+    vi.mocked(adapter.listFamiliars).mockImplementation(async (options) =>
+      ok({
+        data: options?.cursor ? [later] : [first],
+        cursor: options?.cursor
+          ? { current: options.cursor, hasMore: false }
+          : { hasMore: true, next: 'later' },
+      }),
+    );
+    const view = render(<ChatShell queryAdapter={adapter} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more familiars' }));
+    await screen.findByRole('option', { name: 'Later familiar — Guide' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Familiar' }), {
+      target: { value: 'b' },
+    });
+    await screen.findByText('b text');
+    view.rerender(<ChatShell queryAdapter={other} />);
+    await screen.findByText('a-new text');
+    if (availability === 'unavailable') {
+      vi.mocked(adapter.listFamiliars).mockResolvedValue(
+        ok({ data: [first], cursor: { hasMore: false } }),
+      );
+      vi.mocked(adapter.getConversation).mockResolvedValue({
+        status: 'error',
+        code: 'not_found',
+      });
+    }
+    view.rerender(<ChatShell queryAdapter={adapter} />);
+    if (availability === 'unavailable') {
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'selected conversation is unavailable',
+      );
+      expect(screen.queryByText('a-new text')).not.toBeInTheDocument();
+    } else {
+      await screen.findByText('b text');
+    }
+    const select = screen.getByRole('combobox', { name: 'Familiar' });
+    expect(select).toHaveValue('b');
+    expect(select.querySelector('option:checked')).toHaveTextContent(
+      `Saved familiar b — ${availability}`,
+    );
+    if (availability === 'not loaded') {
+      fireEvent.click(screen.getByRole('button', { name: 'Load more familiars' }));
+      await screen.findByRole('option', { name: 'Later familiar — Guide' });
+      expect(select).toHaveValue('b');
+      expect(select.querySelector('option:checked')).toHaveTextContent('Later familiar — Guide');
+      expect(screen.queryByRole('option', { name: /Saved familiar/ })).not.toBeInTheDocument();
+      expect(screen.getByText('b text')).toBeVisible();
+    }
+  },
+);
+
 test('source and writer changes quarantine drafts and late send outcomes', async () => {
   const adapter = source();
   const other = source();

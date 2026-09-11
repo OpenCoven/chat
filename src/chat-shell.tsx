@@ -1049,6 +1049,14 @@ function ChatShellView({
                 selectFamiliar(event.target.value || null);
               }}
             >
+              {selectedFamiliarId !== null && currentFamiliar === null ? (
+                <option value={selectedFamiliarId}>
+                  Saved familiar {selectedFamiliarId} —{' '}
+                  {familiarsState.status === 'ready' && !familiarsState.hasMore
+                    ? 'unavailable'
+                    : 'not loaded'}
+                </option>
+              ) : null}
               {familiars.map((familiar) => (
                 <option key={familiar.id} value={familiar.id}>
                   {familiar.displayName} — {familiar.role}
