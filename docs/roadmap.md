@@ -1,6 +1,48 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-11 UTC
+## Consolidation checkpoint, 2026-09-11 20:05 UTC
+
+Chat [#221](https://github.com/OpenCoven/chat/pull/221) landed as
+`0c7bcc2032691c91a98b1e1326d0dc0b4b6781a6`, preserving frozen executable harness
+`eda879fa0da04e76289fa977e3e853d9d8696df7`. All ten checks in
+[run 34638791505](https://github.com/OpenCoven/chat/actions/runs/34638791505)
+passed at the exact PR head; the verified merge retains its tree. Native tests
+proved isolated quota reads, byte enforcement, post-disable accounting, private
+ACL preservation, disposal behavior, cleanup and the Windows E2E journey.
+The earlier intermittent process-termination failure did not recur and remains
+unclassified. No process-termination acceptance rule was relaxed.
+
+Chat [#223](https://github.com/OpenCoven/chat/pull/223) delivered extended-path
+cleanup and bounded delete context, integrated into #221's tested source.
+Chat [#214](https://github.com/OpenCoven/chat/pull/214) also landed. Parked
+[#86](https://github.com/OpenCoven/chat/pull/86) remains dependent on SDK 0.1.
+
+SDK [#205](https://github.com/OpenCoven/sdk/pull/205) landed as
+`e80625940db64969865a26cb3b17ef50fb341aa8`, binding the exact Chat merge,
+workflow, bootstrap hashes and fixtures. Full local verification passed
+1,513 tests with two skipped, plus coverage, stress tests and lint. Independent
+review checked the merged Git objects; exact-head CI passed. Both repository
+and protected-environment validator scopes were rotated and read back to this
+revision.
+
+Fresh protected [run 34641974164](https://github.com/OpenCoven/chat/actions/runs/34641974164)
+uses these exact revisions. The frozen supervisor build passed, the environment
+was approved after scope rechecks, and all three platform jobs started.
+Platform records and aggregate acceptance are still pending. Prior successful
+Unix records do not establish acceptance for this new binding.
+
+Chat #219, SDK #38 and the final release gate remain open pending the relevant
+protected evidence. Chat #211's review-thread disposition remains unverified;
+Chat #206 still requires causal process-identity evidence. Beads and the
+authorized Teamwork root record the current delivery and remaining gates.
+
+The 19:36 UTC inventory recorded 23 Chat and 25 SDK worktree registrations,
+including seven dirty checkouts and one missing temporary Chat checkout.
+These are inventory facts, not retirement proof. Active, dirty and
+ownership-uncertain worktrees remain preserved; no worktree was removed or
+reset during these landings. The minimum working set is not yet established.
+
+## Historical consolidation checkpoint, 2026-09-11 UTC
 
 This checkpoint supersedes the pending landing and validation claims in the
 historical snapshots below. The latest terminal protected attempt is
