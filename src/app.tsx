@@ -313,7 +313,6 @@ export function App({
   const [caveSurfaceOpen, setCaveSurfaceOpen] = useState(false);
   const [caveStatus, setCaveStatus] = useState<CaveStatus | null>(null);
   const [activeKind, setActiveKind] = useState<'local' | 'cave'>('local');
-  const [revision, setRevision] = useState(0);
 
   const readInstallationId = useCallback(
     () => desktopIdentityHost.readInstallationId(),
@@ -436,15 +435,8 @@ export function App({
         key={activeSource.kind}
         isDurable={activeSource.isDurable}
         queryAdapter={activeSource.adapter}
-        revision={revision}
         writer={activeSource.writer}
-        onCreateConversation={() => {
-          void activeSource.writer.createConversation().then((result) => {
-            if (result.status === 'ok') {
-              setRevision((current) => current + 1);
-            }
-          });
-        }}
+        onCreateConversation={() => activeSource.writer.createConversation()}
         onForgetCredential={() => {
           void caveStatus?.controller?.forgetCredential();
         }}

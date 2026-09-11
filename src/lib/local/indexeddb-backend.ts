@@ -1,4 +1,10 @@
-import type { ChatBackend, ChatRecords, StoredConversation, StoredMessage } from './chat-records';
+import {
+  type ChatBackend,
+  type ChatRecords,
+  checkPreconditions,
+  type StoredConversation,
+  type StoredMessage,
+} from './chat-records';
 
 export const CHAT_DATABASE_NAME = 'opencoven-chat';
 export const CHAT_DATABASE_VERSION = 1;
@@ -92,13 +98,26 @@ export function createIndexedDbChatBackend(database: IDBDatabase): ChatBackend {
         reject(transaction.error ?? new Error('The storage transaction failed.'));
 
       const conversationStore = transaction.objectStore(CONVERSATION_STORE);
-      for (const entry of change.conversations) {
-        conversationStore.put(entry);
-      }
       const messageStore = transaction.objectStore(MESSAGE_STORE);
-      for (const entry of change.messages) {
-        messageStore.put(entry);
-      }
+      const persist = () => {
+        for (const entry of change.conversations) conversationStore.put(entry);
+        for (const id of change.deletedMessageIds ?? []) messageStore.delete(id);
+        for (const entry of change.messages) messageStore.put(entry);
+      };
+      if (change.expectedConversations || change.absentOperationKey) {
+        void Promise.all([
+          requestAsPromise(conversationStore.getAll()),
+          requestAsPromise(messageStore.getAll()),
+        ])
+          .then(([conversations, messages]) => {
+            checkPreconditions(change, { conversations, messages });
+            persist();
+          })
+          .catch((error: unknown) => {
+            reject(error);
+            transaction.abort();
+          });
+      } else persist();
     });
   }
 

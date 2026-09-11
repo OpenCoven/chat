@@ -78,12 +78,17 @@ export function toCaveConversation(entry: StoredConversation): CaveConversation 
     familiarId: entry.familiarId,
     title: entry.title,
     origin: 'local',
+    ...(entry.side ? { status: entry.side.state } : {}),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
   });
 }
 
-export function toCaveMessage(entry: StoredMessage): CaveConversationMessage {
+export type LocalMessage = CaveConversationMessage & {
+  localImport?: NonNullable<StoredMessage['broughtBack']>;
+};
+
+export function toCaveMessage(entry: StoredMessage): LocalMessage {
   return Object.freeze({
     id: entry.id,
     conversationId: entry.conversationId,
@@ -93,6 +98,7 @@ export function toCaveMessage(entry: StoredMessage): CaveConversationMessage {
     createdAt: entry.createdAt,
     attachmentCount: 0,
     toolCount: 0,
+    ...(entry.broughtBack ? { localImport: entry.broughtBack } : {}),
   });
 }
 
@@ -134,6 +140,7 @@ export function createLocalQueryAdapter(store: ChatStore): QueryAdapter {
   }
 
   return Object.freeze({
+    getSourceIdentity: () => store,
     listFamiliars(options) {
       return guard<Page<CaveCanonicalFamiliar>>(() => {
         const normalized = normalize(options);

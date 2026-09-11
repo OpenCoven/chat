@@ -6,9 +6,18 @@ import type {
 } from '@opencoven/cave-client/managed';
 import type { Page } from '@opencoven/sdk-core/browser';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
+import { ChatChapters } from './chat-chapters';
 import { ChatComposer } from './chat-composer';
-import type { ChatWriter } from './lib/local/chat-writer';
+import { ChatSideConversations } from './chat-side-conversations';
+import { chapterTurnElementId } from './lib/chat-chapters';
+import {
+  type ContinuityMemory,
+  continuityMemory,
+  createDraft,
+  exactThreadKey,
+} from './lib/chat-continuity';
+import type { ChatWriter, WriteResult } from './lib/local/chat-writer';
+import type { LocalMessage } from './lib/local/local-query-adapter';
 import { createManualPageWalk, type ManualPageWalk } from './lib/sdk/manual-page-walk';
 import type { QueryAdapter, QueryResult } from './lib/sdk/query-adapter';
 
@@ -53,7 +62,7 @@ type ChatShellProps = Readonly<{
    * thread renders a composer.
    */
   writer?: ChatWriter | null;
-  onCreateConversation?: () => void;
+  onCreateConversation?: () => Promise<WriteResult<CaveConversation>>;
   isDurable?: boolean;
 }>;
 
@@ -242,7 +251,13 @@ function permitsLoadMore(state: LoadMoreState): boolean {
   return state.status !== 'error' || state.code !== INVALID_PAGINATION_CODE;
 }
 
-export function ChatShell({
+export function ChatShell(props: ChatShellProps) {
+  const identity = props.queryAdapter.getSourceIdentity?.() ?? props.queryAdapter;
+  const memory = continuityMemory(identity, props.writer ?? null);
+  return <ChatShellView key={memory.id} {...props} memory={memory} />;
+}
+
+function ChatShellView({
   queryAdapter,
   onReconcile,
   onForgetCredential,
@@ -250,7 +265,8 @@ export function ChatShell({
   writer = null,
   onCreateConversation,
   isDurable = true,
-}: ChatShellProps) {
+  memory,
+}: ChatShellProps & { memory: ContinuityMemory }) {
   const [familiarsState, setFamiliarsState] = useState<ListResourceState<CaveCanonicalFamiliar>>({
     status: 'idle',
   });
@@ -272,8 +288,24 @@ export function ChatShell({
     status: 'idle',
   });
   const [messagesLoadMore, setMessagesLoadMore] = useState<LoadMoreState>({ status: 'idle' });
-  const [selectedFamiliarId, setSelectedFamiliarId] = useState<string | null>(null);
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedFamiliarId, setSelectedFamiliarId] = useState<string | null>(memory.familiarId);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
+    memory.familiarId ? (memory.conversations.get(memory.familiarId) ?? null) : null,
+  );
+  const [positionNotice, setPositionNotice] = useState('');
+  const [creating, setCreating] = useState(false);
+  const creationPending = useRef(false);
+  const navigationEpoch = useRef(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      threadRequestRef.current += 1;
+      shellRequestRef.current += 1;
+    };
+  }, []);
+  const threadBodyRef = useRef<HTMLDivElement>(null);
   const [writeRevision, setWriteRevision] = useState(0);
   const onWritten = useCallback(() => {
     setWriteRevision((current) => current + 1);
@@ -297,6 +329,47 @@ export function ChatShell({
     };
   }
   const pageWalks = pageWalksRef.current;
+  const exactKey =
+    selectedFamiliarId && selectedConversationId
+      ? exactThreadKey(selectedFamiliarId, selectedConversationId)
+      : null;
+  if (exactKey && !memory.drafts.has(exactKey)) memory.drafts.set(exactKey, createDraft());
+  useEffect(() => {
+    function rememberPosition(event: Event) {
+      const body = threadBodyRef.current;
+      if (!exactKey || !body || (event.target !== document && event.target !== body)) return;
+      const top = Math.max(0, body.getBoundingClientRect().top);
+      const first = [...body.querySelectorAll<HTMLElement>('[data-turn-id]')].find((element) => {
+        const bounds = element.getBoundingClientRect();
+        return bounds.bottom > top && bounds.top < window.innerHeight;
+      });
+      if (first?.dataset.turnId) memory.anchors.set(exactKey, first.dataset.turnId);
+    }
+    window.addEventListener('scroll', rememberPosition, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', rememberPosition, true);
+  }, [exactKey, memory]);
+
+  function selectConversation(id: string | null, remember = true) {
+    if (id === selectedConversationId) return;
+    navigationEpoch.current += 1;
+    threadRequestRef.current += 1;
+    if (remember && selectedFamiliarId && id) memory.conversations.set(selectedFamiliarId, id);
+    setPositionNotice('');
+    setConversationState({ status: 'idle' });
+    setMessagesState({ status: 'idle' });
+    setSelectedConversationId(id);
+  }
+
+  function selectFamiliar(id: string | null) {
+    navigationEpoch.current += 1;
+    threadRequestRef.current += 1;
+    memory.familiarId = id;
+    setSelectedFamiliarId(id);
+    setSelectedConversationId(id ? (memory.conversations.get(id) ?? null) : null);
+    setPositionNotice('');
+    setConversationState({ status: 'idle' });
+    setMessagesState({ status: 'idle' });
+  }
 
   function resetAllPageWalks(): void {
     shellRequestRef.current += 1;
@@ -527,7 +600,10 @@ export function ChatShell({
         return;
       }
       if (result.status === 'ok') {
-        if (!pageWalks.messages.acceptNextPage(cursor, result.data)) {
+        if (
+          result.data.data.some((message) => message.conversationId !== conversationId) ||
+          !pageWalks.messages.acceptNextPage(cursor, result.data)
+        ) {
           setMessagesLoadMore({ status: 'error', code: INVALID_PAGINATION_CODE });
           return;
         }
@@ -552,17 +628,11 @@ export function ChatShell({
   const allConversations = conversationsState.status === 'ready' ? conversationsState.items : [];
 
   useEffect(() => {
-    if (familiars.length === 0) {
-      setSelectedFamiliarId(null);
-      return;
-    }
-
-    setSelectedFamiliarId((current) =>
-      current !== null && familiars.some((familiar) => familiar.id === current)
-        ? current
-        : (familiars[0]?.id ?? null),
-    );
-  }, [familiars]);
+    if (familiarsState.status !== 'ready' || selectedFamiliarId !== null) return;
+    const first = familiars[0]?.id ?? null;
+    memory.familiarId = first;
+    setSelectedFamiliarId(first);
+  }, [familiars, familiarsState.status, selectedFamiliarId, memory]);
 
   const filteredConversations = useMemo(() => {
     if (selectedFamiliarId === null) {
@@ -576,8 +646,13 @@ export function ChatShell({
   const selectedConversation = useMemo(
     () =>
       filteredConversations.find((conversation) => conversation.id === selectedConversationId) ??
+      (conversationState.status === 'ready' &&
+      conversationState.data.id === selectedConversationId &&
+      conversationState.data.familiarId === selectedFamiliarId
+        ? conversationState.data
+        : null) ??
       null,
-    [filteredConversations, selectedConversationId],
+    [filteredConversations, selectedConversationId, selectedFamiliarId, conversationState],
   );
 
   const currentFamiliar = useMemo(
@@ -586,17 +661,11 @@ export function ChatShell({
   );
 
   useEffect(() => {
-    if (filteredConversations.length === 0) {
-      setSelectedConversationId(null);
-      return;
-    }
-
-    setSelectedConversationId((current) =>
-      current !== null && filteredConversations.some((conversation) => conversation.id === current)
-        ? current
-        : (filteredConversations[0]?.id ?? null),
-    );
-  }, [filteredConversations]);
+    if (selectedConversationId !== null || !selectedFamiliarId) return;
+    const id = memory.conversations.get(selectedFamiliarId) ?? filteredConversations[0]?.id ?? null;
+    if (id) memory.conversations.set(selectedFamiliarId, id);
+    setSelectedConversationId(id);
+  }, [filteredConversations, selectedConversationId, selectedFamiliarId, memory]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision and writeRevision are refetch triggers, not values this effect reads.
   useEffect(() => {
@@ -633,6 +702,17 @@ export function ChatShell({
       ) {
         return;
       }
+      if (
+        (conversationResult.status === 'ok' &&
+          (conversationResult.data.id !== conversationId ||
+            conversationResult.data.familiarId !== selectedFamiliarId)) ||
+        (messagesResult.status === 'ok' &&
+          messagesResult.data.data.some((message) => message.conversationId !== conversationId))
+      ) {
+        setConversationState({ status: 'error', code: 'invalid_response' });
+        setMessagesState({ status: 'error', code: 'invalid_response' });
+        return;
+      }
       setConversationState(itemState(conversationResult));
       setMessagesState(toRootListState(messagesResult, pageWalks.messages));
     }
@@ -642,14 +722,40 @@ export function ChatShell({
     return () => {
       active = false;
     };
-  }, [pageWalks, queryAdapter, revision, selectedConversationId, writeRevision]);
+  }, [
+    pageWalks,
+    queryAdapter,
+    revision,
+    selectedConversationId,
+    selectedFamiliarId,
+    writeRevision,
+  ]);
 
   useEffect(() => {
     if (selectedConversationId === null || conversationState.status !== 'ready') {
       return;
     }
-    threadHeadingRef.current?.focus();
-  }, [conversationState, selectedConversationId]);
+    if (messagesState.status !== 'ready') return;
+    const anchorId = exactKey ? memory.anchors.get(exactKey) : undefined;
+    if (anchorId) {
+      const anchor = document.getElementById(
+        chapterTurnElementId(selectedConversationId, anchorId),
+      );
+      if (anchor) {
+        anchor.focus({ preventScroll: true });
+        anchor.scrollIntoView?.({ block: 'nearest' });
+        setPositionNotice('');
+      } else {
+        setPositionNotice(
+          messagesState.hasMore
+            ? 'Your saved position is not loaded. Load more messages to reach it.'
+            : 'Your saved message is unavailable. No other position was substituted.',
+        );
+      }
+    } else {
+      threadHeadingRef.current?.focus({ preventScroll: true });
+    }
+  }, [conversationState, messagesState, selectedConversationId, exactKey, memory]);
 
   function renderConversationList() {
     const action = repairAction([familiarsState, conversationsState, conversationsLoadMore], {
@@ -719,7 +825,7 @@ export function ChatShell({
                 role="option"
                 aria-selected={selected}
                 onClick={() => {
-                  setSelectedConversationId(conversation.id);
+                  selectConversation(conversation.id);
                 }}
               >
                 <span className="chat-shell__conversation-title">
@@ -828,6 +934,12 @@ export function ChatShell({
       return statusPanel(formatError(conversationsState.code), 'alert', action);
     }
     if (conversationState.status === 'error') {
+      if (conversationState.code === 'not_found') {
+        return statusPanel(
+          'The selected conversation is unavailable. Choose another exact conversation.',
+          'alert',
+        );
+      }
       return statusPanel(formatError(conversationState.code), 'alert', action);
     }
     if (messagesState.status === 'error') {
@@ -873,6 +985,12 @@ export function ChatShell({
           {messagesState.items.map((message) => (
             <li
               key={message.id}
+              id={chapterTurnElementId(message.conversationId, message.id)}
+              tabIndex={-1}
+              data-turn-id={message.id}
+              onFocus={() => {
+                if (exactKey) memory.anchors.set(exactKey, message.id);
+              }}
               className={`chat-shell__message chat-shell__message--${message.role}`}
             >
               <article className="chat-shell__message-card">
@@ -883,6 +1001,14 @@ export function ChatShell({
                   </time>
                 </div>
                 <p className="chat-shell__message-text">{message.text}</p>
+                {writer?.sideConversations?.custody === 'local-only' &&
+                (message as LocalMessage).localImport ? (
+                  <p className="chat-chapters__notice" role="note">
+                    Reviewed local excerpt · Source note{' '}
+                    {(message as LocalMessage).localImport?.sideConversationId}. Content only, not
+                    execution or approval.
+                  </p>
+                ) : null}
               </article>
             </li>
           ))}
@@ -918,7 +1044,7 @@ export function ChatShell({
               disabled={familiars.length === 0}
               value={selectedFamiliarId ?? ''}
               onChange={(event) => {
-                setSelectedFamiliarId(event.target.value || null);
+                selectFamiliar(event.target.value || null);
               }}
             >
               {familiars.map((familiar) => (
@@ -974,7 +1100,44 @@ export function ChatShell({
               <button
                 className="chat-shell__new-conversation"
                 type="button"
-                onClick={onCreateConversation}
+                disabled={creating}
+                onClick={() => {
+                  if (creationPending.current) return;
+                  creationPending.current = true;
+                  setCreating(true);
+                  const epoch = navigationEpoch.current;
+                  void Promise.resolve()
+                    .then(onCreateConversation)
+                    .then((result) => {
+                      if (!mounted.current || !result) return;
+                      if (
+                        result.status === 'ok' &&
+                        epoch === navigationEpoch.current &&
+                        (selectedFamiliarId === null ||
+                          result.data.familiarId === selectedFamiliarId)
+                      ) {
+                        if (selectedFamiliarId === null) {
+                          memory.familiarId = result.data.familiarId;
+                          memory.conversations.set(result.data.familiarId, result.data.id);
+                          setSelectedFamiliarId(result.data.familiarId);
+                        }
+                        selectConversation(result.data.id);
+                        onWritten();
+                      } else {
+                        setPositionNotice(
+                          'The new conversation could not be selected for this exact source.',
+                        );
+                      }
+                    })
+                    .catch(() => {
+                      if (mounted.current)
+                        setPositionNotice('The new local conversation could not be saved.');
+                    })
+                    .finally(() => {
+                      creationPending.current = false;
+                      if (mounted.current) setCreating(false);
+                    });
+                }}
               >
                 New
               </button>
@@ -1005,13 +1168,56 @@ export function ChatShell({
             {canWrite ? 'Local chat' : 'Read-only chat'}
           </span>
         </header>
-        <div className="chat-shell__thread-body">{renderThreadBody()}</div>
+        <div className="chat-shell__thread-body" ref={threadBodyRef}>
+          {!canWrite ? (
+            <p className="chat-chapters__notice" role="note">
+              Import provenance is unavailable through this installed SDK. Messages are displayed as
+              read-only text.
+            </p>
+          ) : null}
+          {positionNotice ? <output>{positionNotice}</output> : null}
+          {selectedConversationId &&
+          conversationState.status === 'ready' &&
+          messagesState.status === 'ready' ? (
+            <ChatSideConversations
+              key={`side-${selectedConversationId}`}
+              conversationId={selectedConversationId}
+              messages={messagesState.items}
+              hasMoreMessages={messagesState.hasMore}
+              writer={writer}
+              isDurable={isDurable}
+              onNavigate={(id) => selectConversation(id, false)}
+              onWritten={onWritten}
+              memory={memory}
+              familiarId={selectedFamiliarId ?? ''}
+            />
+          ) : null}
+          {selectedConversationId && messagesState.status === 'ready' ? (
+            <ChatChapters
+              key={`chapters-${selectedConversationId}`}
+              conversationId={selectedConversationId}
+              messages={messagesState.items}
+              hasMoreMessages={messagesState.hasMore}
+              queryAdapter={queryAdapter}
+              localOnly={canWrite}
+            />
+          ) : null}
+          {renderThreadBody()}
+        </div>
         {canWrite ? (
           <ChatComposer
-            conversationId={selectedConversationId}
+            key={exactKey ?? 'empty'}
+            conversationId={
+              conversationState.status === 'ready' &&
+              selectedConversation?.id === selectedConversationId &&
+              selectedConversation.status !== 'closed'
+                ? selectedConversationId
+                : null
+            }
             isDurable={isDurable}
             onWritten={onWritten}
             writer={writer}
+            savedDraft={exactKey ? memory.drafts.get(exactKey) : undefined}
           />
         ) : null}
       </main>

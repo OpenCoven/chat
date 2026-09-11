@@ -2,6 +2,7 @@ import type { Page } from '@opencoven/sdk-core/browser';
 
 import {
   type ChatBackend,
+  ChatConflictError,
   type ChatRecords,
   EMPTY_RECORDS,
   type StoredConversation,
@@ -11,6 +12,16 @@ import {
 } from './chat-records';
 import { openIndexedDbChatBackend } from './indexeddb-backend';
 import { createMemoryChatBackend } from './memory-backend';
+import {
+  type BringBackInput,
+  type BringBackPreconditions,
+  type CreateSideInput,
+  operationKey,
+  reviewedExcerpt,
+  type SideConversation,
+  type SideTarget,
+  sameImport,
+} from './side-conversations';
 
 export type ChatStoreChange = Readonly<{ revision: number }>;
 
@@ -26,6 +37,19 @@ export type ChatStore = Readonly<{
     role: StoredMessageRole,
     text: string,
   ) => Promise<StoredMessage>;
+  getSideConversation: (conversationId: string) => SideConversation | undefined;
+  listSideConversations: (
+    parentConversationId: string,
+    limit: number,
+    cursor?: string,
+  ) => Page<SideConversation>;
+  createSideConversation: (input: CreateSideInput) => Promise<SideConversation>;
+  setSideState: (
+    input: SideTarget,
+    state: 'open' | 'closed' | 'discarded',
+  ) => Promise<SideConversation>;
+  bringBack: (input: BringBackInput) => Promise<StoredMessage>;
+  prepareBringBack: (input: SideTarget) => Promise<BringBackPreconditions>;
   subscribe: (listener: (change: ChatStoreChange) => void) => () => void;
   dispose: () => void;
 }>;
@@ -167,6 +191,48 @@ export function createChatStore(
   const listeners = new Set<(change: ChatStoreChange) => void>();
   let revision = 0;
   let disposed = false;
+  let writes: Promise<unknown> = Promise.resolve();
+  let indexedBackendRevision: number | undefined;
+
+  function serialize<T>(write: () => Promise<T>): Promise<T> {
+    const next = writes.then(async () => {
+      if (disposed) throw new ChatStoreError('service_unavailable', 'The chat store is disposed.');
+      const currentRevision = backend.getMutationRevision?.();
+      // Durable backends still refresh before admission. A shared-memory revision
+      // avoids rehydrating unchanged history without trusting window-local state.
+      if (currentRevision === undefined || currentRevision !== indexedBackendRevision) {
+        const current = await backend.loadAll();
+        conversations.clear();
+        messagesByConversation.clear();
+        hydrate(current);
+        indexedBackendRevision = currentRevision;
+      }
+      return write();
+    });
+    writes = next.catch(() => undefined);
+    return next;
+  }
+
+  function requireParent(id: string): StoredConversation {
+    const parent = conversations.get(id);
+    if (!parent || parent.side || parent.familiarId !== options.familiarId) {
+      throw new ChatStoreError('not_found', 'The exact local parent is unavailable.');
+    }
+    return parent;
+  }
+
+  function requireSide(input: SideTarget): SideConversation {
+    requireParent(input.parentConversationId);
+    const side = conversations.get(input.sideConversationId);
+    if (
+      !side?.side ||
+      side.side.parentConversationId !== input.parentConversationId ||
+      side.familiarId !== options.familiarId
+    ) {
+      throw new ChatStoreError('not_found', 'The exact local side note is unavailable.');
+    }
+    return side as SideConversation;
+  }
 
   function conversationKey(entry: StoredConversation): SortKey {
     return { t: entry.updatedAt, i: entry.id };
@@ -182,8 +248,11 @@ export function createChatStore(
       messagesByConversation.set(entry.conversationId, [entry]);
       return;
     }
+    const previous = bucket.at(-1);
     bucket.push(entry);
-    bucket.sort((left, right) => compareKeys(messageKey(left), messageKey(right)));
+    if (previous && compareKeys(messageKey(previous), messageKey(entry)) > 0) {
+      bucket.sort((left, right) => compareKeys(messageKey(left), messageKey(right)));
+    }
   }
 
   function hydrate(records: ChatRecords): void {
@@ -194,9 +263,17 @@ export function createChatStore(
     for (const entry of clean.messages) {
       // Drop orphans: a message whose conversation was lost is unreachable and
       // would only skew paging counts.
-      if (conversations.has(entry.conversationId)) {
-        indexMessage(entry);
+      if (
+        conversations.has(entry.conversationId) &&
+        conversations.get(entry.conversationId)?.side?.state !== 'discarded'
+      ) {
+        const bucket = messagesByConversation.get(entry.conversationId);
+        if (bucket) bucket.push(entry);
+        else messagesByConversation.set(entry.conversationId, [entry]);
       }
+    }
+    for (const bucket of messagesByConversation.values()) {
+      bucket.sort((left, right) => compareKeys(messageKey(left), messageKey(right)));
     }
   }
 
@@ -216,7 +293,11 @@ export function createChatStore(
     }
     try {
       await backend.commit(change);
-    } catch {
+      // Count only our own commit. A competing commit leaves a revision mismatch
+      // and forces a fresh snapshot on the next operation.
+      if (indexedBackendRevision !== undefined) indexedBackendRevision += 1;
+    } catch (error) {
+      if (error instanceof ChatConflictError) throw new ChatStoreError('conflict', error.message);
       throw new ChatStoreError('service_unavailable', 'The chat store could not save the change.');
     }
   }
@@ -226,9 +307,9 @@ export function createChatStore(
     getRevision: () => revision,
 
     listConversations(limit, cursor) {
-      const ordered = [...conversations.values()].sort((left, right) =>
-        compareKeys(conversationKey(right), conversationKey(left)),
-      );
+      const ordered = [...conversations.values()]
+        .filter((entry) => !entry.side)
+        .sort((left, right) => compareKeys(conversationKey(right), conversationKey(left)));
       if (cursor === undefined) {
         return buildPage(ordered.slice(0, limit + 1), limit, conversationKey);
       }
@@ -238,7 +319,10 @@ export function createChatStore(
       return buildPage(rows.slice(0, limit + 1), limit, conversationKey, cursor);
     },
 
-    getConversation: (conversationId) => conversations.get(conversationId),
+    getConversation: (conversationId) => {
+      const entry = conversations.get(conversationId);
+      return entry?.side?.state === 'discarded' ? undefined : entry;
+    },
 
     listMessages(conversationId, limit, cursor) {
       const bucket = messagesByConversation.get(conversationId);
@@ -254,48 +338,249 @@ export function createChatStore(
       return buildPage(rows.slice(0, limit + 1), limit, messageKey, cursor);
     },
 
-    async createConversation(title) {
-      const timestamp = new Date(now()).toISOString();
-      const conversation: StoredConversation = Object.freeze({
-        id: createId(),
-        familiarId: options.familiarId,
-        title: title === undefined ? defaultTitle : normalizeText(title, MAX_TITLE_LENGTH, 'title'),
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
+    createConversation(title) {
+      return serialize(async () => {
+        const timestamp = new Date(now()).toISOString();
+        const conversation: StoredConversation = Object.freeze({
+          id: createId(),
+          familiarId: options.familiarId,
+          title:
+            title === undefined ? defaultTitle : normalizeText(title, MAX_TITLE_LENGTH, 'title'),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
 
-      await commit({ conversations: [conversation], messages: [] });
-      conversations.set(conversation.id, conversation);
-      announce();
-      return conversation;
+        await commit({ conversations: [conversation], messages: [] });
+        conversations.set(conversation.id, conversation);
+        announce();
+        return conversation;
+      });
     },
 
-    async appendMessage(conversationId, role, text) {
-      const conversation = conversations.get(conversationId);
-      if (conversation === undefined) {
-        throw new ChatStoreError('not_found', 'The conversation does not exist.');
-      }
+    appendMessage(conversationId, role, text) {
+      return serialize(async () => {
+        const conversation = conversations.get(conversationId);
+        if (conversation === undefined || conversation.side?.state === 'discarded') {
+          throw new ChatStoreError('not_found', 'The conversation does not exist.');
+        }
+        if (conversation.side && conversation.side.state !== 'open') {
+          throw new ChatStoreError('conflict', 'Reopen this retained note before writing.');
+        }
 
-      const body = normalizeText(text, MAX_MESSAGE_TEXT_LENGTH, 'message');
-      const timestamp = new Date(now()).toISOString();
-      const previous = messagesByConversation.get(conversationId)?.at(-1);
-      const message: StoredMessage = Object.freeze({
-        id: createId(),
-        conversationId,
-        parentId: previous?.id ?? null,
-        role,
-        text: body,
-        createdAt: timestamp,
+        const body = normalizeText(text, MAX_MESSAGE_TEXT_LENGTH, 'message');
+        const previous = messagesByConversation.get(conversationId)?.at(-1);
+        const timestamp = new Date(
+          Math.max(now(), previous ? Date.parse(previous.createdAt) + 1 : 0),
+        ).toISOString();
+        const message: StoredMessage = Object.freeze({
+          id: createId(),
+          conversationId,
+          parentId: previous?.id ?? null,
+          role,
+          text: body,
+          createdAt: timestamp,
+        });
+        const touched: StoredConversation = Object.freeze({
+          ...conversation,
+          updatedAt: timestamp,
+          revision: (conversation.revision ?? 0) + 1,
+        });
+
+        // One commit, so a message can never outlive the updatedAt bump that
+        // orders its conversation.
+        await commit({
+          conversations: [touched],
+          messages: [message],
+          expectedConversations: [conversation],
+        });
+        conversations.set(touched.id, touched);
+        indexMessage(message);
+        announce();
+        return message;
       });
-      const touched: StoredConversation = Object.freeze({ ...conversation, updatedAt: timestamp });
+    },
 
-      // One commit, so a message can never outlive the updatedAt bump that
-      // orders its conversation.
-      await commit({ conversations: [touched], messages: [message] });
-      conversations.set(touched.id, touched);
-      indexMessage(message);
-      announce();
-      return message;
+    getSideConversation(conversationId) {
+      const entry = conversations.get(conversationId);
+      return entry?.side && entry.side.state !== 'discarded'
+        ? (entry as SideConversation)
+        : undefined;
+    },
+
+    listSideConversations(parentConversationId, limit, cursor) {
+      requireParent(parentConversationId);
+      const after = cursor === undefined ? undefined : decodeCursor(cursor);
+      const rows = [...conversations.values()]
+        .filter(
+          (entry): entry is SideConversation =>
+            entry.side?.parentConversationId === parentConversationId &&
+            entry.side.state !== 'discarded' &&
+            entry.familiarId === options.familiarId,
+        )
+        .sort((left, right) => compareKeys(conversationKey(right), conversationKey(left)))
+        .filter((entry) => after === undefined || compareKeys(conversationKey(entry), after) < 0);
+      return buildPage(rows.slice(0, limit + 1), limit, conversationKey, cursor);
+    },
+
+    createSideConversation(input) {
+      return serialize(async () => {
+        const parent = requireParent(input.parentConversationId);
+        const key = operationKey(input.operationKey);
+        const existing = [...conversations.values()].find(
+          (entry) => entry.side?.operationKey === key,
+        );
+        if (existing?.side) {
+          if (existing.side.parentConversationId !== parent.id) {
+            throw new ChatStoreError('conflict', 'This operation key names a different parent.');
+          }
+          return existing as SideConversation;
+        }
+        const timestamp = new Date(now()).toISOString();
+        const side: SideConversation = Object.freeze({
+          id: createId(),
+          familiarId: options.familiarId,
+          title: 'Retained side note',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          side: Object.freeze({
+            parentConversationId: parent.id,
+            operationKey: key,
+            state: 'open',
+          }),
+        });
+        await commit({
+          conversations: [side],
+          messages: [],
+          expectedConversations: [parent],
+          absentOperationKey: key,
+        });
+        conversations.set(side.id, side);
+        announce();
+        return side;
+      });
+    },
+
+    setSideState(input, state) {
+      return serialize(async () => {
+        const side = requireSide(input);
+        if (side.side.state === state) return side;
+        if (side.side.state === 'discarded') {
+          throw new ChatStoreError('not_found', 'This note has been discarded.');
+        }
+        const touched: SideConversation = Object.freeze({
+          ...side,
+          revision: (side.revision ?? 0) + 1,
+          updatedAt: new Date(now()).toISOString(),
+          side: Object.freeze({ ...side.side, state }),
+        });
+        const deletedMessageIds =
+          state === 'discarded'
+            ? (messagesByConversation.get(side.id) ?? []).map((entry) => entry.id)
+            : [];
+        await commit({
+          conversations: [touched],
+          messages: [],
+          deletedMessageIds,
+          expectedConversations: [side],
+        });
+        conversations.set(side.id, touched);
+        if (state === 'discarded') messagesByConversation.delete(side.id);
+        announce();
+        return touched;
+      });
+    },
+
+    prepareBringBack(input) {
+      return serialize(async () => {
+        const parent = requireParent(input.parentConversationId);
+        const side = requireSide(input);
+        if (side.side.state === 'discarded') {
+          throw new ChatStoreError('not_found', 'This note has been discarded.');
+        }
+        return Object.freeze({
+          parentRevision: parent.revision ?? 0,
+          parentLeafId: messagesByConversation.get(parent.id)?.at(-1)?.id ?? null,
+          sideRevision: side.revision ?? 0,
+          sideLeafId: messagesByConversation.get(side.id)?.at(-1)?.id ?? null,
+        });
+      });
+    },
+
+    bringBack(input) {
+      return serialize(async () => {
+        const parent = requireParent(input.parentConversationId);
+        const side = requireSide(input);
+        const text = reviewedExcerpt(input);
+        const previousImport = [...messagesByConversation.values()]
+          .flat()
+          .find((entry) => entry.broughtBack?.operationKey === input.operationKey);
+        if (previousImport) {
+          if (!sameImport(previousImport, input)) {
+            throw new ChatStoreError(
+              'conflict',
+              'This operation key names another reviewed import.',
+            );
+          }
+          return previousImport;
+        }
+        const expected = input.preconditions;
+        if (
+          expected &&
+          (expected.parentRevision !== (parent.revision ?? 0) ||
+            expected.parentLeafId !== (messagesByConversation.get(parent.id)?.at(-1)?.id ?? null) ||
+            expected.sideRevision !== (side.revision ?? 0) ||
+            expected.sideLeafId !== (messagesByConversation.get(side.id)?.at(-1)?.id ?? null))
+        ) {
+          throw new ChatStoreError(
+            'conflict',
+            'The reviewed local branch changed. Cancel and review again.',
+          );
+        }
+        if (side.side.state === 'discarded') {
+          throw new ChatStoreError('not_found', 'This note has been discarded.');
+        }
+        const sourceMessages = messagesByConversation.get(side.id) ?? [];
+        if (
+          !input.sourceMessageIds.every((id) => sourceMessages.some((entry) => entry.id === id))
+        ) {
+          throw new ChatStoreError('not_found', 'A selected source message is unavailable.');
+        }
+        const previous = messagesByConversation.get(parent.id)?.at(-1);
+        const timestamp = new Date(
+          Math.max(now(), previous ? Date.parse(previous.createdAt) + 1 : 0),
+        ).toISOString();
+        const message: StoredMessage = Object.freeze({
+          id: createId(),
+          conversationId: parent.id,
+          parentId: previous?.id ?? null,
+          role: 'user',
+          text,
+          createdAt: timestamp,
+          broughtBack: Object.freeze({
+            operationKey: input.operationKey,
+            sideConversationId: side.id,
+            sourceMessageIds: Object.freeze([...input.sourceMessageIds]),
+            ...(input.preconditions
+              ? { preconditions: Object.freeze({ ...input.preconditions }) }
+              : {}),
+          }),
+        });
+        const touched = Object.freeze({
+          ...parent,
+          updatedAt: timestamp,
+          revision: (parent.revision ?? 0) + 1,
+        });
+        await commit({
+          conversations: [touched],
+          messages: [message],
+          expectedConversations: [parent, side],
+          absentOperationKey: input.operationKey,
+        });
+        conversations.set(parent.id, touched);
+        indexMessage(message);
+        announce();
+        return message;
+      });
     },
 
     subscribe(listener) {

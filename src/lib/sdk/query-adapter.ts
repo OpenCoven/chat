@@ -11,7 +11,7 @@ import {
   isCaveClientError,
 } from '@opencoven/cave-client/managed';
 import { normalizePageOptions, type Page, type PageOptions } from '@opencoven/sdk-core/browser';
-
+import type { ConversationChapterPage } from '../chat-chapters';
 import type { CaveReadClient } from './connection-controller';
 
 export type QueryResult<T> =
@@ -28,6 +28,11 @@ export type FamiliarAnalyticsQuery = Readonly<{
 }>;
 
 export type QueryAdapter = {
+  getSourceIdentity?(): object | null;
+  listChapters?(
+    conversationId: string,
+    options?: PageOptions,
+  ): Promise<QueryResult<ConversationChapterPage>>;
   listFamiliars(options?: PageOptions): Promise<QueryResult<Page<CaveCanonicalFamiliar>>>;
   listProjects(options?: PageOptions): Promise<QueryResult<Page<CaveProject>>>;
   listConversations(options?: PageOptions): Promise<QueryResult<Page<CaveConversation>>>;
@@ -58,6 +63,7 @@ type QueryChannel =
   | 'conversations'
   | 'conversation-detail'
   | 'messages'
+  | 'chapters'
   | 'familiar-contract'
   | 'familiar-analytics';
 
@@ -406,6 +412,26 @@ export function createQueryAdapter(
   }
 
   return Object.freeze({
+    getSourceIdentity: getClient,
+    listChapters(conversationId: string, readOptions?: PageOptions) {
+      const normalized = normalizeBoundedPageOptions(readOptions);
+      if (normalized.status === 'error') return Promise.resolve(normalized.result);
+      const page = normalized.options;
+      return runRead<ConversationChapterPage>(
+        'chapters',
+        JSON.stringify([conversationId, pageIdentity(page)]),
+        detailTtlMs,
+        async (client, signal) => {
+          if (!client.listConversationChapters) throw new Error('unsupported chapter source');
+          return client.listConversationChapters(conversationId, { ...page, signal });
+        },
+      ).then((result) => {
+        if (result.status === 'error' && getClient()?.listConversationChapters === undefined) {
+          return Object.freeze({ status: 'error', code: 'unsupported_operation' } as const);
+        }
+        return result;
+      });
+    },
     listFamiliars(readOptions) {
       const normalized = normalizeBoundedPageOptions(readOptions);
       if (normalized.status === 'error') {

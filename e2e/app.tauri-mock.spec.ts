@@ -1,14 +1,20 @@
 import { expect, test } from '@playwright/test';
+import { localContinuityJourney } from './helpers/local-continuity';
 
 declare global {
   interface Window {
     __mockInvokeCallCounts?: Record<string, number>;
+    __recordMockNativeCommand?: (command: string) => Promise<void>;
   }
 }
 
 test('renders the Phase 1 read-only happy path through the mocked Tauri boundary', async ({
   page,
 }) => {
+  const invokedCommands: string[] = [];
+  await page.exposeFunction('__recordMockNativeCommand', (command: string) => {
+    invokedCommands.push(command);
+  });
   await page.addInitScript(() => {
     const capabilities = [
       'health',
@@ -153,6 +159,7 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
       configurable: true,
       value: {
         invoke(command: string, args?: unknown) {
+          void window.__recordMockNativeCommand?.(command);
           callCounts[command] = (callCounts[command] ?? 0) + 1;
 
           switch (command) {
@@ -274,6 +281,26 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
                       attachmentCount: 0,
                       toolCount: 0,
                     },
+                    {
+                      id: 'message-2',
+                      conversationId: 'conversation-1',
+                      parentId: 'message-1',
+                      role: 'user',
+                      text: 'Keep the original thread. Pick up where we left off.',
+                      createdAt: '2026-08-26T09:00:00.000Z',
+                      attachmentCount: 0,
+                      toolCount: 0,
+                    },
+                    {
+                      id: 'message-3',
+                      conversationId: 'conversation-1',
+                      parentId: 'message-2',
+                      role: 'assistant',
+                      text: 'Same conversation, a new day. The earlier chapter stays exactly where it was.',
+                      createdAt: '2026-08-26T09:01:00.000Z',
+                      attachmentCount: 0,
+                      toolCount: 0,
+                    },
                   ],
                 },
                 cursor: {
@@ -305,7 +332,35 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
   await expect(page.getByRole('combobox', { name: 'Familiar' })).toHaveValue('familiar-1');
   await expect(page.locator('.chat-shell__familiar-meta')).toHaveText('Guide');
   await expect(page.getByText('Read-only chat')).toBeVisible();
+  await expect(
+    page.getByText(
+      'Import provenance is unavailable through this installed SDK. Messages are displayed as read-only text.',
+    ),
+  ).toBeVisible();
+  await expect(page.locator('.chat-shell__message-role')).toHaveText([
+    'assistant',
+    'user',
+    'assistant',
+  ]);
+  await expect(page.getByText(/Reviewed local excerpt/)).toHaveCount(0);
   await expect(page.getByText('Cave connection requires the desktop app.')).toHaveCount(0);
+  await page.getByRole('button', { name: /Ongoing/ }).click();
+  await expect(page.getByText(/Full chapter index unsupported/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '2026-08-26 2 loaded turns' })).toBeVisible();
+  await page.getByRole('button', { name: '2026-08-26 2 loaded turns' }).click();
+  await expect(page.locator('.chat-shell__message').nth(1)).toBeFocused();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+
+  const screenshotPath = process.env.CONTINUITY_SCREENSHOT_PATH;
+  if (screenshotPath) {
+    await page.setViewportSize({ width: 1360, height: 960 });
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: screenshotPath.replace(/\.png$/, '-narrow.png'),
+      fullPage: true,
+    });
+  }
 
   const callCounts = await page.evaluate(() => window.__mockInvokeCallCounts ?? {});
   const expectedCommands = [
@@ -322,4 +377,9 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
   for (const command of expectedCommands) {
     expect(callCounts[command], `expected ${command} to be invoked exactly once`).toBe(1);
   }
+
+  const beforeLocalJourney = [...invokedCommands];
+  await page.getByRole('button', { name: 'This device' }).click();
+  await localContinuityJourney({ page, visit: false, screenshotSuffix: 'tauri-mock-local' });
+  expect(invokedCommands).toEqual(beforeLocalJourney);
 });

@@ -1,10 +1,74 @@
 # OpenCoven Chat
 
-OpenCoven Chat is a production-oriented read-only desktop client with a
-least-privilege native adapter for the Cave SDK. The default UI initializes a
-keychain-backed installation identity, connects or pairs with Cave, and renders
-bounded canonical chat reads. Explicit demo routes remain available for later
-write-oriented design exploration.
+OpenCoven Chat is a local-first desktop client. **This device** notes work
+without Cave. Connecting to Cave adds bounded, read-only conversation views
+through a least-privilege native SDK adapter. Explicit demo routes remain
+separate from the production app.
+
+## Conversation chapters
+
+Open **Ongoing** in a conversation to navigate UTC-day chapters without
+changing its original transcript. This is an exact-conversation view, not a
+merge of conversations that share a familiar name. **This device** notes stay
+separate, and the Cave source stays read-only.
+
+Switching familiars restores the exact conversation you last selected, including
+an available message anchor. References and unsent drafts stay in memory, scoped
+to the live source, writer, familiar ID, and conversation ID. Changing sources
+never copies a draft. Reloading clears drafts and navigation preferences, not
+durably saved local notes. A missing remembered conversation or message shows an
+unavailable notice rather than silently choosing a newer conversation.
+
+The installed frozen SDK does not yet expose `listConversationChapters`.
+Production Chat says so and offers navigation over already-loaded messages
+only, marking partial history rather than prefetching bodies. The additive
+DEVELOPMENT read port can consume typed producer headers after a separately
+qualified SDK/native capability is admitted. It keeps the eight-page ceiling,
+bounded memory-only query cache, revision checks, and source-switch isolation.
+Malformed or cross-conversation chapter headers and repeated anchors are rejected.
+It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
+
+## Retained local side notes
+
+You can explore a separate note without changing your parent conversation:
+
+1. Select **This device**, open a conversation, and choose **New retained side note**.
+2. Save messages in the empty side note. Your parent draft stays separate.
+3. Select individual messages, choose **Review Bring back**, and edit the excerpt.
+4. Choose **Bring back reviewed excerpt** to save exactly that text to the original
+   local parent as an inert user note.
+
+**Close note** retains its messages. **Reopen note** permits more writing.
+**Discard note** requires confirmation and removes the note's local messages;
+previously reviewed imports remain in the parent. A minimal creation tombstone
+prevents a retried create operation from recreating a discarded note.
+
+An attempted review keeps its operation key, selected message IDs, edited text,
+and local branch preconditions in source- and writer-scoped memory. Returning
+to the parent or switching sources does not cancel it. After an uncertain save,
+retry the unchanged review to reconcile the result before editing again, or
+explicitly cancel. Cancellation cannot undo an import that already committed.
+
+**Pending reviews do not survive reload or restart.** Saved imports do. If you
+reload after an uncertain save, inspect the parent before starting another import;
+the app cannot recover that pending review's key across restarts.
+
+Side notes, lineage, and import receipts use the existing `ChatStore` and
+IndexedDB transactions. Repeated operation keys reconcile to the same result;
+changed payloads with reused keys are rejected. Competing windows are checked
+at commit, and failed imports leave no partial parent record. Imports neither
+merge the transcript nor execute instructions, generate replies, copy attachments,
+or write to memory services.
+
+These are local-only notes with **no connected familiar**, not Cave-backed side
+chats. If durable storage is unavailable, the UI discloses memory-only custody.
+There is no Temporary or provider-deletion guarantee. The frozen Cave source
+has no side-chat writer, so it shows an unavailable notice rather than an enabled
+no-op or a local fallback for canonical content.
+
+The installed Cave SDK omits import provenance. The source-level notice states
+that limitation; canonical messages remain read-only text without inferred
+import markers or changed roles.
 
 ## Security boundaries
 
@@ -107,7 +171,8 @@ pnpm exec playwright install chromium
 The current application renders:
 
 - the OpenCoven Chat product identity and exact `#9386d0` Coven violet token
-- an explicitly labeled browser fallback when Tauri is absent
+- writable local conversations in both the desktop app and browser, with an
+  explicit memory-only notice when durable storage is unavailable
 - a typed, non-secret desktop bridge that reads the keyring-backed pairing
   identity through `app_installation_id` before creating the SDK controller
 - connection states and actions for discovery, launch, pairing, cancellation,
@@ -119,12 +184,13 @@ The current application renders:
 - the familiar switcher at the top of the left rail
 - explicit `?demo=chat`, `?demo=messages`, and `?demo=minimal` local mock surfaces
 
-Sending messages and other write operations remain deferred to later phases.
+Sending messages to Cave and other canonical write operations remain deferred
+to later phases. Local notes use the separate device-only writer described above.
 
 ## Proof-of-concept chat demo
 
-`pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
-serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
+`pnpm app:dev` opens local chat in the desktop app, with an optional Cave
+connection. `pnpm dev` serves local chat at <127.0.0.1:4173/> and the mock chat at
 <127.0.0.1:4173/?demo=chat>, which implements the **Familiars Redesign v2**
 design: the ward at the centre of the chat, with a "Needs you" section, held
 actions the familiar stops at until you decide, a composer that warns before a
@@ -154,8 +220,8 @@ Two consequences worth knowing:
 
 - **The demo is explicit.** `tauri.conf.json` uses the production shell route;
   no demo query is embedded in `devUrl`.
-- **The production gate is the default view.** Without a demo query flag the
-  app initializes native installation identity and Cave connection state.
+- **Local chat is the default view.** Cave connection and pairing are optional;
+  local conversations remain usable while Cave is unavailable.
 
 `src/demo/` is meant to be deleted when the real read and send paths land. Its
 mock types are shaped close to the canonical ones so that lands as a change of
