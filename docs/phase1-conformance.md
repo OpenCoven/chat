@@ -1658,3 +1658,26 @@ The cleanup delete harness is pinned at `2a594dc5e6643a318fd9f1f660845646899a413
 only the supervisor, its embedded workflow authority bytes and the new regression change.
 Native Windows CI removed the long-path/trailing-dot/junction tree through the
 production walker; a fresh SDK/protected binding remains required.
+
+## Bounded schema-v2 Cave authority failures
+
+Protected run `34656775116` used Chat #226 producer `cb91fef6` and SDK #207
+validator `7c771629`. Linux and macOS passed, with independently verified
+identities, Cave timing and all 197 ordered assertions per platform. Windows
+completed all observation suites, including the repaired Coven status fixture,
+then reported `phase1.stage.cave-authority.failed`. The underlying Cave cause
+remains unclassified; validation, attestation and aggregation were skipped.
+
+The schema-v2 diagnostic boundary now distinguishes command timeout, output
+limit, spawn/tracking, supervisor termination, signaled exit, and nonzero exit.
+Failed assertion markers yield only fixed Cave category names; unknown names
+remain `assertion.unknown`, and duplicate markers yield `output.invalid`.
+Record read failures and invalid JSON have separate fixed identifiers. Raw
+child output, private paths and assertion text are not copied into public
+diagnostics. Signal values are not disclosed. Unknown errors retain the generic
+stage; marker-free output alone is not classified as malformed.
+
+These diagnostics preserve existing commands, deadlines, resource limits,
+record validation and assertion acceptance. They require a frozen harness and
+SDK binding followed by fresh protected execution before identifying the cause
+of the Windows failure.

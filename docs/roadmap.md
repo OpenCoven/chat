@@ -1,6 +1,24 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-11
+## Consolidation checkpoint, 2026-09-11 23:31 UTC
+
+Chat #226 landed as `cb91fef6e5be851b033015d2de27a78e12c5d668`; SDK #207
+landed as `7c771629e90b6afea9b2044085307c5d3b592de7`. Both validator scopes
+were rotated and read back at the SDK merge. Protected
+[run 34656775116](https://github.com/OpenCoven/chat/actions/runs/34656775116)
+failed on Windows at `phase1.stage.cave-authority.failed`, after all observation
+suites completed, including the repaired Coven status fixture. Linux and macOS
+passed; each record passed independent digest, schema, scan, source/validator
+identity, Cave timing and all 197 ordered assertion checks.
+
+Artifact validation, attestation and aggregation were skipped. The Cave cause
+remains unclassified. Bounded schema-v2 command, record and assertion-output
+diagnostics are the next source adoption; no acceptance or resource change is
+justified. Chat #219, Coven #984, SDK #38 and the final release gate remain open.
+Chat and active worktrees are preserved; retirement and the minimum working set
+remain unproven.
+
+## Historical consolidation checkpoint, 2026-09-11
 
 Chat [#225](https://github.com/OpenCoven/chat/pull/225) landed as
 `e7dfc135bb7341d4cfc5b7f0fcf4004843868809`, preserving frozen harness source

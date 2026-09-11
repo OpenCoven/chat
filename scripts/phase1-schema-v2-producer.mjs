@@ -404,6 +404,27 @@ const publicFailureDiagnosticSet = new Set([
   ),
   'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
+  'phase1.cave-authority.timeout',
+  'phase1.cave-authority.output-limit',
+  'phase1.cave-authority.spawn',
+  'phase1.cave-authority.supervisor',
+  'phase1.cave-authority.signal',
+  'phase1.cave-authority.exit-nonzero',
+  'phase1.cave-authority.output.invalid',
+  'phase1.cave-authority.record.read',
+  'phase1.cave-authority.record.invalid',
+  'phase1.cave-authority.assertion.admin',
+  'phase1.cave-authority.assertion.discovery',
+  'phase1.cave-authority.assertion.health',
+  'phase1.cave-authority.assertion.ingress',
+  'phase1.cave-authority.assertion.pairing',
+  'phase1.cave-authority.assertion.reads',
+  'phase1.cave-authority.assertion.revocation',
+  'phase1.cave-authority.assertion.takeover',
+  'phase1.cave-authority.assertion.harness',
+  'phase1.cave-authority.assertion.hpke',
+  'phase1.cave-authority.assertion.multiple',
+  'phase1.cave-authority.assertion.unknown',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
   ...cleanupGrantFailureCategories.map(
@@ -1324,6 +1345,47 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
       }
     }
     return activeStage;
+  }
+  if (
+    activeStage === 'phase1.stage.cave-authority.failed' &&
+    error instanceof CommandExecutionError
+  ) {
+    const result = error.result;
+    if (result?.reason === 'timeout') return 'phase1.cave-authority.timeout';
+    if (['stdout-limit', 'stderr-limit'].includes(result?.reason))
+      return 'phase1.cave-authority.output-limit';
+    if (['spawn', 'tracking'].includes(result?.reason)) return 'phase1.cave-authority.spawn';
+    if (['supervisor-termination', 'termination'].includes(result?.reason))
+      return 'phase1.cave-authority.supervisor';
+    if (typeof result?.signal === 'string' && result.signal.length > 0)
+      return 'phase1.cave-authority.signal';
+    if (typeof result?.code === 'number' && result.code !== 0) {
+      let assertions;
+      try {
+        assertions = parseCaveConformanceOutput(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+      } catch {
+        return 'phase1.cave-authority.output.invalid';
+      }
+      const failed = [...assertions.entries()].filter(([, status]) => status === 'failed');
+      const categories = new Set(failed.map(([id]) => id.split(/[./]/u, 1)[0]));
+      const allowed = [
+        'admin',
+        'discovery',
+        'health',
+        'ingress',
+        'pairing',
+        'reads',
+        'revocation',
+        'takeover',
+        'harness',
+        'hpke',
+      ];
+      if ([...categories].some((category) => !allowed.includes(category)))
+        return 'phase1.cave-authority.assertion.unknown';
+      if (categories.size > 1) return 'phase1.cave-authority.assertion.multiple';
+      if (categories.size === 1) return `phase1.cave-authority.assertion.${[...categories][0]}`;
+      return 'phase1.cave-authority.exit-nonzero';
+    }
   }
   if (activeStage === 'phase1.packaging.cave-build.failed') {
     return classifyCaveBuildFailureDiagnostic(error);
@@ -3038,6 +3100,20 @@ async function packageLockedArtifacts(
   };
 }
 
+export function readCaveAuthorityRecord(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new Error('phase1.cave-authority.record.read', { cause: error });
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error('phase1.cave-authority.record.invalid', { cause: error });
+  }
+}
+
 async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
   const caveRecordPath = resolve(artifactRoot.rootPath, 'cave-authority-record.json');
   const result = await runCommand(
@@ -3057,9 +3133,15 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
       timeoutMs: caveConformanceTimeoutMs,
     },
   );
-  const caveRecord = JSON.parse(readFileSync(caveRecordPath, 'utf8'));
+  const caveRecord = readCaveAuthorityRecord(caveRecordPath);
+  let assertions;
+  try {
+    assertions = parseCaveConformanceOutput(result.stdout);
+  } catch (error) {
+    throw new Error('phase1.cave-authority.output.invalid', { cause: error });
+  }
   return {
-    assertions: parseCaveConformanceOutput(result.stdout),
+    assertions,
     caveRecord,
   };
 }
