@@ -1,6 +1,6 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-11 20:05 UTC
+## Consolidation checkpoint, 2026-09-11 20:28 UTC
 
 Chat [#221](https://github.com/OpenCoven/chat/pull/221) landed as
 `0c7bcc2032691c91a98b1e1326d0dc0b4b6781a6`, preserving frozen executable harness
@@ -26,10 +26,15 @@ and protected-environment validator scopes were rotated and read back to this
 revision.
 
 Fresh protected [run 34641974164](https://github.com/OpenCoven/chat/actions/runs/34641974164)
-uses these exact revisions. The frozen supervisor build passed, the environment
-was approved after scope rechecks, and all three platform jobs started.
-Platform records and aggregate acceptance are still pending. Prior successful
-Unix records do not establish acceptance for this new binding.
+used these exact revisions and is terminal failed. Linux and macOS passed;
+each retained record passed independent ZIP digest, schema, scan, exact source
+and validator identity, Cave timing, and all 110 Cave / 46 SDK / 41 Chat
+assertion checks. Windows reached SDK runtime observations and failed at
+`phase1.runtime-observations.sdk-tests.failed`. It did not report the previous
+quota-monitor or cleanup failures. The SDK command/report cause remains
+unclassified; bounded diagnostics are in progress. Artifact validation,
+attestation and aggregation were skipped, so complete protected acceptance
+remains outstanding.
 
 Chat #219, SDK #38 and the final release gate remain open pending the relevant
 protected evidence. Chat #211's review-thread disposition remains unverified;
