@@ -26,12 +26,16 @@ export type BringBackPreconditions = Readonly<{
   sideLeafId: string | null;
 }>;
 
-export type BringBackInput = SideTarget &
+export type BringBackSelectionInput = SideTarget &
   Readonly<{
     operationKey: string;
     sourceMessageIds: readonly string[];
     excerpt: string;
-    preconditions?: BringBackPreconditions;
+  }>;
+
+export type BringBackInput = BringBackSelectionInput &
+  Readonly<{
+    preconditions: BringBackPreconditions;
   }>;
 
 export function operationKey(value: string): string {
@@ -45,7 +49,7 @@ export function reviewedExcerpt(input: BringBackInput): string {
   operationKey(input.operationKey);
   if (
     !input.excerpt.trim() ||
-    (input.preconditions !== undefined && !isBringBackPreconditions(input.preconditions)) ||
+    !isBringBackPreconditions(input.preconditions) ||
     input.excerpt.length > MAX_MESSAGE_TEXT_LENGTH ||
     input.sourceMessageIds.length === 0 ||
     input.sourceMessageIds.length > 50 ||

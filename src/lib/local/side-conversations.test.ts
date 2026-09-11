@@ -14,13 +14,14 @@ async function setup() {
     operationKey: 'create-one',
   });
   const message = await store.appendMessage(side.id, 'user', 'Unreviewed text stays here');
-  const input = {
+  const selection = {
     parentConversationId: parent.id,
     sideConversationId: side.id,
     operationKey: 'import-one',
     sourceMessageIds: [message.id],
     excerpt: '  Reviewed edited excerpt\n',
   };
+  const input = { ...selection, preconditions: await store.prepareBringBack(selection) };
   return { backend, store, parent, original, side, message, input };
 }
 
@@ -51,7 +52,11 @@ test('side APIs isolate two familiar stores sharing a backend, including exact-I
       parentConversationId: parent.id,
       operationKey: `${familiarId}-side`,
     });
-    records.push({ familiarId, parent, side });
+    const preconditions = await store.prepareBringBack({
+      parentConversationId: parent.id,
+      sideConversationId: side.id,
+    });
+    records.push({ familiarId, parent, side, preconditions });
   }
   for (const own of records) {
     const store = await openChatStore({ familiarId: own.familiarId, backend });
@@ -81,6 +86,7 @@ test('side APIs isolate two familiar stores sharing a backend, including exact-I
           sourceMessageIds: ['unavailable'],
           excerpt: 'Do not import',
           operationKey: 'foreign-import',
+          preconditions: foreign.preconditions,
         }),
       ).toEqual(missing);
     }
@@ -169,13 +175,14 @@ test.each([false, true])(
     });
     const source = await store.appendMessage(side.id, 'user', 'Source');
     clock -= 1000;
-    const input = {
+    const selection = {
       parentConversationId: parent.id,
       sideConversationId: side.id,
       sourceMessageIds: [source.id],
       operationKey: 'clock-import',
       excerpt: 'Reviewed',
     };
+    const input = { ...selection, preconditions: await store.prepareBringBack(selection) };
     const imported = await store.bringBack(input);
     expect(Date.parse(imported.createdAt)).toBeGreaterThan(Date.parse(floor));
     expect(store.getConversation(parent.id)?.updatedAt).toBe(imported.createdAt);
@@ -377,7 +384,7 @@ test('discard racing an import cannot restore source messages or admit an import
   ]);
   expect(outcomes[0]?.status).toBe('fulfilled');
   expect(outcomes[1]?.status).toBe('rejected');
-  await expect(other.bringBack(input)).rejects.toMatchObject({ code: 'not_found' });
+  await expect(other.bringBack(input)).rejects.toMatchObject({ code: 'stale_review' });
   const records = await backend.loadAll();
   expect(records.messages.some((entry) => entry.conversationId === side.id)).toBe(false);
   expect(records.messages.filter((entry) => entry.conversationId === parent.id)).toHaveLength(1);

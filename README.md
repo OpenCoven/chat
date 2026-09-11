@@ -32,6 +32,22 @@ bounded memory-only query cache, revision checks, and source-switch isolation.
 Malformed or cross-conversation chapter headers and repeated anchors are rejected.
 It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
 
+## Local save recovery
+
+Conversation creation and ordinary message saves distinguish a confirmed commit
+followed by a failed history refresh from an unconfirmed commit acknowledgement.
+Neither outcome invites a second write. **Reconcile local save** reads the exact
+allocated record and refreshes history without resubmitting it. A confirmed save
+clears the matching draft; a confirmed absence retains the draft and permits an
+explicit retry. Read failures stay visible and keep the retry blocked. If an
+unavailable note prevents determining an unconfirmed message's outcome, it is
+not treated as an unsaved message.
+
+Pending save receipts and completed reconciliation results are scoped to the
+live local store. They survive navigation within this app session, not reload
+or restart. After restarting, inspect saved conversations and messages before
+submitting again; there is no cross-session exactly-once guarantee.
+
 ## Retained local side notes
 
 You can explore a separate note without changing your parent conversation:
@@ -72,6 +88,9 @@ read-only, copyable excerpt. **Choose available messages** retains that text
 while preparing a new selection with a new key. If the note is gone, copy the
 excerpt before explicitly canceling; uncertain acknowledgements still cannot
 be edited or reselected.
+If the selected note itself becomes unavailable, its exact stored review remains
+in a read-only recovery panel with **Cancel unavailable review**. That panel
+cannot import, reselect, or navigate another familiar.
 Fresh or reselected reviews require every selected message to be loaded. If
 navigation resets the loaded pages, load the missing page or use **Clear message
 selection** to choose a new exact selection; edited excerpts are retained.
@@ -88,6 +107,10 @@ changed payloads with reused keys are rejected. Competing windows are checked
 at commit, and failed imports leave no partial parent record. Imports neither
 merge the transcript nor execute instructions, generate replies, copy attachments,
 or write to memory services.
+The public import API requires validated parent/side branch preconditions;
+unprepared selections cannot bypass review admission. Already-committed exact
+receipts still reconcile before checking later branch changes. Legacy persisted
+receipts remain readable without rewriting their provenance.
 
 The version-2 IndexedDB upgrade preserves existing records and adds operation-key
 indexes plus an atomic shared mutation revision. Warm writes read only the exact

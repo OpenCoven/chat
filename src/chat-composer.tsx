@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useSyncExternalStore } from 'react';
+import { ChatWriteRecovery } from './chat-write-recovery';
 import { createDraft } from './lib/chat-continuity';
 import type { ChatWriter } from './lib/local/chat-writer';
 
@@ -36,6 +37,7 @@ export function ChatComposer({
     pending,
     error,
     writes,
+    recovery,
   } = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
   const observed = useRef({ entry, writes });
   useEffect(() => {
@@ -46,13 +48,18 @@ export function ChatComposer({
   const inputId = useId();
 
   const canSend =
-    writer.canWrite() && conversationId !== null && draft.trim().length > 0 && !pending;
+    writer.canWrite() &&
+    conversationId !== null &&
+    draft.trim().length > 0 &&
+    !pending &&
+    !recovery;
 
   async function send() {
     if (
       conversationId === null ||
       draft.trim().length === 0 ||
       entry.getSnapshot().pending ||
+      entry.getSnapshot().recovery ||
       !writer.canWrite()
     ) {
       return;
@@ -62,6 +69,10 @@ export function ChatComposer({
     try {
       const result = await writer.sendMessage(conversationId, draft);
 
+      if (result.status === 'reconcile_required') {
+        entry.update({ pending: false, recovery: result.recovery, error: '' });
+        return;
+      }
       if (result.status === 'ok') {
         if (result.data.conversationId !== conversationId) {
           entry.update({
@@ -106,7 +117,7 @@ export function ChatComposer({
           rows={2}
           value={draft}
           placeholder={conversationId === null ? 'Start a conversation first' : 'Write a message…'}
-          disabled={!writer.canWrite() || conversationId === null || pending}
+          disabled={!writer.canWrite() || conversationId === null || pending || recovery !== null}
           maxLength={32_000}
           onChange={(event) => {
             entry.update({ text: event.target.value, error: '' });
@@ -131,6 +142,30 @@ export function ChatComposer({
         <output className="chat-composer__error" aria-live="polite" role="alert">
           {error}
         </output>
+      ) : null}
+      {recovery ? (
+        <ChatWriteRecovery
+          key={recovery.receipt.id}
+          writer={writer}
+          recovery={recovery}
+          onReconciled={(result) => {
+            const current = entry.getSnapshot();
+            if (current.recovery !== recovery) return;
+            const matches =
+              result.receipt.kind === 'message' &&
+              result.receipt.conversationId === conversationId &&
+              result.receipt.text === current.text.trim();
+            entry.update({
+              recovery: null,
+              text: result.outcome === 'committed' && matches ? '' : current.text,
+              error:
+                result.outcome === 'not_committed'
+                  ? 'The save did not commit. Your draft is retained and may be sent again.'
+                  : '',
+              writes: current.writes + 1,
+            });
+          }}
+        />
       ) : null}
     </form>
   );

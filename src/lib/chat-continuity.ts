@@ -1,15 +1,17 @@
 import type { ChatWriter } from './local/chat-writer';
 import type { BringBackInput } from './local/side-conversations';
+import type { RootWriteRecovery } from './local/write-recovery';
 
 export type DraftSnapshot = Readonly<{
   text: string;
   pending: boolean;
   error: string;
   writes: number;
+  recovery: RootWriteRecovery | null;
 }>;
 
 export function createDraft() {
-  let snapshot: DraftSnapshot = { text: '', pending: false, error: '', writes: 0 };
+  let snapshot: DraftSnapshot = { text: '', pending: false, error: '', writes: 0, recovery: null };
   const listeners = new Set<() => void>();
   return {
     getSnapshot: () => snapshot,
@@ -102,6 +104,7 @@ export type ContinuityMemory = {
   conversations: Map<string, string>;
   anchors: Map<string, string>;
   drafts: Map<string, ReturnType<typeof createDraft>>;
+  rootCreation: ReturnType<typeof createDraft>;
   sideReviews: Map<string, ReturnType<typeof createSideReview>>;
   sideCreations: Map<string, ReturnType<typeof createSideCreation>>;
 };
@@ -124,6 +127,7 @@ export function continuityMemory(source: object, writer: ChatWriter | null): Con
       conversations: new Map(),
       anchors: new Map(),
       drafts: new Map(),
+      rootCreation: createDraft(),
       sideReviews: new Map(),
       sideCreations: new Map(),
     };

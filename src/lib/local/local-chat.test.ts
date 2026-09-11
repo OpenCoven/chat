@@ -189,7 +189,10 @@ describe('local chat store writes', () => {
     });
     const store = createChatStore(failing, EMPTY_RECORDS, { familiarId: LOCAL_FAMILIAR_ID });
 
-    await expect(store.createConversation('doomed')).rejects.toBeInstanceOf(ChatStoreError);
+    await expect(store.createConversation('doomed')).rejects.toMatchObject({
+      name: 'ChatWriteRecoveryError',
+      recovery: { commit: 'unconfirmed', code: 'commit_unconfirmed' },
+    });
     expect(store.listConversations(10).data).toHaveLength(0);
     expect(store.getRevision()).toBe(0);
   });

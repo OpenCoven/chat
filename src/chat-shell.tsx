@@ -5,10 +5,12 @@ import type {
   CaveProject,
 } from '@opencoven/cave-client/managed';
 import type { Page } from '@opencoven/sdk-core/browser';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ChatChapters } from './chat-chapters';
 import { ChatComposer } from './chat-composer';
 import { ChatSideConversations } from './chat-side-conversations';
+import { ChatSideRecovery } from './chat-side-recovery';
+import { ChatWriteRecovery } from './chat-write-recovery';
 import { chapterTurnElementId } from './lib/chat-chapters';
 import {
   type ContinuityMemory,
@@ -16,7 +18,7 @@ import {
   createDraft,
   exactThreadKey,
 } from './lib/chat-continuity';
-import type { ChatWriter, WriteResult } from './lib/local/chat-writer';
+import type { ChatWriter, RootWriteResult } from './lib/local/chat-writer';
 import type { LocalMessage } from './lib/local/local-query-adapter';
 import { createManualPageWalk, type ManualPageWalk } from './lib/sdk/manual-page-walk';
 import type { QueryAdapter, QueryResult } from './lib/sdk/query-adapter';
@@ -62,7 +64,7 @@ type ChatShellProps = Readonly<{
    * thread renders a composer.
    */
   writer?: ChatWriter | null;
-  onCreateConversation?: () => Promise<WriteResult<CaveConversation>>;
+  onCreateConversation?: () => Promise<RootWriteResult<CaveConversation>>;
   isDurable?: boolean;
 }>;
 
@@ -295,8 +297,12 @@ function ChatShellView({
     memory.familiarId ? (memory.conversations.get(memory.familiarId) ?? null) : null,
   );
   const [positionNotice, setPositionNotice] = useState('');
-  const [creating, setCreating] = useState(false);
-  const creationPending = useRef(false);
+  const creationEntry = memory.rootCreation;
+  const {
+    pending: creating,
+    recovery: creationRecovery,
+    error: creationError,
+  } = useSyncExternalStore(creationEntry.subscribe, creationEntry.getSnapshot);
   const navigationEpoch = useRef(0);
   const mounted = useRef(false);
   useEffect(() => {
@@ -1115,23 +1121,29 @@ function ChatShellView({
               <button
                 className="chat-shell__new-conversation"
                 type="button"
-                disabled={creating}
+                disabled={creating || creationRecovery !== null}
                 onClick={() => {
-                  if (creationPending.current) return;
-                  creationPending.current = true;
-                  setCreating(true);
+                  const snapshot = creationEntry.getSnapshot();
+                  if (snapshot.pending || snapshot.recovery) return;
+                  creationEntry.update({ pending: true, error: '' });
                   setPositionNotice('');
                   const epoch = navigationEpoch.current;
                   void Promise.resolve()
                     .then(onCreateConversation)
                     .then((result) => {
-                      if (!mounted.current || !result) return;
-                      if (result.status !== 'ok') {
-                        setPositionNotice(
-                          result.status === 'unsupported' ? result.reason : CREATE_FAILURE_NOTICE,
-                        );
+                      if (!result) return;
+                      if (result.status === 'reconcile_required') {
+                        creationEntry.update({ recovery: result.recovery });
                         return;
                       }
+                      if (result.status !== 'ok') {
+                        creationEntry.update({
+                          error:
+                            result.status === 'unsupported' ? result.reason : CREATE_FAILURE_NOTICE,
+                        });
+                        return;
+                      }
+                      if (!mounted.current) return;
                       onWritten();
                       if (
                         epoch === navigationEpoch.current &&
@@ -1151,11 +1163,10 @@ function ChatShellView({
                       }
                     })
                     .catch(() => {
-                      if (mounted.current) setPositionNotice(CREATE_FAILURE_NOTICE);
+                      creationEntry.update({ error: CREATE_FAILURE_NOTICE });
                     })
                     .finally(() => {
-                      creationPending.current = false;
-                      if (mounted.current) setCreating(false);
+                      creationEntry.update({ pending: false });
                     });
                 }}
               >
@@ -1164,6 +1175,25 @@ function ChatShellView({
             ) : null}
             <span className="chat-shell__section-count">{filteredConversations.length}</span>
           </div>
+          {creationError ? <output role="alert">{creationError}</output> : null}
+          {creationRecovery && writer ? (
+            <ChatWriteRecovery
+              key={creationRecovery.receipt.id}
+              writer={writer}
+              recovery={creationRecovery}
+              onReconciled={(result) => {
+                if (creationEntry.getSnapshot().recovery !== creationRecovery) return;
+                creationEntry.update({
+                  recovery: null,
+                  error:
+                    result.outcome === 'not_committed'
+                      ? 'The conversation did not commit. You may create it again.'
+                      : '',
+                });
+                if (mounted.current) onWritten();
+              }}
+            />
+          ) : null}
           {renderConversationList()}
         </section>
 
@@ -1211,6 +1241,19 @@ function ChatShellView({
               onWritten={onWritten}
               memory={memory}
               familiarId={selectedFamiliarId ?? ''}
+            />
+          ) : null}
+          {canWrite &&
+          writer?.sideConversations?.custody === 'local-only' &&
+          selectedConversationId &&
+          selectedFamiliarId &&
+          conversationState.status === 'error' &&
+          conversationState.code === 'not_found' ? (
+            <ChatSideRecovery
+              key={`unavailable-${selectedConversationId}`}
+              conversationId={selectedConversationId}
+              familiarId={selectedFamiliarId}
+              memory={memory}
             />
           ) : null}
           {selectedConversationId && messagesState.status === 'ready' ? (

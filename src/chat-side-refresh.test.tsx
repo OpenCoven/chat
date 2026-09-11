@@ -160,15 +160,24 @@ test.each(['changed-page', 'page-limit', 'read-error'] as const)(
       current.parent.id,
       current.side.id,
     );
+    const source = await current.source.store.appendMessage(
+      current.side.id,
+      'user',
+      'Captured source',
+    );
     review.update({
       phase: 'uncertain',
       notice: 'Import still needs reconciliation.',
       review: {
         parentConversationId: current.parent.id,
         sideConversationId: current.side.id,
-        sourceMessageIds: ['captured-source'],
+        sourceMessageIds: [source.id],
         operationKey: 'uncertain-import',
         excerpt: 'Keep this edited excerpt',
+        preconditions: await current.source.store.prepareBringBack({
+          parentConversationId: current.parent.id,
+          sideConversationId: current.side.id,
+        }),
       },
     });
     const capturedReview = review.getSnapshot();

@@ -127,6 +127,7 @@ function toErrorResult(error: unknown): QueryResult<never> {
  */
 export function createLocalQueryAdapter(store: ChatStore): QueryAdapter {
   let disposed = false;
+  const familiar = Object.freeze({ ...LOCAL_FAMILIAR, id: store.getFamiliarId() });
 
   function guard<T>(read: () => QueryResult<T>): Promise<QueryResult<T>> {
     if (disposed) {
@@ -150,7 +151,7 @@ export function createLocalQueryAdapter(store: ChatStore): QueryAdapter {
         return Object.freeze({
           status: 'ok',
           data: Object.freeze({
-            data: Object.freeze([LOCAL_FAMILIAR]),
+            data: Object.freeze([familiar]),
             cursor: Object.freeze(
               normalized.cursor === undefined
                 ? { hasMore: false }

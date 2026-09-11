@@ -10,6 +10,11 @@ import type {
   SideConversation,
   SideTarget,
 } from './side-conversations';
+import {
+  ChatWriteRecoveryError,
+  type RootWriteReconciliation,
+  type RootWriteRecovery,
+} from './write-recovery';
 
 export type SideConversationWriter = Readonly<{
   custody: 'local-only';
@@ -40,14 +45,19 @@ export type WriteResult<T> =
   | { status: 'unsupported'; reason: string }
   | { status: 'error'; code: string };
 
+export type RootWriteResult<T> =
+  | WriteResult<T>
+  | { status: 'reconcile_required'; recovery: RootWriteRecovery };
+
 export type ChatWriter = Readonly<{
   sideConversations?: SideConversationWriter;
   canWrite: () => boolean;
-  createConversation: (title?: string) => Promise<WriteResult<CaveConversation>>;
+  createConversation: (title?: string) => Promise<RootWriteResult<CaveConversation>>;
+  reconcileWrite?: (receiptId: string) => Promise<WriteResult<RootWriteReconciliation>>;
   sendMessage: (
     conversationId: string,
     text: string,
-  ) => Promise<WriteResult<CaveConversationMessage>>;
+  ) => Promise<RootWriteResult<CaveConversationMessage>>;
 }>;
 
 const UNSUPPORTED_REASON =
@@ -84,6 +94,7 @@ export function createLocalChatWriter(store: ChatStore): ChatWriter {
   }
   return Object.freeze({
     canWrite: () => true,
+    reconcileWrite: (receiptId: string) => write(() => store.reconcileWrite(receiptId)),
     sideConversations: Object.freeze({
       custody: 'local-only' as const,
       get: (id: string) => write(() => store.getSideConversation(id) ?? null),
@@ -118,6 +129,8 @@ export function createLocalChatWriter(store: ChatStore): ChatWriter {
           },
         };
       } catch (error: unknown) {
+        if (error instanceof ChatWriteRecoveryError)
+          return { status: 'reconcile_required', recovery: error.recovery };
         return toError(error);
       }
     },
@@ -141,6 +154,8 @@ export function createLocalChatWriter(store: ChatStore): ChatWriter {
           },
         };
       } catch (error: unknown) {
+        if (error instanceof ChatWriteRecoveryError)
+          return { status: 'reconcile_required', recovery: error.recovery };
         return toError(error);
       }
     },

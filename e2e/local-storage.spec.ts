@@ -5,6 +5,7 @@ declare global {
   interface Window {
     __chatStorageReads: { full: number; writeFull: number; keyed: number; indexed: number };
     __resumeLocalRevisionRead?: () => void;
+    __restoreRootReads?: () => void;
   }
 }
 
@@ -421,11 +422,133 @@ test('an uncertain conversation create reports confirmation guidance without sel
   await loseNextWriteAcknowledgement(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await expect(
-    page.getByText(/conversation creation result could not be confirmed.*before retrying/),
+    page.getByText(/conversation save could not be confirmed.*exact record before retrying/),
   ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New', exact: true })).toBeDisabled();
+  const committed = await durableSummary(page);
+  await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
+  await expect(page.getByRole('option', { name: /New conversation/ })).toHaveCount(1);
+  expect(await durableSummary(page)).toEqual(committed);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
+});
+
+for (const kind of ['conversation', 'message'] as const) {
+  test(`a confirmed ${kind} with a failed post-commit IndexedDB read reconciles without another write`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await seedLegacyHistory(page, 50);
+    await page.evaluate(() => {
+      const transaction = IDBDatabase.prototype.transaction;
+      const get = IDBObjectStore.prototype.get;
+      let arm = true;
+      let blocked = false;
+      IDBDatabase.prototype.transaction = function (...args) {
+        const tx = Reflect.apply(transaction, this, args) as IDBTransaction;
+        if (args[1] === 'readwrite' && arm) {
+          arm = false;
+          tx.addEventListener(
+            'complete',
+            () => {
+              blocked = true;
+            },
+            { once: true },
+          );
+        }
+        return tx;
+      };
+      IDBObjectStore.prototype.get = function (...args) {
+        if (
+          blocked &&
+          this.name === 'meta' &&
+          this.transaction.objectStoreNames.length === 1 &&
+          args[0] === 'mutationRevision'
+        )
+          throw new Error('Injected post-commit revision read failure');
+        return Reflect.apply(get, this, args);
+      };
+      window.__restoreRootReads = () => {
+        blocked = false;
+      };
+    });
+    if (kind === 'conversation')
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+    else {
+      await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Saved root message');
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+    }
+    await expect(
+      page.getByText(new RegExp(`The ${kind} was saved, but local history`)),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: kind === 'conversation' ? 'New' : 'Send', exact: true }),
+    ).toBeDisabled();
+    const bounds = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      height: document.documentElement.scrollHeight,
+    }));
+    expect(bounds.width).toBeLessThanOrEqual(320);
+    expect(bounds.height).toBeLessThanOrEqual(568);
+    const committed = await durableSummary(page);
+    expect(committed.revision).toBe(1);
+    expect(committed.count).toBe(kind === 'message' ? 53 : 52);
+    await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
+    await expect(page.getByText(/Local history could not be reconciled/)).toBeVisible();
+    expect(await durableSummary(page)).toEqual(committed);
+    await page.evaluate(() => {
+      if (!window.__restoreRootReads) throw new Error('Missing read recovery control');
+      window.__restoreRootReads();
+    });
+    await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Reconcile local save' })).toHaveCount(0);
+    if (kind === 'conversation') {
+      await expect(page.getByRole('option', { name: /New conversation/ })).toHaveCount(1);
+      await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('');
+      await expect(
+        page.getByRole('list', { name: 'Messages' }).getByText('Saved root message'),
+      ).toBeVisible();
+    }
+    expect(await durableSummary(page)).toEqual(committed);
+  });
+}
+
+test('an aborted ordinary message is not retryable until exact-record reconciliation confirms absence', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    let abort = true;
+    IDBObjectStore.prototype.put = function (...args) {
+      if (abort && this.name === 'messages') {
+        abort = false;
+        this.transaction.abort();
+        throw new Error('Injected root message abort');
+      }
+      return Reflect.apply(put, this, args);
+    };
+  });
+  await page
+    .getByRole('textbox', { name: 'Message', exact: true })
+    .fill('Retry only after absence');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText(/message save could not be confirmed/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  expect((await durableSummary(page)).revision).toBe(0);
+  await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
+  await expect(page.getByText(/save did not commit.*draft is retained/i)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(
+    'Retry only after absence',
+  );
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(
+    page.getByRole('list', { name: 'Messages' }).getByText('Retry only after absence'),
+  ).toBeVisible();
+  expect((await durableSummary(page)).revision).toBe(1);
 });
 
 test('a discarded create replay reconciles the old key before allowing a new durable side note', async ({

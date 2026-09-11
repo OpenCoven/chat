@@ -88,14 +88,14 @@ test('import operation lookup does not flatten retained history during admission
   const records = retainedHistory();
   const backend = createMemoryChatBackend(records);
   const store = createChatStore(backend, records, { familiarId: 'local' });
-  const input = {
+  const selection = {
     parentConversationId: 'parent',
     sideConversationId: 'long',
     sourceMessageIds: ['m-000000'],
     operationKey: 'indexed-import',
     excerpt: 'reviewed excerpt',
   };
-  await store.prepareBringBack(input);
+  const input = { ...selection, preconditions: await store.prepareBringBack(selection) };
   const flat = vi.spyOn(Array.prototype, 'flat');
   try {
     const saved = await store.bringBack(input);
@@ -156,6 +156,7 @@ test.each(['append', 'import', 'create', 'side', 'state'])(
         sourceMessageIds: ['m-000000'],
         operationKey: 'ours',
         excerpt: 'ours',
+        preconditions: await store.prepareBringBack(side),
       });
     if (operation === 'create') await store.createConversation('ours');
     if (operation === 'side')
@@ -279,7 +280,7 @@ test('post-commit revision read failure is uncertain and does not notify success
     {
       ...backend,
       getMutationRevision() {
-        if (++reads === 2) throw new Error('Revision read failed after commit');
+        if (++reads === 3) throw new Error('Revision read failed after commit');
         return getRevision();
       },
     },
@@ -290,13 +291,14 @@ test('post-commit revision read failure is uncertain and does not notify success
   store.subscribe(listener);
   const writer = createLocalChatWriter(store).sideConversations;
   if (!writer) throw new Error('Missing side capability');
-  const input = {
+  const selection = {
     parentConversationId: 'parent',
     sideConversationId: 'long',
     sourceMessageIds: ['m-000000'],
     operationKey: 'uncertain-import',
     excerpt: 'reviewed',
   };
+  const input = { ...selection, preconditions: await store.prepareBringBack(selection) };
   expect(await writer.bringBack(input)).toEqual({ status: 'error', code: 'service_unavailable' });
   expect(listener).not.toHaveBeenCalled();
   expect(await writer.bringBack(input)).toMatchObject({ status: 'ok' });

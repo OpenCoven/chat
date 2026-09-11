@@ -22,12 +22,20 @@ import {
   type SideTarget,
   sameImport,
 } from './side-conversations';
+import {
+  ChatWriteRecoveryError,
+  type RootWriteReceipt,
+  type RootWriteReconciliation,
+  type RootWriteRecovery,
+} from './write-recovery';
 
 export type ChatStoreChange = Readonly<{ revision: number }>;
 
 export type ChatStore = Readonly<{
   isDurable: () => boolean;
   getRevision: () => number;
+  getFamiliarId: () => string;
+  reconcileWrite: (receiptId: string) => Promise<RootWriteReconciliation>;
   listConversations: (limit: number, cursor?: string) => Page<StoredConversation>;
   getConversation: (conversationId: string) => StoredConversation | undefined;
   listMessages: (conversationId: string, limit: number, cursor?: string) => Page<StoredMessage>;
@@ -191,6 +199,8 @@ export function createChatStore(
   const importsByOperation = new Map<string, StoredMessage>();
   const sideIdsByOperation = new Map<string, string>();
   const listeners = new Set<(change: ChatStoreChange) => void>();
+  const rootRecoveries = new Map<string, RootWriteRecovery>();
+  const reconciledRootWrites = new Map<string, RootWriteReconciliation>();
   let revision = 0;
   let disposed = false;
   let writes: Promise<unknown> = Promise.resolve();
@@ -219,6 +229,41 @@ export function createChatStore(
       throw new ChatStoreError('not_found', 'The exact local parent is unavailable.');
     }
     return parent;
+  }
+
+  function visibleConversation(id: string): StoredConversation | undefined {
+    const entry = conversations.get(id);
+    if (entry?.familiarId !== options.familiarId || entry.side?.state === 'discarded') {
+      return undefined;
+    }
+    if (entry.side) {
+      const parent = conversations.get(entry.side.parentConversationId);
+      if (parent?.familiarId !== options.familiarId || parent.side) return undefined;
+    }
+    return entry;
+  }
+
+  function recoveryScope(receipt: RootWriteReceipt): string {
+    return receipt.kind === 'conversation' ? 'create' : `message:${receipt.conversationId}`;
+  }
+
+  function requireNoRecovery(scope: string): void {
+    const recovery = rootRecoveries.get(scope);
+    if (recovery) throw new ChatWriteRecoveryError(recovery);
+  }
+
+  function requireWriteRecovery(
+    receipt: RootWriteReceipt,
+    commit: RootWriteRecovery['commit'],
+    cause: unknown,
+  ): never {
+    const recovery: RootWriteRecovery = Object.freeze({
+      receipt,
+      commit,
+      code: commit === 'confirmed' ? 'refresh_failed' : 'commit_unconfirmed',
+    });
+    rootRecoveries.set(recoveryScope(receipt), recovery);
+    throw new ChatWriteRecoveryError(recovery, cause);
   }
 
   function requireSide(input: SideTarget): SideConversation {
@@ -301,6 +346,23 @@ export function createChatStore(
     }
   }
 
+  async function commitRoot(change: ChatRecords, receipt: RootWriteReceipt): Promise<void> {
+    try {
+      await commit(change);
+    } catch (error) {
+      if (error instanceof ChatStoreError && error.code === 'conflict') throw error;
+      requireWriteRecovery(receipt, 'unconfirmed', error);
+    }
+  }
+
+  async function announceRoot(receipt: RootWriteReceipt): Promise<void> {
+    try {
+      await announce();
+    } catch (error) {
+      requireWriteRecovery(receipt, 'confirmed', error);
+    }
+  }
+
   async function commit(change: ChatRecords): Promise<void> {
     if (disposed) {
       throw new ChatStoreError('service_unavailable', 'The chat store is disposed.');
@@ -319,10 +381,74 @@ export function createChatStore(
   return Object.freeze({
     isDurable: () => backend.isDurable(),
     getRevision: () => revision,
+    getFamiliarId: () => options.familiarId,
+
+    reconcileWrite(receiptId) {
+      return serialize(async () => {
+        const reconciled = reconciledRootWrites.get(receiptId);
+        if (reconciled) {
+          await announce();
+          return reconciled;
+        }
+        const recovery = [...rootRecoveries.values()].find(
+          (entry) => entry.receipt.id === receiptId,
+        );
+        if (!recovery) throw new ChatStoreError('not_found', 'The save receipt is unavailable.');
+        const before = await backend.getMutationRevision?.();
+        const snapshot = await backend.loadAll();
+        const after = await backend.getMutationRevision?.();
+        if (before !== after) {
+          throw new ChatStoreError('conflict', 'Local history changed during reconciliation.');
+        }
+        hydrate(snapshot);
+        indexedBackendRevision = after;
+        const receipt = recovery.receipt;
+        const record =
+          receipt.kind === 'conversation'
+            ? visibleConversation(receipt.id)
+            : visibleConversation(receipt.conversationId)
+              ? messagesByConversation
+                  .get(receipt.conversationId)
+                  ?.find((message) => message.id === receipt.id)
+              : undefined;
+        if (
+          record &&
+          (record.createdAt !== receipt.createdAt ||
+            (receipt.kind === 'conversation'
+              ? !('title' in record) ||
+                record.title !== receipt.title ||
+                record.familiarId !== receipt.familiarId
+              : !('text' in record) ||
+                record.text !== receipt.text ||
+                record.conversationId !== receipt.conversationId ||
+                record.parentId !== receipt.parentId ||
+                record.role !== receipt.role))
+        ) {
+          throw new ChatStoreError('conflict', 'The saved record does not match this receipt.');
+        }
+        if (
+          !record &&
+          recovery.commit === 'unconfirmed' &&
+          receipt.kind === 'message' &&
+          !visibleConversation(receipt.conversationId)
+        ) {
+          throw new ChatStoreError(
+            'not_found',
+            'The note is unavailable; an unconfirmed message may have been removed.',
+          );
+        }
+        const outcome = record || recovery.commit === 'confirmed' ? 'committed' : 'not_committed';
+        await announce();
+        rootRecoveries.delete(recoveryScope(receipt));
+        const result = Object.freeze({ receipt, outcome });
+        reconciledRootWrites.set(receiptId, result);
+        return result;
+      });
+    },
 
     listConversations(limit, cursor) {
       const ordered = [...conversations.values()]
-        .filter((entry) => !entry.side)
+        .filter((entry) => !entry.side && entry.familiarId === options.familiarId)
         .sort((left, right) => compareKeys(conversationKey(right), conversationKey(left)));
       if (cursor === undefined) {
         return buildPage(ordered.slice(0, limit + 1), limit, conversationKey);
@@ -333,13 +459,12 @@ export function createChatStore(
       return buildPage(rows.slice(0, limit + 1), limit, conversationKey, cursor);
     },
 
-    getConversation: (conversationId) => {
-      const entry = conversations.get(conversationId);
-      return entry?.side?.state === 'discarded' ? undefined : entry;
-    },
+    getConversation: visibleConversation,
 
     listMessages(conversationId, limit, cursor) {
-      const bucket = messagesByConversation.get(conversationId);
+      const bucket = visibleConversation(conversationId)
+        ? messagesByConversation.get(conversationId)
+        : undefined;
       if (bucket === undefined) {
         return emptyPage<StoredMessage>(cursor);
       }
@@ -354,6 +479,7 @@ export function createChatStore(
 
     createConversation(title) {
       return serialize(async () => {
+        requireNoRecovery('create');
         const timestamp = new Date(now()).toISOString();
         const conversation: StoredConversation = Object.freeze({
           id: createId(),
@@ -364,16 +490,18 @@ export function createChatStore(
           updatedAt: timestamp,
         });
 
-        await commit({ conversations: [conversation], messages: [] });
+        const receipt: RootWriteReceipt = Object.freeze({ ...conversation, kind: 'conversation' });
+        await commitRoot({ conversations: [conversation], messages: [] }, receipt);
         conversations.set(conversation.id, conversation);
-        await announce();
+        await announceRoot(receipt);
         return conversation;
       });
     },
 
     appendMessage(conversationId, role, text) {
       return serialize(async () => {
-        const conversation = conversations.get(conversationId);
+        requireNoRecovery(`message:${conversationId}`);
+        const conversation = visibleConversation(conversationId);
         if (conversation === undefined || conversation.side?.state === 'discarded') {
           throw new ChatStoreError('not_found', 'The conversation does not exist.');
         }
@@ -406,28 +534,29 @@ export function createChatStore(
 
         // One commit, so a message can never outlive the updatedAt bump that
         // orders its conversation.
-        await commit({
-          conversations: [touched],
-          messages: [message],
-          expectedConversations: [conversation],
+        const receipt: RootWriteReceipt = Object.freeze({
+          ...message,
+          kind: 'message',
+          familiarId: options.familiarId,
         });
+        await commitRoot(
+          {
+            conversations: [touched],
+            messages: [message],
+            expectedConversations: [conversation],
+          },
+          receipt,
+        );
         conversations.set(touched.id, touched);
         indexMessage(message);
-        await announce();
+        await announceRoot(receipt);
         return message;
       });
     },
 
     getSideConversation(conversationId) {
-      const entry = conversations.get(conversationId);
-      const parent = entry?.side ? conversations.get(entry.side.parentConversationId) : undefined;
-      return entry?.side &&
-        entry.side.state !== 'discarded' &&
-        entry.familiarId === options.familiarId &&
-        parent?.familiarId === options.familiarId &&
-        !parent.side
-        ? (entry as SideConversation)
-        : undefined;
+      const entry = visibleConversation(conversationId);
+      return entry?.side ? (entry as SideConversation) : undefined;
     },
 
     listSideConversations(parentConversationId, limit, cursor) {
@@ -557,11 +686,10 @@ export function createChatStore(
         }
         const expected = input.preconditions;
         if (
-          expected &&
-          (expected.parentRevision !== (parent.revision ?? 0) ||
-            expected.parentLeafId !== (messagesByConversation.get(parent.id)?.at(-1)?.id ?? null) ||
-            expected.sideRevision !== (side.revision ?? 0) ||
-            expected.sideLeafId !== (messagesByConversation.get(side.id)?.at(-1)?.id ?? null))
+          expected.parentRevision !== (parent.revision ?? 0) ||
+          expected.parentLeafId !== (messagesByConversation.get(parent.id)?.at(-1)?.id ?? null) ||
+          expected.sideRevision !== (side.revision ?? 0) ||
+          expected.sideLeafId !== (messagesByConversation.get(side.id)?.at(-1)?.id ?? null)
         ) {
           throw new ChatStoreError(
             'stale_review',
@@ -596,9 +724,7 @@ export function createChatStore(
             operationKey: input.operationKey,
             sideConversationId: side.id,
             sourceMessageIds: Object.freeze([...input.sourceMessageIds]),
-            ...(input.preconditions
-              ? { preconditions: Object.freeze({ ...input.preconditions }) }
-              : {}),
+            preconditions: Object.freeze({ ...input.preconditions }),
           }),
         });
         const touched = Object.freeze({

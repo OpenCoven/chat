@@ -7,7 +7,7 @@ import {
   sideReviewMemory,
 } from './lib/chat-continuity';
 import type { ChatWriter, WriteResult } from './lib/local/chat-writer';
-import type { BringBackInput, SideConversation } from './lib/local/side-conversations';
+import type { BringBackSelectionInput, SideConversation } from './lib/local/side-conversations';
 import { createManualPageWalk } from './lib/sdk/manual-page-walk';
 
 type Props = Readonly<{
@@ -212,7 +212,7 @@ export function ChatSideConversations({
       });
       return;
     }
-    const input: BringBackInput = {
+    const input: BringBackSelectionInput = {
       parentConversationId: side.side.parentConversationId,
       sideConversationId: side.id,
       sourceMessageIds:
