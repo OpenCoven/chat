@@ -20,7 +20,7 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `39fa8953bc9f884dbc9ddd93a2c1b73fd157e033` | `fb057dc6025c431b36f844beb4bfca9ddd0705b0` |
+| Executable harness | `19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9` | `3ba4956c89278313c8b107e96521fa561dfbe339` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
@@ -119,8 +119,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `d56021851537d62cfad9ece80583a908f20898a1`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `39fa8953bc9f884dbc9ddd93a2c1b73fd157e033`,
-  tree `fb057dc6025c431b36f844beb4bfca9ddd0705b0`, retained in the
+- Chat conformance driver `19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9`,
+  tree `3ba4956c89278313c8b107e96521fa561dfbe339`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;

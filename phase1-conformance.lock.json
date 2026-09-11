@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "39fa8953bc9f884dbc9ddd93a2c1b73fd157e033"
+    "revision": "19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9"
   },
   "harnessAuthority": {
-    "revision": "39fa8953bc9f884dbc9ddd93a2c1b73fd157e033",
-    "tree": "fb057dc6025c431b36f844beb4bfca9ddd0705b0",
+    "revision": "19dd987cdc1aeb3e3fa519dfc5282d41fe5f24c9",
+    "tree": "3ba4956c89278313c8b107e96521fa561dfbe339",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "a5f2e7868c2f64a2f1a413e8375eba864375ba38",
-        "sha256": "4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6"
+        "blob": "c84efc415d43a7bc26c435edcb692d6cdf63a358",
+        "sha256": "372bba3fb6be8af72907a2dd8a0c8acd81ab3bd89bcb4e0ec8dfe85cea4ff431"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "5d367ce4c115290da5326f3288529a0d98e70272",
-        "sha256": "b3c6959b5b6b63fedcb7027556a9163904f08c7ec1d91812ce9da73b6347c323"
+        "blob": "76ebff4d15ae0edfb121ad97a6af653b4d56a608",
+        "sha256": "4081f1765e8daf3e7c0405a34403cc098dca4cfc34a1578e6d857561c3d425ec"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "9b6b5424eeda06d487a6b5dab4f07cf2315c453b",
-        "sha256": "0c38650d99040a4395c887dbb1e94d673b8773b7c2d4faead87ebedb6edfe6dc"
+        "blob": "6b5bd572c4d8c2446ffbe1cbe8f46173cd2edca1",
+        "sha256": "5789ab5653e36226bd459bc7ebe62bbb802d8c11fbfbddc6fc5d0ae9481c1a80"
       }
     ],
     "productionDeltas": [
