@@ -18,8 +18,10 @@ SDK and Chat observations, then failed at
 The prior SDK failure did not recur; its cause remains unclassified. Artifact
 validation, attestation and aggregation were skipped.
 
-The frozen Coven sharing fixture calls the default library writer under
-restricted TEMP, bypassing the CLI's configured staging directory. Coven
+In that failed run, the frozen Coven sharing fixture called the default library
+writer under restricted TEMP, bypassing the CLI's configured staging directory.
+The newly adopted fixture passes configured staging explicitly and retains
+separate default-path coverage. Coven
 [#1015](https://github.com/OpenCoven/coven/pull/1015) landed as
 `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`; local workspace tests passed
 3,619 tests with five ignored. Both fixture cases passed native Windows CI at
