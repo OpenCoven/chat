@@ -33,6 +33,27 @@ namespace OpenCoven.Tests {
             catch (System.IO.IOException) { return "io-error"; }
             catch { return "other-error"; }
         }
+        public static string InspectFixedRoots(object identity, MethodInfo method) {
+            string root = (string)identity.GetType().GetProperty("RootPath").GetValue(identity);
+            string[] labels = new string[] { "root", "profile", "appdata", "roaming", "local", "temp", "workspace", "status-staging" };
+            string[] suffixes = new string[] { "", "profile", @"profile\AppData", @"profile\AppData\Roaming", @"profile\AppData\Local", "temp", "workspace", "status-staging" };
+            return (string)method.Invoke(identity, new object[] { new Func<string>(() => {
+                System.Collections.Generic.List<string> results = new System.Collections.Generic.List<string>();
+                for (int index = 0; index < labels.Length; index++) {
+                    string path = System.IO.Path.Combine(root, suffixes[index]);
+                    int count = 0;
+                    string outcome = ReadOutcome(() => {
+                        if ((System.IO.File.GetAttributes(path) & System.IO.FileAttributes.ReparsePoint) != 0)
+                            throw new System.IO.IOException();
+                        foreach (System.IO.FileSystemInfo entry in new System.IO.DirectoryInfo(path).EnumerateFileSystemInfos("*", System.IO.SearchOption.TopDirectoryOnly)) {
+                            if (++count > 32) throw new System.IO.IOException();
+                        }
+                    });
+                    results.Add(String.Format("{0}={1},{2}", labels[index], outcome, count));
+                }
+                return String.Join("; ", results);
+            }) });
+        }
         public static string Inspect(object identity, MethodInfo method, string target) {
             return (string)method.Invoke(identity, new object[] { new Func<string>(() => {
                 string root = System.IO.Path.GetPathRoot(target);
@@ -152,6 +173,7 @@ try {
     if ($result.ResourceQuotaMonitorError -or $result.ResourceQuotaExceeded -ne $expectOverflow) {
       $control = if ($expectOverflow) { 'overflow' } else { 'under-limit' }
       Write-Host ('Isolated quota path probe: ' + [OpenCoven.Tests.QuotaReadPathProbe]::Inspect($identity, $readString, $directory))
+      Write-Host ('Isolated quota fixed-root probe: ' + [OpenCoven.Tests.QuotaReadPathProbe]::InspectFixedRoots($identity, $readString))
       throw ("Isolated terminal quota control failed: case={0}; exceeded={1}; monitor={2}; category={3}; root={4}; operation={5}." -f
         $control, $result.ResourceQuotaExceeded, $result.ResourceQuotaMonitorError,
         $result.ResourceQuotaMonitorCategory, $result.ResourceQuotaMonitorRoot, $result.ResourceQuotaMonitorOperation)
