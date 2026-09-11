@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import type { ChatRecords } from './chat-records';
 import { createChatStore, openChatStore } from './chat-store';
+import { createLocalChatWriter } from './chat-writer';
 import { createMemoryChatBackend } from './memory-backend';
 
 function retainedHistory(count = 20_000): ChatRecords {
@@ -111,6 +112,105 @@ test('import operation lookup does not flatten retained history during admission
   }
 });
 
+test.each(['append', 'import', 'create', 'side', 'state'])(
+  'successful %s observers see a detected competing commit immediately',
+  async (operation) => {
+    const records = retainedHistory(10);
+    const backend = createMemoryChatBackend(records);
+    const parent = records.conversations[0];
+    if (!parent) throw new Error('Missing fixture');
+    const external = { ...parent, id: 'external', title: 'Other window' };
+    const store = createChatStore(
+      {
+        ...backend,
+        async commit(change) {
+          await backend.commit({
+            conversations: [external],
+            messages: [
+              {
+                id: 'external-message',
+                conversationId: external.id,
+                parentId: null,
+                role: 'user',
+                text: 'Other window text',
+                createdAt: external.createdAt,
+              },
+            ],
+          });
+          await backend.commit(change);
+        },
+      },
+      records,
+      { familiarId: 'local' },
+    );
+    const observed: string[][] = [];
+    store.subscribe(() => {
+      observed.push(store.listConversations(50).data.map((entry) => entry.id));
+      expect(store.listMessages('external', 50).data).toHaveLength(1);
+    });
+    const side = { parentConversationId: 'parent', sideConversationId: 'long' };
+    if (operation === 'append') await store.appendMessage('empty', 'user', 'ours');
+    if (operation === 'import')
+      await store.bringBack({
+        ...side,
+        sourceMessageIds: ['m-000000'],
+        operationKey: 'ours',
+        excerpt: 'ours',
+      });
+    if (operation === 'create') await store.createConversation('ours');
+    if (operation === 'side')
+      await store.createSideConversation({ parentConversationId: 'parent', operationKey: 'ours' });
+    if (operation === 'state') await store.setSideState(side, 'closed');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toContain('external');
+    if (operation === 'append') expect(store.listMessages('empty', 50).data).toHaveLength(1);
+    if (operation === 'import') expect(store.listMessages('parent', 50).data).toHaveLength(1);
+  },
+);
+
+test('post-commit reconciliation cannot duplicate our message or overwrite a newer conversation snapshot', async () => {
+  const records = retainedHistory(0);
+  const backend = createMemoryChatBackend(records);
+  const store = createChatStore(
+    {
+      ...backend,
+      async commit(change) {
+        await backend.commit(change);
+        const own = change.messages[0];
+        const conversation = change.conversations[0];
+        if (!own || !conversation) throw new Error('Missing own append');
+        const timestamp = new Date(Date.parse(own.createdAt) + 1).toISOString();
+        await backend.commit({
+          conversations: [
+            { ...conversation, updatedAt: timestamp, revision: (conversation.revision ?? 0) + 1 },
+          ],
+          messages: [
+            {
+              ...own,
+              id: 'after-ours',
+              parentId: own.id,
+              text: 'other window',
+              createdAt: timestamp,
+            },
+          ],
+          expectedConversations: [conversation],
+        });
+      },
+    },
+    records,
+    { familiarId: 'local' },
+  );
+  const listener = vi.fn(() => {
+    expect(store.listMessages('empty', 50).data.map((entry) => entry.text)).toEqual([
+      'ours',
+      'other window',
+    ]);
+    expect(store.getConversation('empty')?.revision).toBe(2);
+  });
+  store.subscribe(listener);
+  await store.appendMessage('empty', 'user', 'ours');
+  expect(listener).toHaveBeenCalledOnce();
+});
 test('side operation admission and replay do not enumerate 20000 unrelated conversations', async () => {
   const parent = retainedHistory(0).conversations[0];
   if (!parent) throw new Error('Missing parent fixture');
@@ -169,6 +269,39 @@ test('side operation admission and replay do not enumerate 20000 unrelated conve
   }
 });
 
+test('post-commit revision read failure is uncertain and does not notify success or duplicate a retried import', async () => {
+  const records = retainedHistory(1);
+  const backend = createMemoryChatBackend(records);
+  const getRevision = backend.getMutationRevision;
+  if (!getRevision) throw new Error('Missing shared revision');
+  let reads = 0;
+  const store = createChatStore(
+    {
+      ...backend,
+      getMutationRevision() {
+        if (++reads === 2) throw new Error('Revision read failed after commit');
+        return getRevision();
+      },
+    },
+    records,
+    { familiarId: 'local' },
+  );
+  const listener = vi.fn();
+  store.subscribe(listener);
+  const writer = createLocalChatWriter(store).sideConversations;
+  if (!writer) throw new Error('Missing side capability');
+  const input = {
+    parentConversationId: 'parent',
+    sideConversationId: 'long',
+    sourceMessageIds: ['m-000000'],
+    operationKey: 'uncertain-import',
+    excerpt: 'reviewed',
+  };
+  expect(await writer.bringBack(input)).toEqual({ status: 'error', code: 'service_unavailable' });
+  expect(listener).not.toHaveBeenCalled();
+  expect(await writer.bringBack(input)).toMatchObject({ status: 'ok' });
+  expect(store.listMessages('parent', 50).data).toHaveLength(1);
+});
 test.skipIf(process.env.CHAT_APPEND_BENCHMARK !== '1')(
   'reports 20k retained-history append samples excluding initialization',
   async () => {

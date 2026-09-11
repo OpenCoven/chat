@@ -31,6 +31,8 @@ const failureGuidance = {
   review:
     'The import result could not be confirmed. Retry the unchanged review with the same operation key.',
 };
+const MISSING_REVIEW_NOTICE =
+  'The exact parent, side note, or selected message is unavailable. This request did not commit an import. Choose available messages, or copy the excerpt before canceling if the note is unavailable.';
 
 function failure(
   result: Exclude<WriteResult<unknown>, { status: 'ok' }>,
@@ -175,15 +177,19 @@ export function ChatSideConversations({
       busy ||
       snapshot.phase === 'preparing' ||
       snapshot.phase === 'sending' ||
-      (snapshot.review && snapshot.phase !== 'rejected')
+      (snapshot.review && snapshot.phase !== 'rejected' && snapshot.phase !== 'reselecting')
     )
       return;
-    const previous = snapshot.phase === 'rejected' ? snapshot.review : null;
+    const previous =
+      snapshot.phase === 'rejected' || snapshot.phase === 'reselecting' ? snapshot.review : null;
     const source = messages.filter((message) => selected.includes(message.id));
     const input: BringBackInput = {
       parentConversationId: side.side.parentConversationId,
       sideConversationId: side.id,
-      sourceMessageIds: previous?.sourceMessageIds ?? source.map((message) => message.id),
+      sourceMessageIds:
+        snapshot.phase === 'reselecting'
+          ? source.map((message) => message.id)
+          : (previous?.sourceMessageIds ?? source.map((message) => message.id)),
       excerpt:
         previous?.excerpt ??
         source
@@ -197,15 +203,17 @@ export function ChatSideConversations({
       const result = await capability.prepareBringBack(input);
       if (result.status === 'ok') {
         reviewEntry.update({ review: { ...input, preconditions: result.data }, phase: 'editing' });
+      } else if (previous && result.status === 'error' && result.code === 'not_found') {
+        reviewEntry.update({ phase: 'unavailable', notice: MISSING_REVIEW_NOTICE });
       } else {
         reviewEntry.update({
-          phase: previous ? 'rejected' : 'idle',
+          phase: previous ? snapshot.phase : 'idle',
           notice: failure(result, 'prepare'),
         });
       }
     } catch {
       reviewEntry.update({
-        phase: previous ? 'rejected' : 'idle',
+        phase: previous ? snapshot.phase : 'idle',
         notice: 'The local branch could not be read. No import was attempted.',
       });
     }
@@ -217,9 +225,7 @@ export function ChatSideConversations({
     if (
       !capability ||
       !input?.excerpt.trim() ||
-      snapshot.phase === 'sending' ||
-      snapshot.phase === 'preparing' ||
-      snapshot.phase === 'rejected'
+      (snapshot.phase !== 'editing' && snapshot.phase !== 'uncertain')
     )
       return;
     reviewEntry.update({ phase: 'sending', notice: '' });
@@ -240,6 +246,8 @@ export function ChatSideConversations({
           notice:
             'The reviewed local branch changed. This request did not commit. Review again with a fresh operation key before importing.',
         });
+      } else if (result.status === 'error' && result.code === 'not_found') {
+        reviewEntry.update({ phase: 'unavailable', notice: MISSING_REVIEW_NOTICE });
       } else {
         reviewEntry.update({
           phase: 'uncertain',
@@ -382,7 +390,7 @@ export function ChatSideConversations({
             </fieldset>
           ) : null}
           {messages.length ? (
-            <fieldset disabled={busy || review !== null}>
+            <fieldset disabled={busy || (review !== null && phase !== 'reselecting')}>
               <legend>Select messages for a reviewed excerpt</legend>
               {messages.map((message, index) => (
                 <label className="chat-side__selection" key={message.id}>
@@ -429,6 +437,7 @@ export function ChatSideConversations({
                 rows={4}
                 maxLength={32_000}
                 disabled={busy || phase === 'uncertain' || phase === 'rejected'}
+                readOnly={phase === 'unavailable' || phase === 'reselecting'}
                 onChange={(event) =>
                   reviewEntry.update({ review: { ...review, excerpt: event.target.value } })
                 }
@@ -448,6 +457,21 @@ export function ChatSideConversations({
                 </p>
               ) : null}
               <div className="chat-side__actions">
+                {phase === 'unavailable' ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      reviewEntry.update({
+                        phase: 'reselecting',
+                        selected: [],
+                        notice:
+                          'Select available messages for a new review. Your edited excerpt is retained.',
+                      })
+                    }
+                  >
+                    Choose available messages
+                  </button>
+                ) : null}
                 {phase === 'rejected' ? (
                   <button
                     type="button"
@@ -461,7 +485,9 @@ export function ChatSideConversations({
                 ) : null}
                 <button
                   type="submit"
-                  disabled={busy || phase === 'rejected' || !review.excerpt.trim()}
+                  disabled={
+                    busy || (phase !== 'editing' && phase !== 'uncertain') || !review.excerpt.trim()
+                  }
                 >
                   Bring back reviewed excerpt
                 </button>

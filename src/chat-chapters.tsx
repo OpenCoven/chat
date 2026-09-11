@@ -102,7 +102,8 @@ export function ChatChapters({
   const unavailable = result.status === 'ok' && result.data.status === 'unavailable';
   const stale = result.status === 'reconcile_required' || result.status === 'stale';
   function close() {
-    if (stale) queryAdapter.invalidate();
+    if (stale || unavailable || (result.status === 'error' && !unsupported))
+      queryAdapter.invalidate();
     setExpanded(false);
   }
   return (

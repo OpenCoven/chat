@@ -237,6 +237,73 @@ test('a generic conflict after a committed import cannot release or edit its ope
   expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(1);
 });
 
+test('a definitive missing-source review keeps its excerpt for explicit reselection with a new key', async () => {
+  const current = await fixture();
+  const local = current.writer.sideConversations;
+  if (!local) throw new Error('Missing local capability');
+  await current.store.appendMessage(current.side.id, 'user', 'available replacement');
+  const bringBack = vi
+    .fn(local.bringBack)
+    .mockResolvedValueOnce({ status: 'error', code: 'not_found' });
+  render(
+    <ChatShell
+      queryAdapter={current.adapter}
+      writer={{ ...current.writer, sideConversations: { ...local, bringBack } }}
+    />,
+  );
+  await openSide();
+  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
+    target: { value: 'valuable edited excerpt' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  const reselect = await screen.findByRole('button', { name: 'Choose available messages' });
+  const excerpt = screen.getByRole('textbox', { name: 'Reviewed excerpt' });
+  expect(excerpt).toHaveValue('valuable edited excerpt');
+  expect(excerpt).toHaveAttribute('readonly');
+  expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
+  fireEvent.click(reselect);
+  fireEvent.click(screen.getByRole('checkbox', { name: /available replacement/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  await waitFor(() => expect(excerpt).not.toHaveAttribute('readonly'));
+  expect(excerpt).toHaveValue('valuable edited excerpt');
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await waitFor(() =>
+    expect(current.store.listMessages(current.parent.id, 50).data).toHaveLength(1),
+  );
+  expect(bringBack.mock.calls[1]?.[0].operationKey).not.toBe(
+    bringBack.mock.calls[0]?.[0].operationKey,
+  );
+  expect(bringBack.mock.calls[1]?.[0].sourceMessageIds).not.toEqual(
+    bringBack.mock.calls[0]?.[0].sourceMessageIds,
+  );
+});
+
+test('a discarded source failing re-review leaves the edited excerpt copyable until explicit cancellation', async () => {
+  const current = await fixture();
+  render(<ChatShell queryAdapter={current.adapter} writer={current.writer} />);
+  await openSide();
+  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
+    target: { value: 'retain this edit' },
+  });
+  await current.store.setSideState(
+    { parentConversationId: current.parent.id, sideConversationId: current.side.id },
+    'discarded',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Review again' }));
+  await screen.findByRole('button', { name: 'Choose available messages' });
+  const excerpt = screen.getByRole('textbox', { name: 'Reviewed excerpt' });
+  expect(excerpt).toHaveValue('retain this edit');
+  expect(excerpt).toHaveAttribute('readonly');
+  expect(excerpt).toBeEnabled();
+  expect(current.store.listMessages(current.parent.id, 50).data).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel review' }));
+  expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument();
+});
 test('in-flight review survives source unmount and remount without releasing its operation key', async () => {
   const first = await fixture();
   const other = await fixture();

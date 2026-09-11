@@ -67,6 +67,11 @@ captures current branch preconditions and a new operation key while retaining
 your edited excerpt. An uncertain operation never becomes editable under its
 old key. Failed side-note metadata reads offer **Retry local side notes** without
 enabling mutations against unknown metadata.
+If the exact source is missing, the rejected review stays available as a
+read-only, copyable excerpt. **Choose available messages** retains that text
+while preparing a new selection with a new key. If the note is gone, copy the
+excerpt before explicitly canceling; uncertain acknowledgements still cannot
+be edited or reselected.
 
 **Pending reviews do not survive reload or restart.** Saved imports do. If you
 reload after an uncertain save, inspect the parent before starting another import;
@@ -84,6 +89,13 @@ indexes plus an atomic shared mutation revision. Warm writes read only the exact
 conversation preconditions and indexed operation receipts; unchanged history is
 not scanned. Initial hydration and refresh after another window's writes still
 load history. Close older app windows if they block the database upgrade.
+Successful writes recheck the shared revision after their local update and
+reconcile detected competing commits before notifying observers. This is not a
+continuous subscription to other windows. The memory-only backend also uses
+keyed preconditions and operation-key counts, maintained across overwrites,
+deletions and discarded-note tombstones. Admission touches only the requested
+records and changed rows; loading snapshots and initial hydration still scan
+history.
 
 These are local-only notes with **no connected familiar**, not Cave-backed side
 chats. If durable storage is unavailable, the UI discloses memory-only custody.

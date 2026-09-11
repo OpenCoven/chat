@@ -412,6 +412,57 @@ test('chapter query caches remain source-bound, bounded and invalidatable', asyn
   expect(await read('one')).toEqual({ status: 'not_ready' });
 });
 
+test.each(['invalid', 'transient', 'unavailable'])(
+  'explicit reopen bypasses a cached %s chapter result',
+  async (kind) => {
+    const read = vi.fn().mockResolvedValue(page());
+    if (kind === 'transient') read.mockRejectedValueOnce(new Error('Temporary failure'));
+    else
+      read.mockResolvedValueOnce(
+        kind === 'invalid'
+          ? { ...page(), sourceRevision: '' }
+          : { ...page(), status: 'unavailable', data: [] },
+      );
+    const client = { listConversationChapters: read } as unknown as CaveReadClient;
+    const adapter = createQueryAdapter(() => client, { now: () => 0 });
+    render(
+      <ChatChapters
+        conversationId="one"
+        messages={messages}
+        hasMoreMessages={false}
+        queryAdapter={adapter}
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: /Ongoing/ });
+    fireEvent.click(toggle);
+    await screen.findByText('Chapter index unavailable. Your transcript is unchanged.');
+    fireEvent.keyDown(toggle, { key: 'Escape' });
+    fireEvent.click(toggle);
+    expect(await screen.findByRole('navigation', { name: 'UTC chapters' })).toBeVisible();
+    expect(read).toHaveBeenCalledTimes(2);
+  },
+);
+
+test('reopening legitimate unsupported chapter fallback does not invalidate other query caches', async () => {
+  const client = {} as CaveReadClient;
+  const adapter = createQueryAdapter(() => client, { now: () => 0 });
+  const invalidate = vi.fn(adapter.invalidate);
+  render(
+    <ChatChapters
+      conversationId="one"
+      messages={messages}
+      hasMoreMessages={false}
+      queryAdapter={{ ...adapter, invalidate }}
+    />,
+  );
+  const toggle = screen.getByRole('button', { name: /Ongoing/ });
+  fireEvent.click(toggle);
+  await screen.findByText(/Full chapter index unsupported/);
+  fireEvent.click(toggle);
+  fireEvent.click(toggle);
+  await screen.findByText(/Full chapter index unsupported/);
+  expect(invalidate).not.toHaveBeenCalled();
+});
 test('same-name familiars keep separate exact conversations in the production shell', async () => {
   const conversations = [
     {

@@ -204,10 +204,6 @@ export function createChatStore(
       // preconditions still fence competing writes after this revision read.
       if (currentRevision === undefined || currentRevision !== indexedBackendRevision) {
         const current = await backend.loadAll();
-        conversations.clear();
-        messagesByConversation.clear();
-        importsByOperation.clear();
-        sideIdsByOperation.clear();
         hydrate(current);
         indexedBackendRevision = currentRevision;
       }
@@ -261,6 +257,10 @@ export function createChatStore(
   }
 
   function hydrate(records: ChatRecords): void {
+    conversations.clear();
+    messagesByConversation.clear();
+    importsByOperation.clear();
+    sideIdsByOperation.clear();
     const clean = sanitizeRecords(records);
     for (const entry of clean.conversations) {
       conversations.set(entry.id, entry);
@@ -286,7 +286,14 @@ export function createChatStore(
 
   hydrate(initialRecords);
 
-  function announce(): void {
+  async function announce(): Promise<void> {
+    const currentRevision = await backend.getMutationRevision?.();
+    if (currentRevision !== undefined && currentRevision !== indexedBackendRevision) {
+      // Our local updates are already applied. Replace them with the shared
+      // snapshot before notifying; never append them again after hydration.
+      hydrate(await backend.loadAll());
+      indexedBackendRevision = currentRevision;
+    }
     revision += 1;
     const change = Object.freeze({ revision });
     for (const listener of [...listeners]) {
@@ -300,8 +307,8 @@ export function createChatStore(
     }
     try {
       await backend.commit(change);
-      // Count only our own commit. A competing commit leaves a revision mismatch
-      // and forces a fresh snapshot on the next operation.
+      // Count only our own commit; announce reconciles any detected competition
+      // after our local update and before exposing it to observers.
       if (indexedBackendRevision !== undefined) indexedBackendRevision += 1;
     } catch (error) {
       if (error instanceof ChatConflictError) throw new ChatStoreError('conflict', error.message);
@@ -359,7 +366,7 @@ export function createChatStore(
 
         await commit({ conversations: [conversation], messages: [] });
         conversations.set(conversation.id, conversation);
-        announce();
+        await announce();
         return conversation;
       });
     },
@@ -406,7 +413,7 @@ export function createChatStore(
         });
         conversations.set(touched.id, touched);
         indexMessage(message);
-        announce();
+        await announce();
         return message;
       });
     },
@@ -466,7 +473,7 @@ export function createChatStore(
         });
         conversations.set(side.id, side);
         sideIdsByOperation.set(key, side.id);
-        announce();
+        await announce();
         return side;
       });
     },
@@ -501,7 +508,7 @@ export function createChatStore(
           }
           messagesByConversation.delete(side.id);
         }
-        announce();
+        await announce();
         return touched;
       });
     },
@@ -596,7 +603,7 @@ export function createChatStore(
         });
         conversations.set(parent.id, touched);
         indexMessage(message);
-        announce();
+        await announce();
         return message;
       });
     },

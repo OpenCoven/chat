@@ -163,6 +163,26 @@ test('duplicate create and Bring back requests replay once, including after relo
   ).toBe('discarded');
 });
 
+test('missing source rejection is precommit while an existing receipt survives discarded-note tombstones', async () => {
+  const { store, backend, input, parent } = await setup();
+  const review = { ...input, preconditions: await store.prepareBringBack(input) };
+  const before = await backend.loadAll();
+  const revision = backend.getMutationRevision?.();
+  await expect(store.bringBack({ ...review, sourceMessageIds: ['missing'] })).rejects.toMatchObject(
+    { code: 'not_found' },
+  );
+  expect(await backend.loadAll()).toEqual(before);
+  expect(backend.getMutationRevision?.()).toBe(revision);
+  const receipt = await store.bringBack(review);
+  await store.setSideState(review, 'discarded');
+  expect(await store.bringBack(review)).toEqual(receipt);
+  await expect(store.bringBack({ ...review, sourceMessageIds: ['missing'] })).rejects.toMatchObject(
+    { code: 'conflict' },
+  );
+  expect(
+    store.listMessages(parent.id, 50).data.filter((message) => message.broughtBack),
+  ).toHaveLength(1);
+});
 test('exact local parent, source message, and operation payload are fenced', async () => {
   const { store, parent, side, input } = await setup();
   const other = await store.createConversation('Other parent');

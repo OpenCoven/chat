@@ -215,7 +215,7 @@ for (const size of [50, 20_000]) {
     expect(reads.full).toBe(0);
     expect(reads.writeFull).toBe(0);
     expect(reads.indexed).toBe(2);
-    expect(reads.keyed).toBeLessThanOrEqual(12);
+    expect(reads.keyed).toBe(14);
     await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
     await expect(
       page.getByRole('list', { name: 'Messages' }).getByText('Bounded reviewed import'),
@@ -504,4 +504,115 @@ test('reload exposes a committed uncertain creation for list reconciliation with
   await expect(page.getByRole('button', { name: /^Retained side note/ })).toHaveCount(1);
   await page.getByRole('button', { name: /^Retained side note/ }).click();
   await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
+});
+
+for (const timing of ['before', 'after'] as const) {
+  test(`a competing write ${timing} our commit is reconciled before the successful UI refresh`, async ({
+    page,
+  }) => {
+    await seedLegacyHistory(page, 50);
+    await page.evaluate((when) => {
+      const original = IDBDatabase.prototype.transaction;
+      let injected = false;
+      IDBDatabase.prototype.transaction = function (...args) {
+        if (args[1] !== 'readwrite' || injected)
+          return Reflect.apply(original, this, args) as IDBTransaction;
+        injected = true;
+        const own =
+          when === 'after' ? (Reflect.apply(original, this, args) as IDBTransaction) : null;
+        const competing = Reflect.apply(original, this, args) as IDBTransaction;
+        const conversations = competing.objectStore('conversations');
+        const messages = competing.objectStore('messages');
+        const parent = conversations.get('parent');
+        parent.onsuccess = () => {
+          if (when === 'before') {
+            conversations.put({
+              ...parent.result,
+              id: 'external-parent',
+              title: 'External sidebar thread',
+            });
+            messages.put({
+              id: 'external-message',
+              conversationId: 'external-parent',
+              parentId: null,
+              role: 'user',
+              text: 'External transcript',
+              createdAt: parent.result.updatedAt,
+            });
+          } else {
+            const turns = messages
+              .index('by_conversation')
+              .getAll(IDBKeyRange.bound(['parent'], ['parent', []]));
+            turns.onsuccess = () => {
+              const last = turns.result.at(-1);
+              const timestamp = new Date(Date.parse(parent.result.updatedAt) + 1).toISOString();
+              messages.put({
+                id: 'after-own-commit',
+                conversationId: 'parent',
+                parentId: last.id,
+                role: 'user',
+                text: 'External after our commit',
+                createdAt: timestamp,
+              });
+              conversations.put({
+                ...parent.result,
+                revision: parent.result.revision + 1,
+                updatedAt: timestamp,
+              });
+            };
+          }
+        };
+        const meta = competing.objectStore('meta');
+        const revision = meta.get('mutationRevision');
+        revision.onsuccess = () =>
+          meta.put({ key: 'mutationRevision', value: revision.result.value + 1 });
+        return own ?? (Reflect.apply(original, this, args) as IDBTransaction);
+      };
+    }, timing);
+    await send(page, 'Our successful append');
+    await expect(
+      page
+        .getByRole('list', { name: 'Messages' })
+        .getByText('Our successful append', { exact: true }),
+    ).toHaveCount(1);
+    if (timing === 'before') {
+      await expect(page.getByRole('option', { name: /External sidebar thread/ })).toBeVisible();
+    } else {
+      await expect(
+        page
+          .getByRole('list', { name: 'Messages' })
+          .getByText('External after our commit', { exact: true }),
+      ).toBeVisible();
+    }
+    expect((await durableSummary(page)).revision).toBe(2);
+  });
+}
+
+test('a discarded reviewed source keeps its edited excerpt available for copying and explicit cancellation', async ({
+  page,
+  context,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await prepareFixedReview(page);
+  const other = await context.newPage();
+  await other.goto('/');
+  await other.getByRole('button', { name: /^Legacy side/ }).click();
+  await other.getByRole('button', { name: 'Discard note', exact: false }).click();
+  await other.getByRole('button', { name: 'Discard local messages', exact: true }).click();
+  await expect(other.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
+  await page.getByRole('button', { name: 'Review again', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Choose available messages', exact: true }),
+  ).toBeVisible();
+  const excerpt = page.getByRole('textbox', { name: 'Reviewed excerpt' });
+  await expect(excerpt).toHaveValue('Atomic reviewed excerpt');
+  await expect(excerpt).toHaveAttribute('readonly', '');
+  await expect(excerpt).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }),
+  ).toBeDisabled();
+  expect((await durableSummary(page)).imported).toBe(0);
+  await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
+  await expect(excerpt).toHaveCount(0);
 });
