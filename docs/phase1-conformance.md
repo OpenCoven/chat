@@ -20,23 +20,25 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `14775ce396f73112ff95205e4e97303740748e13` | `e8419002ca5ea911b7292e27cf2fc08ef917e0bb` |
+| Executable harness | `39fa8953bc9f884dbc9ddd93a2c1b73fd157e033` | `fb057dc6025c431b36f844beb4bfca9ddd0705b0` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
 retains those adoption bytes and additionally updates the Windows supervisor
-and its byte-for-byte workflow copy for owner-only status staging files. The
+and its byte-for-byte workflow copy for owner-only status staging files and
+bounded quota diagnostics that preserve the first failure. The
 existing whole-checkout checks cover vendor files; no authority file list or
 cleanliness check is relaxed. Only the two Cargo-file bindings change within
 the production authority and native delta tables; 23 of the 25 pinned harness
-files retain their previous bytes.
+files retain their bytes from staging harness
+`14775ce396f73112ff95205e4e97303740748e13`.
 
 [Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
 validated the exact production tree and the earlier GLib-adoption harness at
 `e0fca804e46d1a30eedcdae505c33e70d06035fb`: production passed 128 native
 tests and that harness passed 158. Both passed the optimized desktop build, 11
 patched iterator tests, Linux dependency-graph checks and final source
-consistency. That run predates the owner-only status staging fix and does not
+consistency. That run predates the status staging and quota diagnostic changes and does not
 validate the current executable harness. The source commits have verified
 signatures and are retained as parents of the adoption branch. This adoption
 must land with an actual merge commit to preserve their ancestry.
@@ -97,8 +99,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `d56021851537d62cfad9ece80583a908f20898a1`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `14775ce396f73112ff95205e4e97303740748e13`,
-  tree `e8419002ca5ea911b7292e27cf2fc08ef917e0bb`, retained in the
+- Chat conformance driver `39fa8953bc9f884dbc9ddd93a2c1b73fd157e033`,
+  tree `fb057dc6025c431b36f844beb4bfca9ddd0705b0`, retained in the
   adoption branch ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
