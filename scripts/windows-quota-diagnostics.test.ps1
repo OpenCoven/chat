@@ -74,3 +74,15 @@ try {
   }
 } finally { $quotaState.Dispose() }
 Write-Host 'First quota breach remains distinct from later monitor errors.'
+
+# Terminal rechecks must also preserve an earlier concrete quota breach.
+$breachedResult = [OpenCoven.WindowsJobRunResult]::new()
+$breachedResult.GetType().GetProperty('ResourceQuotaExceeded').SetValue($breachedResult, $true)
+$breachedResult.GetType().GetProperty('ResourceQuotaLabel').SetValue($breachedResult, 'bootstrap aggregate')
+$terminal.Invoke($null, [object[]]@($breachedResult, $malformed))
+if (-not $breachedResult.ResourceQuotaExceeded -or $breachedResult.ResourceQuotaMonitorError -or
+    $breachedResult.ResourceQuotaLabel -cne 'bootstrap aggregate' -or
+    $null -ne $breachedResult.ResourceQuotaMonitorCategory -or $breachedResult.ExitCode -eq 0) {
+  throw 'Terminal monitor error replaced the first quota-breach result.'
+}
+Write-Host 'Terminal recheck preserves the first quota breach.'

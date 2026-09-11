@@ -6712,13 +6712,13 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                result.ResourceQuotaExceeded = true;
-                if (!result.ResourceQuotaMonitorError)
+                if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
                 {
                     result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                    result.ResourceQuotaMonitorError = true;
+                    result.ResourceQuotaLabel = null;
                 }
-                result.ResourceQuotaMonitorError = true;
-                result.ResourceQuotaLabel = null;
+                result.ResourceQuotaExceeded = true;
                 result.ExitCode = SupervisorFailureExitCode;
             }
         }
