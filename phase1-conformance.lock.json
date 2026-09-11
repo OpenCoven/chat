@@ -141,8 +141,8 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "c8a8bb4d97ef34ef2be13a21401f1ac740c93905",
-        "sha256": "b15cddf5bf0954c41bf4765676fb3fd6bc2916eb0e5ab29fa0ef2407cd24f043"
+        "blob": "7900ab8086b03f100c3b09868bb575937f978d82",
+        "sha256": "62319ddc6de9a7f5e20a7abbc801410cdfe71f3770c0d7e3dd32f9f3c3248819"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
@@ -153,13 +153,13 @@
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "2cc49129ba7a4649e84a55beb942f7fbaa77b79c",
-        "sha256": "637e8de652eee686a3d62ade180234020c3bec76858cb05a5432ead919852c20"
+        "blob": "5204ef50c5530e085b594470255b7b74b766e764",
+        "sha256": "c6bb5e6d4c570126e22b6b5db2981b7bc3a372b591842900bbfacf52eab8e507"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "8728413b2fc97ff4f61384fa90e0cf0ab1b2340d",
-        "sha256": "f4f9a5126d5467949d7e4ee42a2a7748c52bf69c5b5790cfc41a5cd0684f159c"
+        "blob": "76ae14bde61639edbffe5a2e519a3c1078183eff",
+        "sha256": "cc8b647d8f1099a71cd44726eedfc7e730b9dbc5cffe4c483e6808ac49699221"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
