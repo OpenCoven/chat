@@ -4608,7 +4608,18 @@ Start-Sleep -Seconds 300
     if ($result.ResourceQuotaMonitorError) {
       throw 'Owner-only status file blocked directory quota accounting.'
     }
-    if (-not [IO.File]::Exists($timeoutStatusFile)) {
+    $timeoutStatusEntries = @(
+      [IO.DirectoryInfo]::new(
+        $timeoutContext.User.StatusStagingPath
+      ).EnumerateFileSystemInfos(
+        'owner-only-timeout.tmp',
+        [IO.SearchOption]::TopDirectoryOnly
+      )
+    )
+    if (
+      $timeoutStatusEntries.Count -ne 1 -or
+      $timeoutStatusEntries[0].Name -cne 'owner-only-timeout.tmp'
+    ) {
       throw 'Timed-out producer did not leave the owner-only status file.'
     }
     if (-not $timeoutJob.IsQuarantineComplete) {

@@ -22,19 +22,24 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
 | Executable harness | `00b73e08e21be563ed36cbe4e502067c52725c84` | `91f418c9dbf08b776c6c53848a74471572be3635` |
 
-Each snapshot changes only two Cargo files and 123 reviewed vendor/provenance
-files from its prior frozen revision. The 121 crate files are identical in both
-snapshots. The existing whole-checkout checks cover vendor files; no authority
-file list or cleanliness check is relaxed. Only the two Cargo-file bindings
-change within the production authority and native delta tables. All 25 pinned
-harness files retain their previous bytes.
+The production snapshot changes only two Cargo files and 123 reviewed
+vendor/provenance files from its prior frozen revision. The executable harness
+retains those adoption bytes and additionally updates the Windows supervisor
+and its byte-for-byte workflow copy for owner-only status staging files. The
+existing whole-checkout checks cover vendor files; no authority file list or
+cleanliness check is relaxed. Only the two Cargo-file bindings change within
+the production authority and native delta tables; 23 of the 25 pinned harness
+files retain their previous bytes.
 
 [Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
-validated both exact trees: production passed 128 native tests and the harness
-passed 158. Both passed the optimized desktop build, 11 patched iterator tests,
-Linux dependency-graph checks and final source consistency. The source commits
-have verified signatures and are retained as parents of the adoption branch.
-This adoption must land with an actual merge commit to preserve their ancestry.
+validated the exact production tree and the earlier GLib-adoption harness at
+`e0fca804e46d1a30eedcdae505c33e70d06035fb`: production passed 128 native
+tests and that harness passed 158. Both passed the optimized desktop build, 11
+patched iterator tests, Linux dependency-graph checks and final source
+consistency. That run predates the owner-only status staging fix and does not
+validate the current executable harness. The source commits have verified
+signatures and are retained as parents of the adoption branch. This adoption
+must land with an actual merge commit to preserve their ancestry.
 
 Native candidate validation does not establish protected acceptance. Full
 packaged CI, an updated SDK validator binding, both protected scopes and fresh
@@ -1320,7 +1325,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 295,741 | `cf0bb0cba4b7d784e8611db313e046007e21e7ed49e0d30fd3c8fc15d8f2aee0` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,096 | `4662469fcddf51726ff897d2c0088594b56f282c85bfe16dae577599194c507f` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,404 | `132ca6a8c6e14549f9089f810755c8602814b936d8ebe5140fba70c4c1793ac4` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-status-acl-probe.cs` | 8,380 | `0746f185b73d2ba7bf99efbd0fb38e91f3ad3c5618be0ae0248eb02944de1b1b` |
