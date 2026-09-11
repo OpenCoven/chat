@@ -61,3 +61,16 @@ try {
   }
 } finally { $asyncState.Dispose() }
 Write-Host 'Background quota monitor failure propagation passed.'
+# A later monitor exception must not relabel an already recorded quota breach.
+$quotaState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $stateType.GetMethod('RecordQuotaExceeded', $instanceFlags).Invoke($quotaState, [object[]]@('bootstrap aggregate'))
+  $stateType.GetMethod('RecordMonitorError', $instanceFlags).Invoke($quotaState, [object[]]@([IO.IOException]::new('secret-path')))
+  if (-not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($quotaState) -or
+      $stateType.GetProperty('QuotaLabel', $instanceFlags).GetValue($quotaState) -cne 'bootstrap aggregate' -or
+      $stateType.GetProperty('MonitorError', $instanceFlags).GetValue($quotaState) -or
+      $null -ne $stateType.GetProperty('MonitorErrorCategory', $instanceFlags).GetValue($quotaState)) {
+    throw 'Later monitor error replaced the first quota-breach result.'
+  }
+} finally { $quotaState.Dispose() }
+Write-Host 'First quota breach remains distinct from later monitor errors.'
