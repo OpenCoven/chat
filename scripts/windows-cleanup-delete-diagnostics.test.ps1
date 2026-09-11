@@ -104,7 +104,7 @@ try {
     New-Item -ItemType Directory -Path $target | Out-Null
     [IO.File]::WriteAllBytes((Join-Path $target 'keep.bin'), [byte[]](5))
     New-Item -ItemType Junction -Path (Join-Path $root 'link') -Target $target | Out-Null
-    $deleteTree.Invoke($null, [object[]]@($root))
+    $deleteTree.Invoke($null, [object[]]@([string]$root))
     if (Test-Path -LiteralPath ('\\?\' + $root)) { throw 'Cleanup tree survived removal.' }
     if (-not (Test-Path -LiteralPath (Join-Path $target 'keep.bin'))) { throw 'Cleanup followed a junction into its target.' }
     Write-Host 'Native cleanup tree removal passed.'

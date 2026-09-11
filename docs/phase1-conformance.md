@@ -1370,7 +1370,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,343 | `cb642a675e39d6052827edc01658466b41b3f590e6e52931f257eaf5fd64ba3e` |
-| `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,425 | `c728710dc3aab80c5bff91af0036860e9a7648994c3dc168d7b60a374f1b0329` |
+| `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
