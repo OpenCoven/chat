@@ -1575,3 +1575,12 @@ Only the supervisor and its embedded workflow authority bytes change from
 the cleanup harness; all production inputs, native deltas and limits remain
 unchanged. Native Windows validation and a fresh SDK/protected binding remain
 required.
+
+Local validation of the combined quota-context diagnostic passed eight
+PowerShell regression groups, including real denied enumeration, wildcard
+enumeration, long-path failure, unknown-value sanitization and first-failure
+propagation. The workflow regression confirms the primary diagnostic survives
+a later cleanup failure. Final lock tests passed 92 cases with one platform
+skip; workflow/specification tests passed 128 cases with 19 platform skips.
+Independent specification, quality and final binding reviews passed. These
+local results do not replace native Windows CI or protected execution.
