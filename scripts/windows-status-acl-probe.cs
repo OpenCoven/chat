@@ -20,6 +20,27 @@ public static class StatusAclProbe
         uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share,
+        IntPtr security, uint creation, uint attributes, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private static string ProbeDirectoryWriteDacl(string path)
+    {
+        IntPtr handle = CreateFileW(
+            path,
+            0x00040000,
+            0x00000001 | 0x00000002 | 0x00000004,
+            IntPtr.Zero,
+            3,
+            0x02000000,
+            IntPtr.Zero);
+        if (handle == new IntPtr(-1))
+            return Classify((uint)Marshal.GetLastWin32Error());
+        CloseHandle(handle);
+        return "success";
+    }
 
     private static string Classify(uint status)
     {
@@ -30,7 +51,10 @@ public static class StatusAclProbe
         return "unclassified";
     }
 
-    private static void VerifyInheritedSecurity(string path, string supervisorSid)
+    private static void VerifyInheritedSecurity(
+        string path,
+        string supervisorSid,
+        int isolatedAccess)
     {
         using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
         {
@@ -38,30 +62,66 @@ public static class StatusAclProbe
             FileSecurity security = new FileInfo(path).GetAccessControl();
             if (!identity.User.Equals(security.GetOwner(typeof(SecurityIdentifier))))
                 throw new InvalidOperationException("created-file-owner-mismatch");
-            var expected = new Dictionary<string, int> {
-                { "S-1-5-18", 0x001f01ff },
-                { "S-1-5-32-544", 0x001f01ff },
-                { supervisorSid, 0x001f01ff },
-                { identity.User.Value, 0x001301bf },
-                { "S-1-3-4", 0x00020000 }
-            };
             var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
-            if (descriptor.DiscretionaryAcl == null || descriptor.DiscretionaryAcl.Count != expected.Count)
+            var entries = new List<InheritedAce>();
+            if (descriptor.DiscretionaryAcl == null)
                 throw new InvalidOperationException("created-file-acl-count-mismatch");
             foreach (GenericAce entry in descriptor.DiscretionaryAcl)
             {
                 var ace = entry as CommonAce;
-                int mask;
-                if (ace == null || ace.IsCallback || ace.AceQualifier != AceQualifier.AccessAllowed
-                    || (ace.AceFlags & AceFlags.Inherited) == 0
-                    || (ace.AceFlags & AceFlags.InheritOnly) != 0
-                    || !expected.TryGetValue(ace.SecurityIdentifier.Value, out mask)
-                    || ace.AccessMask != mask)
-                    throw new InvalidOperationException("created-file-acl-mismatch");
-                expected.Remove(ace.SecurityIdentifier.Value);
+                if (ace == null) throw new InvalidOperationException("created-file-acl-mismatch");
+                entries.Add(new InheritedAce(ace.SecurityIdentifier.Value, ace.AccessMask,
+                    ace.AceFlags, !ace.IsCallback && ace.AceQualifier == AceQualifier.AccessAllowed));
             }
-            if (expected.Count != 0) throw new InvalidOperationException("created-file-acl-missing");
+            VerifyInheritedAcl(supervisorSid, identity.User.Value, isolatedAccess, entries);
         }
+    }
+
+    // Project native ACEs into primitive values so the exact-shape check can also
+    // run on non-Windows hosts. Native owner and ACL reads remain above.
+    internal sealed class InheritedAce
+    {
+        internal readonly string Sid;
+        internal readonly int AccessMask;
+        internal readonly AceFlags Flags;
+        internal readonly bool IsAllow;
+        internal InheritedAce(string sid, int mask, AceFlags flags, bool isAllow = true)
+        {
+            Sid = sid; AccessMask = mask; Flags = flags; IsAllow = isAllow;
+        }
+    }
+
+    internal static void VerifyInheritedAcl(string supervisorSid, string ownerSid,
+        int isolatedAccess, IReadOnlyList<InheritedAce> entries)
+    {
+        var expected = new Dictionary<string, int> {
+            { "S-1-5-18", 0x001f01ff },
+            { "S-1-5-32-544", 0x001f01ff },
+            { supervisorSid, 0x001f01ff },
+            { ownerSid, isolatedAccess },
+            { "S-1-3-4", 0x00020000 }
+        };
+        // Staging inherits both the directory's owner MODIFY ACE and its
+        // file-only owner FULL ACE. Every other trustee must appear once.
+        bool ownerModifyRequired = isolatedAccess == 0x001f01ff;
+        if (entries == null || entries.Count != expected.Count + (ownerModifyRequired ? 1 : 0))
+            throw new InvalidOperationException("created-file-acl-count-mismatch");
+        foreach (InheritedAce ace in entries)
+        {
+            if (ace == null || !ace.IsAllow || ace.Flags != AceFlags.Inherited)
+                throw new InvalidOperationException("created-file-acl-mismatch");
+            if (ownerModifyRequired && ace.Sid == ownerSid && ace.AccessMask == 0x001301bf)
+            {
+                ownerModifyRequired = false;
+                continue;
+            }
+            int mask;
+            if (!expected.TryGetValue(ace.Sid, out mask) || ace.AccessMask != mask)
+                throw new InvalidOperationException("created-file-acl-mismatch");
+            expected.Remove(ace.Sid);
+        }
+        if (ownerModifyRequired || expected.Count != 0)
+            throw new InvalidOperationException("created-file-acl-mismatch");
     }
 
     public static string RunControl(string scratchDirectory)
@@ -71,19 +131,39 @@ public static class StatusAclProbe
 
     public static string Run(string scratchDirectory, string supervisorSid)
     {
-        if (string.IsNullOrEmpty(supervisorSid))
+        if (string.IsNullOrWhiteSpace(supervisorSid))
             throw new InvalidOperationException("supervisor-identity-required");
-        return RunInternal(scratchDirectory, supervisorSid);
+        return RunInternal(scratchDirectory, supervisorSid, 0x001301bf);
     }
 
-    private static string RunInternal(string scratchDirectory, string supervisorSid)
+    public static string RunStaging(string scratchDirectory, string supervisorSid)
+    {
+        if (string.IsNullOrWhiteSpace(supervisorSid))
+            throw new InvalidOperationException("supervisor-identity-required");
+        ValidateScratchDirectory(scratchDirectory);
+        return "directory-write-dac:" + ProbeDirectoryWriteDacl(scratchDirectory) +
+            "\n" + RunInternal(scratchDirectory, supervisorSid, 0x001f01ff, true);
+    }
+
+    private static void ValidateScratchDirectory(string scratchDirectory)
     {
         if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("windows-required");
         if (!Directory.Exists(scratchDirectory)) throw new InvalidOperationException("scratch-required");
+    }
+
+    private static string RunInternal(
+        string scratchDirectory,
+        string supervisorSid,
+        int isolatedAccess = 0,
+        bool directFiles = false)
+    {
+        ValidateScratchDirectory(scratchDirectory);
         IntPtr descriptor = IntPtr.Zero;
         IntPtr owner = IntPtr.Zero;
-        string root = Path.Combine(scratchDirectory, "status-acl-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        string prefix = "status-acl-" + Guid.NewGuid().ToString("N");
+        string root = directFiles ? scratchDirectory : Path.Combine(scratchDirectory, prefix);
+        var ownedFiles = new List<string>();
+        if (!directFiles) Directory.CreateDirectory(root);
         try
         {
             uint size;
@@ -108,14 +188,16 @@ public static class StatusAclProbe
             string[] results = new string[3];
             for (int i = 0; i < labels.Length; i++)
             {
-                string path = Path.Combine(root, labels[i]);
+                string path = Path.Combine(root, directFiles ? prefix + "-" + labels[i] : labels[i]);
                 // Exclusive creation, write, sync, and close mirror the writer.
                 using (FileStream file = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
                 {
+                    ownedFiles.Add(path);
                     file.WriteByte(10);
                     file.Flush(true);
                 }
-                if (supervisorSid != null) VerifyInheritedSecurity(path, supervisorSid);
+                if (supervisorSid != null)
+                    VerifyInheritedSecurity(path, supervisorSid, isolatedAccess);
                 uint status = SetNamedSecurityInfoW(path, 1, flags[i],
                     i == 2 ? IntPtr.Zero : owner, IntPtr.Zero,
                     i == 1 ? IntPtr.Zero : dacl, IntPtr.Zero);
@@ -128,7 +210,14 @@ public static class StatusAclProbe
             if (owner != IntPtr.Zero) Marshal.FreeHGlobal(owner);
             if (descriptor != IntPtr.Zero) LocalFree(descriptor);
             // File deletion uses existing modify rights, never an ACL override.
-            Directory.Delete(root, true);
+            if (directFiles)
+            {
+                foreach (string path in ownedFiles) File.Delete(path);
+            }
+            else
+            {
+                Directory.Delete(root, true);
+            }
         }
     }
 }

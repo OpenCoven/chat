@@ -107,6 +107,7 @@ namespace OpenCoven
             string rootPath,
             string profilePath,
             string tempPath,
+            string statusStagingPath,
             string workspacePath,
             string operatingSystemProfilePath,
             string validationSummary)
@@ -117,6 +118,7 @@ namespace OpenCoven
             RootPath = rootPath;
             ProfilePath = profilePath;
             TempPath = tempPath;
+            StatusStagingPath = statusStagingPath;
             WorkspacePath = workspacePath;
             OperatingSystemProfilePath = operatingSystemProfilePath;
             ValidationSummary = validationSummary;
@@ -127,6 +129,7 @@ namespace OpenCoven
         public string RootPath { get; private set; }
         public string ProfilePath { get; private set; }
         public string TempPath { get; private set; }
+        public string StatusStagingPath { get; private set; }
         public string WorkspacePath { get; private set; }
         public string OperatingSystemProfilePath { get; private set; }
         public string ValidationSummary { get; private set; }
@@ -216,12 +219,14 @@ namespace OpenCoven
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
+                string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                 string workspacePath = Path.Combine(fullRoot, "workspace");
                 Directory.CreateDirectory(fullRoot);
                 Directory.CreateDirectory(profilePath);
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Local"));
                 Directory.CreateDirectory(tempPath);
+                Directory.CreateDirectory(statusStagingPath);
                 Directory.CreateDirectory(workspacePath);
 
                 SecurityIdentifier supervisor =
@@ -246,6 +251,10 @@ namespace OpenCoven
                         sid,
                         supervisor.Value);
                 }
+                WindowsJobSupervisor.SecureStatusStagingDirectory(
+                    statusStagingPath,
+                    sid,
+                    supervisor.Value);
                 WindowsJobSupervisor.ProtectCurrentProcess(
                     sid,
                     supervisor.Value);
@@ -257,6 +266,7 @@ namespace OpenCoven
                     fullRoot,
                     profilePath,
                     tempPath,
+                    statusStagingPath,
                     workspacePath,
                     Path.Combine(GetProfilesRoot(), userName),
                     validationSummary);
@@ -1834,12 +1844,44 @@ namespace OpenCoven
             string isolatedSid,
             string supervisorSid)
         {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS);
+        }
+
+        internal static void SecureStatusStagingDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
+        }
+
+        private static void SecureIsolatedDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess = 0)
+        {
             EnablePrivilege("SeRestorePrivilege");
             string sddl = "O:" + isolatedSid + "D:P" +
                 "(A;OICI;0x001f01ff;;;SY)" +
                 "(A;OICI;0x001f01ff;;;BA)" +
                 "(A;OICI;0x001f01ff;;;" + supervisorSid + ")" +
-                "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                "(A;OICI;0x" + isolatedAccess.ToString("x8") + ";;;" + isolatedSid + ")" +
+                (isolatedChildOnlyAccess == 0
+                    ? String.Empty
+                    : "(A;OIIO;0x" +
+                        isolatedChildOnlyAccess.ToString("x8") +
+                        ";;;" + isolatedSid + ")") +
                 "(A;OICI;0x00020000;;;S-1-3-4)";
             IntPtr securityDescriptor;
             uint securityDescriptorLength;
@@ -1871,7 +1913,12 @@ namespace OpenCoven
             {
                 LocalFree(securityDescriptor);
             }
-            ValidateIsolatedDirectory(path, isolatedSid, supervisorSid);
+            ValidateIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                isolatedAccess,
+                isolatedChildOnlyAccess);
         }
 
         public static void ProtectSupervisorDirectory(string path)
@@ -1934,13 +1981,38 @@ namespace OpenCoven
                 throw new InvalidOperationException(
                     "Restricted Windows identity SID is unavailable.");
             }
-            ValidateIsolatedDirectory(path, current.Value, null);
+            ValidateIsolatedDirectory(path, current.Value, null, FILE_MODIFY_ACCESS, 0);
+        }
+
+        public static void RequireCurrentIdentityOwnsStatusStagingDirectory(
+            string path,
+            string supervisorSid)
+        {
+            if (String.IsNullOrWhiteSpace(supervisorSid))
+            {
+                throw new InvalidOperationException(
+                    "Status staging supervisor identity is required.");
+            }
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Restricted Windows identity SID is unavailable.");
+            }
+            ValidateIsolatedDirectory(
+                path,
+                current.Value,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
         }
 
         private static void ValidateIsolatedDirectory(
             string path,
             string isolatedSid,
-            string supervisorSid)
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess)
         {
             if (String.IsNullOrWhiteSpace(path) ||
                 !Path.IsPathRooted(path) ||
@@ -2022,16 +2094,18 @@ namespace OpenCoven
                         out aclInformation,
                         (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
                         AclSizeInformation) ||
-                    aclInformation.AceCount != 5)
+                    aclInformation.AceCount !=
+                        (isolatedChildOnlyAccess == 0 ? 5 : 6))
                 {
                     throw new InvalidOperationException(
-                        "Restricted directory DACL must contain exactly five ACEs.");
+                        "Restricted directory DACL has an unexpected ACE count.");
                 }
 
                 bool foundSystem = false;
                 bool foundAdministrators = false;
                 bool foundSupervisor = false;
                 bool foundOwner = false;
+                bool foundOwnerChildOnly = isolatedChildOnlyAccess == 0;
                 bool foundOwnerRights = false;
                 byte directoryFlags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
                 for (uint index = 0; index < aclInformation.AceCount; index++)
@@ -2052,37 +2126,49 @@ namespace OpenCoven
                         Marshal.OffsetOf(
                             typeof(ACCESS_ALLOWED_ACE),
                             "SidStart").ToInt64());
-                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
-                        ace.Header.AceFlags != directoryFlags)
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
                     {
                         throw new InvalidOperationException(
                             "Restricted directory DACL contains an unexpected ACE.");
                     }
-                    if (EqualSid(aceSid, expectedSystem) &&
+                    if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedSystem) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundSystem)
                     {
                         foundSystem = true;
                     }
-                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedAdministrators) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundAdministrators)
                     {
                         foundAdministrators = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwner) &&
-                        ace.Mask == FILE_MODIFY_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedAccess &&
                         !foundOwner)
                     {
                         foundOwner = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwnerRights) &&
+                    else if (ace.Header.AceFlags ==
+                            (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE) &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedChildOnlyAccess &&
+                        !foundOwnerChildOnly)
+                    {
+                        foundOwnerChildOnly = true;
+                    }
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwnerRights) &&
                         ace.Mask == READ_CONTROL &&
                         !foundOwnerRights)
                     {
                         foundOwnerRights = true;
                     }
-                    else if (ace.Mask == FILE_ALL_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        ace.Mask == FILE_ALL_ACCESS &&
                         !foundSupervisor &&
                         !EqualSid(aceSid, forbiddenEveryone) &&
                         !EqualSid(aceSid, forbiddenAuthenticatedUsers) &&
@@ -2102,6 +2188,7 @@ namespace OpenCoven
                     !foundAdministrators ||
                     !foundSupervisor ||
                     !foundOwner ||
+                    !foundOwnerChildOnly ||
                     !foundOwnerRights)
                 {
                     throw new InvalidOperationException(
@@ -2636,8 +2723,23 @@ namespace OpenCoven
                 }
                 else
                 {
-                    entry.Attributes = FileAttributes.Normal;
-                    entry.Delete();
+                    if (!DeleteFileW(entry.FullName))
+                    {
+                        int deleteError = Marshal.GetLastWin32Error();
+                        if (deleteError != ERROR_ACCESS_DENIED)
+                        {
+                            throw new Win32Exception(
+                                deleteError,
+                                "Cleanup file could not be removed.");
+                        }
+                        entry.Attributes = FileAttributes.Normal;
+                        if (!DeleteFileW(entry.FullName))
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "Cleanup read-only file could not be removed.");
+                        }
+                    }
                 }
             }
         }
@@ -6502,14 +6604,14 @@ namespace OpenCoven
                     }
                     if (segment.IndexOf('*') >= 0)
                     {
-                        List<string> matches = ReadBoundedDirectorySnapshot(
+                        List<FileSystemInfo> matches = ReadBoundedDirectorySnapshot(
                             candidate,
                             segment,
                             true,
                             MaximumQuotaEntries - next.Count);
-                        foreach (string matched in matches)
+                        foreach (FileSystemInfo matched in matches)
                         {
-                            next.Add(matched);
+                            next.Add(matched.FullName);
                         }
                     }
                     else
@@ -6544,23 +6646,25 @@ namespace OpenCoven
             return candidates;
         }
 
-        private static List<string> ReadBoundedDirectorySnapshot(
+        private static List<FileSystemInfo> ReadBoundedDirectorySnapshot(
             string directory,
             string searchPattern,
             bool directoriesOnly,
             int maximumEntries)
         {
-            List<string> snapshot = new List<string>();
-            IEnumerable<string> entries;
-            IEnumerator<string> enumerator;
+            List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+            IEnumerable<FileSystemInfo> entries;
+            IEnumerator<FileSystemInfo> enumerator;
             try
             {
+                DirectoryInfo directoryInfo = new DirectoryInfo(directory);
                 entries = directoriesOnly
-                    ? Directory.EnumerateDirectories(
-                        directory,
+                    ? directoryInfo.EnumerateDirectories(
                         searchPattern,
                         SearchOption.TopDirectoryOnly)
-                    : Directory.EnumerateFileSystemEntries(directory);
+                    : directoryInfo.EnumerateFileSystemInfos(
+                        "*",
+                        SearchOption.TopDirectoryOnly);
                 enumerator = entries.GetEnumerator();
             }
             catch (FileNotFoundException)
@@ -6628,18 +6732,18 @@ namespace OpenCoven
                 {
                     continue;
                 }
-                List<string> snapshot = ReadBoundedDirectorySnapshot(
+                List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshot(
                     directory,
                     null,
                     false,
                     MaximumQuotaEntries - entries);
                 entries = checked(entries + snapshot.Count);
-                foreach (string entry in snapshot)
+                foreach (FileSystemInfo entry in snapshot)
                 {
                     FileAttributes attributes;
                     try
                     {
-                        attributes = File.GetAttributes(entry);
+                        attributes = entry.Attributes;
                     }
                     catch (FileNotFoundException)
                     {
@@ -6655,14 +6759,20 @@ namespace OpenCoven
                     }
                     if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        directories.Push(entry);
+                        directories.Push(entry.FullName);
                     }
                     else
                     {
                         long length;
                         try
                         {
-                            length = new FileInfo(entry).Length;
+                            FileInfo file = entry as FileInfo;
+                            if (file == null)
+                            {
+                                throw new IOException(
+                                    "Directory quota file metadata was unavailable.");
+                            }
+                            length = file.Length;
                         }
                         catch (FileNotFoundException)
                         {

@@ -559,6 +559,7 @@ jobs:
                       string rootPath,
                       string profilePath,
                       string tempPath,
+                      string statusStagingPath,
                       string workspacePath,
                       string operatingSystemProfilePath,
                       string validationSummary)
@@ -569,6 +570,7 @@ jobs:
                       RootPath = rootPath;
                       ProfilePath = profilePath;
                       TempPath = tempPath;
+                      StatusStagingPath = statusStagingPath;
                       WorkspacePath = workspacePath;
                       OperatingSystemProfilePath = operatingSystemProfilePath;
                       ValidationSummary = validationSummary;
@@ -579,6 +581,7 @@ jobs:
                   public string RootPath { get; private set; }
                   public string ProfilePath { get; private set; }
                   public string TempPath { get; private set; }
+                  public string StatusStagingPath { get; private set; }
                   public string WorkspacePath { get; private set; }
                   public string OperatingSystemProfilePath { get; private set; }
                   public string ValidationSummary { get; private set; }
@@ -668,12 +671,14 @@ jobs:
 
                           string profilePath = Path.Combine(fullRoot, "profile");
                           string tempPath = Path.Combine(fullRoot, "temp");
+                          string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                           string workspacePath = Path.Combine(fullRoot, "workspace");
                           Directory.CreateDirectory(fullRoot);
                           Directory.CreateDirectory(profilePath);
                           Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
                           Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Local"));
                           Directory.CreateDirectory(tempPath);
+                          Directory.CreateDirectory(statusStagingPath);
                           Directory.CreateDirectory(workspacePath);
 
                           SecurityIdentifier supervisor =
@@ -698,6 +703,10 @@ jobs:
                                   sid,
                                   supervisor.Value);
                           }
+                          WindowsJobSupervisor.SecureStatusStagingDirectory(
+                              statusStagingPath,
+                              sid,
+                              supervisor.Value);
                           WindowsJobSupervisor.ProtectCurrentProcess(
                               sid,
                               supervisor.Value);
@@ -709,6 +718,7 @@ jobs:
                               fullRoot,
                               profilePath,
                               tempPath,
+                              statusStagingPath,
                               workspacePath,
                               Path.Combine(GetProfilesRoot(), userName),
                               validationSummary);
@@ -2286,12 +2296,44 @@ jobs:
                       string isolatedSid,
                       string supervisorSid)
                   {
+                      SecureIsolatedDirectory(
+                          path,
+                          isolatedSid,
+                          supervisorSid,
+                          FILE_MODIFY_ACCESS);
+                  }
+
+                  internal static void SecureStatusStagingDirectory(
+                      string path,
+                      string isolatedSid,
+                      string supervisorSid)
+                  {
+                      SecureIsolatedDirectory(
+                          path,
+                          isolatedSid,
+                          supervisorSid,
+                          FILE_MODIFY_ACCESS,
+                          FILE_ALL_ACCESS);
+                  }
+
+                  private static void SecureIsolatedDirectory(
+                      string path,
+                      string isolatedSid,
+                      string supervisorSid,
+                      uint isolatedAccess,
+                      uint isolatedChildOnlyAccess = 0)
+                  {
                       EnablePrivilege("SeRestorePrivilege");
                       string sddl = "O:" + isolatedSid + "D:P" +
                           "(A;OICI;0x001f01ff;;;SY)" +
                           "(A;OICI;0x001f01ff;;;BA)" +
                           "(A;OICI;0x001f01ff;;;" + supervisorSid + ")" +
-                          "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                          "(A;OICI;0x" + isolatedAccess.ToString("x8") + ";;;" + isolatedSid + ")" +
+                          (isolatedChildOnlyAccess == 0
+                              ? String.Empty
+                              : "(A;OIIO;0x" +
+                                  isolatedChildOnlyAccess.ToString("x8") +
+                                  ";;;" + isolatedSid + ")") +
                           "(A;OICI;0x00020000;;;S-1-3-4)";
                       IntPtr securityDescriptor;
                       uint securityDescriptorLength;
@@ -2323,7 +2365,12 @@ jobs:
                       {
                           LocalFree(securityDescriptor);
                       }
-                      ValidateIsolatedDirectory(path, isolatedSid, supervisorSid);
+                      ValidateIsolatedDirectory(
+                          path,
+                          isolatedSid,
+                          supervisorSid,
+                          isolatedAccess,
+                          isolatedChildOnlyAccess);
                   }
 
                   public static void ProtectSupervisorDirectory(string path)
@@ -2386,13 +2433,38 @@ jobs:
                           throw new InvalidOperationException(
                               "Restricted Windows identity SID is unavailable.");
                       }
-                      ValidateIsolatedDirectory(path, current.Value, null);
+                      ValidateIsolatedDirectory(path, current.Value, null, FILE_MODIFY_ACCESS, 0);
+                  }
+
+                  public static void RequireCurrentIdentityOwnsStatusStagingDirectory(
+                      string path,
+                      string supervisorSid)
+                  {
+                      if (String.IsNullOrWhiteSpace(supervisorSid))
+                      {
+                          throw new InvalidOperationException(
+                              "Status staging supervisor identity is required.");
+                      }
+                      SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+                      if (current == null)
+                      {
+                          throw new InvalidOperationException(
+                              "Restricted Windows identity SID is unavailable.");
+                      }
+                      ValidateIsolatedDirectory(
+                          path,
+                          current.Value,
+                          supervisorSid,
+                          FILE_MODIFY_ACCESS,
+                          FILE_ALL_ACCESS);
                   }
 
                   private static void ValidateIsolatedDirectory(
                       string path,
                       string isolatedSid,
-                      string supervisorSid)
+                      string supervisorSid,
+                      uint isolatedAccess,
+                      uint isolatedChildOnlyAccess)
                   {
                       if (String.IsNullOrWhiteSpace(path) ||
                           !Path.IsPathRooted(path) ||
@@ -2474,16 +2546,18 @@ jobs:
                                   out aclInformation,
                                   (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
                                   AclSizeInformation) ||
-                              aclInformation.AceCount != 5)
+                              aclInformation.AceCount !=
+                                  (isolatedChildOnlyAccess == 0 ? 5 : 6))
                           {
                               throw new InvalidOperationException(
-                                  "Restricted directory DACL must contain exactly five ACEs.");
+                                  "Restricted directory DACL has an unexpected ACE count.");
                           }
 
                           bool foundSystem = false;
                           bool foundAdministrators = false;
                           bool foundSupervisor = false;
                           bool foundOwner = false;
+                          bool foundOwnerChildOnly = isolatedChildOnlyAccess == 0;
                           bool foundOwnerRights = false;
                           byte directoryFlags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
                           for (uint index = 0; index < aclInformation.AceCount; index++)
@@ -2504,37 +2578,49 @@ jobs:
                                   Marshal.OffsetOf(
                                       typeof(ACCESS_ALLOWED_ACE),
                                       "SidStart").ToInt64());
-                              if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
-                                  ace.Header.AceFlags != directoryFlags)
+                              if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
                               {
                                   throw new InvalidOperationException(
                                       "Restricted directory DACL contains an unexpected ACE.");
                               }
-                              if (EqualSid(aceSid, expectedSystem) &&
+                              if (ace.Header.AceFlags == directoryFlags &&
+                                  EqualSid(aceSid, expectedSystem) &&
                                   ace.Mask == FILE_ALL_ACCESS &&
                                   !foundSystem)
                               {
                                   foundSystem = true;
                               }
-                              else if (EqualSid(aceSid, expectedAdministrators) &&
+                              else if (ace.Header.AceFlags == directoryFlags &&
+                                  EqualSid(aceSid, expectedAdministrators) &&
                                   ace.Mask == FILE_ALL_ACCESS &&
                                   !foundAdministrators)
                               {
                                   foundAdministrators = true;
                               }
-                              else if (EqualSid(aceSid, expectedOwner) &&
-                                  ace.Mask == FILE_MODIFY_ACCESS &&
+                              else if (ace.Header.AceFlags == directoryFlags &&
+                                  EqualSid(aceSid, expectedOwner) &&
+                                  ace.Mask == isolatedAccess &&
                                   !foundOwner)
                               {
                                   foundOwner = true;
                               }
-                              else if (EqualSid(aceSid, expectedOwnerRights) &&
+                              else if (ace.Header.AceFlags ==
+                                      (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE) &&
+                                  EqualSid(aceSid, expectedOwner) &&
+                                  ace.Mask == isolatedChildOnlyAccess &&
+                                  !foundOwnerChildOnly)
+                              {
+                                  foundOwnerChildOnly = true;
+                              }
+                              else if (ace.Header.AceFlags == directoryFlags &&
+                                  EqualSid(aceSid, expectedOwnerRights) &&
                                   ace.Mask == READ_CONTROL &&
                                   !foundOwnerRights)
                               {
                                   foundOwnerRights = true;
                               }
-                              else if (ace.Mask == FILE_ALL_ACCESS &&
+                              else if (ace.Header.AceFlags == directoryFlags &&
+                                  ace.Mask == FILE_ALL_ACCESS &&
                                   !foundSupervisor &&
                                   !EqualSid(aceSid, forbiddenEveryone) &&
                                   !EqualSid(aceSid, forbiddenAuthenticatedUsers) &&
@@ -2554,6 +2640,7 @@ jobs:
                               !foundAdministrators ||
                               !foundSupervisor ||
                               !foundOwner ||
+                              !foundOwnerChildOnly ||
                               !foundOwnerRights)
                           {
                               throw new InvalidOperationException(
@@ -3088,8 +3175,23 @@ jobs:
                           }
                           else
                           {
-                              entry.Attributes = FileAttributes.Normal;
-                              entry.Delete();
+                              if (!DeleteFileW(entry.FullName))
+                              {
+                                  int deleteError = Marshal.GetLastWin32Error();
+                                  if (deleteError != ERROR_ACCESS_DENIED)
+                                  {
+                                      throw new Win32Exception(
+                                          deleteError,
+                                          "Cleanup file could not be removed.");
+                                  }
+                                  entry.Attributes = FileAttributes.Normal;
+                                  if (!DeleteFileW(entry.FullName))
+                                  {
+                                      throw new Win32Exception(
+                                          Marshal.GetLastWin32Error(),
+                                          "Cleanup read-only file could not be removed.");
+                                  }
+                              }
                           }
                       }
                   }
@@ -6954,14 +7056,14 @@ jobs:
                               }
                               if (segment.IndexOf('*') >= 0)
                               {
-                                  List<string> matches = ReadBoundedDirectorySnapshot(
+                                  List<FileSystemInfo> matches = ReadBoundedDirectorySnapshot(
                                       candidate,
                                       segment,
                                       true,
                                       MaximumQuotaEntries - next.Count);
-                                  foreach (string matched in matches)
+                                  foreach (FileSystemInfo matched in matches)
                                   {
-                                      next.Add(matched);
+                                      next.Add(matched.FullName);
                                   }
                               }
                               else
@@ -6996,23 +7098,25 @@ jobs:
                       return candidates;
                   }
 
-                  private static List<string> ReadBoundedDirectorySnapshot(
+                  private static List<FileSystemInfo> ReadBoundedDirectorySnapshot(
                       string directory,
                       string searchPattern,
                       bool directoriesOnly,
                       int maximumEntries)
                   {
-                      List<string> snapshot = new List<string>();
-                      IEnumerable<string> entries;
-                      IEnumerator<string> enumerator;
+                      List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+                      IEnumerable<FileSystemInfo> entries;
+                      IEnumerator<FileSystemInfo> enumerator;
                       try
                       {
+                          DirectoryInfo directoryInfo = new DirectoryInfo(directory);
                           entries = directoriesOnly
-                              ? Directory.EnumerateDirectories(
-                                  directory,
+                              ? directoryInfo.EnumerateDirectories(
                                   searchPattern,
                                   SearchOption.TopDirectoryOnly)
-                              : Directory.EnumerateFileSystemEntries(directory);
+                              : directoryInfo.EnumerateFileSystemInfos(
+                                  "*",
+                                  SearchOption.TopDirectoryOnly);
                           enumerator = entries.GetEnumerator();
                       }
                       catch (FileNotFoundException)
@@ -7080,18 +7184,18 @@ jobs:
                           {
                               continue;
                           }
-                          List<string> snapshot = ReadBoundedDirectorySnapshot(
+                          List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshot(
                               directory,
                               null,
                               false,
                               MaximumQuotaEntries - entries);
                           entries = checked(entries + snapshot.Count);
-                          foreach (string entry in snapshot)
+                          foreach (FileSystemInfo entry in snapshot)
                           {
                               FileAttributes attributes;
                               try
                               {
-                                  attributes = File.GetAttributes(entry);
+                                  attributes = entry.Attributes;
                               }
                               catch (FileNotFoundException)
                               {
@@ -7107,14 +7211,20 @@ jobs:
                               }
                               if ((attributes & FileAttributes.Directory) != 0)
                               {
-                                  directories.Push(entry);
+                                  directories.Push(entry.FullName);
                               }
                               else
                               {
                                   long length;
                                   try
                                   {
-                                      length = new FileInfo(entry).Length;
+                                      FileInfo file = entry as FileInfo;
+                                      if (file == null)
+                                      {
+                                          throw new IOException(
+                                              "Directory quota file metadata was unavailable.");
+                                      }
+                                      length = file.Length;
                                   }
                                   catch (FileNotFoundException)
                                   {
@@ -8399,6 +8509,10 @@ jobs:
               $directory
             )
           }
+          [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsStatusStagingDirectory(
+            $env:COVEN_WINDOWS_STATUS_STAGING_DIR,
+            $env:COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID
+          )
 
           function Invoke-Checked {
             param(
@@ -8862,7 +8976,7 @@ jobs:
             @('scripts\phase1-macos-keychain.mjs', 5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4'),
             @('scripts\phase1-process-supervisor.mjs', 3820, '16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c'),
             @('scripts\phase1-schema-v2-evidence.mjs', 52505, '0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8'),
-            @('scripts\phase1-schema-v2-producer.mjs', 186285, '4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6'),
+            @('scripts\phase1-schema-v2-producer.mjs', 187394, '372bba3fb6be8af72907a2dd8a0c8acd81ab3bd89bcb4e0ec8dfe85cea4ff431'),
             @('scripts\process-owned-artifact-root.mjs', 11788, '426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624'),
             @('scripts\supervised-exec.mjs', 2875, 'a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b'),
             @('scripts\supervisor-status.mjs', 854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e')
@@ -9116,6 +9230,8 @@ jobs:
               HOME = $isolatedUser.ProfilePath
               TEMP = $isolatedUser.TempPath
               TMP = $isolatedUser.TempPath
+              COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
+              COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID = $currentSid.Value
               USERPROFILE = $isolatedUser.ProfilePath
               APPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Roaming')
               LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
@@ -9153,6 +9269,11 @@ jobs:
                 'bootstrap aggregate',
                 $bootstrapRoot,
                 12GB
+              ),
+              [OpenCoven.WindowsDirectoryQuota]::new(
+                'status staging',
+                $isolatedUser.StatusStagingPath,
+                1MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'workspace aggregate',
@@ -9590,7 +9711,7 @@ jobs:
             ['scripts/phase1-macos-keychain.mjs', [5091, 'ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4']],
             ['scripts/phase1-process-supervisor.mjs', [3820, '16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c']],
             ['scripts/phase1-schema-v2-evidence.mjs', [52505, '0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8']],
-            ['scripts/phase1-schema-v2-producer.mjs', [186285, '4f5a0adc5e8386d2c99be33f04817df190a0d1e215a3b9428a9e7353bd3eefa6']],
+            ['scripts/phase1-schema-v2-producer.mjs', [187394, '372bba3fb6be8af72907a2dd8a0c8acd81ab3bd89bcb4e0ec8dfe85cea4ff431']],
             ['scripts/process-owned-artifact-root.mjs', [11788, '426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624']],
             ['scripts/supervised-exec.mjs', [2875, 'a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b']],
             ['scripts/supervisor-status.mjs', [854, 'ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e']],
