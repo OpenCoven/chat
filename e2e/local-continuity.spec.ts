@@ -43,12 +43,29 @@ test('a parent changed in another window cannot silently accept an earlier revie
   ).toBeVisible();
 
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
-  await expect(page.getByText(/This operation conflicts with its earlier request/)).toBeVisible();
+  await expect(page.getByText(/The reviewed local branch changed/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review again', exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
   await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
   await expect(page.getByText('Other window parent edit', { exact: true })).toBeVisible();
   await expect(page.getByText('Earlier reviewed excerpt', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: /Retained side note · open/ }).click();
+  await page.getByRole('button', { name: 'Review again', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Reviewed excerpt' }).fill('Fresh reviewed excerpt');
+  await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
+  await expect(
+    page
+      .getByRole('list', { name: 'Messages' })
+      .getByText('Fresh reviewed excerpt', { exact: true }),
+  ).toBeVisible();
   await page.reload();
   await expect(page.getByText('Other window parent edit', { exact: true })).toBeVisible();
   await expect(page.getByText('Earlier reviewed excerpt', { exact: true })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('list', { name: 'Messages' })
+      .getByText('Fresh reviewed excerpt', { exact: true }),
+  ).toHaveCount(1);
 });

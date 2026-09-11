@@ -338,10 +338,13 @@ function ChatShellView({
     function rememberPosition(event: Event) {
       const body = threadBodyRef.current;
       if (!exactKey || !body || (event.target !== document && event.target !== body)) return;
-      const top = Math.max(0, body.getBoundingClientRect().top);
+      const viewport = body.getBoundingClientRect();
+      const top = Math.max(0, viewport.top);
+      const bottom = Math.min(window.innerHeight, viewport.bottom);
+      if (bottom <= top) return;
       const first = [...body.querySelectorAll<HTMLElement>('[data-turn-id]')].find((element) => {
         const bounds = element.getBoundingClientRect();
-        return bounds.bottom > top && bounds.top < window.innerHeight;
+        return bounds.bottom > top && bounds.top < bottom;
       });
       if (first?.dataset.turnId) memory.anchors.set(exactKey, first.dataset.turnId);
     }
@@ -1120,6 +1123,7 @@ function ChatShellView({
                     .then(onCreateConversation)
                     .then((result) => {
                       if (!mounted.current || !result) return;
+                      if (result.status === 'ok') onWritten();
                       if (
                         result.status === 'ok' &&
                         epoch === navigationEpoch.current &&
@@ -1132,7 +1136,6 @@ function ChatShellView({
                           setSelectedFamiliarId(result.data.familiarId);
                         }
                         selectConversation(result.data.id);
-                        onWritten();
                       } else {
                         setPositionNotice(
                           'The new conversation could not be selected for this exact source.',

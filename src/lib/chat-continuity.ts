@@ -29,7 +29,7 @@ export function createDraft() {
 type SideReviewSnapshot = Readonly<{
   selected: readonly string[];
   review: BringBackInput | null;
-  phase: 'idle' | 'preparing' | 'editing' | 'sending' | 'uncertain';
+  phase: 'idle' | 'preparing' | 'editing' | 'sending' | 'uncertain' | 'rejected';
   notice: string;
   writes: number;
 }>;

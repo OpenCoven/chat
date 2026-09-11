@@ -188,6 +188,7 @@ export function createChatStore(
 
   const conversations = new Map<string, StoredConversation>();
   const messagesByConversation = new Map<string, StoredMessage[]>();
+  const importsByOperation = new Map<string, StoredMessage>();
   const listeners = new Set<(change: ChatStoreChange) => void>();
   let revision = 0;
   let disposed = false;
@@ -197,13 +198,14 @@ export function createChatStore(
   function serialize<T>(write: () => Promise<T>): Promise<T> {
     const next = writes.then(async () => {
       if (disposed) throw new ChatStoreError('service_unavailable', 'The chat store is disposed.');
-      const currentRevision = backend.getMutationRevision?.();
-      // Durable backends still refresh before admission. A shared-memory revision
-      // avoids rehydrating unchanged history without trusting window-local state.
+      const currentRevision = await backend.getMutationRevision?.();
+      // Only a backend-wide revision can skip hydration. Transactional record
+      // preconditions still fence competing writes after this revision read.
       if (currentRevision === undefined || currentRevision !== indexedBackendRevision) {
         const current = await backend.loadAll();
         conversations.clear();
         messagesByConversation.clear();
+        importsByOperation.clear();
         hydrate(current);
         indexedBackendRevision = currentRevision;
       }
@@ -243,6 +245,7 @@ export function createChatStore(
   }
 
   function indexMessage(entry: StoredMessage): void {
+    if (entry.broughtBack) importsByOperation.set(entry.broughtBack.operationKey, entry);
     const bucket = messagesByConversation.get(entry.conversationId);
     if (bucket === undefined) {
       messagesByConversation.set(entry.conversationId, [entry]);
@@ -267,6 +270,7 @@ export function createChatStore(
         conversations.has(entry.conversationId) &&
         conversations.get(entry.conversationId)?.side?.state !== 'discarded'
       ) {
+        if (entry.broughtBack) importsByOperation.set(entry.broughtBack.operationKey, entry);
         const bucket = messagesByConversation.get(entry.conversationId);
         if (bucket) bucket.push(entry);
         else messagesByConversation.set(entry.conversationId, [entry]);
@@ -484,7 +488,12 @@ export function createChatStore(
           expectedConversations: [side],
         });
         conversations.set(side.id, touched);
-        if (state === 'discarded') messagesByConversation.delete(side.id);
+        if (state === 'discarded') {
+          for (const message of messagesByConversation.get(side.id) ?? []) {
+            if (message.broughtBack) importsByOperation.delete(message.broughtBack.operationKey);
+          }
+          messagesByConversation.delete(side.id);
+        }
         announce();
         return touched;
       });
@@ -511,9 +520,7 @@ export function createChatStore(
         const parent = requireParent(input.parentConversationId);
         const side = requireSide(input);
         const text = reviewedExcerpt(input);
-        const previousImport = [...messagesByConversation.values()]
-          .flat()
-          .find((entry) => entry.broughtBack?.operationKey === input.operationKey);
+        const previousImport = importsByOperation.get(input.operationKey);
         if (previousImport) {
           if (!sameImport(previousImport, input)) {
             throw new ChatStoreError(
@@ -532,7 +539,7 @@ export function createChatStore(
             expected.sideLeafId !== (messagesByConversation.get(side.id)?.at(-1)?.id ?? null))
         ) {
           throw new ChatStoreError(
-            'conflict',
+            'stale_review',
             'The reviewed local branch changed. Cancel and review again.',
           );
         }

@@ -101,6 +101,10 @@ export function ChatChapters({
   const chapters = result.status === 'ok' ? result.data.data : unsupported ? loaded : null;
   const unavailable = result.status === 'ok' && result.data.status === 'unavailable';
   const stale = result.status === 'reconcile_required' || result.status === 'stale';
+  function close() {
+    if (stale) queryAdapter.invalidate();
+    setExpanded(false);
+  }
   return (
     <section
       className="chat-chapters"
@@ -108,7 +112,7 @@ export function ChatChapters({
       onKeyDown={(event) => {
         if (event.key === 'Escape' && expanded) {
           event.preventDefault();
-          setExpanded(false);
+          close();
           toggle.current?.focus();
         }
       }}
@@ -120,8 +124,8 @@ export function ChatChapters({
         aria-controls={bodyId}
         ref={toggle}
         onClick={() => {
-          if (expanded && stale) queryAdapter.invalidate();
-          setExpanded(!expanded);
+          if (expanded) close();
+          else setExpanded(true);
         }}
       >
         <span>Ongoing</span>
@@ -151,7 +155,7 @@ export function ChatChapters({
           {unavailable || (unsupported && !loaded) ? (
             <output>Chapter index unavailable. Your transcript is unchanged.</output>
           ) : null}
-          {result.status === 'error' && !unsupported ? (
+          {result.status === 'not_ready' || (result.status === 'error' && !unsupported) ? (
             <p role="alert">Chapter index unavailable. Your transcript is unchanged.</p>
           ) : null}
           {chapters && !unavailable ? (

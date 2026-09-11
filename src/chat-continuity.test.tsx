@@ -1,7 +1,8 @@
-import type { CaveConversationMessage } from '@opencoven/cave-client/managed';
+import type { CaveConversation, CaveConversationMessage } from '@opencoven/cave-client/managed';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatShell } from './chat-shell';
 import { chapterTurnElementId } from './lib/chat-chapters';
+import { continuityMemory, exactThreadKey } from './lib/chat-continuity';
 import { openChatStore } from './lib/local/chat-store';
 import {
   type ChatWriter,
@@ -53,6 +54,58 @@ function source(): QueryAdapter {
     dispose: vi.fn(),
   };
 }
+
+test('remembered scroll anchors must intersect the history pane, not the composer below it', async () => {
+  const adapter = source();
+  const memory = continuityMemory(adapter, null);
+  render(<ChatShell queryAdapter={adapter} />);
+  const message = (await screen.findByText('a-new text')).closest('li');
+  const body = message?.closest('.chat-shell__thread-body');
+  if (!message || !body) throw new Error('Missing history fixture');
+  vi.spyOn(body, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 400, 200));
+  const bounds = vi.spyOn(message, 'getBoundingClientRect');
+  bounds.mockReturnValue(new DOMRect(0, 350, 400, 100));
+  fireEvent.scroll(body);
+  expect(memory.anchors.get(exactThreadKey('a', 'a-new'))).toBeUndefined();
+  bounds.mockReturnValue(new DOMRect(0, 250, 400, 100));
+  fireEvent.scroll(body);
+  expect(memory.anchors.get(exactThreadKey('a', 'a-new'))).toBe('a-new-message');
+});
+
+test('a late successful create refreshes the sidebar without replacing the navigated thread', async () => {
+  const adapter = source();
+  let finish!: (result: WriteResult<CaveConversation>) => void;
+  const create = vi.fn(
+    () =>
+      new Promise<WriteResult<CaveConversation>>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const writer: ChatWriter = {
+    canWrite: () => true,
+    createConversation: create,
+    sendMessage: vi.fn(),
+  };
+  render(<ChatShell queryAdapter={adapter} writer={writer} onCreateConversation={create} />);
+  await screen.findByText('a-new text');
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  await waitFor(() => expect(create).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Familiar' }), { target: { value: 'b' } });
+  await screen.findByText('b text');
+  const created = {
+    id: 'created',
+    familiarId: 'a',
+    title: 'Created while away',
+    updatedAt: timestamp,
+  };
+  vi.mocked(adapter.listConversations).mockResolvedValue(ok({ data: [created, ...conversations] }));
+  await act(async () => finish(ok(created)));
+  await waitFor(() => expect(adapter.listConversations).toHaveBeenCalledTimes(2));
+  expect(screen.getByText('b text')).toBeVisible();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Familiar' }), { target: { value: 'a' } });
+  expect(await screen.findByRole('option', { name: /Created while away/ })).toBeVisible();
+  expect(await screen.findByText('a-new text')).toBeVisible();
+});
 
 test('familiar return restores the exact older conversation and anchor, not newest', async () => {
   const adapter = source();

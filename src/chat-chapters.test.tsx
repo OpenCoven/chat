@@ -34,6 +34,48 @@ const page = (sourceRevision = 'a'.repeat(64), hasMore = false): ConversationCha
 });
 
 const goldenPath = process.env.COVEN_CONTINUITY_GOLDEN_VECTORS;
+test('a disconnected chapter source explains that its index is unavailable', async () => {
+  render(
+    <ChatChapters
+      conversationId="one"
+      messages={messages}
+      hasMoreMessages={false}
+      queryAdapter={
+        { listChapters: vi.fn(async () => ({ status: 'not_ready' })) } as unknown as QueryAdapter
+      }
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Ongoing/ }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Chapter index unavailable');
+  expect(screen.queryByRole('navigation', { name: 'UTC chapters' })).not.toBeInTheDocument();
+});
+
+test('Escape invalidates a stale chapter index before keyboard reopening', async () => {
+  let refreshed = false;
+  const invalidate = vi.fn(() => {
+    refreshed = true;
+  });
+  const listChapters = vi.fn(async () =>
+    refreshed ? { status: 'ok', data: page() } : { status: 'stale' },
+  );
+  render(
+    <ChatChapters
+      conversationId="one"
+      messages={messages}
+      hasMoreMessages={false}
+      queryAdapter={{ listChapters, invalidate } as unknown as QueryAdapter}
+    />,
+  );
+  const toggle = screen.getByRole('button', { name: /Ongoing/ });
+  fireEvent.click(toggle);
+  await screen.findByRole('alert');
+  fireEvent.keyDown(toggle, { key: 'Escape' });
+  expect(invalidate).toHaveBeenCalledOnce();
+  expect(toggle).toHaveFocus();
+  fireEvent.click(toggle);
+  expect(await screen.findByRole('navigation', { name: 'UTC chapters' })).toBeVisible();
+});
+
 test.skipIf(goldenPath === undefined)(
   'DEVELOPMENT builder matches Cave-owned canonical golden vectors',
   () => {

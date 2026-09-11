@@ -20,7 +20,7 @@ type Props = Readonly<{
 function failure(result: Exclude<WriteResult<unknown>, { status: 'ok' }>): string {
   if (result.status === 'unsupported') return result.reason;
   if (result.code === 'conflict')
-    return 'This operation conflicts with its earlier request. Nothing new was imported.';
+    return 'This operation conflicts with its earlier request. Retry the unchanged review to reconcile, or cancel explicitly.';
   if (result.code === 'not_found')
     return 'The exact parent, side note, or selected message is unavailable.';
   return 'The local change could not be saved. Retry uses the same operation key.';
@@ -40,6 +40,8 @@ export function ChatSideConversations({
   const capability = writer?.canWrite() ? writer.sideConversations : undefined;
   const [side, setSide] = useState<SideConversation | null>(null);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [notes, setNotes] = useState<readonly SideConversation[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [notice, setNotice] = useState('');
@@ -70,8 +72,11 @@ export function ChatSideConversations({
   const walk = useRef(createManualPageWalk());
   const reviewId = useId();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadAttempt is an explicit retry trigger for the scoped read.
   useEffect(() => {
     active.current = true;
+    setReady(false);
+    setLoadError('');
     const alive = { value: true };
     if (!capability)
       return () => {
@@ -82,7 +87,7 @@ export function ChatSideConversations({
         const info = await capability.get(conversationId);
         if (!alive.value) return;
         if (info.status !== 'ok') {
-          setNotice(failure(info));
+          setLoadError(failure(info));
           return;
         }
         setSide(info.data);
@@ -90,11 +95,11 @@ export function ChatSideConversations({
           const page = await capability.list(conversationId);
           if (!alive.value) return;
           if (page.status !== 'ok') {
-            setNotice(failure(page));
+            setLoadError(failure(page));
             return;
           }
           if (!walk.current.acceptRootPage(page.data)) {
-            setNotice('The side note page is invalid. Reopen this conversation to refresh.');
+            setLoadError('The side note page is invalid. Retry to refresh.');
             return;
           }
           setNotes(page.data.data);
@@ -102,14 +107,14 @@ export function ChatSideConversations({
         }
         setReady(true);
       } catch {
-        if (alive.value) setNotice('Local side notes are unavailable. No content was moved.');
+        if (alive.value) setLoadError('Local side notes are unavailable. No content was moved.');
       }
     })();
     return () => {
       alive.value = false;
       active.current = false;
     };
-  }, [capability, conversationId]);
+  }, [capability, conversationId, loadAttempt]);
 
   async function run<T>(operation: () => Promise<WriteResult<T>>, success: (data: T) => void) {
     if (pending.current) return;
@@ -131,16 +136,28 @@ export function ChatSideConversations({
   }
 
   async function startReview() {
-    if (!capability || !side || busy || reviewEntry.getSnapshot().review) return;
+    const snapshot = reviewEntry.getSnapshot();
+    if (
+      !capability ||
+      !side ||
+      busy ||
+      snapshot.phase === 'preparing' ||
+      snapshot.phase === 'sending' ||
+      (snapshot.review && snapshot.phase !== 'rejected')
+    )
+      return;
+    const previous = snapshot.phase === 'rejected' ? snapshot.review : null;
     const source = messages.filter((message) => selected.includes(message.id));
     const input: BringBackInput = {
       parentConversationId: side.side.parentConversationId,
       sideConversationId: side.id,
-      sourceMessageIds: source.map((message) => message.id),
-      excerpt: source
-        .map((message) => message.text)
-        .join('\n\n')
-        .slice(0, 32_000),
+      sourceMessageIds: previous?.sourceMessageIds ?? source.map((message) => message.id),
+      excerpt:
+        previous?.excerpt ??
+        source
+          .map((message) => message.text)
+          .join('\n\n')
+          .slice(0, 32_000),
       operationKey: crypto.randomUUID(),
     };
     reviewEntry.update({ phase: 'preparing', notice: '', selected: input.sourceMessageIds });
@@ -149,11 +166,17 @@ export function ChatSideConversations({
       if (result.status === 'ok') {
         reviewEntry.update({ review: { ...input, preconditions: result.data }, phase: 'editing' });
       } else {
-        reviewEntry.update({ phase: 'idle', notice: failure(result) });
+        reviewEntry.update({
+          phase: previous ? 'rejected' : 'idle',
+          notice:
+            result.status === 'error' && result.code === 'service_unavailable'
+              ? 'The local review could not be prepared. Retry when the source is available.'
+              : failure(result),
+        });
       }
     } catch {
       reviewEntry.update({
-        phase: 'idle',
+        phase: previous ? 'rejected' : 'idle',
         notice: 'The local branch could not be read. No import was attempted.',
       });
     }
@@ -166,7 +189,8 @@ export function ChatSideConversations({
       !capability ||
       !input?.excerpt.trim() ||
       snapshot.phase === 'sending' ||
-      snapshot.phase === 'preparing'
+      snapshot.phase === 'preparing' ||
+      snapshot.phase === 'rejected'
     )
       return;
     reviewEntry.update({ phase: 'sending', notice: '' });
@@ -180,6 +204,12 @@ export function ChatSideConversations({
           writes: reviewEntry.getSnapshot().writes + 1,
           notice:
             'Reviewed excerpt saved once to the exact local parent. The side note is still retained.',
+        });
+      } else if (result.status === 'error' && result.code === 'stale_review') {
+        reviewEntry.update({
+          phase: 'rejected',
+          notice:
+            'The reviewed local branch changed. This request did not commit. Review again with a fresh operation key before importing.',
         });
       } else {
         reviewEntry.update({
@@ -257,7 +287,16 @@ export function ChatSideConversations({
         No network, execution, or memory writeback. Not Cave-backed.
       </p>
       {!ready ? (
-        <output>{notice || 'Loading local side notes…'}</output>
+        <>
+          <output role={loadError ? 'alert' : 'status'}>
+            {loadError || 'Loading local side notes…'}
+          </output>
+          {loadError ? (
+            <button type="button" onClick={() => setLoadAttempt((value) => value + 1)}>
+              Retry local side notes
+            </button>
+          ) : null}
+        </>
       ) : side ? (
         <>
           <div className="chat-side__actions">
@@ -342,7 +381,7 @@ export function ChatSideConversations({
                 value={review.excerpt}
                 rows={4}
                 maxLength={32_000}
-                disabled={busy || phase === 'uncertain'}
+                disabled={busy || phase === 'uncertain' || phase === 'rejected'}
                 onChange={(event) =>
                   reviewEntry.update({ review: { ...review, excerpt: event.target.value } })
                 }
@@ -362,7 +401,21 @@ export function ChatSideConversations({
                 </p>
               ) : null}
               <div className="chat-side__actions">
-                <button type="submit" disabled={busy || !review.excerpt.trim()}>
+                {phase === 'rejected' ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      void startReview();
+                    }}
+                  >
+                    Review again
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  disabled={busy || phase === 'rejected' || !review.excerpt.trim()}
+                >
                   Bring back reviewed excerpt
                 </button>
                 <button

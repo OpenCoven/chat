@@ -206,12 +206,12 @@ test('a saved reviewed branch cannot silently retarget after parent or side edit
   const preconditions = await store.prepareBringBack(input);
   await store.appendMessage(parent.id, 'user', 'new parent leaf');
   await expect(store.bringBack({ ...input, preconditions })).rejects.toMatchObject({
-    code: 'conflict',
+    code: 'stale_review',
   });
   const next = await store.prepareBringBack(input);
   await store.appendMessage(side.id, 'user', 'new side leaf');
   await expect(store.bringBack({ ...input, preconditions: next })).rejects.toMatchObject({
-    code: 'conflict',
+    code: 'stale_review',
   });
   expect(store.listMessages(parent.id, 10).data.some((message) => message.broughtBack)).toBe(false);
 });

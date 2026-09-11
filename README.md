@@ -52,6 +52,11 @@ and local branch preconditions in source- and writer-scoped memory. Returning
 to the parent or switching sources does not cancel it. After an uncertain save,
 retry the unchanged review to reconcile the result before editing again, or
 explicitly cancel. Cancellation cannot undo an import that already committed.
+If a stale branch is definitively rejected before committing, **Review again**
+captures current branch preconditions and a new operation key while retaining
+your edited excerpt. An uncertain operation never becomes editable under its
+old key. Failed side-note metadata reads offer **Retry local side notes** without
+enabling mutations against unknown metadata.
 
 **Pending reviews do not survive reload or restart.** Saved imports do. If you
 reload after an uncertain save, inspect the parent before starting another import;
@@ -63,6 +68,12 @@ changed payloads with reused keys are rejected. Competing windows are checked
 at commit, and failed imports leave no partial parent record. Imports neither
 merge the transcript nor execute instructions, generate replies, copy attachments,
 or write to memory services.
+
+The version-2 IndexedDB upgrade preserves existing records and adds operation-key
+indexes plus an atomic shared mutation revision. Warm writes read only the exact
+conversation preconditions and indexed operation receipts; unchanged history is
+not scanned. Initial hydration and refresh after another window's writes still
+load history. Close older app windows if they block the database upgrade.
 
 These are local-only notes with **no connected familiar**, not Cave-backed side
 chats. If durable storage is unavailable, the UI discloses memory-only custody.

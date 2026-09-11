@@ -39,6 +39,112 @@ async function openSide() {
   await screen.findByRole('button', { name: 'Return to parent' });
 }
 
+test.each(['get', 'list', 'throw'])(
+  'side-note %s failures offer a safe load retry',
+  async (failure) => {
+    const current = await fixture();
+    const capability = current.writer.sideConversations;
+    if (!capability) throw new Error('Missing side capability');
+    const get = vi.fn(capability.get);
+    const list = vi.fn(capability.list);
+    if (failure === 'get')
+      get.mockResolvedValueOnce({ status: 'error', code: 'service_unavailable' });
+    if (failure === 'list')
+      list.mockResolvedValueOnce({ status: 'error', code: 'service_unavailable' });
+    if (failure === 'throw') get.mockRejectedValueOnce(new Error('read failed'));
+    const writer = { ...current.writer, sideConversations: { ...capability, get, list } };
+    render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
+    const retry = await screen.findByRole('button', { name: 'Retry local side notes' });
+    expect(
+      screen.queryByRole('button', { name: 'New retained side note' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    expect(await screen.findByRole('button', { name: 'New retained side note' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: /Retained side note · open/ })).toBeVisible();
+  },
+);
+
+test('a definitively stale review requires a fresh operation key and branch before editing', async () => {
+  const current = await fixture();
+  const local = current.writer.sideConversations;
+  if (!local) throw new Error('Missing local capability');
+  const bringBack = vi.fn(local.bringBack);
+  const prepareBringBack = vi.fn(local.prepareBringBack);
+  const writer = {
+    ...current.writer,
+    sideConversations: { ...local, bringBack, prepareBringBack },
+  };
+  render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
+  await openSide();
+  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
+    target: { value: 'keep the reviewed text' },
+  });
+  await current.store.appendMessage(current.parent.id, 'user', 'another parent edit');
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  const again = await screen.findByRole('button', { name: 'Review again' });
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
+  const first = bringBack.mock.calls[0]?.[0];
+  expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(1);
+  prepareBringBack.mockResolvedValueOnce({ status: 'error', code: 'service_unavailable' });
+  fireEvent.click(again);
+  await screen.findByText(/The local review could not be prepared/);
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
+  expect(bringBack).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Review again' }));
+  await waitFor(() =>
+    expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeEnabled(),
+  );
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
+    'keep the reviewed text',
+  );
+  fireEvent.change(screen.getByRole('textbox', { name: 'Reviewed excerpt' }), {
+    target: { value: 'fresh reviewed text' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await waitFor(() =>
+    expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(2),
+  );
+  expect(bringBack.mock.calls[1]?.[0].operationKey).not.toBe(first?.operationKey);
+  expect(bringBack.mock.calls[1]?.[0].preconditions?.parentRevision).toBe(1);
+});
+
+test('a generic conflict after a committed import cannot release or edit its operation key', async () => {
+  const current = await fixture();
+  const local = current.writer.sideConversations;
+  if (!local) throw new Error('Missing local capability');
+  const attempts: BringBackInput[] = [];
+  const writer = {
+    ...current.writer,
+    sideConversations: {
+      ...local,
+      async bringBack(input: BringBackInput) {
+        attempts.push(input);
+        const result = await local.bringBack(input);
+        return attempts.length === 1 ? { status: 'error' as const, code: 'conflict' } : result;
+      },
+    },
+  };
+  render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
+  await openSide();
+  fireEvent.click(screen.getByRole('checkbox', { name: /source text/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await screen.findByText(/conflicts with its earlier request/);
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Review again' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument(),
+  );
+  expect(attempts[1]).toEqual(attempts[0]);
+  expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(1);
+});
+
 test('in-flight review survives source unmount and remount without releasing its operation key', async () => {
   const first = await fixture();
   const other = await fixture();

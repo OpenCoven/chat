@@ -79,10 +79,10 @@ export function checkPreconditions(change: ChatRecords, current: ChatRecords): v
  */
 export type ChatBackend = Readonly<{
   isDurable: () => boolean;
-  /** Optional synchronous revision covering every writer sharing this backend.
+  /** Optional shared revision covering every writer sharing this backend.
    * Increments once per successful atomic commit, never on failed commits.
    */
-  getMutationRevision?: () => number;
+  getMutationRevision?: () => number | Promise<number>;
   loadAll: () => Promise<ChatRecords>;
   commit: (change: ChatRecords) => Promise<void>;
   close: () => void;
