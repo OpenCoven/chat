@@ -1369,7 +1369,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 319,914 | `62b243a47e7646b1dafcc1583101332d9c7004d98ac200bb91bc828867928526` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,990 | `521882751f13fcc312ccb261f61b926e53df0e5309cd54e9fd7f42a342b434a6` |
+| `scripts/windows-job-supervisor.test.ps1` | 178,124 | `b22a424e2cf90ea6c06c184cf7bf0ca737f6e0a55e656ecc2ff614b5969b4b64` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 17,205 | `8125f8a2166c4cc65e461b3019d2497656aa51e11fdea80eceb7b336aad299c1` |

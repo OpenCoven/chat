@@ -42,6 +42,9 @@ function Write-ExceptionChain {
   while ($pending.Count -gt 0 -and $depth -lt 12) {
     $exception = $pending.Dequeue()
     Write-Host "cause[$depth] $($exception.GetType().FullName): $($exception.Message)"
+    if ($exception -is [ComponentModel.Win32Exception]) {
+      Write-Host "native-error[$depth]=$($exception.NativeErrorCode)"
+    }
     if (-not $sidProbeAttempted -and
         $exception.Message -match '^WTS process primary token SID query was ambiguous for process ([0-9]+) in session ([0-9]+)\.$') {
       $sidProbeAttempted = $true
