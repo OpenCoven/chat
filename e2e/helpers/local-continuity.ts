@@ -69,6 +69,18 @@ export async function localContinuityJourney({
   await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
     'Edited excerpt only',
   );
+  await expect(page.getByRole('button', { name: 'Cancel review', exact: true })).toBeDisabled();
+  const uncertainExcerpt = page.getByRole('textbox', { name: 'Reviewed excerpt' });
+  await expect(uncertainExcerpt).toBeEnabled();
+  await expect(uncertainExcerpt).toHaveAttribute('readonly', '');
+  expect(
+    await uncertainExcerpt.evaluate((element) => {
+      if (!(element instanceof HTMLTextAreaElement)) throw new Error('Missing review textarea');
+      element.focus();
+      element.select();
+      return element.value.slice(element.selectionStart, element.selectionEnd);
+    }),
+  ).toBe('Edited excerpt only');
   const firstReceipt = await importReceipts(page);
   expect(firstReceipt).toHaveLength(1);
   expect(firstReceipt[0]?.text).toBe('Edited excerpt only');
@@ -80,6 +92,7 @@ export async function localContinuityJourney({
     'Edited excerpt only',
   );
   await expect(page.getByRole('checkbox', { name: /retained raw source/ })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Cancel review', exact: true })).toBeDisabled();
   const reviewBounds = await page.evaluate(() => {
     const history = document.querySelector('.chat-shell__thread-body');
     const composer = document.querySelector('.chat-composer');

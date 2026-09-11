@@ -84,8 +84,11 @@ There is no cross-session exactly-once creation guarantee or durable pending out
 An attempted review keeps its operation key, selected message IDs, edited text,
 and local branch preconditions in source- and writer-scoped memory. Returning
 to the parent or switching sources does not cancel it. After an uncertain save,
-retry the unchanged review to reconcile the result before editing again, or
-explicitly cancel. Cancellation cannot undo an import that already committed.
+retry the unchanged review to reconcile the result before editing again.
+Ordinary cancellation is disabled while the result is uncertain, so it cannot
+release the original key and enable a duplicate import. The immutable excerpt
+remains selectable and copyable, including while a save is pending; navigation
+does not release its retry identity.
 If a stale branch is definitively rejected before committing, **Review again**
 captures current branch preconditions and a new operation key while retaining
 your edited excerpt. An uncertain operation never becomes editable under its
@@ -98,7 +101,9 @@ excerpt before explicitly canceling; uncertain acknowledgements still cannot
 be edited or reselected.
 If the selected note itself becomes unavailable, its exact stored review remains
 in a read-only recovery panel with **Cancel unavailable review**. That panel
-cannot import, reselect, or navigate another familiar.
+cannot import, reselect, or navigate another familiar. Its explicit dismissal
+only forgets inaccessible recovery text; it does not undo a commit or authorize
+resubmission. Copy valuable text and inspect the parent before dismissing.
 Fresh or reselected reviews require every selected message to be loaded. If
 navigation resets the loaded pages, load the missing page or use **Clear message
 selection** to choose a new exact selection; edited excerpts are retained.
@@ -118,7 +123,11 @@ or write to memory services.
 The public import API requires validated parent/side branch preconditions;
 unprepared selections cannot bypass review admission. Already-committed exact
 receipts still reconcile before checking later branch changes. Legacy persisted
-receipts remain readable without rewriting their provenance.
+receipts lacking stored preconditions may also replay read-only after mandatory
+request validation and exact key, parent, side, source-ID and excerpt matching.
+This does not prove their historical branch snapshot or authorize a new write,
+and their provenance is never rewritten. Modern receipts still reject changed
+preconditions.
 
 The version-2 IndexedDB upgrade preserves existing records and adds operation-key
 indexes plus an atomic shared mutation revision. Warm writes read only the exact
@@ -132,7 +141,13 @@ during opening surface rather than silently trusting the history.
 Close older app windows if they block the database upgrade.
 Successful writes recheck the shared revision after their local update and
 reconcile detected competing commits before notifying observers. This is not a
-continuous subscription to other windows. The memory-only backend also uses
+continuous subscription to other windows. A detected refresh compares revisions
+before and after its snapshot, retries at most three snapshots, and fails
+explicitly without publishing an unstable snapshot if history keeps changing.
+Known root commits retain their confirmed-save recovery; keyed import/creation
+replays notify observers after recovery without writing again. Commits after the
+final sample still require a later refresh; no instantaneous cross-window view
+is promised. The memory-only backend also uses
 keyed preconditions and operation-key counts, maintained across overwrites,
 deletions and discarded-note tombstones. Admission touches only the requested
 records and changed rows; loading snapshots and initial hydration still scan

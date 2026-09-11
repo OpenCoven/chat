@@ -129,7 +129,9 @@ export function isStoredConversation(value: unknown): value is StoredConversatio
         value.side.parentConversationId.length > 0 &&
         typeof value.side.operationKey === 'string' &&
         value.side.operationKey.length > 0 &&
-        ['open', 'closed', 'discarded'].includes(String(value.side.state)))) &&
+        (value.side.state === 'open' ||
+          value.side.state === 'closed' ||
+          value.side.state === 'discarded'))) &&
     isIsoTimestamp(value.createdAt) &&
     isIsoTimestamp(value.updatedAt)
   );

@@ -176,19 +176,21 @@ test('a definitively stale review requires a fresh operation key and branch befo
   await current.store.appendMessage(current.parent.id, 'user', 'another parent edit');
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   const again = await screen.findByRole('button', { name: 'Review again' });
-  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute('readonly');
   expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
   const first = bringBack.mock.calls[0]?.[0];
   expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(1);
   prepareBringBack.mockResolvedValueOnce({ status: 'error', code: 'service_unavailable' });
   fireEvent.click(again);
   await screen.findByText(/The local review could not be prepared/);
-  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute('readonly');
   expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
   expect(bringBack).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Review again' }));
   await waitFor(() =>
-    expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeEnabled(),
+    expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).not.toHaveAttribute(
+      'readonly',
+    ),
   );
   expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
     'keep the reviewed text',
@@ -227,7 +229,7 @@ test('a generic conflict after a committed import cannot release or edit its ope
   await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   await screen.findByText(/conflicts with its earlier request/);
-  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute('readonly');
   expect(screen.queryByRole('button', { name: 'Review again' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   await waitFor(() =>
@@ -351,13 +353,14 @@ test('in-flight review survives source unmount and remount without releasing its
   await openSide();
   const review = await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
   expect(review).toHaveValue('exact edited excerpt');
-  expect(review).toBeDisabled();
+  expect(review).toHaveAttribute('readonly');
+  expect(review).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Bring back reviewed excerpt' })).toBeDisabled();
   await act(async () => release());
   expect(
     await screen.findByText(/Retry the unchanged review with the same operation key/),
   ).toBeVisible();
-  expect(review).toBeDisabled();
+  expect(review).toHaveAttribute('readonly');
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   await waitFor(() =>
     expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument(),
@@ -420,4 +423,61 @@ test('explicit cancellation clears a review without writing an import', async ()
   await openSide();
   expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument();
   expect(current.store.listMessages(current.parent.id, 10).data).toHaveLength(0);
+});
+
+test('an uncertain committed import cannot be cancelled into a fresh key and remains copyable across navigation', async () => {
+  const current = await fixture();
+  const local = current.writer.sideConversations;
+  if (!local) throw new Error('Missing local capability');
+  const attempts: BringBackInput[] = [];
+  const writer = {
+    ...current.writer,
+    sideConversations: {
+      ...local,
+      async bringBack(input: BringBackInput) {
+        attempts.push(input);
+        const result = await local.bringBack(input);
+        return attempts.length === 1
+          ? ({ status: 'error', code: 'service_unavailable' } as const)
+          : result;
+      },
+    },
+  };
+  render(<ChatShell queryAdapter={current.adapter} writer={writer} />);
+  await openSide();
+  const source = screen.getByRole('checkbox', { name: /source text/ });
+  fireEvent.click(screen.getByRole('button', { name: 'Discard note…' }));
+  fireEvent.click(source);
+  await waitFor(() => expect(source).toBeChecked());
+  fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+  const excerpt = await screen.findByRole('textbox', { name: 'Reviewed excerpt' });
+  fireEvent.change(excerpt, { target: { value: 'Copyable exact excerpt' } });
+  await waitFor(() => expect(excerpt).toHaveValue('Copyable exact excerpt'));
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await screen.findByText(/Retry the unchanged review with the same operation key/);
+  const cancel = screen.getByRole('button', { name: 'Cancel review' });
+  expect(cancel).toBeDisabled();
+  const discard = screen.getByRole('button', { name: 'Discard local messages' });
+  expect(discard).toBeDisabled();
+  expect(excerpt).toBeEnabled();
+  expect(excerpt).toHaveAttribute('readonly');
+  fireEvent.click(cancel);
+  fireEvent.click(discard);
+  expect(current.store.getSideConversation(current.side.id)?.side.state).toBe('open');
+  expect(excerpt).toHaveValue('Copyable exact excerpt');
+  fireEvent.change(excerpt, { target: { value: 'Do not change an uncertain payload' } });
+  expect(excerpt).toHaveValue('Copyable exact excerpt');
+  fireEvent.click(screen.getByRole('button', { name: 'Return to parent' }));
+  await openSide();
+  expect(screen.getByRole('button', { name: 'Cancel review' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
+    'Copyable exact excerpt',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).toBeNull(),
+  );
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1]).toEqual(attempts[0]);
+  expect(current.store.listMessages(current.parent.id, 50).data).toHaveLength(1);
 });

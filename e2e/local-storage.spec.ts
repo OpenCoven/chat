@@ -340,7 +340,10 @@ for (const interference of ['parent', 'side', 'creation-key', 'import-key'] as c
     }, interference);
     await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
     await expect(page.getByText(/conflicts with its earlier request/)).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+    await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute(
+      'readonly',
+      '',
+    );
     await expect(page.getByRole('button', { name: 'Review again', exact: true })).toHaveCount(0);
     expect(await durableSummary(page)).toEqual({
       count: interference === 'import-key' ? 53 : 52,
@@ -374,7 +377,10 @@ test('an aborted import rolls back its message, conversation and shared revision
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
   await expect(page.getByText(/The import result could not be confirmed/)).toBeVisible();
   expect(await durableSummary(page)).toEqual({ count: 52, revision: 0, imported: 0 });
-  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute(
+    'readonly',
+    '',
+  );
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
   expect(await durableSummary(page)).toEqual({ count: 53, revision: 1, imported: 1 });
@@ -404,7 +410,7 @@ test('two windows racing the same reviewed key converge on one durable import', 
       )
       .toBe(true);
     if (await review.count()) {
-      await expect(review).toBeDisabled();
+      await expect(review).toHaveAttribute('readonly', '');
       await current
         .getByRole('button', { name: 'Bring back reviewed excerpt', exact: true })
         .click();
@@ -810,6 +816,154 @@ for (const timing of ['before', 'after'] as const) {
     expect((await durableSummary(page)).revision).toBe(2);
   });
 }
+
+test('a write after IndexedDB snapshot capture is reconciled before the active transcript and sidebar refresh', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await page.evaluate(() => {
+    const original = IDBDatabase.prototype.transaction;
+    let committed = false;
+    let captured = false;
+    IDBDatabase.prototype.transaction = function (...args) {
+      const transaction = Reflect.apply(original, this, args) as IDBTransaction;
+      const names = typeof args[0] === 'string' ? [args[0]] : Array.from(args[0]);
+      const firstWrite = !committed && args[1] === 'readwrite';
+      const snapshot =
+        committed &&
+        !captured &&
+        args[1] === 'readonly' &&
+        names.includes('conversations') &&
+        names.includes('messages');
+      if (!firstWrite && !snapshot) return transaction;
+      if (firstWrite) committed = true;
+      else captured = true;
+      const other = Reflect.apply(original, this, [
+        ['meta', 'conversations', 'messages'],
+        'readwrite',
+      ]) as IDBTransaction;
+      const conversations = other.objectStore('conversations');
+      const messages = other.objectStore('messages');
+      const parent = conversations.get('parent');
+      parent.onsuccess = () => {
+        if (firstWrite) {
+          conversations.put({
+            ...parent.result,
+            id: 'external-root',
+            title: 'Concurrent sidebar root',
+          });
+          return;
+        }
+        const turns = messages
+          .index('by_conversation')
+          .getAll(IDBKeyRange.bound(['parent'], ['parent', []]));
+        turns.onsuccess = () => {
+          const timestamp = new Date(Date.parse(parent.result.updatedAt) + 1).toISOString();
+          messages.put({
+            id: 'after-snapshot',
+            conversationId: 'parent',
+            parentId: turns.result.at(-1).id,
+            role: 'user',
+            text: 'Committed after snapshot capture',
+            createdAt: timestamp,
+          });
+          conversations.put({
+            ...parent.result,
+            revision: parent.result.revision + 1,
+            updatedAt: timestamp,
+          });
+        };
+      };
+      const meta = other.objectStore('meta');
+      const revision = meta.get('mutationRevision');
+      revision.onsuccess = () =>
+        meta.put({ key: 'mutationRevision', value: revision.result.value + 1 });
+      return transaction;
+    };
+  });
+  await send(page, 'Our coherent append');
+  const messages = page.getByRole('list', { name: 'Messages' });
+  await expect(messages.getByText('Our coherent append', { exact: true })).toHaveCount(1);
+  await expect(messages.getByText('Committed after snapshot capture', { exact: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByRole('option', { name: /Concurrent sidebar root/ })).toBeVisible();
+  expect((await durableSummary(page)).revision).toBe(3);
+});
+
+test('IndexedDB-cloned boxed and array side states are sanitized without exposing malformed notes', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('opencoven-chat');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('conversations', 'readwrite');
+          const conversations = tx.objectStore('conversations');
+          const parent = conversations.get('parent');
+          parent.onsuccess = () => {
+            for (const [index, state] of [
+              Object('discarded'),
+              Object('open'),
+              ['closed'],
+            ].entries()) {
+              conversations.put({
+                ...parent.result,
+                id: `malformed-${index}`,
+                title: `Malformed note ${index}`,
+                side: { parentConversationId: 'parent', operationKey: `bad-${index}`, state },
+              });
+            }
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+  );
+  await page.reload();
+  await expect(page.getByRole('button', { name: /^Legacy side/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Legacy history/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Malformed note/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /Malformed note/ })).toHaveCount(0);
+});
+
+test('a migrated legacy receipt replays through the local writer without new persistence or provenance changes', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  const before = await durableSummary(page);
+  await page.getByRole('button', { name: /^Legacy side/ }).click();
+  await page.getByRole('checkbox', { name: /Legacy source/ }).check();
+  await page.evaluate(() => {
+    const original = crypto.randomUUID.bind(crypto);
+    Object.defineProperty(crypto, 'randomUUID', {
+      configurable: true,
+      value: () => {
+        Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: original });
+        return 'legacy-import';
+      },
+    });
+  });
+  await page.getByRole('button', { name: 'Review Bring back', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Reviewed excerpt' }).fill('Legacy imported excerpt');
+  await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveCount(0);
+  expect(await durableSummary(page)).toEqual(before);
+  await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
+  await expect(
+    page.getByRole('list', { name: 'Messages' }).getByText('Legacy imported excerpt'),
+  ).toHaveCount(1);
+});
 
 test('a discarded reviewed source keeps its edited excerpt available for copying and explicit cancellation', async ({
   page,

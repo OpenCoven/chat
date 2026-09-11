@@ -45,7 +45,10 @@ test('a parent changed in another window cannot silently accept an earlier revie
   await page.getByRole('button', { name: 'Bring back reviewed excerpt', exact: true }).click();
   await expect(page.getByText(/The reviewed local branch changed/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Review again', exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute(
+    'readonly',
+    '',
+  );
   await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
   await expect(page.getByText('Other window parent edit', { exact: true })).toBeVisible();
   await expect(page.getByText('Earlier reviewed excerpt', { exact: true })).toHaveCount(0);

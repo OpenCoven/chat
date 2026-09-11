@@ -65,6 +65,7 @@ export function sameImport(message: StoredMessage, input: BringBackInput): boole
   const left = message.broughtBack?.preconditions;
   const right = input.preconditions;
   const sameBranch =
+    left === undefined ||
     left === right ||
     (left !== undefined &&
       right !== undefined &&
@@ -73,6 +74,7 @@ export function sameImport(message: StoredMessage, input: BringBackInput): boole
       left.sideRevision === right.sideRevision &&
       left.sideLeafId === right.sideLeafId);
   return (
+    message.broughtBack?.operationKey === input.operationKey &&
     message.conversationId === input.parentConversationId &&
     message.text === input.excerpt &&
     message.broughtBack?.sideConversationId === input.sideConversationId &&

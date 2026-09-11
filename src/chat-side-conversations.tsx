@@ -41,7 +41,7 @@ function failure(
 ): string {
   if (result.status === 'unsupported') return result.reason;
   if (result.code === 'conflict' && context === 'review')
-    return 'This operation conflicts with its earlier request. Retry the unchanged review to reconcile, or cancel explicitly.';
+    return 'This operation conflicts with its earlier request. Keep this review and retry unchanged to reconcile; it may already have committed.';
   if (result.code === 'not_found')
     return 'The exact parent, side note, or selected message is unavailable.';
   return failureGuidance[context];
@@ -341,6 +341,10 @@ export function ChatSideConversations({
 
   function changeState(state: 'open' | 'closed' | 'discarded') {
     if (!capability || !side) return;
+    if (state === 'discarded' && reviewEntry.getSnapshot().review) {
+      setNotice('Resolve the current review before discarding its source note.');
+      return;
+    }
     void run(
       'state',
       () =>
@@ -410,7 +414,11 @@ export function ChatSideConversations({
                 Discard this note’s local messages? Reviewed excerpts already brought back stay in
                 the parent.
               </p>
-              <button type="button" onClick={() => changeState('discarded')} disabled={busy}>
+              <button
+                type="button"
+                onClick={() => changeState('discarded')}
+                disabled={busy || review !== null}
+              >
                 Discard local messages
               </button>
               <button type="button" onClick={() => setDiscarding(false)} disabled={busy}>
@@ -478,11 +486,15 @@ export function ChatSideConversations({
                 value={review.excerpt}
                 rows={4}
                 maxLength={32_000}
-                disabled={busy || phase === 'uncertain' || phase === 'rejected'}
-                readOnly={phase === 'unavailable' || phase === 'reselecting'}
-                onChange={(event) =>
-                  reviewEntry.update({ review: { ...review, excerpt: event.target.value } })
-                }
+                readOnly={busy || phase !== 'editing'}
+                onChange={(event) => {
+                  const current = reviewEntry.getSnapshot();
+                  if (!busy && current.phase === 'editing' && current.review) {
+                    reviewEntry.update({
+                      review: { ...current.review, excerpt: event.target.value },
+                    });
+                  }
+                }}
               />
               <p>
                 Only this edited text is added as an inert user note to the exact parent. No full
@@ -490,12 +502,13 @@ export function ChatSideConversations({
               </p>
               <p>
                 Pending reviews survive navigation in this app session only, not reload or restart.
-                Canceling forgets the retry but cannot undo a committed import.
+                Uncertain imports keep their original retry identity; cancellation is unavailable
+                until the result is reconciled.
               </p>
               {phase === 'uncertain' ? (
                 <p>
                   Retry this unchanged review to reconcile its result before editing or starting
-                  another import.
+                  another import. You can still copy the excerpt or navigate away.
                 </p>
               ) : null}
               <div className="chat-side__actions">
@@ -535,10 +548,19 @@ export function ChatSideConversations({
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    reviewEntry.update({ review: null, phase: 'idle', notice: '', selected: [] })
-                  }
+                  disabled={busy || phase === 'uncertain'}
+                  onClick={() => {
+                    const current = reviewEntry.getSnapshot();
+                    if (
+                      !busy &&
+                      (current.phase === 'editing' ||
+                        current.phase === 'rejected' ||
+                        current.phase === 'unavailable' ||
+                        current.phase === 'reselecting')
+                    ) {
+                      reviewEntry.update({ review: null, phase: 'idle', notice: '', selected: [] });
+                    }
+                  }}
                 >
                   Cancel review
                 </button>

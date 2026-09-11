@@ -122,8 +122,8 @@ test('identical prepared receipts replay unchanged after advancement, discard an
   ]);
 });
 
-test('legacy persisted receipts without preconditions remain readable after hydration', async () => {
-  const { backend, store, parent, input } = await setupReview();
+test('legacy receipts replay read-only after hydration and discard, but never bypass request validation', async () => {
+  const { backend, store, parent, selection, input } = await setupReview();
   const receipt = await store.bringBack(input);
   if (!receipt.broughtBack) throw new Error('Missing receipt provenance');
   const { preconditions: _preconditions, ...legacyProvenance } = receipt.broughtBack;
@@ -137,5 +137,37 @@ test('legacy persisted receipts without preconditions remain readable after hydr
   });
   const reloaded = await openChatStore({ familiarId: 'local', backend: legacyBackend });
   expect(reloaded.listMessages(parent.id, 50).data).toEqual([legacyReceipt]);
-  expect((await legacyBackend.loadAll()).messages).toContainEqual(legacyReceipt);
+  await reloaded.setSideState(selection, 'discarded');
+  const before = await legacyBackend.loadAll();
+  const revision = legacyBackend.getMutationRevision?.();
+  expect(await reloaded.bringBack(input)).toEqual(legacyReceipt);
+  const reopened = await openChatStore({ familiarId: 'local', backend: legacyBackend });
+  const capability = createLocalChatWriter(reopened).sideConversations;
+  if (!capability) throw new Error('Missing local side capability');
+  expect(await capability.bringBack(input)).toMatchObject({
+    status: 'ok',
+    data: { id: receipt.id },
+  });
+  for (const invalid of [selection, { ...input, preconditions: null }]) {
+    await expect(Reflect.apply(reopened.bringBack, reopened, [invalid])).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+  }
+  for (const changed of [
+    { ...input, excerpt: 'Different excerpt' },
+    { ...input, sourceMessageIds: ['other-source'] },
+  ]) {
+    await expect(reopened.bringBack(changed)).rejects.toMatchObject({ code: 'conflict' });
+  }
+  for (const changed of [
+    { ...input, parentConversationId: 'another-parent' },
+    { ...input, sideConversationId: 'another-side' },
+  ]) {
+    await expect(reopened.bringBack(changed)).rejects.toMatchObject({ code: 'not_found' });
+  }
+  await expect(reopened.bringBack({ ...input, operationKey: 'fresh-key' })).rejects.toMatchObject({
+    code: 'stale_review',
+  });
+  expect(await legacyBackend.loadAll()).toEqual(before);
+  expect(legacyBackend.getMutationRevision?.()).toBe(revision);
 });

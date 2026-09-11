@@ -221,9 +221,7 @@ function createHydratedChatStore(
       // Only a backend-wide revision can skip hydration. Transactional record
       // preconditions still fence competing writes after this revision read.
       if (currentRevision === undefined || currentRevision !== indexedBackendRevision) {
-        const current = await backend.loadAll();
-        hydrate(current);
-        indexedBackendRevision = currentRevision;
+        await refreshSnapshot(currentRevision);
       }
       return write();
     });
@@ -339,14 +337,35 @@ function createHydratedChatStore(
 
   hydrate(initialRecords);
 
+  async function refreshSnapshot(before: number | undefined): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const snapshot = await backend.loadAll();
+      const after = await backend.getMutationRevision?.();
+      if (before === after) {
+        hydrate(snapshot);
+        indexedBackendRevision = before;
+        return;
+      }
+      before = after;
+    }
+    throw new ChatStoreError(
+      'conflict',
+      'Local history kept changing during refresh. Retry to reconcile the exact operation.',
+    );
+  }
+
   async function announce(): Promise<void> {
     const currentRevision = await backend.getMutationRevision?.();
     if (currentRevision !== undefined && currentRevision !== indexedBackendRevision) {
       // Our local updates are already applied. Replace them with the shared
       // snapshot before notifying; never append them again after hydration.
-      hydrate(await backend.loadAll());
-      indexedBackendRevision = currentRevision;
+      await refreshSnapshot(currentRevision);
     }
+    notify();
+  }
+
+  // Receipt-only replays publish synchronously with their lookup in the serialized snapshot.
+  function notify(): void {
     revision += 1;
     const change = Object.freeze({ revision });
     for (const listener of [...listeners]) {
@@ -604,6 +623,7 @@ function createHydratedChatStore(
               'This operation key names a different local side note.',
             );
           }
+          notify();
           return existing as SideConversation;
         }
         const timestamp = new Date(now()).toISOString();
@@ -696,6 +716,7 @@ function createHydratedChatStore(
               'This operation key names another reviewed import.',
             );
           }
+          notify();
           return previousImport;
         }
         const expected = input.preconditions;

@@ -294,8 +294,12 @@ test.each(['rejected', 'uncertain'] as const)(
       />,
     );
     fireEvent.click(await screen.findByRole('button', { name: /Retained side note · open/ }));
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Original source/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+    const selectedSource = await screen.findByRole('checkbox', { name: /Original source/ });
+    fireEvent.click(selectedSource);
+    await waitFor(() => expect(selectedSource).toBeChecked());
+    const prepare = screen.getByRole('button', { name: 'Review Bring back' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    fireEvent.click(prepare);
     fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
       target: { value: 'Keep my carefully edited excerpt' },
     });

@@ -157,7 +157,7 @@ test('a captured uncertain review reconciles unchanged even when its selected so
   expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveValue(
     'Selected message 51',
   );
-  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: 'Reviewed excerpt' })).toHaveAttribute('readonly');
   fireEvent.click(screen.getByRole('button', { name: 'Bring back reviewed excerpt' }));
   await waitFor(() =>
     expect(screen.queryByRole('textbox', { name: 'Reviewed excerpt' })).not.toBeInTheDocument(),

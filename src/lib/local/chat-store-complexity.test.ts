@@ -353,12 +353,19 @@ test('post-commit revision read failure is uncertain and does not notify success
   const backend = createMemoryChatBackend(records);
   const getRevision = backend.getMutationRevision;
   if (!getRevision) throw new Error('Missing shared revision');
-  let reads = 0;
+  let failAfterCommit = false;
   const store = createChatStore(
     {
       ...backend,
+      async commit(change) {
+        await backend.commit(change);
+        failAfterCommit = true;
+      },
       getMutationRevision() {
-        if (++reads === 3) throw new Error('Revision read failed after commit');
+        if (failAfterCommit) {
+          failAfterCommit = false;
+          throw new Error('Revision read failed after commit');
+        }
         return getRevision();
       },
     },
@@ -379,7 +386,11 @@ test('post-commit revision read failure is uncertain and does not notify success
   const input = { ...selection, preconditions: await store.prepareBringBack(selection) };
   expect(await writer.bringBack(input)).toEqual({ status: 'error', code: 'service_unavailable' });
   expect(listener).not.toHaveBeenCalled();
+  expect(
+    (await backend.loadAll()).messages.filter((row) => row.conversationId === 'parent'),
+  ).toHaveLength(1);
   expect(await writer.bringBack(input)).toMatchObject({ status: 'ok' });
+  expect(listener).toHaveBeenCalledOnce();
   expect(store.listMessages('parent', 50).data).toHaveLength(1);
 });
 test.skipIf(process.env.CHAT_APPEND_BENCHMARK !== '1')(
