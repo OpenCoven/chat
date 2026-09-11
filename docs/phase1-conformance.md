@@ -20,7 +20,7 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
+| Executable harness | `2a594dc5e6643a318fd9f1f660845646899a413d` | `e21006a194ad73dda94c7f248dca32e91733f392` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
@@ -1612,4 +1612,8 @@ boundary for present and missing entries, and, on Windows, removes a real
 tree containing a path longer than 260 characters, a trailing-dot component,
 a read-only file and a directory junction whose target must survive.
 
-The cleanup delete diagnostic harness pin is recorded below once frozen.
+The cleanup delete harness is pinned at `2a594dc5e6643a318fd9f1f660845646899a413d`, tree
+`e21006a194ad73dda94c7f248dca32e91733f392`. It retains the quota-context harness ancestry;
+only the supervisor, its embedded workflow authority bytes and the new regression change.
+Native Windows CI removed the long-path/trailing-dot/junction tree through the
+production walker; a fresh SDK/protected binding remains required.
