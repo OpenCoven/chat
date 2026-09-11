@@ -9,6 +9,178 @@ The desktop app can also connect or pair with Cave through a least-privilege
 native adapter and render bounded, read-only canonical chat data. Explicit demo
 routes remain available for design exploration.
 
+## Conversation chapters
+
+Open **Ongoing** in a conversation to navigate UTC-day chapters without
+changing its original transcript. This is an exact-conversation view, not a
+merge of conversations that share a familiar name. **This device** notes stay
+separate, and the Cave source stays read-only.
+
+Switching familiars restores the exact conversation you last selected, including
+an available message anchor. References and unsent drafts stay in memory, scoped
+to the live source, writer, familiar ID, and conversation ID. Changing sources
+never copies a draft. Reloading clears drafts and navigation preferences, not
+durably saved local notes. A missing remembered conversation or message shows an
+unavailable notice rather than silently choosing a newer conversation.
+
+The installed frozen SDK does not yet expose `listConversationChapters`.
+Production Chat says so and offers navigation over already-loaded messages
+only, marking partial history rather than prefetching bodies. The additive
+DEVELOPMENT read port can consume typed producer headers after a separately
+qualified SDK/native capability is admitted. It keeps the eight-page ceiling,
+bounded memory-only query cache, revision checks, and source-switch isolation.
+Malformed or cross-conversation chapter headers and repeated anchors are rejected.
+It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
+
+## Local save recovery
+
+If local storage cannot be read during startup, **Retry local storage** retries
+opening it without starting Cave or substituting an empty successful session.
+Memory-only fallback applies only when the IndexedDB API is genuinely absent.
+If a present API denies or fails an open, or an older window blocks its upgrade,
+startup stays at the retry gate. Close the older windows before retrying.
+Retries do not queue additional opens behind an already-blocked request; once
+unblocked, that abandoned upgrade is aborted and closed without migrating in the
+background. A subsequent explicit retry opens the retained history.
+
+Conversation creation and ordinary message saves distinguish a confirmed commit
+followed by a failed history refresh from an unconfirmed commit acknowledgement.
+Neither outcome invites a second write. **Reconcile local save** reads the exact
+allocated record and refreshes history without resubmitting it. A committed save
+whose exact record is available clears the matching draft. Only a no-commit
+outcome permits retrying the retained draft. A known successful commit remains
+committed even if its record is later deleted or discarded: commit outcome and
+current availability are separate facts. Recovery keeps the unavailable saved
+text or conversation title copyable until **Dismiss unavailable save**; it never
+resubmits or recreates deleted data. Read failures stay visible and keep the retry
+blocked. If an
+unavailable note prevents determining an unconfirmed message's outcome, it is
+not treated as an unsaved message.
+Recovery content remains read-only and copyable while the outcome is unresolved.
+A backend without a shared revision cannot prove an unconfirmed save absent:
+the save stays blocked, even if a read returns no record. A later exact positive
+receipt can resolve it, and a known commit remains committed if its content is
+missing. The default atomic IndexedDB and memory providers retain revision-based
+absence reconciliation; no background retry loop or alternate write is added.
+
+Pending save receipts and completed reconciliation results are scoped to the
+live local store. They survive navigation within this app session, not reload
+or restart. After restarting, inspect saved conversations and messages before
+submitting again; there is no cross-session exactly-once guarantee.
+
+## Retained local side notes
+
+You can explore a separate note without changing your parent conversation:
+
+1. Select **This device**, open a conversation, and choose **New retained side note**.
+2. Save messages in the empty side note. Your parent draft stays separate.
+3. Select individual messages, choose **Review Bring back**, and edit the excerpt.
+4. Choose **Bring back reviewed excerpt** to save exactly that text to the original
+   local parent as an inert user note.
+
+**Close note** retains its messages. **Reopen note** permits more writing.
+**Discard note** requires confirmation and removes the note's local messages;
+previously reviewed imports remain in the parent. A minimal creation tombstone
+prevents a retried create operation from recreating a discarded note.
+An uncertain creation retries with its original key. Once a replay confirms that
+the note was discarded, the next explicit **New retained side note** starts a
+fresh creation request.
+Pending creation keys and acknowledgements survive navigation in exact
+source/writer/familiar/parent-scoped session memory. **Retry retained side note
+creation** replays that request instead of starting another one. Late
+acknowledgements cannot clear a newer request or navigate another parent.
+These keys do **not** survive reload or restart: inspect the durable retained-note
+list and open any already-created note before choosing to create another.
+There is no cross-session exactly-once creation guarantee or durable pending outbox.
+
+An attempted review keeps its operation key, selected message IDs, edited text,
+and local branch preconditions in source- and writer-scoped memory. Returning
+to the parent or switching sources does not cancel it. After an uncertain save,
+retry the unchanged review to reconcile the result before editing again.
+Ordinary cancellation is disabled while the result is uncertain, so it cannot
+release the original key and enable a duplicate import. The immutable excerpt
+remains selectable and copyable, including while a save is pending; navigation
+does not release its retry identity.
+If a stale branch is definitively rejected before committing, **Review again**
+captures current branch preconditions and a new operation key while retaining
+your edited excerpt. An uncertain operation never becomes editable under its
+old key. Failed side-note metadata reads offer **Retry local side notes** without
+enabling mutations against unknown metadata.
+If the exact source is missing, the rejected review stays available as a
+read-only, copyable excerpt. **Choose available messages** retains that text
+while preparing a new selection with a new key. If the note is gone, a definitively
+rejected review can be dismissed after copying; uncertain acknowledgements cannot
+be edited, canceled, or reselected.
+If the selected note itself becomes unavailable, its exact stored review remains
+in a read-only recovery panel with **Cancel unavailable review**. That panel
+cannot import, reselect, or navigate another familiar. Cancellation is also
+disabled there for uncertain or in-flight reviews: the original key and excerpt
+remain retained and copyable, without offering reconciliation against an
+unavailable target. Only an unattempted or definitively rejected review can be
+explicitly dismissed; dismissal neither undoes a commit nor authorizes resubmission.
+Fresh or reselected reviews require every selected message to be loaded. If
+navigation resets the loaded pages, load the missing page or use **Clear message
+selection** to choose a new exact selection; edited excerpts are retained.
+Already-captured reviews retry their unchanged payload without requiring the
+source page to be loaded again.
+
+**Pending reviews do not survive reload or restart.** Saved imports do. If you
+reload after an uncertain save, inspect the parent before starting another import;
+the app cannot recover that pending review's key across restarts.
+
+Side notes, lineage, and import receipts use the existing `ChatStore` and
+IndexedDB transactions. Repeated operation keys reconcile to the same result;
+changed payloads with reused keys are rejected. Competing windows are checked
+at commit, and failed imports leave no partial parent record. Imports neither
+merge the transcript nor execute instructions, generate replies, copy attachments,
+or write to memory services.
+The public import API requires validated parent/side branch preconditions;
+unprepared selections cannot bypass review admission. Already-committed exact
+receipts still reconcile before checking later branch changes. Legacy persisted
+receipts lacking stored preconditions may also replay read-only after mandatory
+request validation and exact key, parent, side, source-ID and excerpt matching.
+This does not prove their historical branch snapshot or authorize a new write,
+and their provenance is never rewritten. Modern receipts still reject changed
+preconditions.
+
+The version-2 IndexedDB upgrade preserves existing records and adds operation-key
+indexes plus an atomic shared mutation revision. Warm writes read only the exact
+conversation preconditions and indexed operation receipts; unchanged history is
+not scanned. Initial hydration and refresh after another window's writes still
+load history. A successful open carries the revision sampled **before** its
+initial snapshot into the store, avoiding a duplicate scan on the first write.
+Concurrent changes still force refresh; a backend without revisions or a failed
+initial snapshot cannot mark an unchecked snapshot fresh. Revision-read failures
+during opening surface rather than silently trusting the history.
+Close older app windows if they block the database upgrade.
+Successful writes recheck the shared revision after their local update and
+reconcile detected competing commits before notifying observers. This is not a
+continuous subscription to other windows. A detected refresh compares revisions
+before and after its snapshot, retries at most three snapshots, and fails
+explicitly without publishing an unstable snapshot if history keeps changing.
+Known root commits retain their confirmed-save recovery; keyed import/creation
+replays notify observers after recovery without writing again. Commits after the
+final sample still require a later refresh; no instantaneous cross-window view
+is promised. The memory-only backend also uses
+keyed preconditions and operation-key counts, maintained across overwrites,
+deletions and discarded-note tombstones. Admission touches only the requested
+records and changed rows; loading snapshots and initial hydration still scan
+history.
+App owns the local store subscription independently of transient panels, so
+late committed writes refresh the active local transcript, sidebar and side-note
+metadata without another click. These notifications neither navigate another
+conversation nor refetch an active Cave source.
+
+These are local-only notes with **no connected familiar**, not Cave-backed side
+chats. If durable storage is unavailable, the UI discloses memory-only custody.
+There is no Temporary or provider-deletion guarantee. The frozen Cave source
+has no side-chat writer, so it shows an unavailable notice rather than an enabled
+no-op or a local fallback for canonical content.
+
+The installed Cave SDK omits import provenance. The source-level notice states
+that limitation; canonical messages remain read-only text without inferred
+import markers or changed roles.
+
 ## Security boundaries
 
 - The main window can invoke only the reviewed `app_identity`,

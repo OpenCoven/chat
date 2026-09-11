@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('preserves the local demo routes alongside the default app', async ({ page }) => {
+test('preserves the local demo routes alongside the default app', async ({ page, baseURL }) => {
   await page.goto('/?demo=chat');
 
-  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=chat');
+  await expect(page).toHaveURL(new URL('/?demo=chat', baseURL).href);
   await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Held action' })).toBeVisible();
   // Exact: the composer also has a "Send options" caret beside Send.
@@ -12,19 +12,19 @@ test('preserves the local demo routes alongside the default app', async ({ page 
 
   await page.goto('/?demo=messages');
 
-  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=messages');
+  await expect(page).toHaveURL(new URL('/?demo=messages', baseURL).href);
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 
   await page.goto('/?demo=minimal');
 
-  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=minimal');
+  await expect(page).toHaveURL(new URL('/?demo=minimal', baseURL).href);
   await expect(page.getByText('Chats', { exact: true })).toBeVisible();
   await expect(page.getByText('Familiars', { exact: true })).toBeVisible();
 
   await page.goto('/?demo=familiars-reads');
 
-  await expect(page).toHaveURL('http://127.0.0.1:4174/?demo=familiars-reads');
+  await expect(page).toHaveURL(new URL('/?demo=familiars-reads', baseURL).href);
   await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Q3 pricing evidence map/ })).toBeVisible();
   // Stage 1 has no send capability yet; the composer notice says so rather

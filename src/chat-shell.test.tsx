@@ -103,20 +103,20 @@ function makeQueryAdapter(overrides: Partial<QueryAdapter> = {}): QueryAdapter {
         },
       ]),
     ),
-    getConversation: vi.fn().mockResolvedValue({
+    getConversation: vi.fn().mockImplementation(async (id: string) => ({
       status: 'ok',
       data: {
-        id: 'conversation-1',
+        id,
         familiarId: 'familiar-1',
         title: 'First thread',
         updatedAt: '2026-08-25T00:00:00.000Z',
       },
-    }),
-    listMessages: vi.fn().mockResolvedValue(
+    })),
+    listMessages: vi.fn().mockImplementation(async (id: string) =>
       okPage([
         {
           id: 'message-1',
-          conversationId: 'conversation-1',
+          conversationId: id,
           parentId: null,
           role: 'assistant',
           text: 'Hello from Cave.',

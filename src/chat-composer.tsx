@@ -1,5 +1,6 @@
-import { useId, useState } from 'react';
-
+import { useEffect, useId, useMemo, useRef, useSyncExternalStore } from 'react';
+import { ChatWriteRecovery } from './chat-write-recovery';
+import { createDraft } from './lib/chat-continuity';
 import type { ChatWriter } from './lib/local/chat-writer';
 
 export type ChatComposerProps = Readonly<{
@@ -7,15 +8,8 @@ export type ChatComposerProps = Readonly<{
   conversationId: string | null;
   isDurable: boolean;
   onWritten: () => void;
+  savedDraft?: ReturnType<typeof createDraft> | undefined;
 }>;
-
-type ComposerStatus =
-  | Readonly<{ status: 'idle' }>
-  | Readonly<{ status: 'sending' }>
-  | Readonly<{ status: 'error'; message: string }>;
-
-const IDLE: ComposerStatus = Object.freeze({ status: 'idle' } as const);
-const SENDING: ComposerStatus = Object.freeze({ status: 'sending' } as const);
 
 function messageForCode(code: string): string {
   switch (code) {
@@ -28,40 +22,80 @@ function messageForCode(code: string): string {
   }
 }
 
-export function ChatComposer({ writer, conversationId, isDurable, onWritten }: ChatComposerProps) {
-  const [draft, setDraft] = useState('');
-  const [composerStatus, setComposerStatus] = useState<ComposerStatus>(IDLE);
+export function ChatComposer({
+  writer,
+  conversationId,
+  isDurable,
+  onWritten,
+  savedDraft,
+}: ChatComposerProps) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: changing the exact destination resets a standalone composer.
+  const localDraft = useMemo(createDraft, [writer, conversationId]);
+  const entry = savedDraft ?? localDraft;
+  const {
+    text: draft,
+    pending,
+    error,
+    writes,
+    recovery,
+  } = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
+  const observed = useRef({ entry, writes });
+  useEffect(() => {
+    const changed = observed.current.entry === entry && observed.current.writes !== writes;
+    observed.current = { entry, writes };
+    if (changed) onWritten();
+  }, [entry, writes, onWritten]);
   const inputId = useId();
 
   const canSend =
-    conversationId !== null && draft.trim().length > 0 && composerStatus.status !== 'sending';
+    writer.canWrite() &&
+    conversationId !== null &&
+    draft.trim().length > 0 &&
+    !pending &&
+    !recovery;
 
   async function send() {
-    if (conversationId === null || draft.trim().length === 0) {
+    if (
+      conversationId === null ||
+      draft.trim().length === 0 ||
+      entry.getSnapshot().pending ||
+      entry.getSnapshot().recovery ||
+      !writer.canWrite()
+    ) {
       return;
     }
 
-    setComposerStatus(SENDING);
+    entry.update({ pending: true, error: '' });
     try {
       const result = await writer.sendMessage(conversationId, draft);
 
+      if (result.status === 'reconcile_required') {
+        entry.update({ pending: false, recovery: result.recovery, error: '' });
+        return;
+      }
       if (result.status === 'ok') {
-        setDraft('');
-        setComposerStatus(IDLE);
-        onWritten();
+        if (result.data.conversationId !== conversationId) {
+          entry.update({
+            pending: false,
+            error: 'The save result did not match this exact conversation. Your draft was kept.',
+          });
+          return;
+        }
+        entry.update({
+          text: '',
+          pending: false,
+          error: '',
+          writes: entry.getSnapshot().writes + 1,
+        });
         return;
       }
 
-      setComposerStatus(
-        Object.freeze({
-          status: 'error',
-          message: result.status === 'unsupported' ? result.reason : messageForCode(result.code),
-        }),
-      );
+      entry.update({
+        pending: false,
+        error: result.status === 'unsupported' ? result.reason : messageForCode(result.code),
+      });
     } catch {
-      setComposerStatus(
-        Object.freeze({ status: 'error', message: messageForCode('service_unavailable') }),
-      );
+      entry.update({ pending: false, error: messageForCode('service_unavailable') });
     }
   }
 
@@ -83,22 +117,20 @@ export function ChatComposer({ writer, conversationId, isDurable, onWritten }: C
           rows={2}
           value={draft}
           placeholder={conversationId === null ? 'Start a conversation first' : 'Write a message…'}
-          disabled={conversationId === null || composerStatus.status === 'sending'}
+          disabled={!writer.canWrite() || conversationId === null || pending || recovery !== null}
+          maxLength={32_000}
           onChange={(event) => {
-            setDraft(event.target.value);
-            if (composerStatus.status === 'error') {
-              setComposerStatus(IDLE);
-            }
+            entry.update({ text: event.target.value, error: '' });
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void send();
             }
           }}
         />
         <button className="chat-composer__send" type="submit" disabled={!canSend}>
-          {composerStatus.status === 'sending' ? 'Saving…' : 'Send'}
+          {pending ? 'Saving…' : 'Send'}
         </button>
       </div>
       <p className="chat-composer__note" role="note">
@@ -106,10 +138,34 @@ export function ChatComposer({ writer, conversationId, isDurable, onWritten }: C
           ? 'Saved on this device. No familiar is connected, so no reply will arrive.'
           : 'This device has no available storage, so these messages are kept in memory only and will be lost when the app closes.'}
       </p>
-      {composerStatus.status === 'error' ? (
+      {error ? (
         <output className="chat-composer__error" aria-live="polite" role="alert">
-          {composerStatus.message}
+          {error}
         </output>
+      ) : null}
+      {recovery ? (
+        <ChatWriteRecovery
+          key={recovery.receipt.id}
+          writer={writer}
+          recovery={recovery}
+          onReconciled={(result) => {
+            const current = entry.getSnapshot();
+            if (current.recovery !== recovery) return;
+            const matches =
+              result.receipt.kind === 'message' &&
+              result.receipt.conversationId === conversationId &&
+              result.receipt.text === current.text.trim();
+            entry.update({
+              recovery: null,
+              text: result.outcome === 'committed' && matches ? '' : current.text,
+              error:
+                result.outcome === 'not_committed'
+                  ? 'The save did not commit. Your draft is retained and may be sent again.'
+                  : '',
+              writes: current.writes + 1,
+            });
+          }}
+        />
       ) : null}
     </form>
   );

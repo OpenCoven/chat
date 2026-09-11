@@ -81,7 +81,7 @@ $categories = $failure.Message.Substring($prefix.Length - 'quarantine-check:io,q
 if ($categories.Count -ne $aggregate.InnerExceptions.Count) { throw 'Cleanup categories do not pair with retained failures.' }
 if ($aggregate.InnerExceptions[0] -isnot [IO.IOException] -or $aggregate.InnerExceptions[1] -isnot [UnauthorizedAccessException]) { throw 'Cleanup failure order was not preserved.' }
 foreach ($category in $categories) {
-  if ($category -notmatch '^[a-z-]+:(win32-\d+|access-denied|not-found|io|invalid-operation|timeout|unexpected)$') { throw "Unbounded cleanup category: $category" }
+  if ($category -notmatch '^[a-z-]+:(win32-\d+(\[[a-z0-9=;-]+\])?|access-denied|not-found|io|invalid-operation|timeout|unexpected)$') { throw "Unbounded cleanup category: $category" }
 }
 if (-not $identityType.GetField('disposed', $instanceFlags).GetValue($identity)) { throw 'Identity was not marked disposed after cleanup failure.' }
 try { $identity.Dispose() } catch { throw 'Repeated Dispose must be idempotent.' }

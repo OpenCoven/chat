@@ -1343,7 +1343,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 494,637 | `e3af5c05b31a4a8724684690c4704738d41c7da1f50fc5f6e7573ecb78046daf` |
+| `.github/workflows/client-v1-conformance.yml` | 500,326 | `ec2eda9cf170a3588de5bc2a710c6fe9214e72e7032a9f1e6af1ebf4a6215525` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1368,13 +1368,14 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 315,295 | `0831d87c38c290d13ec87de47dec6aac504146215302c358cf5299d4ee0e627a` |
-| `scripts/windows-job-supervisor.test.ps1` | 177,916 | `8d57c5af17e68f4ce1b241a41c27b2ec88297202acf610862ab6c58c15cbeb2c` |
+| `scripts/windows-job-supervisor.cs` | 319,914 | `62b243a47e7646b1dafcc1583101332d9c7004d98ac200bb91bc828867928526` |
+| `scripts/windows-job-supervisor.test.ps1` | 177,990 | `521882751f13fcc312ccb261f61b926e53df0e5309cd54e9fd7f42a342b434a6` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 17,205 | `8125f8a2166c4cc65e461b3019d2497656aa51e11fdea80eceb7b336aad299c1` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,577 | `df8ef3078ee0b085abe3a81d94acb682a4f4cbc377d3945453b7917ba1b33589` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,596 | `fa738d8e93a8132a26e34fbbb58e89f7ac12c13e7298cf923f8db6b31e7097c5` |
+| `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -1540,7 +1541,12 @@ subtree reads are never retried as the supervisor. Token duplicates remain
 noninheritable and valid across account disablement, and admitted reads retain
 their handle through disposal. These attribute checks preserve the existing
 check/use behavior; they do not establish immunity to ancestor replacement.
-Native reader success and refreshed protected acceptance remain required.
+Native run `34632027669` subsequently confirmed that only the implicitly
+created `profile\AppData` directory denied enumeration; its parent and both
+explicitly initialized children were readable. That intermediate directory is
+now included in the existing security initialization and validation loop, using
+the same trustees and access contract as its parent and children. Native reader
+success and refreshed protected acceptance remain required.
 
 Protected run `34580621067` passed Linux and Darwin, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove
@@ -1620,3 +1626,34 @@ The earlier owner-directory reproduction landed in #220 with full native CI.
 This accounting implementation requires its own native Windows run, reviewed
 SDK rebinding and fresh protected validation. The denied protected descendant
 and separate cleanup `win32-3` remain open under #219.
+
+## Windows cleanup delete diagnostics
+
+Protected run `34611963297` disclosed the first cleanup categories:
+`root-delete:win32-3,root-survived:invalid-operation`. Win32 status 3 is
+`ERROR_PATH_NOT_FOUND` and, inside `DeleteDirectoryTree`, only the raw
+`DeleteFileW`/`RemoveDirectoryW` calls raise it as a `Win32Exception`; the
+managed enumerator had just returned the entry. The native calls now receive
+the extended-length (`\\?\`) form of the managed full path so both layers
+resolve the same entry regardless of `MAX_PATH` or trailing dot/space
+normalization. A not-found status (2 or 3) is accepted only when the managed
+layer confirms the entry is gone; every other disagreement still fails closed.
+The retained `Win32Exception` carries fixed, path-free context appended to the
+category as `win32-<status>[op=<operation>;kind=<entry>;depth=<bucket>;len=<bucket>;entry=present|gone;parent=present|gone]`.
+Operations are `delete-file`, `delete-read-only-file`, `remove-reparse-file`
+or `remove-reparse-directory`; depth buckets are `le4`, `le16`, `le64`, `gt64`;
+length buckets are `lt260`, `lt1024`, `ge1024`. No names, paths or exception
+text are recorded. Cleanup order, reparse rejection, read-only handling and the
+`root-survived` invariant are unchanged.
+
+`scripts/windows-cleanup-delete-diagnostics.test.ps1` checks the extended-path
+forms, the bounded context grammar, the classifier suffix, the fail-closed
+boundary for present and missing entries, and, on Windows, removes a real
+tree containing a path longer than 260 characters, a trailing-dot component,
+a read-only file and a directory junction whose target must survive.
+
+The cleanup delete harness is pinned at `2a594dc5e6643a318fd9f1f660845646899a413d`, tree
+`e21006a194ad73dda94c7f248dca32e91733f392`. It retains the quota-context harness ancestry;
+only the supervisor, its embedded workflow authority bytes and the new regression change.
+Native Windows CI removed the long-path/trailing-dot/junction tree through the
+production walker; a fresh SDK/protected binding remains required.
