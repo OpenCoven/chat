@@ -6,7 +6,7 @@ import {
   isCaveClientError,
 } from '@opencoven/cave-client/managed';
 import type { OperationOptions } from '@opencoven/sdk-core/browser';
-
+import type { DevelopmentChapterReadClient } from '../chat-chapters';
 import type { CaveConnectionHost } from './connection-host';
 
 export type PairingRequiredReason = 'cancelled' | 'expired';
@@ -31,16 +31,17 @@ type CavePairingSessionPort = Pick<
   'exchange' | 'expiresAt' | 'poll' | 'requestId'
 >;
 
-export type CaveReadClient = Pick<
-  CaveClient,
-  | 'listFamiliars'
-  | 'listProjects'
-  | 'listConversations'
-  | 'getConversation'
-  | 'listConversationMessages'
-  | 'familiarContract'
-  | 'familiarAnalytics'
->;
+export type CaveReadClient = DevelopmentChapterReadClient &
+  Pick<
+    CaveClient,
+    | 'listFamiliars'
+    | 'listProjects'
+    | 'listConversations'
+    | 'getConversation'
+    | 'listConversationMessages'
+    | 'familiarContract'
+    | 'familiarAnalytics'
+  >;
 
 type CaveConnectionClient = CaveReadClient &
   Pick<CaveClient, 'createPairing' | 'credentialStatus' | 'forgetCredential' | 'health'>;

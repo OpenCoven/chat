@@ -1,6 +1,36 @@
 import type { CaveConversation, CaveConversationMessage } from '@opencoven/cave-client/managed';
+import type { Page, PageOptions } from '@opencoven/sdk-core/browser';
 
 import { type ChatStore, ChatStoreError } from './chat-store';
+import { toCaveMessage } from './local-query-adapter';
+import type {
+  BringBackInput,
+  BringBackPreconditions,
+  CreateSideInput,
+  SideConversation,
+  SideTarget,
+} from './side-conversations';
+import {
+  ChatWriteRecoveryError,
+  type RootWriteReconciliation,
+  type RootWriteRecovery,
+} from './write-recovery';
+
+export type SideConversationWriter = Readonly<{
+  custody: 'local-only';
+  get: (conversationId: string) => Promise<WriteResult<SideConversation | null>>;
+  list: (
+    parentConversationId: string,
+    options?: PageOptions,
+  ) => Promise<WriteResult<Page<SideConversation>>>;
+  create: (input: CreateSideInput) => Promise<WriteResult<SideConversation>>;
+  setState: (
+    input: SideTarget,
+    state: 'open' | 'closed' | 'discarded',
+  ) => Promise<WriteResult<SideConversation>>;
+  bringBack: (input: BringBackInput) => Promise<WriteResult<CaveConversationMessage>>;
+  prepareBringBack: (input: SideTarget) => Promise<WriteResult<BringBackPreconditions>>;
+}>;
 
 /**
  * Write outcomes are a separate union from `QueryResult`.
@@ -15,13 +45,19 @@ export type WriteResult<T> =
   | { status: 'unsupported'; reason: string }
   | { status: 'error'; code: string };
 
+export type RootWriteResult<T> =
+  | WriteResult<T>
+  | { status: 'reconcile_required'; recovery: RootWriteRecovery };
+
 export type ChatWriter = Readonly<{
+  sideConversations?: SideConversationWriter;
   canWrite: () => boolean;
-  createConversation: (title?: string) => Promise<WriteResult<CaveConversation>>;
+  createConversation: (title?: string) => Promise<RootWriteResult<CaveConversation>>;
+  reconcileWrite?: (receiptId: string) => Promise<WriteResult<RootWriteReconciliation>>;
   sendMessage: (
     conversationId: string,
     text: string,
-  ) => Promise<WriteResult<CaveConversationMessage>>;
+  ) => Promise<RootWriteResult<CaveConversationMessage>>;
 }>;
 
 const UNSUPPORTED_REASON =
@@ -49,8 +85,34 @@ export function createReadOnlyChatWriter(reason: string = UNSUPPORTED_REASON): C
 }
 
 export function createLocalChatWriter(store: ChatStore): ChatWriter {
+  async function write<T>(operation: () => T | Promise<T>): Promise<WriteResult<T>> {
+    try {
+      return { status: 'ok', data: await operation() };
+    } catch (error) {
+      return toError(error);
+    }
+  }
   return Object.freeze({
     canWrite: () => true,
+    reconcileWrite: (receiptId: string) => write(() => store.reconcileWrite(receiptId)),
+    sideConversations: Object.freeze({
+      custody: 'local-only' as const,
+      get: (id: string) => write(() => store.getSideConversation(id) ?? null),
+      list: (id: string, options?: PageOptions) =>
+        write(() => {
+          const limit = options?.limit ?? 20;
+          if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+            throw new ChatStoreError('invalid_request', 'The side note page limit is invalid.');
+          }
+          return store.listSideConversations(id, limit, options?.cursor);
+        }),
+      create: (input: CreateSideInput) => write(() => store.createSideConversation(input)),
+      setState: (input: SideTarget, state: 'open' | 'closed' | 'discarded') =>
+        write(() => store.setSideState(input, state)),
+      bringBack: (input: BringBackInput) =>
+        write(async () => toCaveMessage(await store.bringBack(input))),
+      prepareBringBack: (input: SideTarget) => write(() => store.prepareBringBack(input)),
+    }),
 
     async createConversation(title) {
       try {
@@ -67,6 +129,8 @@ export function createLocalChatWriter(store: ChatStore): ChatWriter {
           },
         };
       } catch (error: unknown) {
+        if (error instanceof ChatWriteRecoveryError)
+          return { status: 'reconcile_required', recovery: error.recovery };
         return toError(error);
       }
     },
@@ -90,6 +154,8 @@ export function createLocalChatWriter(store: ChatStore): ChatWriter {
           },
         };
       } catch (error: unknown) {
+        if (error instanceof ChatWriteRecoveryError)
+          return { status: 'reconcile_required', recovery: error.recovery };
         return toError(error);
       }
     },

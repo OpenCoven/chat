@@ -1,3 +1,5 @@
+import type { BringBackPreconditions } from './side-conversations';
+
 /**
  * Local chat records and the durable backend port.
  *
@@ -12,6 +14,12 @@ export type StoredConversation = Readonly<{
   title: string;
   createdAt: string;
   updatedAt: string;
+  revision?: number;
+  side?: Readonly<{
+    parentConversationId: string;
+    operationKey: string;
+    state: 'open' | 'closed' | 'discarded';
+  }>;
 }>;
 
 export type StoredMessageRole = 'user' | 'assistant';
@@ -23,12 +31,43 @@ export type StoredMessage = Readonly<{
   role: StoredMessageRole;
   text: string;
   createdAt: string;
+  broughtBack?: Readonly<{
+    operationKey: string;
+    sideConversationId: string;
+    sourceMessageIds: readonly string[];
+    preconditions?: BringBackPreconditions;
+  }>;
 }>;
 
 export type ChatRecords = Readonly<{
   conversations: readonly StoredConversation[];
   messages: readonly StoredMessage[];
+  deletedMessageIds?: readonly string[];
+  expectedConversations?: readonly StoredConversation[];
+  absentOperationKey?: string;
 }>;
+
+export class ChatConflictError extends Error {
+  readonly code = 'conflict';
+}
+
+/** Checked inside the same transaction as writes, including across open windows. */
+export function checkPreconditions(change: ChatRecords, current: ChatRecords): void {
+  for (const expected of change.expectedConversations ?? []) {
+    const actual = current.conversations.find((entry) => entry.id === expected.id);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new ChatConflictError('The exact local record changed. Retry after refreshing.');
+    }
+  }
+  const key = change.absentOperationKey;
+  if (
+    key &&
+    (current.conversations.some((entry) => entry.side?.operationKey === key) ||
+      current.messages.some((entry) => entry.broughtBack?.operationKey === key))
+  ) {
+    throw new ChatConflictError('This operation was already committed. Retry to reconcile.');
+  }
+}
 
 /**
  * Durable storage port.
@@ -40,6 +79,10 @@ export type ChatRecords = Readonly<{
  */
 export type ChatBackend = Readonly<{
   isDurable: () => boolean;
+  /** Optional shared revision covering every writer sharing this backend.
+   * Increments once per successful atomic commit, never on failed commits.
+   */
+  getMutationRevision?: () => number | Promise<number>;
   loadAll: () => Promise<ChatRecords>;
   commit: (change: ChatRecords) => Promise<void>;
   close: () => void;
@@ -58,6 +101,18 @@ function isIsoTimestamp(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value));
 }
 
+export function isBringBackPreconditions(value: unknown): value is BringBackPreconditions {
+  return (
+    isRecord(value) &&
+    Number.isSafeInteger(value.parentRevision) &&
+    Number(value.parentRevision) >= 0 &&
+    Number.isSafeInteger(value.sideRevision) &&
+    Number(value.sideRevision) >= 0 &&
+    (value.parentLeafId === null || typeof value.parentLeafId === 'string') &&
+    (value.sideLeafId === null || typeof value.sideLeafId === 'string')
+  );
+}
+
 export function isStoredConversation(value: unknown): value is StoredConversation {
   return (
     isRecord(value) &&
@@ -66,6 +121,17 @@ export function isStoredConversation(value: unknown): value is StoredConversatio
     typeof value.familiarId === 'string' &&
     value.familiarId.length > 0 &&
     typeof value.title === 'string' &&
+    (value.revision === undefined ||
+      (Number.isSafeInteger(value.revision) && Number(value.revision) >= 0)) &&
+    (value.side === undefined ||
+      (isRecord(value.side) &&
+        typeof value.side.parentConversationId === 'string' &&
+        value.side.parentConversationId.length > 0 &&
+        typeof value.side.operationKey === 'string' &&
+        value.side.operationKey.length > 0 &&
+        (value.side.state === 'open' ||
+          value.side.state === 'closed' ||
+          value.side.state === 'discarded'))) &&
     isIsoTimestamp(value.createdAt) &&
     isIsoTimestamp(value.updatedAt)
   );
@@ -81,6 +147,14 @@ export function isStoredMessage(value: unknown): value is StoredMessage {
     (value.parentId === null || typeof value.parentId === 'string') &&
     (value.role === 'user' || value.role === 'assistant') &&
     typeof value.text === 'string' &&
+    (value.broughtBack === undefined ||
+      (isRecord(value.broughtBack) &&
+        typeof value.broughtBack.operationKey === 'string' &&
+        typeof value.broughtBack.sideConversationId === 'string' &&
+        (value.broughtBack.preconditions === undefined ||
+          isBringBackPreconditions(value.broughtBack.preconditions)) &&
+        Array.isArray(value.broughtBack.sourceMessageIds) &&
+        value.broughtBack.sourceMessageIds.every((id) => typeof id === 'string'))) &&
     isIsoTimestamp(value.createdAt)
   );
 }
