@@ -561,7 +561,11 @@ export function createChatStore(
         }
         const previous = messagesByConversation.get(parent.id)?.at(-1);
         const timestamp = new Date(
-          Math.max(now(), previous ? Date.parse(previous.createdAt) + 1 : 0),
+          Math.max(
+            now(),
+            Date.parse(parent.updatedAt) + 1,
+            previous ? Date.parse(previous.createdAt) + 1 : 0,
+          ),
         ).toISOString();
         const message: StoredMessage = Object.freeze({
           id: createId(),

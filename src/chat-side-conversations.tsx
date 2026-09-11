@@ -1,6 +1,11 @@
 import type { CaveConversationMessage } from '@opencoven/cave-client/managed';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { type ContinuityMemory, createSideReview, sideReviewMemory } from './lib/chat-continuity';
+import {
+  type ContinuityMemory,
+  createSideReview,
+  sideCreationMemory,
+  sideReviewMemory,
+} from './lib/chat-continuity';
 import type { ChatWriter, WriteResult } from './lib/local/chat-writer';
 import type { BringBackInput, SideConversation } from './lib/local/side-conversations';
 import { createManualPageWalk } from './lib/sdk/manual-page-walk';
@@ -71,7 +76,19 @@ export function ChatSideConversations({
     notice: reviewNotice,
     writes,
   } = useSyncExternalStore(reviewEntry.subscribe, reviewEntry.getSnapshot);
-  const busy = operationBusy || phase === 'preparing' || phase === 'sending';
+  const creationEntry = sideCreationMemory(memory, familiarId, conversationId);
+  const creation = useSyncExternalStore(creationEntry.subscribe, creationEntry.getSnapshot);
+  const creationOwner = useRef(creationEntry);
+  creationOwner.current = creationEntry;
+  const observedCreation = useRef({ creationEntry, writes: creation.writes });
+  useEffect(() => {
+    const changed =
+      observedCreation.current.creationEntry === creationEntry &&
+      observedCreation.current.writes !== creation.writes;
+    observedCreation.current = { creationEntry, writes: creation.writes };
+    if (changed) onWritten();
+  }, [creationEntry, creation.writes, onWritten]);
+  const busy = operationBusy || creation.pending || phase === 'preparing' || phase === 'sending';
   const observed = useRef({ reviewEntry, writes });
   useEffect(() => {
     const changed =
@@ -81,7 +98,6 @@ export function ChatSideConversations({
   }, [reviewEntry, writes, onWritten]);
   const active = useRef(false);
   const pending = useRef(false);
-  const createKey = useRef<string | null>(null);
   const walk = useRef(createManualPageWalk());
   const reviewId = useId();
 
@@ -130,7 +146,7 @@ export function ChatSideConversations({
   }, [capability, conversationId, loadAttempt]);
 
   async function run<T>(
-    context: 'read' | 'create' | 'state',
+    context: 'read' | 'state',
     operation: () => Promise<WriteResult<T>>,
     success: (data: T) => void,
   ) {
@@ -249,26 +265,41 @@ export function ChatSideConversations({
     );
   }
 
-  function create() {
-    if (!capability) return;
-    createKey.current ??= crypto.randomUUID();
-    void run(
-      'create',
-      () =>
-        capability.create({
-          parentConversationId: conversationId,
-          operationKey: createKey.current ?? '',
-        }),
-      (created) => {
-        createKey.current = null;
-        if (created.side.state === 'discarded') {
-          setNotice('This creation request refers to a discarded note.');
-          return;
-        }
-        onWritten();
-        onNavigate(created.id);
-      },
-    );
+  async function create() {
+    const snapshot = creationEntry.getSnapshot();
+    if (!capability || snapshot.pending) return;
+    const operationKey = snapshot.operationKey ?? crypto.randomUUID();
+    creationEntry.update({ operationKey, pending: true, notice: '' });
+    let result: WriteResult<SideConversation>;
+    try {
+      result = await capability.create({ parentConversationId: conversationId, operationKey });
+    } catch {
+      if (creationEntry.getSnapshot().operationKey === operationKey) {
+        creationEntry.update({ pending: false, notice: failureGuidance.create });
+      }
+      return;
+    }
+    if (creationEntry.getSnapshot().operationKey !== operationKey) return;
+    if (result.status !== 'ok') {
+      creationEntry.update({ pending: false, notice: failure(result, 'create') });
+      return;
+    }
+    const writes = creationEntry.getSnapshot().writes + 1;
+    const current = active.current && creationOwner.current === creationEntry;
+    if (current) observedCreation.current = { creationEntry, writes };
+    creationEntry.update({
+      operationKey: null,
+      pending: false,
+      writes,
+      notice:
+        result.data.side.state === 'discarded'
+          ? 'This creation request refers to a discarded note.'
+          : 'Retained side note creation confirmed. The note is listed under its exact parent.',
+    });
+    if (current) {
+      onWritten();
+      if (result.data.side.state !== 'discarded') onNavigate(result.data.id);
+    }
   }
 
   function changeState(state: 'open' | 'closed' | 'discarded') {
@@ -450,8 +481,15 @@ export function ChatSideConversations({
       ) : (
         <>
           <button type="button" onClick={create} disabled={busy}>
-            New retained side note
+            {creation.operationKey ? 'Retry retained side note creation' : 'New retained side note'}
           </button>
+          <p className="chat-chapters__notice">
+            Pending creations survive navigation in this app session only, not reload or restart.
+            After restarting, inspect the retained note list before creating another note; previous
+            retry keys are not recovered.
+          </p>
+          {creation.pending ? <output>Creating retained side note…</output> : null}
+          {creation.notice ? <output aria-live="polite">{creation.notice}</output> : null}
           {notes.length ? (
             <ul className="chat-side__list" aria-label="Retained local side notes">
               {notes.map((note) => (

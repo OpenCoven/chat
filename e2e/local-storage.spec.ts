@@ -430,7 +430,9 @@ test('a discarded create replay reconciles the old key before allowing a new dur
   await other.getByRole('button', { name: 'Discard note', exact: false }).click();
   await other.getByRole('button', { name: 'Discard local messages', exact: true }).click();
   await expect(other.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Retry retained side note creation', exact: true })
+    .click();
   await expect(page.getByText(/creation request refers to a discarded note/)).toBeVisible();
   await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
@@ -460,4 +462,46 @@ test('a discarded create replay reconciles the old key before allowing a new dur
   );
   expect(creations.map((entry) => entry.state).sort()).toEqual(['discarded', 'open']);
   expect(new Set(creations.map((entry) => entry.key)).size).toBe(2);
+});
+
+test('uncertain side creation retains its retry identity across real parent navigation', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await loseNextWriteAcknowledgement(page);
+  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await expect(page.getByText(/side note creation result could not be confirmed/)).toBeVisible();
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'New retained side note', exact: true }),
+  ).toBeEnabled();
+  await page.getByRole('option', { name: /Legacy parent/ }).click();
+  await page
+    .getByRole('button', { name: 'Retry retained side note creation', exact: true })
+    .click();
+  await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Return to parent', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Retained side note/ })).toHaveCount(1);
+});
+
+test('reload exposes a committed uncertain creation for list reconciliation without claiming its retry key survived', async ({
+  page,
+}) => {
+  await seedLegacyHistory(page, 50);
+  await loseNextWriteAcknowledgement(page);
+  await page.getByRole('button', { name: 'New retained side note', exact: true }).click();
+  await expect(page.getByText(/side note creation result could not be confirmed/)).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText(
+      /Pending creations survive navigation in this app session only, not reload or restart/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Retry retained side note creation', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Retained side note/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /^Retained side note/ }).click();
+  await expect(page.getByRole('button', { name: 'Close note', exact: true })).toBeVisible();
 });

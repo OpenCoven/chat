@@ -76,6 +76,45 @@ test('Escape invalidates a stale chapter index before keyboard reopening', async
   expect(await screen.findByRole('navigation', { name: 'UTC chapters' })).toBeVisible();
 });
 
+test.each(['root', 'continuation'])(
+  'an unavailable %s chapter page is terminal even when it advertises another cursor',
+  async (position) => {
+    const unavailable = {
+      ...page(),
+      status: 'unavailable' as const,
+      data: [],
+      cursor: {
+        ...(position === 'continuation' ? { current: 'cursor-next' } : {}),
+        hasMore: true,
+        next: 'unavailable-next',
+      },
+    };
+    const listChapters = vi.fn(
+      async (): Promise<QueryResult<ConversationChapterPage>> => ({ status: 'ok', data: page() }),
+    );
+    if (position === 'continuation')
+      listChapters.mockResolvedValueOnce({ status: 'ok', data: page(undefined, true) });
+    listChapters.mockResolvedValueOnce({ status: 'ok', data: unavailable });
+    render(
+      <ChatChapters
+        conversationId="one"
+        messages={messages}
+        hasMoreMessages={false}
+        queryAdapter={{ listChapters } as unknown as QueryAdapter}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Ongoing/ }));
+    if (position === 'continuation')
+      fireEvent.click(await screen.findByRole('button', { name: 'Load more chapters' }));
+    await screen.findByText('Chapter index unavailable. Your transcript is unchanged.');
+    const load = screen.queryByRole('button', { name: 'Load more chapters' });
+    if (load) await act(async () => fireEvent.click(load));
+    expect(listChapters).toHaveBeenCalledTimes(position === 'root' ? 1 : 2);
+    expect(screen.queryByRole('button', { name: 'Load more chapters' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'UTC chapters' })).not.toBeInTheDocument();
+  },
+);
+
 test.skipIf(goldenPath === undefined)(
   'DEVELOPMENT builder matches Cave-owned canonical golden vectors',
   () => {

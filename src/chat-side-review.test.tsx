@@ -96,7 +96,7 @@ test.each(['error', 'throw'])(
     fireEvent.click(await screen.findByRole('button', { name: 'New retained side note' }));
     const uncertain = await screen.findByText(/same operation key/i);
     expect(uncertain).toHaveTextContent(/creation result could not be confirmed/i);
-    fireEvent.click(screen.getByRole('button', { name: 'New retained side note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry retained side note creation' }));
     await screen.findByText(/creation request refers to a discarded note/);
     expect(create.mock.calls[1]?.[0]).toEqual(create.mock.calls[0]?.[0]);
     fireEvent.click(screen.getByRole('button', { name: 'New retained side note' }));

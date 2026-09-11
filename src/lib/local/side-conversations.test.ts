@@ -75,6 +75,45 @@ test('side state timestamps stay monotonic through rollback, paging and subseque
   expect(Date.parse(discarded.updatedAt)).toBeGreaterThan(Date.parse(reopened.updatedAt));
 });
 
+test.each([false, true])(
+  'import preserves its parent clock floor and ordering (existing message=%s)',
+  async (hasMessage) => {
+    let clock = Date.parse('2026-09-11T12:00:00Z');
+    const store = await openChatStore({
+      familiarId: LOCAL_FAMILIAR_ID,
+      backend: createMemoryChatBackend(),
+      now: () => clock,
+    });
+    const parent = await store.createConversation('Future parent');
+    if (hasMessage) await store.appendMessage(parent.id, 'user', 'Existing message');
+    const floor = store.getConversation(parent.id)?.updatedAt;
+    if (!floor) throw new Error('Missing parent timestamp');
+    clock -= 1000;
+    const other = await store.createConversation('Earlier parent');
+    const side = await store.createSideConversation({
+      parentConversationId: parent.id,
+      operationKey: 'clock-side',
+    });
+    const source = await store.appendMessage(side.id, 'user', 'Source');
+    clock -= 1000;
+    const input = {
+      parentConversationId: parent.id,
+      sideConversationId: side.id,
+      sourceMessageIds: [source.id],
+      operationKey: 'clock-import',
+      excerpt: 'Reviewed',
+    };
+    const imported = await store.bringBack(input);
+    expect(Date.parse(imported.createdAt)).toBeGreaterThan(Date.parse(floor));
+    expect(store.getConversation(parent.id)?.updatedAt).toBe(imported.createdAt);
+    expect(store.listConversations(50).data.map((record) => record.id)).toEqual([
+      parent.id,
+      other.id,
+    ]);
+    expect(await store.bringBack(input)).toEqual(imported);
+  },
+);
+
 test('side operation replay resolves current records after append, state changes, hydration and external refresh', async () => {
   const { store, backend, parent, side } = await setup();
   const input = { parentConversationId: parent.id, operationKey: 'create-one' };

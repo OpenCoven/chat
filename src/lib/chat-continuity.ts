@@ -58,6 +58,36 @@ export function createSideReview() {
   };
 }
 
+type SideCreationSnapshot = Readonly<{
+  operationKey: string | null;
+  pending: boolean;
+  notice: string;
+  writes: number;
+}>;
+
+function createSideCreation() {
+  let snapshot: SideCreationSnapshot = {
+    operationKey: null,
+    pending: false,
+    notice: '',
+    writes: 0,
+  };
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    update(next: Partial<SideCreationSnapshot>) {
+      snapshot = { ...snapshot, ...next };
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
 export type ContinuityMemory = {
   id: number;
   familiarId: string | null;
@@ -65,6 +95,7 @@ export type ContinuityMemory = {
   anchors: Map<string, string>;
   drafts: Map<string, ReturnType<typeof createDraft>>;
   sideReviews: Map<string, ReturnType<typeof createSideReview>>;
+  sideCreations: Map<string, ReturnType<typeof createSideCreation>>;
 };
 
 const memories = new WeakMap<object, Map<ChatWriter | null, ContinuityMemory>>();
@@ -86,6 +117,7 @@ export function continuityMemory(source: object, writer: ChatWriter | null): Con
       anchors: new Map(),
       drafts: new Map(),
       sideReviews: new Map(),
+      sideCreations: new Map(),
     };
     writers.set(writer, memory);
   }
@@ -109,4 +141,14 @@ export function sideReviewMemory(
 
 export function exactThreadKey(familiarId: string, conversationId: string): string {
   return JSON.stringify([familiarId, conversationId]);
+}
+
+export function sideCreationMemory(memory: ContinuityMemory, familiarId: string, parentId: string) {
+  const key = exactThreadKey(familiarId, parentId);
+  let entry = memory.sideCreations.get(key);
+  if (!entry) {
+    entry = createSideCreation();
+    memory.sideCreations.set(key, entry);
+  }
+  return entry;
 }

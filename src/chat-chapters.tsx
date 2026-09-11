@@ -64,7 +64,7 @@ export function ChatChapters({
   }, [conversationId, expanded, queryAdapter, walk, localOnly]);
 
   function loadMore() {
-    if (result.status !== 'ok' || paging) return;
+    if (result.status !== 'ok' || result.data.status === 'unavailable' || paging) return;
     const previous = result.data;
     const cursor = previous.cursor?.next;
     const read = queryAdapter.listChapters?.bind(queryAdapter);
@@ -193,7 +193,7 @@ export function ChatChapters({
               ))}
             </nav>
           ) : null}
-          {result.status === 'ok' && result.data.cursor?.hasMore ? (
+          {result.status === 'ok' && !unavailable && result.data.cursor?.hasMore ? (
             <button
               className="chat-shell__load-more"
               type="button"

@@ -49,6 +49,13 @@ prevents a retried create operation from recreating a discarded note.
 An uncertain creation retries with its original key. Once a replay confirms that
 the note was discarded, the next explicit **New retained side note** starts a
 fresh creation request.
+Pending creation keys and acknowledgements survive navigation in exact
+source/writer/familiar/parent-scoped session memory. **Retry retained side note
+creation** replays that request instead of starting another one. Late
+acknowledgements cannot clear a newer request or navigate another parent.
+These keys do **not** survive reload or restart: inspect the durable retained-note
+list and open any already-created note before choosing to create another.
+There is no cross-session exactly-once creation guarantee or durable pending outbox.
 
 An attempted review keeps its operation key, selected message IDs, edited text,
 and local branch preconditions in source- and writer-scoped memory. Returning
