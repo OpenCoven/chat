@@ -190,6 +190,15 @@ export function createChatStore(
   initialRecords: ChatRecords,
   options: ChatStoreOptions,
 ): ChatStore {
+  return createHydratedChatStore(backend, initialRecords, options);
+}
+
+function createHydratedChatStore(
+  backend: ChatBackend,
+  initialRecords: ChatRecords,
+  options: ChatStoreOptions,
+  initialBackendRevision?: number,
+): ChatStore {
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? (() => crypto.randomUUID());
   const defaultTitle = options.defaultTitle ?? DEFAULT_CONVERSATION_TITLE;
@@ -204,7 +213,7 @@ export function createChatStore(
   let revision = 0;
   let disposed = false;
   let writes: Promise<unknown> = Promise.resolve();
-  let indexedBackendRevision: number | undefined;
+  let indexedBackendRevision = initialBackendRevision;
 
   function serialize<T>(write: () => Promise<T>): Promise<T> {
     const next = writes.then(async () => {
@@ -386,14 +395,13 @@ export function createChatStore(
     reconcileWrite(receiptId) {
       return serialize(async () => {
         const reconciled = reconciledRootWrites.get(receiptId);
-        if (reconciled) {
-          await announce();
-          return reconciled;
-        }
         const recovery = [...rootRecoveries.values()].find(
           (entry) => entry.receipt.id === receiptId,
         );
-        if (!recovery) throw new ChatStoreError('not_found', 'The save receipt is unavailable.');
+        const receipt = reconciled?.receipt ?? recovery?.receipt;
+        if (!receipt) throw new ChatStoreError('not_found', 'The save receipt is unavailable.');
+        const knownCommitted =
+          reconciled?.outcome === 'committed' || recovery?.commit === 'confirmed';
         const before = await backend.getMutationRevision?.();
         const snapshot = await backend.loadAll();
         const after = await backend.getMutationRevision?.();
@@ -402,7 +410,7 @@ export function createChatStore(
         }
         hydrate(snapshot);
         indexedBackendRevision = after;
-        const receipt = recovery.receipt;
+        await announce();
         const record =
           receipt.kind === 'conversation'
             ? visibleConversation(receipt.id)
@@ -428,7 +436,8 @@ export function createChatStore(
         }
         if (
           !record &&
-          recovery.commit === 'unconfirmed' &&
+          !knownCommitted &&
+          !reconciled &&
           receipt.kind === 'message' &&
           !visibleConversation(receipt.conversationId)
         ) {
@@ -437,10 +446,16 @@ export function createChatStore(
             'The note is unavailable; an unconfirmed message may have been removed.',
           );
         }
-        const outcome = record || recovery.commit === 'confirmed' ? 'committed' : 'not_committed';
-        await announce();
-        rootRecoveries.delete(recoveryScope(receipt));
-        const result = Object.freeze({ receipt, outcome });
+        const result: RootWriteReconciliation =
+          record || knownCommitted
+            ? Object.freeze({
+                receipt,
+                outcome: 'committed',
+                availability: record ? 'present' : 'unavailable',
+              })
+            : Object.freeze({ receipt, outcome: 'not_committed', availability: 'absent' });
+        if (recovery && rootRecoveries.get(recoveryScope(receipt)) === recovery)
+          rootRecoveries.delete(recoveryScope(receipt));
         reconciledRootWrites.set(receiptId, result);
         return result;
       });
@@ -774,12 +789,16 @@ export async function openChatStore(
   const backend =
     options.backend ?? (await openIndexedDbChatBackend()) ?? createMemoryChatBackend();
 
+  // A pre-snapshot bound detects concurrent commits; a later revision could certify stale data.
+  const revisionBeforeSnapshot = await backend.getMutationRevision?.();
   let records: ChatRecords = EMPTY_RECORDS;
+  let initialRevision: number | undefined;
   try {
     records = await backend.loadAll();
+    initialRevision = revisionBeforeSnapshot;
   } catch {
     records = EMPTY_RECORDS;
   }
 
-  return createChatStore(backend, records, options);
+  return createHydratedChatStore(backend, records, options, initialRevision);
 }

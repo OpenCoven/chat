@@ -34,6 +34,81 @@ function retainedHistory(count = 20_000): ChatRecords {
   };
 }
 
+test.each([50, 20_000])(
+  'the first write after opening %s retained messages does not reload the initial snapshot',
+  async (size) => {
+    const backend = createMemoryChatBackend(retainedHistory(size));
+    const loadAll = vi.fn(backend.loadAll);
+    const store = await openChatStore({ backend: { ...backend, loadAll }, familiarId: 'local' });
+    expect(loadAll).toHaveBeenCalledOnce();
+    await store.appendMessage('empty', 'user', 'First write');
+    expect(loadAll).toHaveBeenCalledOnce();
+    expect(store.listMessages('long', 1).data[0]?.id).toBe('m-000000');
+  },
+);
+
+test.each(['during', 'after'] as const)(
+  'a revision sampled before hydration detects an external commit %s its initial snapshot',
+  async (when) => {
+    const backend = createMemoryChatBackend(retainedHistory(50));
+    const external = {
+      id: 'external',
+      familiarId: 'local',
+      title: 'External root',
+      createdAt: '2026-09-11T00:00:00.000Z',
+      updatedAt: '2026-09-11T00:00:00.000Z',
+    };
+    let first = true;
+    const loadAll = vi.fn(async () => {
+      const snapshot = await backend.loadAll();
+      if (first) {
+        first = false;
+        if (when === 'during') await backend.commit({ conversations: [external], messages: [] });
+      }
+      return snapshot;
+    });
+    const store = await openChatStore({ backend: { ...backend, loadAll }, familiarId: 'local' });
+    if (when === 'after') await backend.commit({ conversations: [external], messages: [] });
+    await store.appendMessage('empty', 'user', 'First write');
+    expect(store.getConversation('external')).toEqual(external);
+    expect(loadAll).toHaveBeenCalledTimes(2);
+  },
+);
+
+test('a backend without revisions still reloads before the first write', async () => {
+  const backend = createMemoryChatBackend(retainedHistory(50));
+  const { getMutationRevision: _revision, ...withoutRevision } = backend;
+  const loadAll = vi.fn(backend.loadAll);
+  const store = await openChatStore({
+    backend: { ...withoutRevision, loadAll },
+    familiarId: 'local',
+  });
+  await store.appendMessage('empty', 'user', 'First write');
+  expect(loadAll).toHaveBeenCalledTimes(2);
+});
+
+test('failed initial hydration never stamps the empty fallback with a trusted revision', async () => {
+  const backend = createMemoryChatBackend(retainedHistory(50));
+  const loadAll = vi.fn(backend.loadAll).mockRejectedValueOnce(new Error('initial read failed'));
+  const store = await openChatStore({ backend: { ...backend, loadAll }, familiarId: 'local' });
+  await store.appendMessage('empty', 'user', 'First write');
+  expect(loadAll).toHaveBeenCalledTimes(2);
+  expect(store.listMessages('long', 1).data[0]?.id).toBe('m-000000');
+});
+
+test('an initial revision read failure surfaces instead of marking an unchecked snapshot fresh', async () => {
+  const backend = createMemoryChatBackend(retainedHistory(50));
+  await expect(
+    openChatStore({
+      backend: {
+        ...backend,
+        getMutationRevision: () => Promise.reject(new Error('initial revision read failed')),
+      },
+      familiarId: 'local',
+    }),
+  ).rejects.toThrow('initial revision read failed');
+});
+
 test('refresh sorts a 20,000-message retained bucket at most once per write', async () => {
   const records = retainedHistory();
   const backend = createMemoryChatBackend(records);

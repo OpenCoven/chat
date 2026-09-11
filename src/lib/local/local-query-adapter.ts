@@ -151,7 +151,7 @@ export function createLocalQueryAdapter(store: ChatStore): QueryAdapter {
         return Object.freeze({
           status: 'ok',
           data: Object.freeze({
-            data: Object.freeze([familiar]),
+            data: Object.freeze(normalized.cursor === undefined ? [familiar] : []),
             cursor: Object.freeze(
               normalized.cursor === undefined
                 ? { hasMore: false }

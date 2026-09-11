@@ -54,6 +54,106 @@ async function fixture() {
   };
 }
 
+test('a committed message discarded externally remains copyable until explicit dismissal without resubmitting', async () => {
+  const current = await fixture();
+  const side = await current.source.store.createSideConversation({
+    parentConversationId: current.parent.id,
+    operationKey: 'discard-after-commit',
+  });
+  current.mount();
+  fireEvent.click(await screen.findByRole('button', { name: /Retained side note · open/ }));
+  const composer = await screen.findByRole('textbox', { name: 'Message' });
+  await waitFor(() => expect(composer).toBeEnabled());
+  fireEvent.change(composer, { target: { value: 'Saved before the discard' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+  current.arm();
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await screen.findByText(/The message was saved, but local history/);
+  await act(async () => {
+    const other = await openChatStore({ backend: current.backend, familiarId: 'local' });
+    await other.setSideState(
+      { parentConversationId: current.parent.id, sideConversationId: side.id },
+      'discarded',
+    );
+  });
+  current.allowReads();
+  await act(async () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile local save' })),
+  );
+  const saved = await screen.findByRole('textbox', { name: 'Unavailable saved content' });
+  expect(saved).toHaveValue('Saved before the discard');
+  expect(saved).toHaveAttribute('readonly');
+  expect(saved).not.toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  expect(current.send).toHaveBeenCalledOnce();
+  expect((await current.backend.loadAll()).messages).toEqual([]);
+  await act(async () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss unavailable save' })),
+  );
+  expect(screen.queryByRole('textbox', { name: 'Unavailable saved content' })).toBeNull();
+  expect(current.send).toHaveBeenCalledOnce();
+  expect((await current.backend.loadAll()).messages).toEqual([]);
+});
+
+test.each([
+  ['conversation', 'no-commit'],
+  ['message', 'no-commit'],
+  ['conversation', 'missing-availability'],
+  ['message', 'missing-availability'],
+  ['conversation', 'inconsistent-availability'],
+  ['message', 'inconsistent-availability'],
+] as const)(
+  'App rejects a %s recovery with %s even with an exact receipt',
+  async (kind, problem) => {
+    const current = await fixture();
+    const reconcile = current.source.writer.reconcileWrite;
+    if (!reconcile) throw new Error('Missing reconciliation capability');
+    const contradictory = vi
+      .spyOn(current.source.writer, 'reconcileWrite')
+      .mockImplementation(async (id) => {
+        const result = await reconcile(id);
+        if (result.status !== 'ok') return result;
+        if (problem === 'no-commit')
+          return {
+            status: 'ok',
+            data: {
+              receipt: result.data.receipt,
+              outcome: 'not_committed',
+              availability: 'absent',
+            },
+          };
+        const data = { ...result.data };
+        if (problem === 'missing-availability') Reflect.deleteProperty(data, 'availability');
+        else Reflect.set(data, 'availability', 'absent');
+        return { status: 'ok', data };
+      });
+    current.mount();
+    await screen.findByRole('heading', { name: 'Recovery parent' });
+    current.arm();
+    if (kind === 'message') {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'Already committed' },
+      });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    } else fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    await screen.findByText(new RegExp(`The ${kind} was saved, but local history`));
+    current.allowReads();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile local save' }));
+    await screen.findByText(/Local history could not be reconciled/);
+    expect(
+      screen.getByRole('button', { name: kind === 'message' ? 'Send' : 'New' }),
+    ).toBeDisabled();
+    if (kind === 'message')
+      expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Already committed');
+    contradictory.mockRestore();
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Reconcile local save' })),
+    );
+    expect(screen.queryByRole('button', { name: 'Reconcile local save' })).toBeNull();
+  },
+);
+
 test.each(['conversation', 'message'] as const)(
   'App reconciles a known committed %s after a refresh failure without submitting again',
   async (kind) => {

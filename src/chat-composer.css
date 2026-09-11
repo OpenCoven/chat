@@ -84,6 +84,11 @@
   border-top: 1px solid var(--chat-border, rgb(255 255 255 / 12%));
 }
 
+.chat-composer:has(.chat-write-recovery) {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .chat-composer__label {
   position: absolute;
   width: 1px;

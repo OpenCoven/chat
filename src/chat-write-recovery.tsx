@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { ChatWriter } from './lib/local/chat-writer';
 import {
   type RootWriteReconciliation,
@@ -18,16 +18,30 @@ export function ChatWriteRecovery({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [unavailable, setUnavailable] = useState<RootWriteReconciliation | null>(null);
+  const contentId = useId();
   const failed =
     'Local history could not be reconciled. No new write was attempted. Retry reconciliation.';
+  function matchesRecovery(result: RootWriteReconciliation): boolean {
+    return (
+      sameRootWriteReceipt(recovery.receipt, result.receipt) &&
+      ((result.outcome === 'committed' &&
+        (result.availability === 'present' || result.availability === 'unavailable')) ||
+        (recovery.commit === 'unconfirmed' &&
+          result.outcome === 'not_committed' &&
+          result.availability === 'absent'))
+    );
+  }
   async function reconcile() {
     if (pending || !writer.reconcileWrite) return;
     setPending(true);
     setError('');
     try {
       const result = await writer.reconcileWrite(recovery.receipt.id);
-      if (result.status === 'ok' && sameRootWriteReceipt(recovery.receipt, result.data.receipt)) {
-        onReconciled(result.data);
+      if (result.status === 'ok' && matchesRecovery(result.data)) {
+        if (result.data.outcome === 'committed' && result.data.availability === 'unavailable')
+          setUnavailable(result.data);
+        else onReconciled(result.data);
       } else {
         setError(
           result.status === 'error' && result.code === 'not_found'
@@ -42,15 +56,46 @@ export function ChatWriteRecovery({
     }
   }
   return (
-    <section className="chat-chapters__notice" aria-label="Local save recovery">
-      <p role="alert">{writeRecoveryNotice(recovery)}</p>
-      <button
-        type="button"
-        disabled={pending || !writer.reconcileWrite}
-        onClick={() => void reconcile()}
-      >
-        Reconcile local save
-      </button>
+    <section className="chat-write-recovery chat-chapters__notice" aria-label="Local save recovery">
+      <p role="alert">
+        {unavailable
+          ? 'This save committed, but its record is no longer available. A later deletion or discard does not undo that commit. Copy the saved content before dismissing; nothing will be resubmitted.'
+          : writeRecoveryNotice(recovery)}
+      </p>
+      {unavailable ? (
+        <>
+          <label htmlFor={contentId}>Unavailable saved content</label>
+          <textarea
+            id={contentId}
+            readOnly
+            value={
+              recovery.receipt.kind === 'message' ? recovery.receipt.text : recovery.receipt.title
+            }
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                matchesRecovery(unavailable) &&
+                unavailable.outcome === 'committed' &&
+                unavailable.availability === 'unavailable'
+              )
+                onReconciled(unavailable);
+              else setError(failed);
+            }}
+          >
+            Dismiss unavailable save
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={pending || !writer.reconcileWrite}
+          onClick={() => void reconcile()}
+        >
+          Reconcile local save
+        </button>
+      )}
       {error ? <output role="alert">{error}</output> : null}
     </section>
   );

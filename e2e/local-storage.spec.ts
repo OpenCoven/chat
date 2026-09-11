@@ -190,11 +190,10 @@ test('version-one IndexedDB migrates receipts and discard tombstones without rew
 });
 
 for (const size of [50, 20_000]) {
-  test(`warm durable writes use bounded reads with ${size} unrelated retained messages`, async ({
+  test(`first and warm durable writes use bounded reads with ${size} unrelated retained messages`, async ({
     page,
   }) => {
     await seedLegacyHistory(page, size);
-    await send(page, 'Warm snapshot');
     await page.evaluate(() => {
       window.__chatStorageReads = { full: 0, writeFull: 0, keyed: 0, indexed: 0 };
       const getAll = IDBObjectStore.prototype.getAll;
@@ -434,8 +433,13 @@ test('an uncertain conversation create reports confirmation guidance without sel
   await expect(page.getByRole('heading', { name: 'New conversation', exact: true })).toBeVisible();
 });
 
-for (const kind of ['conversation', 'message'] as const) {
-  test(`a confirmed ${kind} with a failed post-commit IndexedDB read reconciles without another write`, async ({
+for (const { kind, removed } of [
+  { kind: 'conversation', removed: false },
+  { kind: 'message', removed: false },
+  { kind: 'conversation', removed: true },
+  { kind: 'message', removed: true },
+] as const) {
+  test(`a confirmed ${kind} with a failed post-commit IndexedDB read reconciles without another write (deleted=${removed})`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
@@ -497,13 +501,95 @@ for (const kind of ['conversation', 'message'] as const) {
     await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
     await expect(page.getByText(/Local history could not be reconciled/)).toBeVisible();
     expect(await durableSummary(page)).toEqual(committed);
+    if (removed) {
+      await page.evaluate(
+        (kind) =>
+          new Promise<void>((resolve, reject) => {
+            const open = indexedDB.open('opencoven-chat');
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+              const db = open.result;
+              const name = kind === 'conversation' ? 'conversations' : 'messages';
+              const tx = db.transaction([name, 'meta'], 'readwrite');
+              const store = tx.objectStore(name);
+              const records = store.getAll();
+              const revision = tx.objectStore('meta').get('mutationRevision');
+              records.onsuccess = () => {
+                const matching = records.result.filter((record) =>
+                  kind === 'conversation'
+                    ? record.title === 'New conversation'
+                    : record.text === 'Saved root message',
+                );
+                if (matching.length !== 1) {
+                  tx.abort();
+                  return;
+                }
+                store.delete(matching[0].id);
+              };
+              revision.onsuccess = () => {
+                if (!revision.result) {
+                  tx.abort();
+                  return;
+                }
+                tx.objectStore('meta').put({
+                  key: 'mutationRevision',
+                  value: revision.result.value + 1,
+                });
+              };
+              tx.onabort = () => {
+                db.close();
+                reject(tx.error ?? new Error('External deletion failed'));
+              };
+              tx.oncomplete = () => {
+                db.close();
+                resolve();
+              };
+            };
+          }),
+        kind,
+      );
+    }
+    const expectedHistory = await durableSummary(page);
     await page.evaluate(() => {
       if (!window.__restoreRootReads) throw new Error('Missing read recovery control');
       window.__restoreRootReads();
     });
     await page.getByRole('button', { name: 'Reconcile local save', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Reconcile local save' })).toHaveCount(0);
-    if (kind === 'conversation') {
+    if (removed) {
+      const content = page.getByRole('textbox', { name: 'Unavailable saved content' });
+      await expect(content).toHaveValue(
+        kind === 'message' ? 'Saved root message' : 'New conversation',
+      );
+      await expect(content).toHaveAttribute('readonly', '');
+      await expect(content).toBeEnabled();
+      await expect(
+        page.getByText(/This save committed, but its record is no longer available/),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('button', {
+          name: kind === 'message' ? 'Send' : 'New',
+          exact: true,
+        }),
+      ).toBeDisabled();
+      if (kind === 'message') {
+        const layout = await page.evaluate(() => ({
+          composerBottom: document.querySelector('.chat-composer')?.getBoundingClientRect().bottom,
+          historyHeight: document.querySelector('.chat-shell__thread-body')?.clientHeight,
+        }));
+        expect(layout.composerBottom).toBeLessThanOrEqual(568);
+        expect(layout.historyHeight).toBeGreaterThan(0);
+      }
+      expect(await durableSummary(page)).toEqual(expectedHistory);
+      await page.getByRole('button', { name: 'Dismiss unavailable save', exact: true }).click();
+      await expect(content).toHaveCount(0);
+      if (kind === 'message') {
+        await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('');
+        await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+      } else {
+        await expect(page.getByRole('option', { name: /New conversation/ })).toHaveCount(0);
+      }
+    } else if (kind === 'conversation') {
       await expect(page.getByRole('option', { name: /New conversation/ })).toHaveCount(1);
       await expect(page.getByRole('heading', { name: 'Legacy parent', exact: true })).toBeVisible();
     } else {
@@ -512,7 +598,7 @@ for (const kind of ['conversation', 'message'] as const) {
         page.getByRole('list', { name: 'Messages' }).getByText('Saved root message'),
       ).toBeVisible();
     }
-    expect(await durableSummary(page)).toEqual(committed);
+    expect(await durableSummary(page)).toEqual(expectedHistory);
   });
 }
 

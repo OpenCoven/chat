@@ -123,6 +123,71 @@ test.each(['create', 'message'] as const)(
   },
 );
 
+test.each(['before', 'after'] as const)(
+  'deletion %s the first reconciliation cannot undo a known commit or resurrect its message',
+  async (when) => {
+    const current = await recoveryFixture('refresh');
+    current.arm();
+    const result = await current.writer.sendMessage(current.parent.id, 'Historically committed');
+    if (result.status !== 'reconcile_required') throw new Error('Missing recovery receipt');
+    current.allowReads();
+    if (when === 'after')
+      expect(await current.store.reconcileWrite(result.recovery.receipt.id)).toMatchObject({
+        outcome: 'committed',
+        availability: 'present',
+      });
+    await current.durable.commit({
+      conversations: [],
+      messages: [],
+      deletedMessageIds: [result.recovery.receipt.id],
+    });
+    const deleted = await current.durable.loadAll();
+    expect(await current.store.reconcileWrite(result.recovery.receipt.id)).toMatchObject({
+      outcome: 'committed',
+      availability: 'unavailable',
+      receipt: result.recovery.receipt,
+    });
+    expect(await current.store.reconcileWrite(result.recovery.receipt.id)).toMatchObject({
+      outcome: 'committed',
+      availability: 'unavailable',
+    });
+    expect(await current.durable.loadAll()).toEqual(deleted);
+    expect(current.store.listMessages(current.parent.id, 50).data).toEqual([]);
+  },
+);
+
+test('reconciling an old completed receipt cannot release a newer pending save in the same thread', async () => {
+  const current = await recoveryFixture('refresh');
+  current.arm();
+  const first = await current.writer.sendMessage(current.parent.id, 'First save');
+  if (first.status !== 'reconcile_required') throw new Error('Missing first receipt');
+  current.allowReads();
+  await current.store.reconcileWrite(first.recovery.receipt.id);
+  current.arm();
+  const next = await current.writer.sendMessage(current.parent.id, 'Second save');
+  if (next.status !== 'reconcile_required') throw new Error('Missing second receipt');
+  current.allowReads();
+  await current.store.reconcileWrite(first.recovery.receipt.id);
+  expect(await current.writer.sendMessage(current.parent.id, 'Second save')).toEqual(next);
+  expect((await current.durable.loadAll()).messages).toHaveLength(2);
+});
+
+test('the local familiar continuation is terminal and echoes the supplied cursor without repeating data', async () => {
+  const store = await openChatStore({
+    familiarId: 'configured',
+    backend: createMemoryChatBackend(),
+  });
+  const adapter = createLocalQueryAdapter(store);
+  expect(await adapter.listFamiliars()).toMatchObject({
+    status: 'ok',
+    data: { data: [{ id: 'configured' }], cursor: { hasMore: false } },
+  });
+  expect(await adapter.listFamiliars({ cursor: 'dGVybWluYWwtcGFnZQ' })).toEqual({
+    status: 'ok',
+    data: { data: [], cursor: { current: 'dGVybWluYWwtcGFnZQ', hasMore: false } },
+  });
+});
+
 test.each(['lost-ack', 'abort'] as const)(
   'a root message %s is reconciled against its exact allocated ID before retry',
   async (failure) => {

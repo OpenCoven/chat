@@ -10,10 +10,12 @@ export type RootWriteRecovery = Readonly<{
   code: 'refresh_failed' | 'commit_unconfirmed';
 }>;
 
-export type RootWriteReconciliation = Readonly<{
-  receipt: RootWriteReceipt;
-  outcome: 'committed' | 'not_committed';
-}>;
+export type RootWriteReconciliation = Readonly<
+  { receipt: RootWriteReceipt } & (
+    | { outcome: 'committed'; availability: 'present' | 'unavailable' }
+    | { outcome: 'not_committed'; availability: 'absent' }
+  )
+>;
 
 export function sameRootWriteReceipt(
   expected: RootWriteReceipt,

@@ -37,9 +37,14 @@ It does not replace `vendor/opencoven-sdk` bytes or either conformance lock.
 Conversation creation and ordinary message saves distinguish a confirmed commit
 followed by a failed history refresh from an unconfirmed commit acknowledgement.
 Neither outcome invites a second write. **Reconcile local save** reads the exact
-allocated record and refreshes history without resubmitting it. A confirmed save
-clears the matching draft; a confirmed absence retains the draft and permits an
-explicit retry. Read failures stay visible and keep the retry blocked. If an
+allocated record and refreshes history without resubmitting it. A committed save
+whose exact record is available clears the matching draft. Only a no-commit
+outcome permits retrying the retained draft. A known successful commit remains
+committed even if its record is later deleted or discarded: commit outcome and
+current availability are separate facts. Recovery keeps the unavailable saved
+text or conversation title copyable until **Dismiss unavailable save**; it never
+resubmits or recreates deleted data. Read failures stay visible and keep the retry
+blocked. If an
 unavailable note prevents determining an unconfirmed message's outcome, it is
 not treated as an unsaved message.
 
@@ -116,7 +121,12 @@ The version-2 IndexedDB upgrade preserves existing records and adds operation-ke
 indexes plus an atomic shared mutation revision. Warm writes read only the exact
 conversation preconditions and indexed operation receipts; unchanged history is
 not scanned. Initial hydration and refresh after another window's writes still
-load history. Close older app windows if they block the database upgrade.
+load history. A successful open carries the revision sampled **before** its
+initial snapshot into the store, avoiding a duplicate scan on the first write.
+Concurrent changes still force refresh; a backend without revisions or a failed
+initial snapshot cannot mark an unchecked snapshot fresh. Revision-read failures
+during opening surface rather than silently trusting the history.
+Close older app windows if they block the database upgrade.
 Successful writes recheck the shared revision after their local update and
 reconcile detected competing commits before notifying observers. This is not a
 continuous subscription to other windows. The memory-only backend also uses
