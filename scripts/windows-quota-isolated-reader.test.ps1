@@ -103,7 +103,10 @@ try {
     $terminal.Invoke($null, [object[]]@($identity, $result, $quota))
     $expectOverflow = $quota[0].MaxBytes -eq 512
     if ($result.ResourceQuotaMonitorError -or $result.ResourceQuotaExceeded -ne $expectOverflow) {
-      throw 'Isolated terminal accounting confused owner-only access with byte overflow.'
+      $control = if ($expectOverflow) { 'overflow' } else { 'under-limit' }
+      throw ("Isolated terminal quota control failed: case={0}; exceeded={1}; monitor={2}; category={3}; root={4}; operation={5}." -f
+        $control, $result.ResourceQuotaExceeded, $result.ResourceQuotaMonitorError,
+        $result.ResourceQuotaMonitorCategory, $result.ResourceQuotaMonitorRoot, $result.ResourceQuotaMonitorOperation)
     }
     if ($expectOverflow -and ($result.ExitCode -eq 0 -or $result.ResourceQuotaLabel -cne 'harness execution aggregate')) {
       throw 'Isolated terminal accounting lost the actual overflow outcome.'

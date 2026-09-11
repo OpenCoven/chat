@@ -1372,7 +1372,7 @@ The later SDK validator repin must use these exact committed file bytes:
 | `scripts/windows-job-supervisor.test.ps1` | 177,916 | `8d57c5af17e68f4ce1b241a41c27b2ec88297202acf610862ab6c58c15cbeb2c` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 11,203 | `53f4a530ee873a0eefebb061269fa42ac2f9e8964ed278684e51eea4c46e23c4` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 11,526 | `4fbb494badadb2d06ed581da883ce18b5889f5d0b982a87a0203420495c50f02` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,577 | `df8ef3078ee0b085abe3a81d94acb682a4f4cbc377d3945453b7917ba1b33589` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
