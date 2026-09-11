@@ -1076,6 +1076,7 @@ namespace OpenCoven
                 return;
             }
             List<Exception> cleanupFailures = new List<Exception>();
+            List<string> cleanupCategories = new List<string>();
             if (quarantineIsolatedIdentity != null)
             {
                 bool quarantineComplete = false;
@@ -1085,7 +1086,7 @@ namespace OpenCoven
                 }
                 catch (Exception error)
                 {
-                    cleanupFailures.Add(error);
+                    RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine-check", error);
                 }
                 if (!quarantineComplete)
                 {
@@ -1095,7 +1096,7 @@ namespace OpenCoven
                     }
                     catch (Exception error)
                     {
-                        cleanupFailures.Add(error);
+                        RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine", error);
                     }
                 }
             }
@@ -1108,7 +1109,7 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-delete", error);
             }
             try
             {
@@ -1116,7 +1117,7 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "root-delete", error);
             }
             try
             {
@@ -1127,40 +1128,85 @@ namespace OpenCoven
                         unchecked((int)status),
                         "Ephemeral local user deletion failed.");
                 }
+            }
+            catch (Exception error)
+            {
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-delete", error);
+            }
+            try
+            {
                 IntPtr information;
-                status = NetUserGetInfo(null, UserName, 1, out information);
+                uint status = NetUserGetInfo(null, UserName, 1, out information);
                 if (information != IntPtr.Zero)
                 {
                     NetApiBufferFree(information);
                 }
                 if (status != NERR_USER_NOT_FOUND)
                 {
-                    throw new InvalidOperationException(
+                    throw new Win32Exception(
+                        unchecked((int)status),
                         "Ephemeral local user survived cleanup.");
                 }
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-survived", error);
             }
             password = null;
             if (Directory.Exists(OperatingSystemProfilePath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral Windows profile survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "profile-survived",
+                    new InvalidOperationException(
+                        "Ephemeral Windows profile survived cleanup."));
             }
             if (Directory.Exists(RootPath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral bootstrap root survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "root-survived",
+                    new InvalidOperationException(
+                        "Ephemeral bootstrap root survived cleanup."));
             }
             GC.SuppressFinalize(this);
             if (cleanupFailures.Count != 0)
             {
                 throw new InvalidOperationException(
-                    "Ephemeral Windows identity cleanup failed.",
+                    "Ephemeral Windows identity cleanup failed: " +
+                        String.Join(",", cleanupCategories.ToArray()) + ".",
                     new AggregateException(cleanupFailures.ToArray()));
             }
+        }
+
+        // Records one bounded cleanup step failure. The category is a fixed
+        // step label plus an exception kind and, for native failures, the
+        // numeric Win32/NetAPI status. No exception text or paths are recorded.
+        private static void RecordCleanupFailure(
+            List<Exception> failures,
+            List<string> categories,
+            string step,
+            Exception error)
+        {
+            failures.Add(error);
+            categories.Add(step + ":" + ClassifyCleanupError(error));
+        }
+
+        internal static string ClassifyCleanupError(Exception error)
+        {
+            Win32Exception native = error as Win32Exception;
+            if (native != null)
+            {
+                return "win32-" + native.NativeErrorCode.ToString(CultureInfo.InvariantCulture);
+            }
+            if (error is UnauthorizedAccessException) return "access-denied";
+            if (error is DirectoryNotFoundException) return "not-found";
+            if (error is IOException) return "io";
+            if (error is InvalidOperationException) return "invalid-operation";
+            if (error is TimeoutException) return "timeout";
+            return "unexpected";
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
