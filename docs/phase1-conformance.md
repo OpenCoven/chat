@@ -20,7 +20,7 @@ The Phase 1 lock binds the reviewed GLib iterator backport in both source roots:
 | Source | Revision | Tree |
 | --- | --- | --- |
 | Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
-| Executable harness | `85bc89b1b6d8ef5c099566b827146e0e75608beb` | `b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9` |
+| Executable harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
 
 The production snapshot changes only two Cargo files and 123 reviewed
 vendor/provenance files from its prior frozen revision. The executable harness
@@ -1340,7 +1340,7 @@ The later SDK validator repin must use these exact committed file bytes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 486,878 | `4efb62882d778a9e4a132a64f43e8265c233d6e309d6fb1dfc0e87cab19635a1` |
+| `.github/workflows/client-v1-conformance.yml` | 483,228 | `b90f2d19b7df51fedad150d6b31049d88c0c6d9544f8850fd935727957871b18` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1567,3 +1567,11 @@ grammar, idempotent disposal and absence of leaked text.
 The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
 `b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
 status staging harness and is retained in the diagnostic branch ancestry.
+
+
+The combined quota-context harness is pinned at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
+`b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
+Only the supervisor and its embedded workflow authority bytes change from
+the cleanup harness; all production inputs, native deltas and limits remain
+unchanged. Native Windows validation and a fresh SDK/protected binding remain
+required.
