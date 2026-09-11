@@ -2366,6 +2366,7 @@ ${source.slice(start, end)}
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
       'scripts/windows-quota-diagnostics.test.ps1',
+      'scripts/windows-owner-directory-quota.test.ps1',
       'scripts/windows-identity-cleanup-diagnostics.test.ps1',
       'scripts/windows-staging-binding.test.ps1',
       'scripts/windows-status-acl-probe.test.ps1',
