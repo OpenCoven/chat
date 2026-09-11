@@ -94,6 +94,8 @@ namespace OpenCoven
         private const uint MediumIntegrityRid = 0x2000;
         private const int MaximumAccountCreationAttempts = 8;
 
+        private readonly object quotaTokenSync = new object();
+        private SafeAccessTokenHandle quotaToken;
         private string password;
         private bool accountDisabled;
         private Action quarantineIsolatedIdentity;
@@ -110,7 +112,8 @@ namespace OpenCoven
             string statusStagingPath,
             string workspacePath,
             string operatingSystemProfilePath,
-            string validationSummary)
+            string validationSummary,
+            SafeAccessTokenHandle validatedQuotaToken)
         {
             UserName = userName;
             password = passwordValue;
@@ -122,6 +125,7 @@ namespace OpenCoven
             WorkspacePath = workspacePath;
             OperatingSystemProfilePath = operatingSystemProfilePath;
             ValidationSummary = validationSummary;
+            quotaToken = validatedQuotaToken;
         }
 
         public string UserName { get; private set; }
@@ -171,6 +175,7 @@ namespace OpenCoven
             string passwordValue = null;
             string sid = null;
             bool accountCreated = false;
+            SafeAccessTokenHandle validatedQuotaToken = null;
             try
             {
                 for (int attempt = 0; attempt < MaximumAccountCreationAttempts; attempt++)
@@ -215,7 +220,7 @@ namespace OpenCoven
                 sid = accountSid.Value;
                 EnsureUsersGroupMembership(userName);
                 string validationSummary =
-                    ValidateStandardUser(userName, passwordValue, sid);
+                    ValidateStandardUser(userName, passwordValue, sid, out validatedQuotaToken);
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
@@ -240,6 +245,7 @@ namespace OpenCoven
                 {
                     fullRoot,
                     profilePath,
+                    Path.Combine(profilePath, "AppData"),
                     Path.Combine(profilePath, @"AppData\Roaming"),
                     Path.Combine(profilePath, @"AppData\Local"),
                     tempPath,
@@ -259,7 +265,7 @@ namespace OpenCoven
                     sid,
                     supervisor.Value);
 
-                return new WindowsIsolatedUser(
+                WindowsIsolatedUser created = new WindowsIsolatedUser(
                     userName,
                     passwordValue,
                     sid,
@@ -269,11 +275,18 @@ namespace OpenCoven
                     statusStagingPath,
                     workspacePath,
                     Path.Combine(GetProfilesRoot(), userName),
-                    validationSummary);
+                    validationSummary,
+                    validatedQuotaToken);
+                validatedQuotaToken = null;
+                return created;
             }
             catch (Exception original)
             {
                 List<Exception> cleanupFailures = new List<Exception>();
+                if (validatedQuotaToken != null)
+                {
+                    validatedQuotaToken.Dispose();
+                }
                 if (Directory.Exists(fullRoot))
                 {
                     try
@@ -334,6 +347,36 @@ namespace OpenCoven
             if (disposed)
             {
                 throw new ObjectDisposedException("WindowsIsolatedUser");
+            }
+        }
+
+        // A read owns its duplicate independently of identity disposal. No
+        // filesystem work or quarantine callback runs under the lifetime lock.
+        internal T RunQuotaRead<T>(Func<T> read)
+        {
+            if (read == null)
+            {
+                throw new ArgumentNullException("read");
+            }
+            SafeAccessTokenHandle readToken;
+            lock (quotaTokenSync)
+            {
+                ThrowIfDisposed();
+                IntPtr duplicate;
+                IntPtr process = GetCurrentProcess();
+                if (!DuplicateHandle(
+                        process, quotaToken, process,
+                        out duplicate, 0, false, 2))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Validated quota token could not be duplicated.");
+                }
+                readToken = new SafeAccessTokenHandle(duplicate);
+            }
+            using (readToken)
+            {
+                return WindowsIdentity.RunImpersonated(readToken, read);
             }
         }
 
@@ -475,8 +518,10 @@ namespace OpenCoven
         private static string ValidateStandardUser(
             string userName,
             string passwordValue,
-            string expectedSid)
+            string expectedSid,
+            out SafeAccessTokenHandle validatedQuotaToken)
         {
+            validatedQuotaToken = null;
             IntPtr information = IntPtr.Zero;
             uint legacyPrivilege;
             uint accountFlags;
@@ -613,11 +658,22 @@ namespace OpenCoven
                         error.Message + " " + summary,
                         error);
                 }
+                if (!SetHandleInformation(token, 1, 0))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Validated quota token could not be made noninheritable.");
+                }
+                validatedQuotaToken = new SafeAccessTokenHandle(token);
+                token = IntPtr.Zero;
                 return summary;
             }
             finally
             {
-                CloseHandle(token);
+                if (token != IntPtr.Zero)
+                {
+                    CloseHandle(token);
+                }
             }
         }
 
@@ -1100,7 +1156,17 @@ namespace OpenCoven
                     }
                 }
             }
-            disposed = true;
+            SafeAccessTokenHandle retiredQuotaToken;
+            lock (quotaTokenSync)
+            {
+                disposed = true;
+                retiredQuotaToken = quotaToken;
+                quotaToken = null;
+            }
+            if (retiredQuotaToken != null)
+            {
+                retiredQuotaToken.Dispose();
+            }
             try
             {
                 WindowsJobSupervisor.DeleteOperatingSystemProfile(
@@ -1323,6 +1389,19 @@ namespace OpenCoven
             uint level,
             ref LOCALGROUP_MEMBERS_INFO_3 buffer,
             uint totalEntries);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateHandle(
+            IntPtr sourceProcess, SafeAccessTokenHandle source, IntPtr targetProcess,
+            out IntPtr target, uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint options);
 
         [DllImport("netapi32.dll")]
         private static extern uint NetApiBufferFree(IntPtr buffer);
@@ -6244,7 +6323,7 @@ namespace OpenCoven
                     "Terminal producer identity quarantine failed.",
                     quarantineFailure);
             }
-            ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);
+            ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);
             lock (quarantineSync)
             {
                 terminalProducerSucceeded =
@@ -6448,7 +6527,8 @@ namespace OpenCoven
                 stderrRead = IntPtr.Zero;
                 if (DirectoryQuotas.Length > 0)
                 {
-                    quotaTask = MonitorDirectoryQuotasAsync(
+                    quotaTask = MonitorDirectoryQuotasAsUserAsync(
+                        isolatedUser,
                         DirectoryQuotas,
                         quotaFailure,
                         quotaCancellation.Token);
@@ -6524,7 +6604,8 @@ namespace OpenCoven
                     try
                     {
                         WindowsDirectoryQuota exceededQuota;
-                        if (DirectoryQuotasExceeded(
+                        if (DirectoryQuotasExceededAsUser(
+                                isolatedUser,
                                 DirectoryQuotas,
                                 out exceededQuota))
                         {
@@ -6618,8 +6699,7 @@ namespace OpenCoven
                     {
                     }
                 }
-                quotaCancellation.Dispose();
-                quotaFailure.Dispose();
+                DisposeDirectoryQuotaResources(quotaTask, quotaCancellation, quotaFailure);
                 overflow.Dispose();
                 if (environmentBlock != IntPtr.Zero)
                 {
@@ -6634,6 +6714,31 @@ namespace OpenCoven
                 CloseIfValid(stdinRead);
                 CloseIfValid(stdinWrite);
             }
+        }
+
+        private static Task DisposeDirectoryQuotaResources(
+            Task quotaTask,
+            CancellationTokenSource quotaCancellation,
+            DirectoryQuotaFailureState quotaFailure)
+        {
+            if (quotaTask == null || quotaTask.IsCompleted)
+            {
+                quotaCancellation.Dispose();
+                quotaFailure.Dispose();
+                return Task.CompletedTask;
+            }
+            return quotaTask.ContinueWith(
+                completed =>
+                {
+                    // Observe a fault and release only the monitor's resources
+                    // after its final access has completed.
+                    AggregateException observed = completed.Exception;
+                    quotaCancellation.Dispose();
+                    quotaFailure.Dispose();
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private static void TerminateJobAndWaitForZero(
@@ -6682,6 +6787,25 @@ namespace OpenCoven
             DirectoryQuotaFailureState failure,
             CancellationToken cancellationToken)
         {
+            return MonitorDirectoryQuotasCoreAsync(null, quotas, failure, cancellationToken);
+        }
+
+        private static Task MonitorDirectoryQuotasAsUserAsync(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            DirectoryQuotaFailureState failure,
+            CancellationToken cancellationToken)
+        {
+            if (isolatedUser == null) throw new ArgumentNullException("isolatedUser");
+            return MonitorDirectoryQuotasCoreAsync(isolatedUser, quotas, failure, cancellationToken);
+        }
+
+        private static Task MonitorDirectoryQuotasCoreAsync(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            DirectoryQuotaFailureState failure,
+            CancellationToken cancellationToken)
+        {
             return Task.Run(delegate
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -6689,7 +6813,7 @@ namespace OpenCoven
                     try
                     {
                         WindowsDirectoryQuota exceededQuota;
-                        if (DirectoryQuotasExceeded(quotas, out exceededQuota))
+                        if (DirectoryQuotasExceededAsUser(isolatedUser, quotas, out exceededQuota))
                         {
                             failure.RecordQuotaExceeded(exceededQuota.Label);
                             return;
@@ -6708,7 +6832,29 @@ namespace OpenCoven
             });
         }
 
+        private static bool DirectoryQuotasExceededAsUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            out WindowsDirectoryQuota exceededQuota)
+        {
+            // Only the fixed diagnostic entry points pass null. Production
+            // caller identity is validated by RunAsUserCore and the AsUser APIs.
+            if (isolatedUser == null)
+            {
+                return DirectoryQuotasExceeded(quotas, out exceededQuota);
+            }
+            return DirectoryQuotasExceededCore(isolatedUser, quotas, out exceededQuota);
+        }
+
         private static bool DirectoryQuotasExceeded(
+            WindowsDirectoryQuota[] quotas,
+            out WindowsDirectoryQuota exceededQuota)
+        {
+            return DirectoryQuotasExceededCore(null, quotas, out exceededQuota);
+        }
+
+        private static bool DirectoryQuotasExceededCore(
+            WindowsIsolatedUser isolatedUser,
             WindowsDirectoryQuota[] quotas,
             out WindowsDirectoryQuota exceededQuota)
         {
@@ -6717,18 +6863,30 @@ namespace OpenCoven
             {
                 try
                 {
-                    long total = 0;
-                    foreach (string path in ExpandQuotaPattern(quota.PathPattern))
+                    bool exceeded;
+                    if (isolatedUser == null)
                     {
-                        total = checked(
-                            total + MeasureDirectoryBytes(
-                                path,
-                                quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
-                        if (total > quota.MaxBytes)
+                        exceeded = DirectoryQuotaExceeded(quota, Path.GetPathRoot(quota.PathPattern));
+                    }
+                    else
+                    {
+                        string readRoot = ReadQuotaOperation("pattern-attributes", () =>
+                            GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
+                        // Validate the fixed prefix as the supervisor. The isolated
+                        // token can traverse an ancestor without permission to read
+                        // its attributes. Never retry denied descendant reads here.
+                        bool prefixExists = false;
+                        foreach (string prefix in ExpandQuotaPattern(readRoot))
                         {
-                            exceededQuota = quota;
-                            return true;
+                            prefixExists = true;
                         }
+                        if (!prefixExists) continue;
+                        exceeded = isolatedUser.RunQuotaRead(() => DirectoryQuotaExceeded(quota, readRoot));
+                    }
+                    if (exceeded)
+                    {
+                        exceededQuota = quota;
+                        return true;
                     }
                 }
                 catch (Exception error)
@@ -6743,9 +6901,48 @@ namespace OpenCoven
             return false;
         }
 
+        private static string GetIsolatedQuotaReadRoot(string isolatedRoot, string pattern)
+        {
+            string root = Path.GetFullPath(isolatedRoot).Replace('/', '\\').TrimEnd('\\');
+            string normalizedPattern = pattern.Replace('/', '\\').TrimEnd('\\');
+            if (root.Length < 3 || root[1] != ':' || root[2] != '\\' ||
+                !((root[0] >= 'A' && root[0] <= 'Z') || (root[0] >= 'a' && root[0] <= 'z')) ||
+                root.IndexOf('*') >= 0 ||
+                (!String.Equals(normalizedPattern, root, StringComparison.OrdinalIgnoreCase) &&
+                    !normalizedPattern.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException("Quota pattern is outside the isolated root.");
+            }
+            foreach (string segment in normalizedPattern.Substring(3).Split('\\'))
+            {
+                if (segment.Length == 0 || segment.EndsWith(".", StringComparison.Ordinal) ||
+                    segment.EndsWith(" ", StringComparison.Ordinal) || segment.IndexOf(':') >= 0)
+                {
+                    throw new ArgumentException("Quota pattern has an ambiguous path component.");
+                }
+            }
+            return root;
+        }
+
+        private static bool DirectoryQuotaExceeded(WindowsDirectoryQuota quota, string readRoot)
+        {
+            long total = 0;
+            foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot))
+            {
+                total = checked(total + MeasureDirectoryBytes(
+                    path, quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
+                if (total > quota.MaxBytes) return true;
+            }
+            return false;
+        }
+
         private static IEnumerable<string> ExpandQuotaPattern(string pattern)
         {
-            string root = Path.GetPathRoot(pattern);
+            return ExpandQuotaPatternFromRoot(pattern, Path.GetPathRoot(pattern));
+        }
+
+        private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root)
+        {
             string relative = pattern.Substring(root.Length);
             string[] segments = relative.Split(
                 new char[] { '\\', '/' },
@@ -6980,6 +7177,23 @@ namespace OpenCoven
             WindowsJobRunResult result,
             WindowsDirectoryQuota[] quotas)
         {
+            ApplyTerminalDirectoryQuotaCheckCore(null, result, quotas);
+        }
+
+        private static void ApplyTerminalDirectoryQuotaCheckAsUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsJobRunResult result,
+            WindowsDirectoryQuota[] quotas)
+        {
+            if (isolatedUser == null) throw new ArgumentNullException("isolatedUser");
+            ApplyTerminalDirectoryQuotaCheckCore(isolatedUser, result, quotas);
+        }
+
+        private static void ApplyTerminalDirectoryQuotaCheckCore(
+            WindowsIsolatedUser isolatedUser,
+            WindowsJobRunResult result,
+            WindowsDirectoryQuota[] quotas)
+        {
             if (result == null)
             {
                 throw new InvalidOperationException(
@@ -6992,7 +7206,7 @@ namespace OpenCoven
             try
             {
                 WindowsDirectoryQuota exceededQuota;
-                if (DirectoryQuotasExceeded(quotas, out exceededQuota))
+                if (DirectoryQuotasExceededAsUser(isolatedUser, quotas, out exceededQuota))
                 {
                     result.ResourceQuotaExceeded = true;
                     if (!result.ResourceQuotaMonitorError &&
