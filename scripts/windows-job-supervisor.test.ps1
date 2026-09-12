@@ -5388,3 +5388,7 @@ if ([IO.Directory]::Exists($ephemeralProfilePath)) {
 if ([IO.Directory]::Exists($root)) {
   throw 'Ephemeral bootstrap root survived cleanup.'
 }
+
+# Each fresh context replaces the supervisor process ACL with its own SID.
+# Run after the parent context probes and cleanup so that their boundary stays intact.
+& (Join-Path $PSScriptRoot 'windows-profile-lifecycle.test.ps1')

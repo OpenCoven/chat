@@ -1387,7 +1387,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 329,556 | `de2103afa3c475a9696d68cc3db3cdbfb022731cb35a5a49507148b540b7d0e0` |
-| `scripts/windows-job-supervisor.test.ps1` | 186,748 | `b6835ef6ebadec046086f8f36b5df518d6462e486c3b32a92bff027d316744ea` |
+| `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
