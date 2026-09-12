@@ -193,6 +193,7 @@ const launchFailureCategories = [
   'initial-unsafe-probe-profile-reparse',
   'initial-unsafe-probe-profile-owner',
   'initial-unsafe-probe-profile-owner-acl',
+  'initial-unsafe-probe-profile-owner-acl-unavailable',
   'initial-unsafe-probe-profile-acl',
   'initial-unsafe-probe-profile-missing',
   'initial-unsafe-probe-profile-unavailable',
@@ -200,6 +201,7 @@ const launchFailureCategories = [
   'initial-unsafe-probe-coven-reparse',
   'initial-unsafe-probe-coven-owner',
   'initial-unsafe-probe-coven-owner-acl',
+  'initial-unsafe-probe-coven-owner-acl-unavailable',
   'initial-unsafe-probe-coven-acl',
   'initial-unsafe-probe-coven-missing',
   'initial-unsafe-probe-coven-unavailable',
@@ -207,6 +209,7 @@ const launchFailureCategories = [
   'initial-unsafe-probe-cave-reparse',
   'initial-unsafe-probe-cave-owner',
   'initial-unsafe-probe-cave-owner-acl',
+  'initial-unsafe-probe-cave-owner-acl-unavailable',
   'initial-unsafe-probe-cave-acl',
   'initial-unsafe-probe-cave-missing',
   'initial-unsafe-probe-cave-unavailable',
@@ -1615,7 +1618,16 @@ export function classifyDiscoverySafetyProbe(response) {
     return 'unknown';
   }
   const scopes = ['profile', 'coven', 'cave'];
-  const categories = ['type', 'reparse', 'owner', 'owner-acl', 'acl', 'missing', 'unavailable'];
+  const categories = [
+    'type',
+    'reparse',
+    'owner',
+    'owner-acl',
+    'owner-acl-unavailable',
+    'acl',
+    'missing',
+    'unavailable',
+  ];
   for (let index = 0; index < directories.length; index += 1) {
     const entry = directories[index];
     if (!Array.isArray(entry) || entry.length !== 2 || entry[0] !== scopes[index]) {
@@ -1689,7 +1701,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
       return 'phase1.native-scenarios.launch.initial-discovery';
     }
     const safetyProbeFailure =
-      /^native RPC initial unsafe follow-up probe ((?:profile|coven|cave)-(?:type|reparse|owner|owner-acl|acl|missing|unavailable)|directories-safe|unknown)$/u.exec(
+      /^native RPC initial unsafe follow-up probe ((?:profile|coven|cave)-(?:type|reparse|owner|owner-acl|owner-acl-unavailable|acl|missing|unavailable)|directories-safe|unknown)$/u.exec(
         message,
       );
     if (safetyProbeFailure !== null) {
