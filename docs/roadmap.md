@@ -762,8 +762,9 @@ must still be resolved. Local cleanup is not proof of program completion.
 ## Protected workflow file-size guard
 
 GitHub rejected the initial #231 workflow at 512,502 bytes because its limit is
-500 KiB (512,000 bytes). Serializing the existing artifact-validation script
-as a quoted YAML scalar reduces the file to 511,839 bytes. The entire parsed
-workflow, including every command and setting, is unchanged. A regression
-check now enforces the GitHub limit; the final workflow size and hash are
-recorded in the conformance guide and must be used by the next SDK binding.
+500 KiB (512,000 bytes). Serializing existing validation scripts as quoted YAML
+scalars keeps the workflow at 511,593 bytes. Their parsed commands are
+unchanged, while isolated quota repeats now issue fresh filesystem metadata
+reads without repeating supervisor-identity validation. A regression check
+enforces the GitHub limit; the final workflow size and hash are recorded in the
+conformance guide and must be used by the next SDK binding.

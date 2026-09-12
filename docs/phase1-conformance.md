@@ -1348,7 +1348,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,839 | `89a343d478f22de7210b8bba7c8122ebf88d95fb09ed6b252127107e9bcd231d` |
+| `.github/workflows/client-v1-conformance.yml` | 511,593 | `aaff5f8083c4f93730f8461a4dca0e27709d9c0e913bfdab9366d59e4e35f14e` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1373,11 +1373,11 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,720 | `c97fb6cf60f4609053279ea23e5677de56652ad80951a2796e55f7497d969b8d` |
+| `scripts/windows-job-supervisor.cs` | 330,220 | `8d5e68f9d44049bd00bcdb8291d4e7c542dcdeaf1e15685b619962a12e0f30ca` |
 | `scripts/windows-job-supervisor.test.ps1` | 178,124 | `b22a424e2cf90ea6c06c184cf7bf0ca737f6e0a55e656ecc2ff614b5969b4b64` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 20,121 | `356f0fb6419519d87eb1f9f33bd083fd76ec9f1e5a3034443f12308eb2fa2247` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 21,401 | `b98a2c18ecf3ca7ee749bfa278cb1132250c1db5fc7cc28920e3384a38066c9c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 17,205 | `8125f8a2166c4cc65e461b3019d2497656aa51e11fdea80eceb7b336aad299c1` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,596 | `fa738d8e93a8132a26e34fbbb58e89f7ac12c13e7298cf923f8db6b31e7097c5` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
@@ -1743,12 +1743,15 @@ current bounded traversal node.
 After an initial metadata failure, the same validated isolated-user token
 performs one immediate bounded repeat. `transient` means that repeat returned
 or the target disappeared; `persistent` means it threw again. Enumeration
-creates a fresh enumerator. Entry-attribute and file-length delegates reuse
-`FileSystemInfo` metadata, which may cache an error, so their repeat label does
-not establish that a filesystem denial persisted. The original failure still
-terminates production in either case. Synthetic or unattributed failures use `none`. The repeat never
-uses the supervisor identity, changes an ACL, accepts a partial measurement, or
-retries production. Existing quotas, traversal bounds, reparse handling,
-first-failure state, cleanup and acceptance remain unchanged. Native regression
+creates a fresh enumerator, entry attributes use a fresh static metadata read,
+and file length uses a fresh metadata object, so each repeat reaches the
+filesystem again. The original failure still terminates production in either
+case. Synthetic or unattributed failures use `none`. Initial enumeration metadata and byte accounting are unchanged; fresh metadata
+is requested only by the diagnostic repeat. Supervisor prefix validation and
+non-isolated reads remain single-pass. The repeat never uses the
+supervisor identity, changes an ACL, accepts a partial measurement, or retries
+production. Existing quotas, traversal bounds, reparse handling, first-failure
+state, cleanup and acceptance remain unchanged. Supervisor-identity validation
+performs only the original read and reports `repeat=none`. Native regression
 coverage verifies the closed scope vocabulary, repeat propagation, unknown
 fallback and absence of private nonce or exception text.

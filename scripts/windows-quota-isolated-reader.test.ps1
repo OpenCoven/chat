@@ -211,6 +211,34 @@ try {
       $inaccessible.ExitCode -eq 0 -or $inaccessible.ResourceQuotaMonitorCategory -cne 'access-denied') {
     throw 'Unexpected unreadable quota directory did not fail closed.'
   }
+  $enumerationDenied = Join-Path $identity.TempPath 'phase1-conformance-run-enumeration-denied'
+  [IO.Directory]::CreateDirectory($enumerationDenied) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $enumerationDenied 'payload'), 'bounded')
+  $enumerationAcl = Get-Acl -LiteralPath $enumerationDenied
+  try {
+    $denialAcl = Get-Acl -LiteralPath $enumerationDenied
+    $denialAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.SecurityIdentifier]::new($identity.Sid),
+      [Security.AccessControl.FileSystemRights]::ListDirectory,
+      [Security.AccessControl.AccessControlType]::Deny
+    ))
+    Set-Acl -LiteralPath $enumerationDenied -AclObject $denialAcl
+    $enumerationResult = [OpenCoven.WindowsJobRunResult]::new()
+    $terminal.Invoke($null, [object[]]@($identity, $enumerationResult, [OpenCoven.WindowsDirectoryQuota[]]@(
+      [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $enumerationDenied, 2048)
+    )))
+    if (-not $enumerationResult.ResourceQuotaMonitorError -or
+        -not $enumerationResult.ResourceQuotaExceeded -or $enumerationResult.ExitCode -eq 0 -or
+        $enumerationResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or
+        $enumerationResult.ResourceQuotaMonitorOperation -cne 'directory-enumeration-root' -or
+        $enumerationResult.ResourceQuotaMonitorRepeat -cne 'persistent') {
+      throw 'Isolated enumeration did not retain the original failure and bounded repeat.'
+    }
+  } finally {
+    Set-Acl -LiteralPath $enumerationDenied -AclObject $enumerationAcl
+    Remove-Item -LiteralPath $enumerationDenied -Recurse -Force
+  }
+  Write-Host 'Isolated enumeration repeat remains bounded and fail-closed.'
   $state = [Activator]::CreateInstance($stateType, $true)
   $cancel = [Threading.CancellationTokenSource]::new(5000)
   $task = $monitor.Invoke($null, [object[]]@($identity, $over, $state, $cancel.Token))

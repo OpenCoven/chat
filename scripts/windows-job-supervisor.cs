@@ -6885,7 +6885,7 @@ namespace OpenCoven
                             prefixExists = true;
                         }
                         if (!prefixExists) continue;
-                        exceeded = isolatedUser.RunQuotaRead(() => DirectoryQuotaExceeded(quota, readRoot));
+                        exceeded = isolatedUser.RunQuotaRead(() => DirectoryQuotaExceeded(quota, readRoot, true));
                     }
                     if (exceeded)
                     {
@@ -6930,15 +6930,15 @@ namespace OpenCoven
             return root;
         }
 
-        private static bool DirectoryQuotaExceeded(WindowsDirectoryQuota quota, string readRoot)
+        private static bool DirectoryQuotaExceeded(WindowsDirectoryQuota quota, string readRoot, bool repeatDiagnostic = false)
         {
             long total = 0;
-            foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot))
+            foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot, repeatDiagnostic))
             {
                 total = checked(total + MeasureDirectoryBytes(
                     path,
                     quota.MaxBytes - Math.Min(total, quota.MaxBytes),
-                    quota.Label));
+                    quota.Label, repeatDiagnostic));
                 if (total > quota.MaxBytes) return true;
             }
             return false;
@@ -6949,7 +6949,7 @@ namespace OpenCoven
             return ExpandQuotaPatternFromRoot(pattern, Path.GetPathRoot(pattern));
         }
 
-        private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root)
+        private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root, bool repeatDiagnostic = false)
         {
             string relative = pattern.Substring(root.Length);
             string[] segments = relative.Split(
@@ -6965,7 +6965,7 @@ namespace OpenCoven
                     FileAttributes candidateAttributes;
                     try
                     {
-                        candidateAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(candidate));
+                        candidateAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(candidate), repeatDiagnostic);
                     }
                     catch (FileNotFoundException)
                     {
@@ -6986,7 +6986,7 @@ namespace OpenCoven
                             candidate,
                             segment,
                             true,
-                            MaximumQuotaEntries - next.Count);
+                            MaximumQuotaEntries - next.Count, -1, repeatDiagnostic);
                         foreach (FileSystemInfo matched in matches)
                         {
                             next.Add(matched.FullName);
@@ -6998,7 +6998,7 @@ namespace OpenCoven
                         FileAttributes childAttributes;
                         try
                         {
-                            childAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(child));
+                            childAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(child), repeatDiagnostic);
                         }
                         catch (FileNotFoundException)
                         {
@@ -7029,7 +7029,7 @@ namespace OpenCoven
             string searchPattern,
             bool directoriesOnly,
             int maximumEntries,
-            int depth = -1)
+            int depth = -1, bool repeatDiagnostic = false)
         {
             try
             {
@@ -7041,12 +7041,12 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                string repeat = ClassifyQuotaReadRepeat(() =>
+                string repeat = repeatDiagnostic ? ClassifyQuotaReadRepeat(() =>
                     ReadBoundedDirectorySnapshotCore(
                         directory,
                         searchPattern,
                         directoriesOnly,
-                        maximumEntries));
+                        maximumEntries)) : "none";
                 throw new QuotaMonitorContextException(
                     null,
                     directoriesOnly ? "pattern-enumeration" :
@@ -7123,7 +7123,7 @@ namespace OpenCoven
         private static long MeasureDirectoryBytes(
             string root,
             long remaining,
-            string quotaLabel)
+            string quotaLabel, bool repeatDiagnostic)
         {
             long total = 0;
             int entries = 0;
@@ -7145,7 +7145,7 @@ namespace OpenCoven
                     {
                         directoryAttributes = ReadQuotaOperation(
                             "directory-attributes",
-                            () => File.GetAttributes(directory));
+                            () => File.GetAttributes(directory), repeatDiagnostic);
                     }
                     catch (FileNotFoundException)
                     {
@@ -7164,7 +7164,7 @@ namespace OpenCoven
                         null,
                         false,
                         MaximumQuotaEntries - entries,
-                        current.Value);
+                        current.Value, repeatDiagnostic);
                     entries = checked(entries + snapshot.Count);
                     foreach (FileSystemInfo entry in snapshot)
                     {
@@ -7173,7 +7173,7 @@ namespace OpenCoven
                         {
                             attributes = ReadQuotaOperation(
                                 "entry-attributes",
-                                () => entry.Attributes);
+                                () => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName));
                         }
                         catch (FileNotFoundException)
                         {
@@ -7206,7 +7206,7 @@ namespace OpenCoven
                                 }
                                 length = ReadQuotaOperation(
                                     "file-length",
-                                    () => file.Length);
+                                    () => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length);
                             }
                             catch (FileNotFoundException)
                             {
@@ -7651,7 +7651,7 @@ namespace OpenCoven
             }
         }
 
-        private static T ReadQuotaOperation<T>(string operation, Func<T> read)
+        private static T ReadQuotaOperation<T>(string operation, Func<T> read, bool repeatDiagnostic = false, Func<T> repeatRead = null)
         {
             try { return read(); }
             catch (FileNotFoundException) { throw; }
@@ -7662,7 +7662,7 @@ namespace OpenCoven
                     null,
                     operation,
                     null,
-                    ClassifyQuotaReadRepeat(read),
+                    repeatDiagnostic ? ClassifyQuotaReadRepeat(repeatRead ?? read) : "none",
                     error);
             }
         }

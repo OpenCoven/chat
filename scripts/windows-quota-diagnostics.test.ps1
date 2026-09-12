@@ -219,12 +219,22 @@ namespace OpenCoven.Tests
 '@
 }
 $readQuota = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadQuotaOperation', $flags).MakeGenericMethod([string])
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
+try {
+  $readQuota.Invoke($null, [object[]]@('pattern-attributes', [OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, [Type]::Missing, [Type]::Missing)) | Out-Null
+} catch {
+  $singlePassError = $_.Exception.GetBaseException()
+}
+if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1) {
+  throw 'Supervisor quota validation repeated a failed read.'
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
 foreach ($repeatCase in @(
     @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'transient', 'TransientCalls'),
     @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'))) {
   $caught = $null
   try {
-    $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0])) | Out-Null
+    $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0], $true, [Type]::Missing)) | Out-Null
   } catch {
     $caught = $_.Exception.GetBaseException()
   }
@@ -237,6 +247,19 @@ foreach ($repeatCase in @(
       $caught.ToString().Contains('private-')) {
     throw "Quota repeat classification changed: $($repeatCase[1])"
   }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls = 1
+try {
+  $readQuota.Invoke($null, [object[]]@('entry-attributes',
+    [OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, $true,
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientRead)) | Out-Null
+} catch { $freshRepeatError = $_.Exception.GetBaseException() }
+if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls -ne 2 -or
+    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($freshRepeatError) -cne 'transient' -or
+    $contextType.GetProperty('Category', $instanceFlags).GetValue($freshRepeatError) -cne 'access-denied') {
+  throw 'Fresh diagnostic metadata read changed the original failure or initial read.'
 }
 Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
 
@@ -294,7 +317,7 @@ foreach ($depth in @(0, 1, 2, 3, 5)) {
       if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
           $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
           $deniedResult.ResourceQuotaMonitorScope -cne 'none' -or $deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation -or
-          $deniedResult.ResourceQuotaMonitorRepeat -cne 'persistent') { throw 'Native access-denied fixture lost its bounded context.' }
+          $deniedResult.ResourceQuotaMonitorRepeat -cne 'none') { throw 'Native access-denied fixture lost its bounded context.' }
       $terminal.Invoke($null, [object[]]@($deniedResult, $malformed))
       if ($deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Terminal recheck replaced first depth context.' }
       # Wildcard discovery has a distinct enumeration seam; a caller label that
@@ -304,7 +327,7 @@ foreach ($depth in @(0, 1, 2, 3, 5)) {
       $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
       if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
           $wildcardResult.ResourceQuotaMonitorScope -cne 'none' -or $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration' -or
-          $wildcardResult.ResourceQuotaMonitorRepeat -cne 'persistent') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
+          $wildcardResult.ResourceQuotaMonitorRepeat -cne 'none') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
       $deniedState = [Activator]::CreateInstance($stateType, $true)
       try {
         $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
@@ -313,7 +336,7 @@ foreach ($depth in @(0, 1, 2, 3, 5)) {
           if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
         }
         if ($stateType.GetProperty('MonitorErrorScope', $instanceFlags).GetValue($deniedState) -cne 'none' -or
-            $stateType.GetProperty('MonitorErrorRepeat', $instanceFlags).GetValue($deniedState) -cne 'persistent') {
+            $stateType.GetProperty('MonitorErrorRepeat', $instanceFlags).GetValue($deniedState) -cne 'none') {
           throw 'Native background check lost scope/repeat context.'
         }
       } finally { $deniedState.Dispose() }

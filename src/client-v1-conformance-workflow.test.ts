@@ -133,12 +133,22 @@ function extractPowerShellFunction(source: string, name: string): string {
 }
 
 function workflowRunBody(step: string): string {
-  const marker = '        run: |\n';
-  const start = step.indexOf(marker);
-  if (start < 0) {
-    throw new Error('workflow step has no literal run body');
+  const literalMarker = '        run: |\n';
+  const literalStart = step.indexOf(literalMarker);
+  if (literalStart >= 0) {
+    return step.slice(literalStart + literalMarker.length);
   }
-  return step.slice(start + marker.length);
+  const quotedMarker = '        run: ';
+  const quotedStart = step.indexOf(quotedMarker);
+  if (quotedStart >= 0) {
+    const run: unknown = JSON.parse(step.slice(quotedStart + quotedMarker.length));
+    if (typeof run !== 'string') throw new Error('workflow run body is not a string');
+    return run
+      .split('\n')
+      .map((line) => (line ? `          ${line}` : line))
+      .join('\n');
+  }
+  throw new Error('workflow step has no supported run body');
 }
 
 function workflowStepEnvironment(step: string): string {
@@ -2408,6 +2418,7 @@ ${source.slice(start, end)}
     const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
     const toolPathStep = workflowStep(workflow, 'Compute reviewed Unix tool path');
     const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const trustedSetupRunBody = workflowRunBody(trustedSetup);
     const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
     const supervisor = readFileSync(
       resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
@@ -2433,9 +2444,9 @@ ${source.slice(start, end)}
     expect(unixStep).toContain(
       '--handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff"',
     );
-    expect(trustedSetup).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(trustedSetupRunBody).toContain('broker_root="/tmp/opencoven-unix-broker"');
     expect(unixStep).toContain('broker_root="/tmp/opencoven-unix-broker"');
-    expect(trustedSetup).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
+    expect(trustedSetupRunBody).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(unixStep).not.toContain('--tool-path "$PATH"');
@@ -2467,9 +2478,9 @@ ${source.slice(start, end)}
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
     );
-    expect(trustedSetup).toContain('cc -std=c11');
-    expect(trustedSetup).toContain('unix-artifact-handoff.c');
-    expect(trustedSetup).toContain('createHash');
+    expect(trustedSetupRunBody).toContain('cc -std=c11');
+    expect(trustedSetupRunBody).toContain('unix-artifact-handoff.c');
+    expect(trustedSetupRunBody).toContain('createHash');
     for (const relativePath of [
       'scripts/phase1-conformance.mjs',
       'scripts/phase1-schema-v2-producer.mjs',
@@ -2479,7 +2490,7 @@ ${source.slice(start, end)}
       'scripts/unix-producer-supervisor.sh',
     ]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
-      expect(trustedSetup).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
+      expect(trustedSetupRunBody).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
     }
     expect(validation).toContain('phase1-artifact-secret-scan.mjs');
     expect(validation).toContain('scanPhase1ArtifactText');
@@ -3086,6 +3097,12 @@ ${pathAssignment}
       for (const repeat of ['none', 'transient', 'persistent']) {
         expect(source).toContain(`"${repeat}"`);
       }
+      expect(source).toContain(
+        '() => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName)',
+      );
+      expect(source).toContain(
+        '() => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length',
+      );
     }
   });
 
