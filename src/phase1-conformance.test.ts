@@ -1162,6 +1162,21 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
+  test('removes native profile state only after the RPC process has closed', () => {
+    expect(schemaV2Producer.cleanupNativeScenarioHome).toBeTypeOf('function');
+    const root = mkdtempSync(resolve(tmpdir(), 'phase1-native-profile-cleanup-'));
+    const covenHome = resolve(root, '.coven');
+    try {
+      mkdirSync(covenHome);
+      expect(schemaV2Producer.cleanupNativeScenarioHome(covenHome, true, false)).toBe(false);
+      expect(existsSync(covenHome)).toBe(true);
+      expect(schemaV2Producer.cleanupNativeScenarioHome(covenHome, true, true)).toBe(true);
+      expect(existsSync(covenHome)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('routes only Windows Cave authority fixtures through the ACL-repairable temp root', () => {
     const environment = {
       PATH: 'C:\\trusted\\node',

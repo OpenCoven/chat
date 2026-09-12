@@ -2221,6 +2221,14 @@ export function nativeScenarioHomes(artifactRootPath, environment, platform = pr
   };
 }
 
+export function cleanupNativeScenarioHome(covenHome, removeCovenHome, rpcClosed) {
+  if (!removeCovenHome || !rpcClosed) {
+    return false;
+  }
+  rmSync(covenHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  return true;
+}
+
 function runCommand(
   artifactRoot,
   label,
@@ -4334,6 +4342,7 @@ async function runNativeScenarios({
     throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
   }
   let rpc;
+  let rpcClosed = true;
   let handle;
   let credentialId;
   const nativeInstanceIds = new Set();
@@ -4413,6 +4422,7 @@ async function runNativeScenarios({
     };
     activeNativeStage = 'rpc-start';
     rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
+    rpcClosed = false;
     let installationId = 'phase1-installation-1';
     if (platformEnvironment !== undefined) {
       activeNativeStage = 'native-preflight';
@@ -4956,14 +4966,15 @@ async function runNativeScenarios({
     try {
       activeNativeStage = 'cleanup-rpc';
       await rpc.close();
+      rpcClosed = true;
     } catch (error) {
       cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
     }
   }
-  if (removeCovenHome) {
+  if (removeCovenHome && rpcClosed) {
     try {
       activeNativeStage = 'cleanup';
-      rmSync(covenHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      cleanupNativeScenarioHome(covenHome, removeCovenHome, rpcClosed);
     } catch (error) {
       cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
     }
