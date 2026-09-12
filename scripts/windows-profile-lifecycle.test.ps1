@@ -121,8 +121,11 @@ public static class ChildProfileFixture {
 "@
 if (-not [string]::Equals([ChildProfileFixture]::Read(),
     $env:OPENCOVEN_PROFILE_FIXTURE_EXPECTED, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
+if (-not [string]::Equals([ChildProfileFixture]::Read(),
+    $env:OPENCOVEN_WINDOWS_PROFILE_ROOT, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
 '@, [Text.UTF8Encoding]::new($false))
     $context.Environment.OPENCOVEN_PROFILE_FIXTURE_EXPECTED = $createdProfile
+    $context.Environment.OPENCOVEN_WINDOWS_PROFILE_ROOT = 'C:\forged-profile'
     $nonce = [Guid]::NewGuid().ToString('N')
     $jobName = "Local\OpenCoven.Chat.Conformance.$nonce"
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce

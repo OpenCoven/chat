@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `0a2cf1c9815b511bcc53e37360b5b2bafdfe20dd`,
-  tree `8af153dba24817a92b4843a192d80a2fdcf468d7`, retained in the
+- Chat conformance driver `0392645db9ec3b6e06cbc91ed0c09a868a50aea5`,
+  tree `73d764b11de695ef6e047770a936f3fa9d1ec668`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,20 +1361,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,638 | `67d5a23b0a795b5e8f9f272c0e4be62a4babcef88762dd8b444a2a17647e6e39` |
+| `.github/workflows/client-v1-conformance.yml` | 511,778 | `8f17982e473485f2cb228561be507b9427dc01a8043dfc2e34208a4289c6693a` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 212,618 | `7a770074a35745627599a28e1752684661eb1403e2b3024db429e4c4700ebc67` |
+| `scripts/phase1-conformance.mjs` | 212,537 | `7d805d55ad5c8e78aa4e2fd5b8eaf751b936ccabc733e24d5291035e7523a92d` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 208,728 | `4c06ea93f3c6ff71cfdd338348660bfd35d92a136bafdce159b0cb1e4d31fc2b` |
+| `scripts/phase1-schema-v2-producer.mjs` | 210,859 | `8aca42e269b6ea473af4e0b4638087d2cfa899b0a3ab0abcb64f67c98162a911` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1386,7 +1386,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,556 | `de2103afa3c475a9696d68cc3db3cdbfb022731cb35a5a49507148b540b7d0e0` |
+| `scripts/windows-job-supervisor.cs` | 329,668 | `962bcb84af48532bf216770c0f50a023c255c286515f08d1befbf95922b487f3` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
@@ -1911,8 +1911,30 @@ timeout maps to `phase1.native-scenarios.launch.timeout`. A native
 because that code also represents worker completion loss and generation
 overflow. No paths, process IDs, discovery bytes, or child output are exposed.
 
-Windows fixture publication still uses artifact-local `COVEN_CAVE_HOME`, while
-the native reader selects the actual token profile's `.coven/cave`. A response
-budget correction cannot align those roots. That separate repair must retain
-native identity checks, existing aggregate quota ceilings, and owned profile
-teardown before fresh protected validation can establish Windows acceptance.
+Before this change, Windows fixture publication used artifact-local
+`COVEN_CAVE_HOME`, while the native reader selected the actual token profile's
+`.coven/cave`. A response-budget correction alone could not align those roots.
+
+Protected run `34718514551` reached Rust's 30-second readiness deadline with the
+Cave child still alive. The Windows reader/publisher path comparison then
+confirmed the unresolved mismatch: the Rust reader intentionally derives the
+profile from the process token, while the producer directed Cave to an
+artifact-local home. The supervisor now overwrites
+`OPENCOVEN_WINDOWS_PROFILE_ROOT` after copying the requested child environment,
+using the operating-system profile registered for the restricted process token.
+The protected producer validates that dedicated canonical path independently
+from the bootstrap-local `USERPROFILE` redirect and places only the Windows
+native fixture beneath the token profile's `.coven/cave`. A caller-provided or
+inherited profile-root value therefore cannot redirect fixture publication.
+The fixture is removed only after the native RPC and its nested Cave Job close.
+If graceful shutdown fails, deletion is deferred to the supervisor's existing
+process-termination and profile-deletion boundary.
+
+Cave's fail-closed Windows discovery publisher permits its PowerShell ownership
+and DACL probe to run for up to 60 seconds. Rust therefore uses a 75-second
+Windows-only launch deadline. Both harness clients allow that deadline plus the
+existing 10-second transport allowance, for an 85-second Windows
+`cave_launch` budget. Non-Windows launch remains 30 seconds plus the transport
+allowance, and every other RPC remains bounded at 10 seconds. No ownership,
+DACL, identity, quota, liveness, discovery, health, redaction, or attestation
+check is bypassed.

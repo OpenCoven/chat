@@ -48,6 +48,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  caveLaunchRpcTimeoutForPlatform,
   classifyCavePluginEvaluationFailure,
   pnpmInvocation,
   runSchemaV2Conformance,
@@ -59,6 +60,7 @@ import { configureSupervisedExecution, runSupervisedSync } from './supervised-ex
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 export {
+  caveLaunchRpcTimeoutForPlatform,
   runPowerShellCommandWithArgs,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
@@ -84,9 +86,7 @@ export const cargoBuildTimeoutMs = 45 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
 const rpcTimeoutMs = 10_000;
-// Native launch owns a 30-second readiness deadline (connection.rs). Allow the
-// existing RPC transport budget after it so a native result can reach the caller.
-const caveLaunchRpcTimeoutMs = 30_000 + rpcTimeoutMs;
+const caveLaunchRpcTimeoutMs = caveLaunchRpcTimeoutForPlatform();
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedCommandFailureReasons = new Set([
   'spawn',
