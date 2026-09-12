@@ -179,6 +179,18 @@ const cleanupGrantFailureCategories = [
   'response',
   'unknown',
 ];
+const launchFailureCategories = [
+  'not-installed',
+  'configuration-invalid',
+  'process',
+  'timeout',
+  'rpc-closed',
+  'initial-discovery',
+  'discovery-timeout',
+  'health',
+  'health-envelope',
+  'unknown',
+];
 const cleanupCustodyFailureCategories = [
   'secure-store-unavailable',
   'keychain-failure',
@@ -441,6 +453,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.assertion.unknown',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+  ...launchFailureCategories.map((category) => `phase1.native-scenarios.launch.${category}`),
   ...cleanupGrantFailureCategories.map(
     (category) => `phase1.native-scenarios.cleanup-grant.${category}`,
   ),
@@ -1554,6 +1567,55 @@ export async function runSchemaV2StageAsync(stage, action) {
 }
 
 export function schemaV2NativeFailureDiagnostic(stage, error) {
+  if (stage === 'launch') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.launch';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const launchFailure =
+      /^native RPC cave_launch failed with (cave_not_installed|cave_launch_configuration_invalid|cave_launch_failed)$/u.exec(
+        message,
+      );
+    if (launchFailure !== null) {
+      return `phase1.native-scenarios.launch.${
+        {
+          cave_not_installed: 'not-installed',
+          cave_launch_configuration_invalid: 'configuration-invalid',
+          cave_launch_failed: 'process',
+        }[launchFailure[1]]
+      }`;
+    }
+    if (message === 'native RPC timed out for cave_launch') {
+      return 'phase1.native-scenarios.launch.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.launch.rpc-closed';
+    }
+    if (message === 'native RPC cave_read_discovery did not return cave_discovery_not_found') {
+      return 'phase1.native-scenarios.launch.initial-discovery';
+    }
+    if (message === 'native RPC did not discover the launched Cave') {
+      return 'phase1.native-scenarios.launch.discovery-timeout';
+    }
+    if (
+      message === 'native RPC timed out for cave_health' ||
+      /^native RPC cave_health failed with (invalid_request|unauthorized|scope_denied|not_found|conflict|rate_limited|pairing_denied|pairing_expired|incompatible_version|service_unavailable|reconcile_required|internal_error|invalid_response|timeout|stale_discovery_handle|invalid_native_response)$/u.test(
+        message,
+      )
+    ) {
+      return 'phase1.native-scenarios.launch.health';
+    }
+    if (message === 'launched Cave returned an invalid health envelope') {
+      return 'phase1.native-scenarios.launch.health-envelope';
+    }
+    return 'phase1.native-scenarios.launch.unknown';
+  }
   if (stage === 'cleanup-grant') {
     if (error === undefined) {
       return 'phase1.native-scenarios.cleanup-grant';

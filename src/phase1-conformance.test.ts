@@ -2051,6 +2051,79 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test.each([
     [
+      'native RPC cave_launch failed with cave_not_installed',
+      'phase1.native-scenarios.launch.not-installed',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_configuration_invalid',
+      'phase1.native-scenarios.launch.configuration-invalid',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_failed',
+      'phase1.native-scenarios.launch.process',
+    ],
+    ['native RPC timed out for cave_launch', 'phase1.native-scenarios.launch.timeout'],
+    ['native RPC closed before responding', 'phase1.native-scenarios.launch.rpc-closed'],
+    [
+      'native RPC cave_read_discovery did not return cave_discovery_not_found',
+      'phase1.native-scenarios.launch.initial-discovery',
+    ],
+    [
+      'native RPC did not discover the launched Cave',
+      'phase1.native-scenarios.launch.discovery-timeout',
+    ],
+    [
+      'native RPC cave_health failed with service_unavailable',
+      'phase1.native-scenarios.launch.health',
+    ],
+    ['native RPC timed out for cave_health', 'phase1.native-scenarios.launch.health'],
+    [
+      'launched Cave returned an invalid health envelope',
+      'phase1.native-scenarios.launch.health-envelope',
+    ],
+    [
+      'native RPC cave_health failed with attacker_secret',
+      'phase1.native-scenarios.launch.unknown',
+    ],
+    ['private protected-run failure', 'phase1.native-scenarios.launch.unknown'],
+  ])('classifies launch failure without exposing detail', async (message, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const diagnose = producer.schemaV2NativeFailureDiagnostic;
+    expect(diagnose).toBeTypeOf('function');
+    if (typeof diagnose !== 'function') {
+      return;
+    }
+
+    const diagnostic = diagnose('launch', new Error(message));
+
+    expect(diagnostic).toBe(expected);
+    expect(diagnostic).not.toContain('private');
+  });
+
+  test.each([
+    'not-installed',
+    'configuration-invalid',
+    'process',
+    'timeout',
+    'rpc-closed',
+    'initial-discovery',
+    'discovery-timeout',
+    'health',
+    'health-envelope',
+    'unknown',
+  ])('preserves the bounded launch.%s diagnostic through public extraction', (category) => {
+    const diagnostic = `phase1.native-scenarios.launch.${category}`;
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+  });
+
+  test.each([
+    [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_service_unavailable',
       'phase1.native-scenarios.cleanup-grant.service-unavailable',
     ],
@@ -4318,7 +4391,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const first = retain(undefined, 'launch', new Error('private launch failure')) as Error;
     const retained = retain(first, 'reads', new Error('private read failure')) as Error;
 
-    expect(first.message).toBe('phase1.native-scenarios.launch');
+    expect(first.message).toBe('phase1.native-scenarios.launch.unknown');
     expect(first.cause).toEqual(new Error('private launch failure'));
     expect(retained).toBe(first);
   });
