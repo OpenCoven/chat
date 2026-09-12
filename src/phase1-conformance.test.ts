@@ -5949,7 +5949,24 @@ describe('schema-v2 bounded Cave authority diagnostics', () => {
   });
 
   test.each([
-    ['', 'client-v1-conformance: Cave exited before readiness. private path', 'startup'],
+    ['', 'client-v1-conformance: Cave readiness timed out after 120 seconds.', 'startup.timeout'],
+    ['', 'client-v1-conformance: Cave exited before readiness. private path', 'startup.exit'],
+    ['', 'client-v1-conformance: Cave health is not ready.', 'startup.health'],
+    [
+      '',
+      'client-v1-conformance: Client v1 discovery record is not published.',
+      'startup.discovery.missing',
+    ],
+    [
+      '',
+      'client-v1-conformance: Client v1 discovery endpoint does not match the listening Cave.',
+      'startup.discovery.endpoint',
+    ],
+    [
+      '',
+      'client-v1-conformance: Client v1 discovery pid does not match the launched Cave.',
+      'startup.discovery.pid',
+    ],
     ['', 'client-v1-conformance: pairing creation answered 500: unlink private path', 'pairing'],
     ['', 'client-v1-conformance: private path contains rmdir and ECONNRESET', 'phase.setup'],
     ['', 'client-v1-conformance: connect ECONNREFUSED 127.0.0.1:1', 'request'],
