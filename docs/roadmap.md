@@ -1,6 +1,6 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 04:05 UTC
+## Consolidation checkpoint, 2026-09-12 04:28 UTC
 
 Chat [#230](https://github.com/OpenCoven/chat/pull/230) merged as
 `09410982d3a85cbfbcdf2d2d193c3a96e8e80f74`; exact-head CI run
@@ -16,12 +16,18 @@ operation=directory-enumeration-depth-3-plus`; validation, attestation and
 aggregation were skipped. This proves the intermittent quota failure can mask
 the Cave startup classifier and narrows it to a deep bootstrap subtree.
 
-The active diagnostic adds only fixed bootstrap scope and same-token repeat
+The active diagnostic adds fixed bootstrap scope and same-token repeat
 labels. The initial failure remains terminal; no ACL, quota, identity,
-traversal bound, cleanup or acceptance rule changes. The pending SDK #230
-binding is intentionally held until this additional Chat diagnostic freezes,
-so one validator rotation can cover both bounded signals. Chat #219, Coven
-#984, SDK #38 and final protected acceptance remain open.
+traversal bound, cleanup or acceptance rule changes. SDK #213 has landed as
+`5e76d40a4056dae128c711c875ad8f9a5edbfe20`, binding Chat #230. Both validator
+scopes read back that revision, and protected run
+[34672157833](https://github.com/OpenCoven/chat/actions/runs/34672157833) was
+approved after its supervisor build passed. Linux independently passed archive
+integrity, scans, exact identities, Cave timing and all 197 ordered assertions;
+Darwin and Windows remain pending as of 04:28 UTC. The additional diagnostic
+in #231 requires its own verified landing and subsequent SDK binding. Chat
+#219, Coven #984, SDK #38 and final protected acceptance remain open. Chat and
+active worktrees are preserved.
 
 ## Historical consolidation checkpoint, 2026-09-12 03:27 UTC
 

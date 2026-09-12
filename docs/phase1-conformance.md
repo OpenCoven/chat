@@ -1741,9 +1741,12 @@ attributes, enumeration, entry attributes and file-length failures for the
 current bounded traversal node.
 
 After an initial metadata failure, the same validated isolated-user token
-performs one immediate bounded repeat solely to classify the condition as
-`transient` or `persistent`; the original failure still terminates production
-in either case. Synthetic or unattributed failures use `none`. The repeat never
+performs one immediate bounded repeat. `transient` means that repeat returned
+or the target disappeared; `persistent` means it threw again. Enumeration
+creates a fresh enumerator. Entry-attribute and file-length delegates reuse
+`FileSystemInfo` metadata, which may cache an error, so their repeat label does
+not establish that a filesystem denial persisted. The original failure still
+terminates production in either case. Synthetic or unattributed failures use `none`. The repeat never
 uses the supervisor identity, changes an ACL, accepts a partial measurement, or
 retries production. Existing quotas, traversal bounds, reparse handling,
 first-failure state, cleanup and acceptance remain unchanged. Native regression
