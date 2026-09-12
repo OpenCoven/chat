@@ -5233,6 +5233,49 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         if ($validNative.ExitCode -ne 0 -or $validNative.Stdout -ne '' -or $validNative.Stderr -ne '') {
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
+
+        $nativeDiscoveryNonce = '33333333333333333333333333333333'
+        $nativeDiscoveryJobName =
+          "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
+        $nativeDiscoveryEnvironment = $childEnvironment.Clone()
+        $nativeDiscoveryEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeDiscoveryNonce
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeDiscoveryJobName
+        $nativeDiscoveryJob = [OpenCoven.WindowsJobSupervisor]::Create(
+          $nativeDiscoveryJobName,
+          $isolatedUser
+        )
+        try {
+          $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
+            '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
+              "`n"
+          )
+          $nativeDiscovery = $nativeDiscoveryJob.RunAsUserWithStandardInput(
+            $isolatedUser,
+            $nativeRpc,
+            '',
+            $root,
+            $nativeDiscoveryEnvironment,
+            [TimeSpan]::FromSeconds(30),
+            1MB,
+            1MB,
+            $nativeDiscoveryRequest
+          )
+          if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
+            throw 'Native discovery profile-root regression probe failed.'
+          }
+          $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
+          if (
+            $nativeDiscoveryResponse.id -cne 'discovery' -or
+            $nativeDiscoveryResponse.ok -ne $false -or
+            $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
+          ) {
+            throw 'Native discovery rejected the isolated Windows profile root.'
+          }
+        } finally {
+          $nativeDiscoveryJob.Dispose()
+        }
       } finally {
         $jobB.Dispose()
         $jobA.Dispose()
