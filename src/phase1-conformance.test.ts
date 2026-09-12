@@ -5950,6 +5950,9 @@ describe('schema-v2 bounded Cave authority diagnostics', () => {
 
   test.each([
     ['', 'client-v1-conformance: Cave exited before readiness. private path', 'startup'],
+    ['', 'client-v1-conformance: pairing creation answered 500: unlink private path', 'pairing'],
+    ['', 'client-v1-conformance: private path contains rmdir and ECONNRESET', 'phase.setup'],
+    ['', 'client-v1-conformance: connect ECONNREFUSED 127.0.0.1:1', 'request'],
     [
       'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
       "client-v1-conformance: EPERM: operation not permitted, rmdir 'private path'",

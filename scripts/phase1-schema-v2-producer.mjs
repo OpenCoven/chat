@@ -1255,9 +1255,6 @@ export function classifyCavePreAssertionFailure(output) {
     .split(/\r?\n/u)
     .filter((line) => line.startsWith('client-v1-conformance: '))
     .map((line) => line.slice('client-v1-conformance: '.length));
-  if (messages.some((message) => /\b(?:rmdir|unlink)\b/iu.test(message))) {
-    return 'phase1.cave-authority.cleanup';
-  }
   if (
     messages.some((message) =>
       [
@@ -1291,10 +1288,17 @@ export function classifyCavePreAssertionFailure(output) {
     messages.some(
       (message) =>
         message === 'request timed out' ||
-        /\b(?:ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT)\b/u.test(message),
+        /^(?:connect|read|write) (?:ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT)(?: |$)/u.test(message),
     )
   ) {
     return 'phase1.cave-authority.request';
+  }
+  if (
+    messages.some((message) =>
+      /^(?:EACCES|EBUSY|EPERM): [^,\r\n]+, (?:rmdir|unlink) /u.test(message),
+    )
+  ) {
+    return 'phase1.cave-authority.cleanup';
   }
   if (text.includes('client-v1-conformance: phase B (admin token configured) on ')) {
     return 'phase1.cave-authority.phase.configured';
