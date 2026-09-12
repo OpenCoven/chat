@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `e80906c5c9b8a39a40e8a219a9ec5d072eec90f5`,
-  tree `5dd31650ef4b1464a40fbcb90cc5c7766bb5d900`, retained in the
+- Chat conformance driver `b4544ae9590c8e7d4b02bb1bdd0b736fef77c5e7`,
+  tree `8192de30850754e3d7015eedd99bf708e26b94db`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,602 | `ffd399c67db2f63ff21ec4140129642baab636e4ddf1119f4a010a76396110d9` |
+| `.github/workflows/client-v1-conformance.yml` | 511,602 | `77ae6b590076f5fa8d77f0b22b55c0d14a1eba52c14e1ae8e20d128d71744340` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1374,7 +1374,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 210,381 | `6b39b810eb6e3d0cbb0600ea63105875e6886c4e1739c9e139cd21a37a9fe85e` |
+| `scripts/phase1-schema-v2-producer.mjs` | 210,696 | `ce0ed96da55ac9f00e6e294f7f3ee25a4d17ea36e8576704b51e79c035cf1f3d` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1920,8 +1920,9 @@ profile from the process token, while the producer directed Cave to an
 artifact-local home. The protected producer now validates the supervisor's
 canonical `USERPROFILE`, passes it forward as a dedicated binding, and places
 only the Windows native fixture beneath that ephemeral profile's `.coven/cave`.
-The fixture is removed after the native RPC and its nested Cave Job close;
-supervisor-owned profile deletion remains the final cleanup boundary.
+The fixture is removed only after the native RPC and its nested Cave Job close.
+If graceful shutdown fails, deletion is deferred to the supervisor's existing
+process-termination and profile-deletion boundary.
 
 Cave's fail-closed Windows discovery publisher permits its PowerShell ownership
 and DACL probe to run for up to 60 seconds. Rust therefore uses a 75-second
