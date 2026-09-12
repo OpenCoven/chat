@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `a990cdc516f9d7798ed2a317eb026ff438745824`,
-  tree `82a18fca5c9c15f879fa9254c9d54793cde480a0`, retained in the
+- Chat conformance driver `97094a07bdeb79d23b73042e2cea0fa1d52156c4`,
+  tree `bc4eba66294c0e793f3dd369d63c29e33c02a7b7`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,996 | `e0d3a41052fddd22fc6fb5e113dbfc25bc7a9be227d682c615e175c6098f8634` |
+| `.github/workflows/client-v1-conformance.yml` | 511,980 | `ebd1583aaf0ea22dfffd9add8265cce50027935e78be69d4cc2bdb4b0c7f3f39` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1374,7 +1374,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 201,595 | `10a66fac1cc2a1f084b680e8a740024310ec4af47506d6b39fea21083e4721cb` |
+| `scripts/phase1-schema-v2-producer.mjs` | 203,569 | `6b00277ae63cd3b6f8ee51c75cb74d1a5946e81b7412aa9a05f45420ec252bb7` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1726,6 +1726,17 @@ restricted Cave checkout instead of the injected dedicated temp root. Cave
 OS-temp fixture helper. The proof, cleanup behavior, general workspace ACLs and
 quota policy remain unchanged. Validation, attestation and aggregation were
 skipped; a newly bound SDK validator and fresh protected matrix are required.
+
+Protected run `34691885853` used Chat #235 (`6e9af83`) and SDK #217
+(`9921f89`). Linux and macOS passed. Windows passed the frozen supervisor build
+and the repaired Cave authority proof, then failed later at the coarse
+`phase1.native-scenarios.launch` boundary. Validation, attestation and
+aggregation were skipped. The launch classifier now maps only fixed, public
+RPC outcomes into bounded not-installed, configuration, process, timeout,
+closed-RPC, initial-discovery, discovery-timeout, health, health-envelope and
+unknown categories. It never publishes the underlying response, path, process
+identifier, private error or child output. A newly bound SDK validator and
+fresh protected matrix are required before choosing a behavioral repair.
 
 These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and
