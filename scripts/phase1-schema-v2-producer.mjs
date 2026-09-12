@@ -79,7 +79,9 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
-const caveLaunchRpcTimeoutMs = 35_000;
+// Native launch owns a 30-second readiness deadline (connection.rs). Allow the
+// existing RPC transport budget after it so a native result can reach the caller.
+const caveLaunchRpcTimeoutMs = 30_000 + rpcTimeoutMs;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
@@ -1692,10 +1694,7 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         }[launchFailure[1]]
       }`;
     }
-    if (
-      message === 'native RPC timed out for cave_launch' ||
-      message === 'native RPC cave_launch failed with service_unavailable'
-    ) {
+    if (message === 'native RPC timed out for cave_launch') {
       return 'phase1.native-scenarios.launch.timeout';
     }
     if (message === 'native RPC closed before responding') {

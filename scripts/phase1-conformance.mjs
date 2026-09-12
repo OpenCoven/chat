@@ -84,6 +84,9 @@ export const cargoBuildTimeoutMs = 45 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
 const rpcTimeoutMs = 10_000;
+// Native launch owns a 30-second readiness deadline (connection.rs). Allow the
+// existing RPC transport budget after it so a native result can reach the caller.
+const caveLaunchRpcTimeoutMs = 30_000 + rpcTimeoutMs;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedCommandFailureReasons = new Set([
   'spawn',
@@ -2906,9 +2909,19 @@ async function assertSuccessfulChildExit(child, code, signal, supervised = false
 }
 
 export class NativeRpcClient {
-  constructor(child, { shutdownTimeoutMs = rpcTimeoutMs, supervised = false } = {}) {
+  constructor(
+    child,
+    {
+      shutdownTimeoutMs = rpcTimeoutMs,
+      requestTimeoutMs = rpcTimeoutMs,
+      caveLaunchTimeoutMs = caveLaunchRpcTimeoutMs,
+      supervised = false,
+    } = {},
+  ) {
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
     this.supervised = supervised;
     this.pending = new Map();
     this.sequence = 0;
@@ -2967,11 +2980,12 @@ export class NativeRpcClient {
     this.sequence += 1;
     const id = `request-${this.sequence}`;
     const request = { id, command, ...(args === undefined ? {} : { args }) };
+    const timeoutMs = command === 'cave_launch' ? this.caveLaunchTimeoutMs : this.requestTimeoutMs;
     return new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         rejectRequest(new Error(`native RPC timed out for ${command}`));
-      }, rpcTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
       const failWrite = () => {
         const pending = this.pending.get(id);
