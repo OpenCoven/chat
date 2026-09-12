@@ -1,4 +1,5 @@
 export const cargoBuildTimeoutMs: number;
+export function caveLaunchRpcTimeoutForPlatform(platform?: NodeJS.Platform): number;
 export function windowsJobBindingEnvironment(
   environment?: NodeJS.ProcessEnv,
   platform?: NodeJS.Platform,

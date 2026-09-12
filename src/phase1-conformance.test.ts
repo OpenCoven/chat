@@ -967,6 +967,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const workspace = `${bootstrapRoot}\\workspace`;
     const caveConformanceTemp = `${bootstrapRoot}\\cave-conformance-temp`;
     const artifactDirectory = `${workspace}\\.artifacts`;
+    const profileRoot = 'C:\\Users\\opencoven-conformance';
     const binding = {
       OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
       OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
@@ -987,6 +988,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       TMP: `${bootstrapRoot}\\temp`,
       PATH: 'C:\\trusted\\node;C:\\trusted\\cargo',
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      USERPROFILE: profileRoot,
       LIB: [
         'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
@@ -998,7 +1000,10 @@ describe('Phase 1 real-authority conformance harness', () => {
       ].join(';'),
     };
 
-    expect(windowsJobBindingEnvironment(binding, 'win32')).toEqual(binding);
+    expect(windowsJobBindingEnvironment(binding, 'win32')).toEqual({
+      ...binding,
+      OPENCOVEN_WINDOWS_PROFILE_ROOT: profileRoot,
+    });
     expect(windowsJobBindingEnvironment(binding, 'linux')).toEqual({});
     for (const supervisorSid of [
       undefined,
@@ -1120,6 +1125,41 @@ describe('Phase 1 real-authority conformance harness', () => {
         'win32',
       ),
     ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          USERPROFILE: 'relative-profile',
+        },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-profile');
+  });
+
+  test('routes Windows native fixtures through the validated token profile', () => {
+    expect(schemaV2Producer.nativeScenarioHomes).toBeTypeOf('function');
+    expect(
+      schemaV2Producer.nativeScenarioHomes(
+        'C:\\OpenCoven\\bootstrap\\workspace\\.artifacts\\run',
+        { OPENCOVEN_WINDOWS_PROFILE_ROOT: 'C:\\Users\\opencoven-conformance' },
+        'win32',
+      ),
+    ).toEqual({
+      isolatedHome: 'C:\\OpenCoven\\bootstrap\\workspace\\.artifacts\\run\\native-authority-home',
+      covenHome: 'C:\\Users\\opencoven-conformance\\.coven',
+      caveHome: 'C:\\Users\\opencoven-conformance\\.coven\\cave',
+      removeCovenHome: true,
+    });
+    expect(schemaV2Producer.nativeScenarioHomes('/artifacts/run', {}, 'linux')).toEqual({
+      isolatedHome: '/artifacts/run/native-authority-home',
+      covenHome: '/artifacts/run/native-authority-home/coven',
+      caveHome: '/artifacts/run/native-authority-home/coven/cave',
+      removeCovenHome: false,
+    });
+    expect(() => schemaV2Producer.nativeScenarioHomes('C:\\artifacts\\run', {}, 'win32')).toThrow(
+      'phase1.native-scenarios.profile-home',
+    );
   });
 
   test('routes only Windows Cave authority fixtures through the ACL-repairable temp root', () => {
@@ -1429,6 +1469,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       TEMP: `${bootstrapRoot}\\temp`,
       TMP: `${bootstrapRoot}\\temp`,
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      USERPROFILE: 'C:\\Users\\opencoven-conformance',
       LIB: [
         'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
@@ -1486,6 +1527,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
+      OPENCOVEN_WINDOWS_PROFILE_ROOT: 'C:\\Users\\opencoven-conformance',
+      USERPROFILE: 'C:\\Users\\opencoven-conformance',
       SYSTEMROOT: 'C:\\Windows',
       WINDIR: 'C:\\Windows',
       COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
@@ -2059,7 +2102,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       8,
     );
     expect(nativeScenarios.match(/cleanupFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
-      4,
+      5,
     );
     expect(nativeScenarios).not.toContain('cause.message');
   });
@@ -4021,12 +4064,17 @@ describe('Phase 1 real-authority conformance harness', () => {
       // @ts-expect-error The executable script intentionally has no declaration file.
       const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
       const Client = kind === 'producer' ? producer.NativeRpcClient : NativeRpcClient;
-      const nativeSource = readFileSync(join(projectRoot, 'src-tauri/src/connection.rs'), 'utf8');
-      const deadline = /LAUNCH_READINESS_DEADLINE: Duration = Duration::from_secs\((\d+)\)/u.exec(
-        nativeSource,
-      );
-      expect(deadline).not.toBeNull();
-      const deadlineMs = Number(deadline?.[1]) * 1_000;
+      const module =
+        kind === 'producer'
+          ? producer
+          : ((await import('../scripts/phase1-conformance.mjs')) as Record<string, unknown>);
+      expect(module.caveLaunchRpcTimeoutForPlatform).toBeTypeOf('function');
+      const timeoutForPlatform = module.caveLaunchRpcTimeoutForPlatform as (
+        platform: NodeJS.Platform,
+      ) => number;
+      expect(timeoutForPlatform('win32')).toBe(85_000);
+      expect(timeoutForPlatform('linux')).toBe(40_000);
+      const timeoutMs = timeoutForPlatform(process.platform);
       vi.useFakeTimers();
       try {
         const child = new DelayedResponseChild();
@@ -4036,7 +4084,7 @@ describe('Phase 1 real-authority conformance harness', () => {
           settled = true;
         });
         const failure = expect(response).rejects.toThrow('native RPC timed out for cave_launch');
-        await vi.advanceTimersByTimeAsync(deadlineMs + 10_000 - 1);
+        await vi.advanceTimersByTimeAsync(timeoutMs - 1);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
         await failure;

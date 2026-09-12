@@ -79,9 +79,11 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
-// Native launch owns a 30-second readiness deadline (connection.rs). Allow the
-// existing RPC transport budget after it so a native result can reach the caller.
-const caveLaunchRpcTimeoutMs = 30_000 + rpcTimeoutMs;
+export function caveLaunchRpcTimeoutForPlatform(platform = process.platform) {
+  const nativeReadinessTimeoutMs = platform === 'win32' ? 75_000 : 30_000;
+  return nativeReadinessTimeoutMs + rpcTimeoutMs;
+}
+const caveLaunchRpcTimeoutMs = caveLaunchRpcTimeoutForPlatform();
 const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
@@ -606,6 +608,7 @@ export function windowsJobBindingEnvironment(
   const commandProcessor = environment.COMSPEC;
   const temporaryDirectory = environment.TEMP;
   const secondaryTemporaryDirectory = environment.TMP;
+  const profileRoot = environment.USERPROFILE;
   const executablePath = environment.PATH;
   const pathExtensions = environment.PATHEXT;
   const compilerLibraryPath = environment.LIB;
@@ -686,6 +689,12 @@ export function windowsJobBindingEnvironment(
   const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
     secondaryTemporaryDirectory,
   );
+  let canonicalProfileRoot;
+  try {
+    canonicalProfileRoot = requireCanonicalWindowsPath(profileRoot);
+  } catch {
+    throw new Error('phase1.stage.invocation.windows-profile');
+  }
   requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
   requireDescendant(canonicalBootstrapRoot, canonicalCaveConformanceTemp);
   requireDescendant(canonicalBootstrapRoot, canonicalStatusStagingDirectory);
@@ -748,6 +757,8 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
     OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
     OPENCOVEN_WINDOWS_PNPM_CLI: canonicalPnpmCli,
+    OPENCOVEN_WINDOWS_PROFILE_ROOT: canonicalProfileRoot,
+    USERPROFILE: canonicalProfileRoot,
     SYSTEMROOT: systemRoot,
     WINDIR: windowsDirectory,
     COMSPEC: commandProcessor,
@@ -2177,6 +2188,37 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     }
   }
   return environment;
+}
+
+export function nativeScenarioHomes(artifactRootPath, environment, platform = process.platform) {
+  const pathApi = platform === 'win32' ? windowsPath : { resolve };
+  const isolatedHome = pathApi.resolve(artifactRootPath, 'native-authority-home');
+  if (platform !== 'win32') {
+    const covenHome = pathApi.resolve(isolatedHome, 'coven');
+    return {
+      isolatedHome,
+      covenHome,
+      caveHome: pathApi.resolve(covenHome, 'cave'),
+      removeCovenHome: false,
+    };
+  }
+  const profileRoot = environment.OPENCOVEN_WINDOWS_PROFILE_ROOT;
+  if (
+    typeof profileRoot !== 'string' ||
+    profileRoot.length === 0 ||
+    profileRoot.includes('\0') ||
+    !windowsPath.isAbsolute(profileRoot) ||
+    windowsPath.normalize(profileRoot) !== profileRoot
+  ) {
+    throw new Error('phase1.native-scenarios.profile-home');
+  }
+  const covenHome = windowsPath.join(profileRoot, '.coven');
+  return {
+    isolatedHome,
+    covenHome,
+    caveHome: windowsPath.join(covenHome, 'cave'),
+    removeCovenHome: true,
+  };
 }
 
 function runCommand(
@@ -4273,9 +4315,10 @@ async function runNativeScenarios({
   platform,
   compatibilityPassed,
 }) {
-  const isolatedHome = resolve(artifactRoot.rootPath, 'native-authority-home');
-  const covenHome = resolve(isolatedHome, 'coven');
-  const caveHome = resolve(covenHome, 'cave');
+  const { isolatedHome, covenHome, caveHome, removeCovenHome } = nativeScenarioHomes(
+    artifactRoot.rootPath,
+    environment,
+  );
   let activeNativeStage = 'fixture-daemon';
   let fixtureDaemon;
   try {
@@ -4913,6 +4956,14 @@ async function runNativeScenarios({
     try {
       activeNativeStage = 'cleanup-rpc';
       await rpc.close();
+    } catch (error) {
+      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+    }
+  }
+  if (removeCovenHome) {
+    try {
+      activeNativeStage = 'cleanup';
+      rmSync(covenHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     } catch (error) {
       cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
     }
