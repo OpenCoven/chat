@@ -1539,6 +1539,10 @@ describe('Phase 1 SDK source contract authority', () => {
 
     const historicalPhase1Lock = {
       ...phase1Lock,
+      cave: {
+        repository: 'OpenCoven/coven-cave',
+        revision: 'd20d83c46ba0c32433ce8dc6a358fb14b6bd0e45',
+      },
       coven: {
         repository: 'OpenCoven/coven',
         revision: 'c0c979cdee96327bf24218bc7c7ecb90d719cb27',
@@ -1561,7 +1565,7 @@ describe('Phase 1 SDK source contract authority', () => {
     expect(frozenLock.sources).toMatchObject({
       cave: {
         repository: 'OpenCoven/coven-cave',
-        commit: phase1Lock.cave.revision,
+        commit: historicalPhase1Lock.cave.revision,
       },
       coven: {
         repository: 'OpenCoven/coven',
