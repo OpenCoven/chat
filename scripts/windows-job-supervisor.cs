@@ -7615,7 +7615,8 @@ namespace OpenCoven
         {
             switch (repeat)
             {
-                case "transient":
+                case "readable":
+                case "missing":
                 case "persistent":
                     return repeat;
                 default: return "none";
@@ -7627,15 +7628,15 @@ namespace OpenCoven
             try
             {
                 retry();
-                return "transient";
+                return "readable";
             }
             catch (FileNotFoundException)
             {
-                return "transient";
+                return "missing";
             }
             catch (DirectoryNotFoundException)
             {
-                return "transient";
+                return "missing";
             }
             catch
             {

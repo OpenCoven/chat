@@ -1388,7 +1388,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 329,642 | `e9aadf9ed090fea972229580f2fdc1b15431f20ff5a3a6425d65fdce62d69e98` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1785,8 +1785,10 @@ attributes, enumeration, entry attributes and file-length failures for the
 current bounded traversal node.
 
 After an initial metadata failure, the same validated isolated-user token
-performs one immediate bounded repeat. `transient` means that repeat returned
-or the target disappeared; `persistent` means it threw again. Enumeration
+performs one immediate bounded repeat. `readable` means the callback returned;
+`missing` means it reported a missing file or directory; `persistent` means
+it threw another exception, which need not match the first error. Older bound
+producers reported both readable and missing outcomes as `transient`. Enumeration
 creates a fresh enumerator, entry attributes use a fresh static metadata read,
 and file length uses a fresh metadata object, so each repeat reaches the
 filesystem again. The original failure still terminates production in either
