@@ -5233,6 +5233,40 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         if ($validNative.ExitCode -ne 0 -or $validNative.Stdout -ne '' -or $validNative.Stderr -ne '') {
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
+
+        $nativeDiscoveryScript = Join-Path $root 'native-discovery.ps1'
+        [IO.File]::WriteAllText(
+          $nativeDiscoveryScript,
+          @"
+`$request = '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}'
+`$request | & '$($nativeRpc.Replace("'", "''"))'
+if (`$LASTEXITCODE -ne 0) {
+  exit `$LASTEXITCODE
+}
+"@,
+          [Text.UTF8Encoding]::new($false)
+        )
+        $nativeDiscovery = $jobA.RunAsUser(
+          $isolatedUser,
+          $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$nativeDiscoveryScript`"",
+          $root,
+          $validNativeEnvironment,
+          [TimeSpan]::FromSeconds(30),
+          1MB,
+          1MB
+        )
+        if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
+          throw 'Native discovery profile-root regression probe failed.'
+        }
+        $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
+        if (
+          $nativeDiscoveryResponse.id -cne 'discovery' -or
+          $nativeDiscoveryResponse.ok -ne $false -or
+          $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
+        ) {
+          throw 'Native discovery rejected the isolated Windows profile root.'
+        }
       } finally {
         $jobB.Dispose()
         $jobA.Dispose()

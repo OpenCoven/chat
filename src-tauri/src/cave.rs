@@ -294,6 +294,8 @@ struct WindowsFileMetadata {
     is_regular: bool,
     is_reparse_point: bool,
     owner_matches_current_user: bool,
+    owner_is_trusted: bool,
+    dacl_permits_only_trusted_writers: bool,
     len: u64,
     #[cfg_attr(not(windows), allow(dead_code))]
     links: u64,
@@ -541,6 +543,20 @@ fn validate_windows_directory(metadata: WindowsFileMetadata) -> NativeResult<()>
         || metadata.is_regular
         || metadata.is_reparse_point
         || !metadata.owner_matches_current_user
+        || !metadata.dacl_permits_only_trusted_writers
+    {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn validate_windows_profile_root(metadata: WindowsFileMetadata) -> NativeResult<()> {
+    if !metadata.is_directory
+        || metadata.is_regular
+        || metadata.is_reparse_point
+        || !metadata.owner_is_trusted
+        || !metadata.dacl_permits_only_trusted_writers
     {
         return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
     }
@@ -553,6 +569,7 @@ fn validate_windows_file(metadata: WindowsFileMetadata) -> NativeResult<()> {
         || metadata.is_directory
         || metadata.is_reparse_point
         || !metadata.owner_matches_current_user
+        || !metadata.dacl_permits_only_trusted_writers
         || metadata.file_index == 0
     {
         return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
@@ -570,7 +587,12 @@ fn read_windows_discovery_with(
     let root = backend.canonical_root().map_err(windows_discovery_error)?;
     let coven = root.join(".coven");
     let cave = coven.join("cave");
-    for directory in [&root, &coven, &cave] {
+    validate_windows_profile_root(
+        backend
+            .open_directory(&root)
+            .map_err(windows_discovery_error)?,
+    )?;
+    for directory in [&coven, &cave] {
         validate_windows_directory(
             backend
                 .open_directory(directory)
@@ -724,7 +746,8 @@ mod windows_discovery {
             if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {
                 return Err(WindowsDiscoveryIoError::Unavailable);
             }
-            let owner_matches_current_user = owner_matches(handle, &self.sid)?;
+            let (owner_matches_current_user, owner_is_trusted, dacl_permits_only_trusted_writers) =
+                path_security(handle, &self.sid)?;
             let attributes = information.dwFileAttributes;
             let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
             Ok(WindowsFileMetadata {
@@ -732,6 +755,8 @@ mod windows_discovery {
                 is_regular: !is_directory && unsafe { GetFileType(handle) } == FILE_TYPE_DISK,
                 is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
                 owner_matches_current_user,
+                owner_is_trusted,
+                dacl_permits_only_trusted_writers,
                 len: ((information.nFileSizeHigh as u64) << 32) | information.nFileSizeLow as u64,
                 links: information.nNumberOfLinks as u64,
                 volume_serial: information.dwVolumeSerialNumber as u64,
@@ -958,10 +983,10 @@ mod windows_discovery {
         Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
     }
 
-    fn owner_matches(
+    fn path_security(
         handle: HANDLE,
         current_user_sid: &[u8],
-    ) -> Result<bool, WindowsDiscoveryIoError> {
+    ) -> Result<(bool, bool, bool), WindowsDiscoveryIoError> {
         let mut owner = ptr::null_mut();
         let mut dacl = ptr::null_mut();
         let mut descriptor = ptr::null_mut();
@@ -982,11 +1007,12 @@ mod windows_discovery {
         }
         let owner_matches = !owner.is_null()
             && unsafe { EqualSid(owner, current_user_sid.as_ptr().cast_mut().cast()) } != 0;
+        let owner_is_trusted = !owner.is_null() && trusted_writer(owner, current_user_sid);
         let dacl_is_safe = dacl_permits_only_trusted_writers(dacl, current_user_sid);
         unsafe {
             LocalFree(descriptor.cast());
         }
-        Ok(owner_matches && dacl_is_safe?)
+        Ok((owner_matches, owner_is_trusted, dacl_is_safe?))
     }
 
     fn dacl_permits_only_trusted_writers(
@@ -1420,9 +1446,9 @@ mod tests {
     #[cfg(not(windows))]
     use super::{
         parse_windows_discovery_liveness_metadata, read_windows_discovery_with,
-        windows_record_process_is_alive, NativeDiagnostic, NativeResult, WindowsDiscoveryBackend,
-        WindowsDiscoveryIoError, WindowsFileMetadata, WindowsOpenedDiscovery,
-        WindowsProcessInspector, WindowsProcessState,
+        validate_windows_directory, validate_windows_profile_root, windows_record_process_is_alive,
+        NativeDiagnostic, NativeResult, WindowsDiscoveryBackend, WindowsDiscoveryIoError,
+        WindowsFileMetadata, WindowsOpenedDiscovery, WindowsProcessInspector, WindowsProcessState,
     };
 
     #[cfg(unix)]
@@ -1747,6 +1773,8 @@ mod tests {
             is_regular: true,
             is_reparse_point: false,
             owner_matches_current_user: true,
+            owner_is_trusted: true,
+            dacl_permits_only_trusted_writers: true,
             len: 42,
             links: 1,
             volume_serial,
@@ -1760,6 +1788,45 @@ mod tests {
             Err(error) => error.code,
             Ok(_) => panic!("expected Windows discovery to fail"),
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_profile_root_accepts_only_trusted_owners_and_writers() {
+        let system_owned_profile = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            owner_matches_current_user: false,
+            owner_is_trusted: true,
+            dacl_permits_only_trusted_writers: true,
+            ..safe_windows_metadata(1, 2)
+        };
+
+        assert!(validate_windows_profile_root(system_owned_profile).is_ok());
+        assert_eq!(
+            validate_windows_directory(system_owned_profile)
+                .unwrap_err()
+                .code,
+            "unsafe_discovery_record"
+        );
+        assert_eq!(
+            validate_windows_profile_root(WindowsFileMetadata {
+                owner_is_trusted: false,
+                ..system_owned_profile
+            })
+            .unwrap_err()
+            .code,
+            "unsafe_discovery_record"
+        );
+        assert_eq!(
+            validate_windows_profile_root(WindowsFileMetadata {
+                dacl_permits_only_trusted_writers: false,
+                ..system_owned_profile
+            })
+            .unwrap_err()
+            .code,
+            "unsafe_discovery_record"
+        );
     }
 
     #[cfg(not(windows))]
