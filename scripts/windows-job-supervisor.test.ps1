@@ -1684,10 +1684,36 @@ foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   `$statusStaging,
   `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
 )
+`$caveRootAclDenied = `$false
+try {
+  `$rootAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
+  `$rootAcl.AddAccessRule(
+    [Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.WindowsIdentity]::GetCurrent().User,
+      [Security.AccessControl.FileSystemRights]::FullControl,
+      [Security.AccessControl.AccessControlType]::Allow
+    )
+  )
+  [IO.FileSystemAclExtensions]::SetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    `$rootAcl
+  )
+} catch [UnauthorizedAccessException] {
+  `$caveRootAclDenied = `$true
+}
+if (-not `$caveRootAclDenied) {
+  throw 'Cave conformance root DACL rewrite was authorized.'
+}
 `$caveAclProbe = Join-Path `$caveConformanceTemp "acl-repair-$([Guid]::NewGuid().ToString('N'))"
 [IO.Directory]::CreateDirectory(`$caveAclProbe) | Out-Null
 try {
-  `$caveAcl = [IO.DirectoryInfo]::new(`$caveAclProbe).GetAccessControl('Access')
+  `$caveAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveAclProbe),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
   `$caveAcl.SetAccessRuleProtection(`$true, `$false)
   foreach (`$sid in @(
     [Security.Principal.WindowsIdentity]::GetCurrent().User,

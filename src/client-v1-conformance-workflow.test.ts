@@ -1445,6 +1445,24 @@ ${source.slice(start, end)}
     expect(unixPinComplete).toBeLessThan(unixRunBody.indexOf('\n          EOF'));
   });
 
+  test('keeps Cave temp root protected while allowing directory fixture ACL repair', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'), 'utf8');
+    const caveHelper = source.slice(
+      source.indexOf('public static void SecureCaveConformanceTempDirectory('),
+      source.indexOf('private static void SecureIsolatedDirectory('),
+    );
+    expect(caveHelper).toContain('FILE_MODIFY_ACCESS,');
+    expect(caveHelper).toContain('FILE_ALL_ACCESS,');
+    expect(caveHelper).toContain('true');
+    const nativeTest = readFileSync(
+      resolve(projectRoot, 'scripts/windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+    expect(nativeTest).toContain('Cave conformance root DACL rewrite was authorized.');
+    expect(nativeTest).toContain('Cave conformance child DACL repair failed.');
+    expect(source).toContain('"(A;OICIIO;0x"');
+  });
+
   test('provisions a bounded same-volume staging directory for Windows daemon status files', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const supervisor = embeddedWindowsSupervisorSource(workflow);

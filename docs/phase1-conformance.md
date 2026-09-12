@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `2456be72daa92e580fe16cde954fd6eace25a089`,
-  tree `66eb43874130c4a9572ad2e152903adee92b7de4`, retained in the
+- Chat conformance driver `a990cdc516f9d7798ed2a317eb026ff438745824`,
+  tree `82a18fca5c9c15f879fa9254c9d54793cde480a0`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -875,9 +875,10 @@ proves terminal cleanup still removes the complete bootstrap root.
 The protected Windows bootstrap also provisions a dedicated 64 MiB Cave
 conformance temp root. The general temp and workspace roots retain their
 `OWNER RIGHTS` read-only ACE, which prevents the isolated producer from
-rewriting their DACLs. The dedicated root instead grants the isolated identity
-explicit full control while retaining the same protected owner, SYSTEM,
-Administrators, and supervisor ACL shape. Only the Cave real-authority child
+rewriting their DACLs. The dedicated root keeps the isolated identity at modify-only access and
+grants full control only to descendant files and directories through an
+inherit-only ACE. It retains the same protected owner, SYSTEM, Administrators,
+and supervisor ACL shape. Only the Cave real-authority child
 receives that root as `TEMP`/`TMP`/`TMPDIR`; its newly created fixture
 descendants can therefore remove inherited supervisor access and enforce
 Cave's stricter discovery-directory ACL without weakening the rest of the
@@ -1360,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,743 | `c9b7e7bf3e6b484925b34949835dbe215d2debd846ac1148e57399383d572784` |
+| `.github/workflows/client-v1-conformance.yml` | 511,996 | `e0d3a41052fddd22fc6fb5e113dbfc25bc7a9be227d682c615e175c6098f8634` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1385,8 +1386,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,795 | `e790a12671f7a3fce16ff488a72f6b8b4bc094d83073834cdc0e92fef1c10fab` |
-| `scripts/windows-job-supervisor.test.ps1` | 180,439 | `920e5cae9dbb650d627d053100ead7755b26058a46c645331177b6c5757930ea` |
+| `scripts/windows-job-supervisor.cs` | 330,018 | `14bd8f149dc29e66b37191fb47d3ea8d75ff4dee3e38d4e8163f2ced64278eb6` |
+| `scripts/windows-job-supervisor.test.ps1` | 181,303 | `6348c9d127a405bb93c008d28fe6bdf12879abd97a9242b7b95e9009430c0922` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 21,401 | `b98a2c18ecf3ca7ee749bfa278cb1132250c1db5fc7cc28920e3384a38066c9c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
