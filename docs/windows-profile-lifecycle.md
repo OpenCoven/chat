@@ -37,3 +37,10 @@ The corrected fixture uses a 260-character creation output buffer and explicit
 output marshalling, while retaining dynamic token-query buffer sizing. This is
 a bounded interop hypothesis requiring fresh native validation; the published
 CreateProfile contract does not state an internal RPC capacity range.
+
+The corrected creation call passed token agreement, child launch, duplicate
+rejection, and failure cleanup in [CI34719291294](https://github.com/OpenCoven/chat/actions/runs/34719291294).
+The subsequent parent ACL probe failed because each fresh account replaces the
+supervisor process ACL. The lifecycle fixture now runs after the parent suite
+and its cleanup, preserving the original account boundary for all parent probes.
+A fresh complete Windows suite must validate this ordering correction.
