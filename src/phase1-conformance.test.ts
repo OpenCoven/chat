@@ -21,7 +21,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { verifyFrozenPackedConsumer } from '../scripts/contract-canary.mjs';
 import {
@@ -2079,7 +2079,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
     [
       'native RPC cave_launch failed with service_unavailable',
-      'phase1.native-scenarios.launch.timeout',
+      'phase1.native-scenarios.launch.unknown',
     ],
     ['native RPC timed out for cave_launch', 'phase1.native-scenarios.launch.timeout'],
     ['native RPC closed before responding', 'phase1.native-scenarios.launch.rpc-closed'],
@@ -3949,19 +3949,104 @@ describe('Phase 1 real-authority conformance harness', () => {
     await expect(client.close()).rejects.toThrow(/shutdown timed out/);
   });
 
-  test('extends only the cave launch RPC response budget', async () => {
+  test.each(['packaged', 'producer'])(
+    'bounds %s launch RPC responses independently',
+    async (kind) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const Client = kind === 'producer' ? producer.NativeRpcClient : NativeRpcClient;
+      vi.useFakeTimers();
+      try {
+        const child = new DelayedResponseChild();
+        child.stdin.write = (line: string) => {
+          const request = JSON.parse(line) as { id: string; command: string };
+          if (request.command !== 'cave_launch') return true;
+          setTimeout(() => {
+            child.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result: {} })}\n`);
+          }, 20_000);
+          return true;
+        };
+        const client = new Client(child);
+        const normal = expect(client.request('app_installation_id')).rejects.toThrow(
+          'native RPC timed out for app_installation_id',
+        );
+        const launch = Promise.allSettled([client.request('cave_launch')]);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await normal;
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await launch).toMatchObject([{ status: 'fulfilled', value: { ok: true } }]);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test.each(['packaged', 'producer'])('preserves delayed %s native launch errors', async (kind) => {
     // @ts-expect-error The executable script intentionally has no declaration file.
     const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
-    const client = new producer.NativeRpcClient(new DelayedResponseChild(), {
-      requestTimeoutMs: 5,
-      caveLaunchTimeoutMs: 50,
-    });
-
-    await expect(client.request('app_installation_id')).rejects.toThrow(
-      'native RPC timed out for app_installation_id',
-    );
-    await expect(client.request('cave_launch')).resolves.toMatchObject({ ok: true });
+    const Client = kind === 'producer' ? producer.NativeRpcClient : NativeRpcClient;
+    vi.useFakeTimers();
+    try {
+      const child = new DelayedResponseChild();
+      child.stdin.write = (line: string) => {
+        const request = JSON.parse(line) as { id: string };
+        setTimeout(() => {
+          child.stdout.write(
+            `${JSON.stringify({ id: request.id, ok: false, error: { code: 'service_unavailable' } })}\n`,
+          );
+        }, 30_000);
+        return true;
+      };
+      const response = Promise.allSettled([new Client(child).request('cave_launch')]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await response).toMatchObject([
+        {
+          status: 'fulfilled',
+          value: {
+            ok: false,
+            error: { code: 'service_unavailable' },
+          },
+        },
+      ]);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
+
+  test.each(['packaged', 'producer'])(
+    'expires unanswered %s launch after native deadline plus transport allowance',
+    async (kind) => {
+      // @ts-expect-error The executable script intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const Client = kind === 'producer' ? producer.NativeRpcClient : NativeRpcClient;
+      const nativeSource = readFileSync(join(projectRoot, 'src-tauri/src/connection.rs'), 'utf8');
+      const deadline = /LAUNCH_READINESS_DEADLINE: Duration = Duration::from_secs\((\d+)\)/u.exec(
+        nativeSource,
+      );
+      expect(deadline).not.toBeNull();
+      const deadlineMs = Number(deadline?.[1]) * 1_000;
+      vi.useFakeTimers();
+      try {
+        const child = new DelayedResponseChild();
+        child.stdin.write = () => true;
+        let settled = false;
+        const response = new Client(child).request('cave_launch').finally(() => {
+          settled = true;
+        });
+        const failure = expect(response).rejects.toThrow('native RPC timed out for cave_launch');
+        await vi.advanceTimersByTimeAsync(deadlineMs + 10_000 - 1);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        await failure;
+        expect(settled).toBe(true);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   test('rejects pending RPC requests when child stdin closes without an unhandled stream error', async () => {
     const child = new EventEmitter() as EventEmitter & {

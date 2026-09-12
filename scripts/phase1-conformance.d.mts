@@ -292,7 +292,15 @@ export function diagnoseCovenLifecycleFailure(
   rerun: (testName: string) => Promise<unknown>,
 ): Promise<never>;
 export class NativeRpcClient {
-  constructor(child: unknown, options?: { shutdownTimeoutMs?: number; supervised?: boolean });
+  constructor(
+    child: unknown,
+    options?: {
+      shutdownTimeoutMs?: number;
+      requestTimeoutMs?: number;
+      caveLaunchTimeoutMs?: number;
+      supervised?: boolean;
+    },
+  );
   request(command: string, args?: unknown): Promise<unknown>;
   close(): Promise<void>;
 }
