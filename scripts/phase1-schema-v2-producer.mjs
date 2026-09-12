@@ -412,6 +412,12 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.exit-nonzero',
   'phase1.cave-authority.cleanup',
   'phase1.cave-authority.startup',
+  'phase1.cave-authority.startup.timeout',
+  'phase1.cave-authority.startup.exit',
+  'phase1.cave-authority.startup.health',
+  'phase1.cave-authority.startup.discovery.missing',
+  'phase1.cave-authority.startup.discovery.endpoint',
+  'phase1.cave-authority.startup.discovery.pid',
   'phase1.cave-authority.pairing',
   'phase1.cave-authority.reads',
   'phase1.cave-authority.request',
@@ -1255,19 +1261,22 @@ export function classifyCavePreAssertionFailure(output) {
     .split(/\r?\n/u)
     .filter((line) => line.startsWith('client-v1-conformance: '))
     .map((line) => line.slice('client-v1-conformance: '.length));
-  if (
-    messages.some((message) =>
-      [
-        'Cave readiness timed out after 120 seconds.',
-        'Cave exited before readiness.',
-        'Cave health is not ready.',
-        'Client v1 discovery record is not published.',
-        'Client v1 discovery endpoint does not match the listening Cave.',
-        'Client v1 discovery pid does not match the launched Cave.',
-      ].some((prefix) => message.startsWith(prefix)),
-    )
-  ) {
-    return 'phase1.cave-authority.startup';
+  const startupDiagnostics = [
+    ['Cave readiness timed out after 120 seconds.', 'startup.timeout'],
+    ['Cave exited before readiness.', 'startup.exit'],
+    ['Cave health is not ready.', 'startup.health'],
+    ['Client v1 discovery record is not published.', 'startup.discovery.missing'],
+    [
+      'Client v1 discovery endpoint does not match the listening Cave.',
+      'startup.discovery.endpoint',
+    ],
+    ['Client v1 discovery pid does not match the launched Cave.', 'startup.discovery.pid'],
+  ];
+  for (const message of messages) {
+    const startup = startupDiagnostics.find(([prefix]) => message.startsWith(prefix));
+    if (startup !== undefined) {
+      return `phase1.cave-authority.${startup[1]}`;
+    }
   }
   if (
     messages.some((message) =>

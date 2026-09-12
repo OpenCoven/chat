@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `2ab6bdeee06dde573ea432db3dcca8c158a3a576`,
-  tree `b2c9e9949c1cc4ad101fc03a94cfbcee5a572dd2`, retained in the
+- Chat conformance driver `a0e13a30213496bdec88c1a6b88f632212bac762`,
+  tree `1aa1d24ed6289667fec05037667c9480d5c16388`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1348,20 +1348,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 501,294 | `6086cf8e4bcdbe575b9b47b2b97f2ab67a806117338719f9e36b0594ad1ff207` |
+| `.github/workflows/client-v1-conformance.yml` | 501,294 | `23471463ae5a8f506c6aeb1595cbc5a5f5dbdc7229443321ad78557332e8dbaa` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
-| `scripts/phase1-conformance.mjs` | 209,059 | `86007dec030268762f96dc2cc9a740a80e1d949fdc7858277c3667cdf324622e` |
+| `scripts/phase1-conformance.mjs` | 209,340 | `e02a95e70cf343f66b8faf498856ea4927cdf7fa6d234a69bb234fe53a50201b` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 200,239 | `055da52a4d80ce85378c64072c058d3ac9dd390a47203ea4aa7afc01f203d702` |
+| `scripts/phase1-schema-v2-producer.mjs` | 200,758 | `3e98a7881d53703e38a043a1d28c4c2a06467adabb8c2fc7b5835431803c3d25` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1665,14 +1665,14 @@ production walker; a fresh SDK/protected binding remains required.
 
 ## Bounded schema-v2 Cave authority failures
 
-Protected run `34661318050` used Chat #227 producer `c680e0a` and SDK #209
-validator `cab8260`. Linux and macOS passed, with independently verified
+Protected retry `34667436672` used Chat #228 producer `f77b249` and SDK #211
+validator `5730979`. Linux and macOS passed, with independently verified
 identities, Cave timing and all 197 ordered assertions per platform. Windows
-completed all observation suites, including the repaired Coven status fixture,
-then reported `phase1.cave-authority.exit-nonzero`. This establishes a nonzero
-Cave authority exit without failed assertion markers; successful or skipped
-markers followed by a later failure remain possible. Validation, attestation
-and aggregation were skipped.
+completed the observation suites and reported `phase1.cave-authority.startup`.
+Validation, attestation and aggregation were skipped. The preceding exact-
+authority run `34666399779` encountered an isolated fail-closed Windows quota
+monitor read before the Cave harness; its retry did not reproduce that monitor
+failure.
 
 The schema-v2 diagnostic boundary now distinguishes command timeout, output
 limit, spawn/tracking, supervisor termination, signaled exit, and nonzero exit.
@@ -1689,10 +1689,15 @@ setup, bounded paging, request transport, or the last emitted phase marker
 (setup, unconfigured, or configured). The classifier never publishes the
 captured error message, endpoint, path, status body, token, or child output.
 
+The startup category is now split into fixed timeout, early-exit, health,
+missing-discovery, endpoint-mismatch and pid-mismatch identifiers. These values
+correspond only to already fixed Cave harness messages and reveal no endpoint,
+path, process identifier, response body or child output.
+
 These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and
-SDK binding followed by fresh protected execution before identifying the cause
-of the Windows failure.
+SDK binding followed by fresh protected execution before applying a behavioral
+Windows fix.
 
 ## Bounded Windows quota traversal depth
 
