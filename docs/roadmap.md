@@ -1,6 +1,38 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 03:27 UTC
+## Consolidation checkpoint, 2026-09-12 04:36 UTC
+
+Chat [#230](https://github.com/OpenCoven/chat/pull/230) merged as
+`09410982d3a85cbfbcdf2d2d193c3a96e8e80f74`; exact-head CI run
+`34670529730` passed. It preserves #229's quota-depth source and adds six fixed
+Cave startup subtypes without exposing child output, paths, endpoints, process
+identifiers or response bodies.
+
+The protected #229/#212 authority run
+[34670074847](https://github.com/OpenCoven/chat/actions/runs/34670074847)
+passed Linux and macOS. Windows failed closed at
+`access-denied; root=bootstrap-aggregate;
+operation=directory-enumeration-depth-3-plus`; validation, attestation and
+aggregation were skipped. This proves the intermittent quota failure can mask
+the Cave startup classifier and narrows it to a deep bootstrap subtree.
+
+The active diagnostic adds fixed bootstrap scope and same-token repeat
+labels. The initial failure remains terminal; no ACL, quota, identity,
+traversal bound, cleanup or acceptance rule changes. SDK #213 has landed as
+`5e76d40a4056dae128c711c875ad8f9a5edbfe20`, binding Chat #230. Both validator
+scopes read back that revision, and protected run
+[34672157833](https://github.com/OpenCoven/chat/actions/runs/34672157833) was
+approved after its supervisor build passed. Linux and Darwin independently
+passed archive integrity, scans, exact identities, Cave timing and all 197
+ordered assertions each. Windows failed closed at `harness-cargo-registry`,
+`directory-enumeration-depth-3-plus`, with `access-denied`. Validation, attestation
+and aggregation were skipped. This is distinct from the earlier bootstrap
+root observation and establishes no Cave record mismatch. The additional
+diagnostic in #231 requires its own verified landing and subsequent SDK binding. Chat
+#219, Coven #984, SDK #38 and final protected acceptance remain open. Chat and
+active worktrees are preserved.
+
+## Historical consolidation checkpoint, 2026-09-12 03:27 UTC
 
 Chat [#229](https://github.com/OpenCoven/chat/pull/229) landed as
 `5f4572c45e19bc17fa8963fb8147b47bc8d0c31c` after all ten CI jobs passed,
@@ -13,7 +45,7 @@ test and coverage suites each passed all 1,515 tests.
 Both validator scopes were read back at SDK `33240b9`. Fresh protected
 [run 34670074847](https://github.com/OpenCoven/chat/actions/runs/34670074847)
 uses Chat `5f4572c`; its supervisor build passed and protected environment
-approval is verified. Platform execution is still pending terminal evidence.
+approval was verified.
 The preceding completed run `34667436672` classified Windows startup/readiness
 failure; both Unix records independently passed identities, timing, scans and
 all 197 assertions. The separate quota denial in `34666399779` remains distinct.
@@ -726,3 +758,13 @@ they were not force-deleted to satisfy a branch-count target.
 Delivery remains incomplete: draft PR readiness, Teamwork mirror synchronization,
 a compatible Beads write path, protected release conformance, and the SDK release
 must still be resolved. Local cleanup is not proof of program completion.
+
+## Protected workflow file-size guard
+
+GitHub rejected the initial #231 workflow at 512,502 bytes because its limit is
+500 KiB (512,000 bytes). Serializing existing validation scripts as quoted YAML
+scalars keeps the workflow at 511,593 bytes. Their parsed commands are
+unchanged, while isolated quota repeats now issue fresh filesystem metadata
+reads without repeating supervisor-identity validation. A regression check
+enforces the GitHub limit; the final workflow size and hash are recorded in the
+conformance guide and must be used by the next SDK binding.

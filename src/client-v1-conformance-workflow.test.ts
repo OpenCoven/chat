@@ -133,12 +133,22 @@ function extractPowerShellFunction(source: string, name: string): string {
 }
 
 function workflowRunBody(step: string): string {
-  const marker = '        run: |\n';
-  const start = step.indexOf(marker);
-  if (start < 0) {
-    throw new Error('workflow step has no literal run body');
+  const literalMarker = '        run: |\n';
+  const literalStart = step.indexOf(literalMarker);
+  if (literalStart >= 0) {
+    return step.slice(literalStart + literalMarker.length);
   }
-  return step.slice(start + marker.length);
+  const quotedMarker = '        run: ';
+  const quotedStart = step.indexOf(quotedMarker);
+  if (quotedStart >= 0) {
+    const run: unknown = JSON.parse(step.slice(quotedStart + quotedMarker.length));
+    if (typeof run !== 'string') throw new Error('workflow run body is not a string');
+    return run
+      .split('\n')
+      .map((line) => (line ? `          ${line}` : line))
+      .join('\n');
+  }
+  throw new Error('workflow step has no supported run body');
 }
 
 function workflowStepEnvironment(step: string): string {
@@ -429,6 +439,10 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('fits the GitHub Actions 500 KiB workflow file limit', () => {
+    expect(readFileSync(workflowPath).byteLength).toBeLessThanOrEqual(500 * 1024);
+  });
+
   test('pins the exact checked-in Phase 1 harness bytes', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const harness = readFileSync(harnessPath);
@@ -2404,6 +2418,7 @@ ${source.slice(start, end)}
     const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
     const toolPathStep = workflowStep(workflow, 'Compute reviewed Unix tool path');
     const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const trustedSetupRunBody = workflowRunBody(trustedSetup);
     const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
     const supervisor = readFileSync(
       resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
@@ -2429,9 +2444,9 @@ ${source.slice(start, end)}
     expect(unixStep).toContain(
       '--handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff"',
     );
-    expect(trustedSetup).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(trustedSetupRunBody).toContain('broker_root="/tmp/opencoven-unix-broker"');
     expect(unixStep).toContain('broker_root="/tmp/opencoven-unix-broker"');
-    expect(trustedSetup).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
+    expect(trustedSetupRunBody).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(unixStep).not.toContain('--tool-path "$PATH"');
@@ -2463,9 +2478,9 @@ ${source.slice(start, end)}
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
     );
-    expect(trustedSetup).toContain('cc -std=c11');
-    expect(trustedSetup).toContain('unix-artifact-handoff.c');
-    expect(trustedSetup).toContain('createHash');
+    expect(trustedSetupRunBody).toContain('cc -std=c11');
+    expect(trustedSetupRunBody).toContain('unix-artifact-handoff.c');
+    expect(trustedSetupRunBody).toContain('createHash');
     for (const relativePath of [
       'scripts/phase1-conformance.mjs',
       'scripts/phase1-schema-v2-producer.mjs',
@@ -2475,7 +2490,7 @@ ${source.slice(start, end)}
       'scripts/unix-producer-supervisor.sh',
     ]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
-      expect(trustedSetup).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
+      expect(trustedSetupRunBody).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
     }
     expect(validation).toContain('phase1-artifact-secret-scan.mjs');
     expect(validation).toContain('scanPhase1ArtifactText');
@@ -3038,6 +3053,59 @@ ${pathAssignment}
     }
   });
 
+  test('bounds Windows quota scope and repeat diagnostics without changing fail-closed accounting', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+    for (const source of sources) {
+      for (const required of [
+        'ResourceQuotaMonitorScope',
+        'ResourceQuotaMonitorRepeat',
+        'ClassifyBootstrapQuotaScope',
+        'NormalizeQuotaScope',
+        'NormalizeQuotaRepeat',
+        'scope == null ? "none" : scope',
+        'repeat == null ? "none" : repeat',
+        'catch (QuotaMonitorContextException error)',
+      ]) {
+        expect(source).toContain(required);
+      }
+      for (const scope of [
+        'root',
+        'profile',
+        'temp',
+        'status-staging',
+        'workspace',
+        'downloads',
+        'tools-git',
+        'tools-node',
+        'tools-pnpm',
+        'tools-other',
+        'rustup',
+        'cargo-registry',
+        'cargo-git',
+        'cargo-other',
+        'pnpm-store',
+        'npm-cache',
+        'counterparts',
+        'other',
+      ]) {
+        expect(source).toContain(`"${scope}"`);
+      }
+      for (const repeat of ['none', 'transient', 'persistent']) {
+        expect(source).toContain(`"${repeat}"`);
+      }
+      expect(source).toContain(
+        '() => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName)',
+      );
+      expect(source).toContain(
+        '() => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length',
+      );
+    }
+  });
+
   test.each([
     {
       name: 'quota exceeded',
@@ -3051,10 +3119,12 @@ ${pathAssignment}
         ResourceQuotaMonitorError: true,
         ResourceQuotaMonitorCategory: 'access-denied',
         ResourceQuotaMonitorRoot: 'status-staging',
+        ResourceQuotaMonitorScope: 'workspace',
         ResourceQuotaMonitorOperation: 'directory-enumeration',
+        ResourceQuotaMonitorRepeat: 'persistent',
       },
       diagnostic:
-        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; operation=directory-enumeration.',
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; scope=workspace; operation=directory-enumeration; repeat=persistent.',
     },
     {
       name: 'unidentified quota',
@@ -3224,7 +3294,7 @@ ${quotaAssignment}
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain(
-      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); operation=$($result.ResourceQuotaMonitorOperation).',
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); scope=$($result.ResourceQuotaMonitorScope); operation=$($result.ResourceQuotaMonitorOperation); repeat=$($result.ResourceQuotaMonitorRepeat).',
     );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
