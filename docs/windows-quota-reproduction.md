@@ -79,3 +79,31 @@ private directory permissions are not expanded.
 Native Windows results and a fresh protected run are required before treating
 this repair as accepted. The separate protected cleanup `win32-3` failure and
 the exact denied descendant remain unresolved by this change.
+
+## Delete-pending attribute characterization
+
+Protected run [34714716267](https://github.com/OpenCoven/chat/actions/runs/34714716267)
+failed Windows bootstrap accounting with `access-denied`, root
+`bootstrap-aggregate`, scope `temp`, operation `directory-attributes`, and
+repeat `persistent`. The repeat label means a second non-missing-path exception;
+it does not prove the second error was another permission denial.
+
+The test-only `scripts/windows-quota-delete-pending.test.ps1` runs immediately
+after the owner-directory fixture in the Windows supervisor suite. It uses a
+retained, noninheritable handle and `RemoveDirectoryW`, then verifies the
+handle's `FILE_STANDARD_INFO.DeletePending` and directory flags. It observes
+`File.GetAttributes` and the real `MeasureDirectoryBytes` traversal while that
+handle remains open. Readable baselines and an explicit attribute-read denial
+with handle-based ACL restoration provide separate controls. No raw paths,
+SIDs, ACLs, or exception text are printed; I/O observations retain numeric
+HRESULTs. Closing the retained handle must make the path missing, verified
+with `GetAttributes` rather than `Directory.Exists`.
+
+A matching managed error demonstrates that a known deletion lifecycle can
+produce that signature; it does not identify the protected run's descendant.
+Missing, readable, or different I/O outcomes are explicitly inconclusive for
+this reproduction. Native Windows results are required. This fixture changes
+no production reads, retries, accounting limits, access rules, or source pins.
+
+Windows documents deletion-on-last-handle-close in the
+[RemoveDirectoryW contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-removedirectoryw).
