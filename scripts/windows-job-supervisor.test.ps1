@@ -5289,19 +5289,34 @@ try {
   }
 } finally { $currentIdentity.Dispose() }
 '@, [Text.UTF8Encoding]::new($false))
-          $nativeProfileOwner = $nativeDiscoveryJob.RunAsUser(
-            $isolatedUser,
-            $trustedPwsh,
-            "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
-            $root,
-            $nativeDiscoveryEnvironment,
-            [TimeSpan]::FromSeconds(30),
-            1MB,
-            1MB
+          # Keep the owner probe and native RPC in independent Job lifetimes.
+          $nativeProfileOwnerNonce = '44444444444444444444444444444444'
+          $nativeProfileOwnerJobName =
+            "Local\OpenCoven.Chat.Conformance.$nativeProfileOwnerNonce"
+          $nativeProfileOwnerEnvironment = $nativeDiscoveryEnvironment.Clone()
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeProfileOwnerNonce
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeProfileOwnerJobName
+          $nativeProfileOwnerJob = [OpenCoven.WindowsJobSupervisor]::Create(
+            $nativeProfileOwnerJobName,
+            $isolatedUser
           )
-          if ($nativeProfileOwner.ExitCode -ne 0 -or
-              $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
-            throw 'Native discovery token-profile owner assertion failed.'
+          try {
+            $nativeProfileOwner = $nativeProfileOwnerJob.RunAsUser(
+              $isolatedUser,
+              $trustedPwsh,
+              "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
+              $root,
+              $nativeProfileOwnerEnvironment,
+              [TimeSpan]::FromSeconds(30),
+              1MB,
+              1MB
+            )
+            if ($nativeProfileOwner.ExitCode -ne 0 -or
+                $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
+              throw 'Native discovery token-profile owner assertion failed.'
+            }
+          } finally {
+            $nativeProfileOwnerJob.Dispose()
           }
           $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
             '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +

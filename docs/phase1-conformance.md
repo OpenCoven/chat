@@ -1387,7 +1387,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 329,530 | `d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a` |
-| `scripts/windows-job-supervisor.test.ps1` | 185,863 | `3d6d0d5d4e5f47b57077b445c124084304a1648820f6bcc1d810d5bcd1d713c8` |
+| `scripts/windows-job-supervisor.test.ps1` | 186,680 | `4d72ab77e9f1e3d442b5e0bffd7b920e53fa28548a22b53f7e6226bd9b19df4a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
@@ -1886,3 +1886,7 @@ response before any discovery state exists.
 When a trusted profile owner's ACL metadata cannot be queried, the follow-up
 probe reports `unavailable`; the ordinary reader continues to reject the path.
 Unknown ACL metadata is never reported as an observed unsafe ACL or accepted.
+
+The token-profile owner probe and native discovery request use independent Job
+Objects. Each is disposed after its bounded process completes; neither relies
+on assigning another process to a drained Job.
