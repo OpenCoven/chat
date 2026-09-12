@@ -1,6 +1,29 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 03:27 UTC
+## Consolidation checkpoint, 2026-09-12 04:05 UTC
+
+Chat [#230](https://github.com/OpenCoven/chat/pull/230) merged as
+`09410982d3a85cbfbcdf2d2d193c3a96e8e80f74`; exact-head CI run
+`34670529730` passed. It preserves #229's quota-depth source and adds six fixed
+Cave startup subtypes without exposing child output, paths, endpoints, process
+identifiers or response bodies.
+
+The protected #229/#212 authority run
+[34670074847](https://github.com/OpenCoven/chat/actions/runs/34670074847)
+passed Linux and macOS. Windows failed closed at
+`access-denied; root=bootstrap-aggregate;
+operation=directory-enumeration-depth-3-plus`; validation, attestation and
+aggregation were skipped. This proves the intermittent quota failure can mask
+the Cave startup classifier and narrows it to a deep bootstrap subtree.
+
+The active diagnostic adds only fixed bootstrap scope and same-token repeat
+labels. The initial failure remains terminal; no ACL, quota, identity,
+traversal bound, cleanup or acceptance rule changes. The pending SDK #230
+binding is intentionally held until this additional Chat diagnostic freezes,
+so one validator rotation can cover both bounded signals. Chat #219, Coven
+#984, SDK #38 and final protected acceptance remain open.
+
+## Historical consolidation checkpoint, 2026-09-12 03:27 UTC
 
 Chat [#229](https://github.com/OpenCoven/chat/pull/229) landed as
 `5f4572c45e19bc17fa8963fb8147b47bc8d0c31c` after all ten CI jobs passed,
@@ -13,7 +36,7 @@ test and coverage suites each passed all 1,515 tests.
 Both validator scopes were read back at SDK `33240b9`. Fresh protected
 [run 34670074847](https://github.com/OpenCoven/chat/actions/runs/34670074847)
 uses Chat `5f4572c`; its supervisor build passed and protected environment
-approval is verified. Platform execution is still pending terminal evidence.
+approval was verified.
 The preceding completed run `34667436672` classified Windows startup/readiness
 failure; both Unix records independently passed identities, timing, scans and
 all 197 assertions. The separate quota denial in `34666399779` remains distinct.

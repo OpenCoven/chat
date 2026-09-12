@@ -104,6 +104,36 @@ try {
   }
   if ($context.ToString().Contains('secret-path')) { throw 'Context exception retained raw exception text.' }
 } finally { $contextState.Dispose() }
+$boundedConstructor = $contextType.GetConstructor(
+  $instanceFlags,
+  $null,
+  [type[]]@([string], [string], [string], [string], [Exception]),
+  $null
+)
+if ($null -eq $boundedConstructor) { throw 'Missing bounded quota scope/repeat context overload.' }
+$boundedContext = $boundedConstructor.Invoke([object[]]@(
+  'bootstrap aggregate',
+  'directory-enumeration-depth-3-plus',
+  'workspace',
+  'persistent',
+  [UnauthorizedAccessException]::new('private-nonce')
+))
+$boundedState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $record.Invoke($boundedState, [object[]]@($boundedContext))
+  foreach ($pair in @(
+      @('MonitorErrorRoot', 'bootstrap-aggregate'),
+      @('MonitorErrorScope', 'workspace'),
+      @('MonitorErrorOperation', 'directory-enumeration-depth-3-plus'),
+      @('MonitorErrorRepeat', 'persistent'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($boundedState) -cne $pair[1]) {
+      throw "Lost bounded quota context: $($pair[0])"
+    }
+  }
+  if ($boundedContext.ToString().Contains('private-nonce')) {
+    throw 'Bounded quota context retained private exception text.'
+  }
+} finally { $boundedState.Dispose() }
 $unknown = $constructor.Invoke([object[]]@('secret-label', 'secret-operation', [UnauthorizedAccessException]::new('secret-message')))
 foreach ($property in @('Root', 'Operation')) {
   if ($contextType.GetProperty($property, $instanceFlags).GetValue($unknown) -cne 'unknown') { throw "Unbounded $property" }
@@ -117,6 +147,98 @@ foreach ($errorCase in $cases) {
   if ($classify.Invoke($null, [object[]]@($classifiedContext)) -cne $errorCase[1]) { throw 'Context changed an existing error category.' }
 }
 Write-Host 'Root and operation sanitization and first-failure preservation passed.'
+
+$classifyScope = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyBootstrapQuotaScope', $flags)
+if ($null -eq $classifyScope) { throw 'Missing bounded bootstrap quota scope classifier.' }
+$scopeRoot = 'C:\quota-root'
+$scopeCases = @(
+  @($scopeRoot, 'root'),
+  @("$scopeRoot\profile\AppData\private-nonce", 'profile'),
+  @("$scopeRoot\temp\private-nonce", 'temp'),
+  @("$scopeRoot\status-staging\private-nonce", 'status-staging'),
+  @("$scopeRoot\workspace\node_modules\private-nonce", 'workspace'),
+  @("$scopeRoot\downloads\private-nonce", 'downloads'),
+  @("$scopeRoot\tools\git\private-nonce", 'tools-git'),
+  @("$scopeRoot\tools\node\private-nonce", 'tools-node'),
+  @("$scopeRoot\tools\pnpm\private-nonce", 'tools-pnpm'),
+  @("$scopeRoot\tools\private-nonce", 'tools-other'),
+  @("$scopeRoot\rustup\private-nonce", 'rustup'),
+  @("$scopeRoot\cargo\registry\private-nonce", 'cargo-registry'),
+  @("$scopeRoot\cargo\git\private-nonce", 'cargo-git'),
+  @("$scopeRoot\cargo\private-nonce", 'cargo-other'),
+  @("$scopeRoot\pnpm-store\private-nonce", 'pnpm-store'),
+  @("$scopeRoot\npm-cache\private-nonce", 'npm-cache'),
+  @("$scopeRoot\counterparts\private-nonce", 'counterparts'),
+  @("$scopeRoot\private-nonce", 'other')
+)
+foreach ($scopeCase in $scopeCases) {
+  $actualScope = $classifyScope.Invoke($null, [object[]]@(
+    'bootstrap aggregate',
+    $scopeRoot,
+    $scopeCase[0]
+  ))
+  if ($actualScope -cne $scopeCase[1] -or $actualScope.Contains('private-nonce')) {
+    throw "Bootstrap scope was not bounded: $actualScope"
+  }
+}
+foreach ($unscoped in @(
+    @('workspace aggregate', $scopeRoot, "$scopeRoot\workspace"),
+    @('bootstrap aggregate', $scopeRoot, 'C:\quota-root-sibling\private-nonce'))) {
+  if ($classifyScope.Invoke($null, [object[]]@($unscoped[0], $unscoped[1], $unscoped[2])) -cne 'none') {
+    throw 'Non-bootstrap or out-of-root quota path gained a scope.'
+  }
+}
+Write-Host 'Bootstrap quota scope classification is fixed and path-free.'
+
+if (-not ('OpenCoven.Tests.QuotaRepeatProbe' -as [type])) {
+  Add-Type -Language CSharp -TypeDefinition @'
+using System;
+namespace OpenCoven.Tests
+{
+    public static class QuotaRepeatProbe
+    {
+        public static int TransientCalls;
+        public static int PersistentCalls;
+        public static Func<string> TransientRead { get { return Transient; } }
+        public static Func<string> PersistentRead { get { return Persistent; } }
+
+        public static string Transient()
+        {
+            TransientCalls++;
+            if (TransientCalls == 1) throw new UnauthorizedAccessException("private-transient");
+            return "ok";
+        }
+
+        public static string Persistent()
+        {
+            PersistentCalls++;
+            throw new UnauthorizedAccessException("private-persistent");
+        }
+    }
+}
+'@
+}
+$readQuota = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadQuotaOperation', $flags).MakeGenericMethod([string])
+foreach ($repeatCase in @(
+    @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'transient', 'TransientCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'))) {
+  $caught = $null
+  try {
+    $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0])) | Out-Null
+  } catch {
+    $caught = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $caught -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($caught) -cne 'access-denied' -or
+      $contextType.GetProperty('Scope', $instanceFlags).GetValue($caught) -cne 'none' -or
+      $contextType.GetProperty('Operation', $instanceFlags).GetValue($caught) -cne 'entry-attributes' -or
+      $contextType.GetProperty('Repeat', $instanceFlags).GetValue($caught) -cne $repeatCase[1] -or
+      [OpenCoven.Tests.QuotaRepeatProbe].GetField($repeatCase[2]).GetValue($null) -ne 2 -or
+      $caught.ToString().Contains('private-')) {
+    throw "Quota repeat classification changed: $($repeatCase[1])"
+  }
+}
+Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
 
 # A real overlong filesystem name exercises the terminal/background catches on
 # every platform, including exact operation context at the attribute read.
@@ -171,7 +293,8 @@ foreach ($depth in @(0, 1, 2, 3, 5)) {
       $terminal.Invoke($null, [object[]]@($deniedResult, $deniedQuotas))
       if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
           $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
-          $deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Native access-denied fixture lost its category/root/operation.' }
+          $deniedResult.ResourceQuotaMonitorScope -cne 'none' -or $deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation -or
+          $deniedResult.ResourceQuotaMonitorRepeat -cne 'persistent') { throw 'Native access-denied fixture lost its bounded context.' }
       $terminal.Invoke($null, [object[]]@($deniedResult, $malformed))
       if ($deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Terminal recheck replaced first depth context.' }
       # Wildcard discovery has a distinct enumeration seam; a caller label that
@@ -180,13 +303,18 @@ foreach ($depth in @(0, 1, 2, 3, 5)) {
       $wildcardResult = [OpenCoven.WindowsJobRunResult]::new()
       $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
       if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
-          $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
+          $wildcardResult.ResourceQuotaMonitorScope -cne 'none' -or $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration' -or
+          $wildcardResult.ResourceQuotaMonitorRepeat -cne 'persistent') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
       $deniedState = [Activator]::CreateInstance($stateType, $true)
       try {
         $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
         if (-not $task.Wait(5000)) { throw 'Native access-denied background check did not terminate.' }
         foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'status-staging'), @('MonitorErrorOperation', $expectedOperation))) {
           if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
+        }
+        if ($stateType.GetProperty('MonitorErrorScope', $instanceFlags).GetValue($deniedState) -cne 'none' -or
+            $stateType.GetProperty('MonitorErrorRepeat', $instanceFlags).GetValue($deniedState) -cne 'persistent') {
+          throw 'Native background check lost scope/repeat context.'
         }
       } finally { $deniedState.Dispose() }
     }

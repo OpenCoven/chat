@@ -3038,6 +3038,53 @@ ${pathAssignment}
     }
   });
 
+  test('bounds Windows quota scope and repeat diagnostics without changing fail-closed accounting', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+    for (const source of sources) {
+      for (const required of [
+        'ResourceQuotaMonitorScope',
+        'ResourceQuotaMonitorRepeat',
+        'ClassifyBootstrapQuotaScope',
+        'NormalizeQuotaScope',
+        'NormalizeQuotaRepeat',
+        'scope == null ? "none" : scope',
+        'repeat == null ? "none" : repeat',
+        'catch (QuotaMonitorContextException error)',
+      ]) {
+        expect(source).toContain(required);
+      }
+      for (const scope of [
+        'root',
+        'profile',
+        'temp',
+        'status-staging',
+        'workspace',
+        'downloads',
+        'tools-git',
+        'tools-node',
+        'tools-pnpm',
+        'tools-other',
+        'rustup',
+        'cargo-registry',
+        'cargo-git',
+        'cargo-other',
+        'pnpm-store',
+        'npm-cache',
+        'counterparts',
+        'other',
+      ]) {
+        expect(source).toContain(`"${scope}"`);
+      }
+      for (const repeat of ['none', 'transient', 'persistent']) {
+        expect(source).toContain(`"${repeat}"`);
+      }
+    }
+  });
+
   test.each([
     {
       name: 'quota exceeded',
@@ -3051,10 +3098,12 @@ ${pathAssignment}
         ResourceQuotaMonitorError: true,
         ResourceQuotaMonitorCategory: 'access-denied',
         ResourceQuotaMonitorRoot: 'status-staging',
+        ResourceQuotaMonitorScope: 'workspace',
         ResourceQuotaMonitorOperation: 'directory-enumeration',
+        ResourceQuotaMonitorRepeat: 'persistent',
       },
       diagnostic:
-        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; operation=directory-enumeration.',
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; scope=workspace; operation=directory-enumeration; repeat=persistent.',
     },
     {
       name: 'unidentified quota',
@@ -3224,7 +3273,7 @@ ${quotaAssignment}
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
     expect(bootstrap).toContain(
-      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); operation=$($result.ResourceQuotaMonitorOperation).',
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); scope=$($result.ResourceQuotaMonitorScope); operation=$($result.ResourceQuotaMonitorOperation); repeat=$($result.ResourceQuotaMonitorRepeat).',
     );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
