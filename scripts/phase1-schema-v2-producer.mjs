@@ -1603,7 +1603,12 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
     if (message === 'native RPC did not discover the launched Cave') {
       return 'phase1.native-scenarios.launch.discovery-timeout';
     }
-    if (/^native RPC cave_health failed with [a-z0-9_]+$/u.test(message)) {
+    if (
+      message === 'native RPC timed out for cave_health' ||
+      /^native RPC cave_health failed with (invalid_request|unauthorized|scope_denied|not_found|conflict|rate_limited|pairing_denied|pairing_expired|incompatible_version|service_unavailable|reconcile_required|internal_error|invalid_response|timeout|stale_discovery_handle|invalid_native_response)$/u.test(
+        message,
+      )
+    ) {
       return 'phase1.native-scenarios.launch.health';
     }
     if (message === 'launched Cave returned an invalid health envelope') {

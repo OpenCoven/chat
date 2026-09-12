@@ -2076,9 +2076,14 @@ describe('Phase 1 real-authority conformance harness', () => {
       'native RPC cave_health failed with service_unavailable',
       'phase1.native-scenarios.launch.health',
     ],
+    ['native RPC timed out for cave_health', 'phase1.native-scenarios.launch.health'],
     [
       'launched Cave returned an invalid health envelope',
       'phase1.native-scenarios.launch.health-envelope',
+    ],
+    [
+      'native RPC cave_health failed with attacker_secret',
+      'phase1.native-scenarios.launch.unknown',
     ],
     ['private protected-run failure', 'phase1.native-scenarios.launch.unknown'],
   ])('classifies launch failure without exposing detail', async (message, expected) => {
@@ -2097,6 +2102,24 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(diagnostic).toBe(expected);
     expect(diagnostic).not.toContain('private');
+  });
+
+  test.each([
+    'not-installed',
+    'configuration-invalid',
+    'process',
+    'timeout',
+    'rpc-closed',
+    'initial-discovery',
+    'discovery-timeout',
+    'health',
+    'health-envelope',
+    'unknown',
+  ])('preserves the bounded launch.%s diagnostic through public extraction', (category) => {
+    const diagnostic = `phase1.native-scenarios.launch.${category}`;
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
   });
 
   test.each([
