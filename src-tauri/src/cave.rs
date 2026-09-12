@@ -294,6 +294,10 @@ struct WindowsFileMetadata {
     is_regular: bool,
     is_reparse_point: bool,
     owner_matches_current_user: bool,
+    #[cfg_attr(not(feature = "phase1-conformance"), allow(dead_code))]
+    owner_sid_matches: bool,
+    #[cfg_attr(not(feature = "phase1-conformance"), allow(dead_code))]
+    trusted_writer_dacl: Option<bool>,
     len: u64,
     #[cfg_attr(not(windows), allow(dead_code))]
     links: u64,
@@ -318,7 +322,7 @@ struct WindowsOpenedDiscovery {
 }
 
 #[cfg(any(windows, test))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum WindowsDiscoveryIoError {
     Missing,
     Unavailable,
@@ -536,6 +540,84 @@ fn same_windows_file(left: WindowsFileMetadata, right: WindowsFileMetadata) -> b
 }
 
 #[cfg(any(windows, test))]
+fn windows_owner_safety(
+    owner_matches: bool,
+    dacl: Result<bool, WindowsDiscoveryIoError>,
+) -> Result<(bool, Option<bool>), WindowsDiscoveryIoError> {
+    // Preserve the ordinary reader's owner-false short circuit. Unknown ACL
+    // metadata is retained only for the diagnostic, never treated as safe.
+    if owner_matches {
+        Ok((true, Some(dacl?)))
+    } else {
+        Ok((false, dacl.ok()))
+    }
+}
+
+#[cfg(any(test, all(windows, feature = "phase1-conformance")))]
+fn windows_directory_safety_category(metadata: WindowsFileMetadata) -> &'static str {
+    if !metadata.is_directory || metadata.is_regular {
+        "type"
+    } else if metadata.is_reparse_point {
+        "reparse"
+    } else if !metadata.owner_sid_matches && metadata.trusted_writer_dacl.is_none() {
+        "owner-acl-unavailable"
+    } else if !metadata.owner_sid_matches && metadata.trusted_writer_dacl == Some(false) {
+        "owner-acl"
+    } else if !metadata.owner_sid_matches {
+        "owner"
+    } else if metadata.trusted_writer_dacl != Some(true) {
+        "acl"
+    } else {
+        "safe"
+    }
+}
+
+// Conformance-only, read-only and path-free. The ordinary reader still enforces
+// its existing checks; these observations never authorize discovery or launch.
+#[cfg(feature = "phase1-conformance")]
+pub(crate) fn windows_discovery_safety_probe() -> Vec<(&'static str, &'static str)> {
+    #[cfg(not(windows))]
+    {
+        vec![("platform", "unsupported")]
+    }
+    #[cfg(windows)]
+    {
+        let backend = match windows_discovery::NativeWindowsDiscovery::new() {
+            Ok(backend) => backend,
+            Err(_) => return vec![("profile", "unavailable")],
+        };
+        windows_discovery_safety_with(&backend)
+    }
+}
+
+#[cfg(any(test, all(windows, feature = "phase1-conformance")))]
+fn windows_discovery_safety_with(
+    backend: &dyn WindowsDiscoveryBackend,
+) -> Vec<(&'static str, &'static str)> {
+    let root = match backend.canonical_root() {
+        Ok(root) => root,
+        Err(_) => return vec![("profile", "unavailable")],
+    };
+    let mut observations = Vec::new();
+    for (scope, path) in [
+        ("profile", root.clone()),
+        ("coven", root.join(".coven")),
+        ("cave", root.join(".coven").join("cave")),
+    ] {
+        let category = match backend.open_directory(&path) {
+            Ok(metadata) => windows_directory_safety_category(metadata),
+            Err(WindowsDiscoveryIoError::Missing) => "missing",
+            Err(WindowsDiscoveryIoError::Unavailable) => "unavailable",
+        };
+        observations.push((scope, category));
+        if category != "safe" {
+            break;
+        }
+    }
+    observations
+}
+
+#[cfg(any(windows, test))]
 fn validate_windows_directory(metadata: WindowsFileMetadata) -> NativeResult<()> {
     if !metadata.is_directory
         || metadata.is_regular
@@ -724,7 +806,8 @@ mod windows_discovery {
             if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {
                 return Err(WindowsDiscoveryIoError::Unavailable);
             }
-            let owner_matches_current_user = owner_matches(handle, &self.sid)?;
+            let (owner_sid_matches, trusted_writer_dacl) = owner_safety(handle, &self.sid)?;
+            let owner_matches_current_user = owner_sid_matches && trusted_writer_dacl == Some(true);
             let attributes = information.dwFileAttributes;
             let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
             Ok(WindowsFileMetadata {
@@ -732,6 +815,8 @@ mod windows_discovery {
                 is_regular: !is_directory && unsafe { GetFileType(handle) } == FILE_TYPE_DISK,
                 is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
                 owner_matches_current_user,
+                owner_sid_matches,
+                trusted_writer_dacl,
                 len: ((information.nFileSizeHigh as u64) << 32) | information.nFileSizeLow as u64,
                 links: information.nNumberOfLinks as u64,
                 volume_serial: information.dwVolumeSerialNumber as u64,
@@ -958,10 +1043,10 @@ mod windows_discovery {
         Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
     }
 
-    fn owner_matches(
+    fn owner_safety(
         handle: HANDLE,
         current_user_sid: &[u8],
-    ) -> Result<bool, WindowsDiscoveryIoError> {
+    ) -> Result<(bool, Option<bool>), WindowsDiscoveryIoError> {
         let mut owner = ptr::null_mut();
         let mut dacl = ptr::null_mut();
         let mut descriptor = ptr::null_mut();
@@ -986,7 +1071,7 @@ mod windows_discovery {
         unsafe {
             LocalFree(descriptor.cast());
         }
-        Ok(owner_matches && dacl_is_safe?)
+        super::windows_owner_safety(owner_matches, dacl_is_safe)
     }
 
     fn dacl_permits_only_trusted_writers(
@@ -1747,6 +1832,8 @@ mod tests {
             is_regular: true,
             is_reparse_point: false,
             owner_matches_current_user: true,
+            owner_sid_matches: true,
+            trusted_writer_dacl: Some(true),
             len: 42,
             links: 1,
             volume_serial,
@@ -1760,6 +1847,144 @@ mod tests {
             Err(error) => error.code,
             Ok(_) => panic!("expected Windows discovery to fail"),
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_discovery_safety_probe_stops_before_descendants_or_file_reads() {
+        let safe = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            ..safe_windows_metadata(1, 2)
+        };
+        for (result, category) in [
+            (Err(WindowsDiscoveryIoError::Missing), "missing"),
+            (Err(WindowsDiscoveryIoError::Unavailable), "unavailable"),
+            (
+                Ok(WindowsFileMetadata {
+                    is_reparse_point: true,
+                    ..safe
+                }),
+                "reparse",
+            ),
+        ] {
+            for stop in 0..3 {
+                let mut directories = vec![Ok(safe); 3];
+                directories[stop] = result;
+                let backend = FakeWindowsDiscovery {
+                    root: PathBuf::from(r"C:\private-token-root"),
+                    directories: Mutex::new(VecDeque::from(directories)),
+                    file: None,
+                    identity: "private-identity".into(),
+                    process: Ok(WindowsProcessState::NotFound),
+                };
+                let observed = super::windows_discovery_safety_with(&backend);
+                assert_eq!(observed.len(), stop + 1);
+                for (index, entry) in observed.iter().enumerate() {
+                    assert_eq!(entry.0, ["profile", "coven", "cave"][index]);
+                    assert_eq!(entry.1, if index == stop { category } else { "safe" });
+                }
+                assert_eq!(backend.directories.lock().unwrap().len(), 2 - stop);
+                assert!(!serde_json::to_string(&observed)
+                    .unwrap()
+                    .contains("private"));
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_owner_safety_preserves_foreign_owner_acl_error_rejection() {
+        let foreign = super::windows_owner_safety(false, Err(WindowsDiscoveryIoError::Unavailable))
+            .expect("foreign owner remains an unsafe metadata result");
+        assert_eq!(foreign, (false, None));
+        assert_eq!(
+            super::windows_owner_safety(true, Ok(false)).unwrap(),
+            (true, Some(false))
+        );
+        assert_eq!(
+            super::windows_owner_safety(false, Ok(true)).unwrap(),
+            (false, Some(true))
+        );
+        let metadata = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            owner_matches_current_user: false,
+            owner_sid_matches: false,
+            trusted_writer_dacl: None,
+            ..safe_windows_metadata(1, 2)
+        };
+        assert_eq!(
+            super::windows_directory_safety_category(metadata),
+            "owner-acl-unavailable"
+        );
+        assert_eq!(
+            super::validate_windows_directory(metadata)
+                .unwrap_err()
+                .code,
+            "unsafe_discovery_record"
+        );
+        assert!(
+            super::windows_owner_safety(true, Err(WindowsDiscoveryIoError::Unavailable)).is_err()
+        );
+        assert_eq!(
+            super::windows_owner_safety(true, Ok(true)).unwrap(),
+            (true, Some(true))
+        );
+        assert_eq!(
+            super::windows_owner_safety(false, Ok(false)).unwrap(),
+            (false, Some(false))
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_discovery_safety_probe_reports_fixed_directory_categories() {
+        let safe = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            ..safe_windows_metadata(1, 2)
+        };
+        assert_eq!(super::windows_directory_safety_category(safe), "safe");
+        assert_eq!(
+            super::windows_directory_safety_category(WindowsFileMetadata {
+                owner_sid_matches: false,
+                trusted_writer_dacl: Some(false),
+                owner_matches_current_user: false,
+                ..safe
+            }),
+            "owner-acl"
+        );
+        assert_eq!(
+            super::windows_directory_safety_category(WindowsFileMetadata {
+                is_reparse_point: true,
+                ..safe
+            }),
+            "reparse"
+        );
+        assert_eq!(
+            super::windows_directory_safety_category(WindowsFileMetadata {
+                is_directory: false,
+                ..safe
+            }),
+            "type"
+        );
+        assert_eq!(
+            super::windows_directory_safety_category(WindowsFileMetadata {
+                owner_sid_matches: false,
+                owner_matches_current_user: false,
+                ..safe
+            }),
+            "owner"
+        );
+        assert_eq!(
+            super::windows_directory_safety_category(WindowsFileMetadata {
+                trusted_writer_dacl: Some(false),
+                owner_matches_current_user: false,
+                ..safe
+            }),
+            "acl"
+        );
     }
 
     #[cfg(not(windows))]

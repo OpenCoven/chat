@@ -258,6 +258,7 @@ enum RpcCommand {
         capability: String,
         owner_token: String,
     },
+    ConformanceDiscoverySafety,
     ConformanceNativeCustodyState {
         instance_ids: Vec<String>,
     },
@@ -324,6 +325,7 @@ impl RpcCommand {
                 | Self::CaveResetPairing { .. }
                 | Self::ConformancePrepareNativeCleanup { .. }
                 | Self::ConformanceDeleteNativeCredential { .. }
+                | Self::ConformanceDiscoverySafety
                 | Self::ConformanceNativeCustodyState { .. }
                 | Self::ConformanceIssueNativeCustodyCleanup { .. }
                 | Self::ConformanceCleanupNativeCustody { .. }
@@ -1201,6 +1203,9 @@ impl RpcRuntime {
                 }
                 json!({ "status": "missing" })
             }
+            RpcCommand::ConformanceDiscoverySafety => {
+                json!({ "directories": crate::cave::windows_discovery_safety_probe() })
+            }
             RpcCommand::ConformanceNativeCustodyState { instance_ids } => {
                 let cleanup = self
                     .emergency_cleanup
@@ -1607,6 +1612,10 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                 capability,
                 owner_token,
             })
+        }
+        "conformance_discovery_safety" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::ConformanceDiscoverySafety)
         }
         "conformance_native_custody_state" => {
             expect_exact_args(object, &["instanceIds"])?;
@@ -2472,6 +2481,23 @@ mod tests {
         .expect("coven health should be registered");
 
         assert!(matches!(command, RpcCommand::CovenHealth { .. }));
+    }
+
+    #[test]
+    fn discovery_safety_rpc_rejects_caller_selected_paths_and_is_a_barrier() {
+        let command = parse_command("conformance_discovery_safety", Some(json!({})))
+            .expect("fixed discovery probe should be registered");
+        assert!(matches!(command, RpcCommand::ConformanceDiscoverySafety));
+        assert!(command.is_barrier());
+        for args in [
+            json!({"path": "private"}),
+            json!({"root": "private"}),
+            json!({"sid": "private"}),
+            json!([]),
+            json!("private"),
+        ] {
+            assert!(parse_command("conformance_discovery_safety", Some(args)).is_err());
+        }
     }
 
     #[test]

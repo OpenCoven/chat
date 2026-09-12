@@ -2142,6 +2142,33 @@ describe('Phase 1 real-authority conformance harness', () => {
     'initial-present',
     'initial-unavailable',
     'initial-unsafe',
+    'initial-unsafe-probe-profile-type',
+    'initial-unsafe-probe-profile-reparse',
+    'initial-unsafe-probe-profile-owner',
+    'initial-unsafe-probe-profile-owner-acl',
+    'initial-unsafe-probe-profile-owner-acl-unavailable',
+    'initial-unsafe-probe-profile-acl',
+    'initial-unsafe-probe-profile-missing',
+    'initial-unsafe-probe-profile-unavailable',
+    'initial-unsafe-probe-coven-type',
+    'initial-unsafe-probe-coven-reparse',
+    'initial-unsafe-probe-coven-owner',
+    'initial-unsafe-probe-coven-owner-acl',
+    'initial-unsafe-probe-coven-owner-acl-unavailable',
+    'initial-unsafe-probe-coven-acl',
+    'initial-unsafe-probe-coven-missing',
+    'initial-unsafe-probe-coven-unavailable',
+    'initial-unsafe-probe-cave-type',
+    'initial-unsafe-probe-cave-reparse',
+    'initial-unsafe-probe-cave-owner',
+    'initial-unsafe-probe-cave-owner-acl',
+    'initial-unsafe-probe-cave-owner-acl-unavailable',
+    'initial-unsafe-probe-cave-acl',
+    'initial-unsafe-probe-cave-missing',
+    'initial-unsafe-probe-cave-unavailable',
+    'initial-unsafe-probe-directories-safe',
+    'initial-unsafe-probe-unknown',
+
     'initial-invalid',
     'initial-body-limit',
     'initial-service',
@@ -2191,6 +2218,125 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(outcome).toBe(expected);
     expect(String(outcome)).not.toContain('private');
+  });
+
+  test.each([
+    'profile-type',
+    'profile-reparse',
+    'profile-owner',
+    'profile-owner-acl',
+    'profile-owner-acl-unavailable',
+    'profile-acl',
+    'profile-missing',
+    'profile-unavailable',
+    'coven-type',
+    'coven-reparse',
+    'coven-owner',
+    'coven-owner-acl',
+    'coven-owner-acl-unavailable',
+    'coven-acl',
+    'coven-missing',
+    'coven-unavailable',
+    'cave-type',
+    'cave-reparse',
+    'cave-owner',
+    'cave-owner-acl',
+    'cave-owner-acl-unavailable',
+    'cave-acl',
+    'cave-missing',
+    'cave-unavailable',
+    'directories-safe',
+    'unknown',
+  ])('maps follow-up safety category %s to its public diagnostic', async (category) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const diagnostic = `phase1.native-scenarios.launch.initial-unsafe-probe-${category}`;
+    expect(
+      producer.schemaV2NativeFailureDiagnostic(
+        'launch',
+        new Error(`native RPC initial unsafe follow-up probe ${category}`),
+      ),
+    ).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+  });
+
+  test('probes only Windows initial unsafe and preserves probe failures without raw errors', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const calls: string[] = [];
+    const rpc = {
+      ok: async (command: string) => {
+        calls.push(command);
+        throw new Error('private-path-and-sid');
+      },
+    };
+    for (const [outcome, platform] of [
+      ['unsafe', 'linux'],
+      ['unsafe', 'darwin'],
+      ['present', 'win32'],
+      [null, 'win32'],
+      ['unknown', 'win32'],
+    ]) {
+      expect(await producer.observeInitialDiscoverySafety(rpc, outcome, platform)).toBeNull();
+    }
+    expect(calls).toEqual([]);
+    expect(await producer.observeInitialDiscoverySafety(rpc, 'unsafe', 'win32')).toBe('unknown');
+    expect(calls).toEqual(['conformance_discovery_safety']);
+    expect(
+      await producer.observeInitialDiscoverySafety(
+        {
+          ok: async () => ({
+            directories: [['profile', 'owner-acl']],
+          }),
+        },
+        'unsafe',
+        'win32',
+      ),
+    ).toBe('profile-owner-acl');
+  });
+
+  test.each([
+    [{ directories: [['profile', 'owner']] }, 'profile-owner'],
+    [{ directories: [['profile', 'owner-acl']] }, 'profile-owner-acl'],
+    [{ directories: [['profile', 'owner-acl-unavailable']] }, 'profile-owner-acl-unavailable'],
+    [
+      {
+        directories: [
+          ['profile', 'safe'],
+          ['coven', 'acl'],
+        ],
+      },
+      'coven-acl',
+    ],
+    [
+      {
+        directories: [
+          ['profile', 'safe'],
+          ['coven', 'safe'],
+          ['cave', 'safe'],
+        ],
+      },
+      'directories-safe',
+    ],
+    [{ directories: [['cave', 'owner']] }, 'unknown'],
+    [{ directories: [['profile', 'safe']] }, 'unknown'],
+    [
+      {
+        directories: [
+          ['profile', 'owner'],
+          ['coven', 'safe'],
+        ],
+      },
+      'unknown',
+    ],
+    [{ directories: [['profile', 'private']] }, 'unknown'],
+    [{ directories: [['profile', 'owner', 'private']] }, 'unknown'],
+    [null, 'unknown'],
+  ])('bounds follow-up discovery safety observations', async (response, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(producer.classifyDiscoverySafetyProbe(response)).toBe(expected);
   });
 
   test.each([
