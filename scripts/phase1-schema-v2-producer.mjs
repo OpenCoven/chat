@@ -79,7 +79,7 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
-const caveLaunchRpcTimeoutMs = 35_000;
+export const caveLaunchRpcTimeoutMs = 80_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';

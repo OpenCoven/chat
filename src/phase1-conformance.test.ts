@@ -3952,6 +3952,7 @@ describe('Phase 1 real-authority conformance harness', () => {
   test('extends only the cave launch RPC response budget', async () => {
     // @ts-expect-error The executable script intentionally has no declaration file.
     const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(producer.caveLaunchRpcTimeoutMs).toBe(80_000);
     const client = new producer.NativeRpcClient(new DelayedResponseChild(), {
       requestTimeoutMs: 5,
       caveLaunchTimeoutMs: 50,
