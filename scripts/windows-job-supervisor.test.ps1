@@ -5247,6 +5247,77 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
           $isolatedUser
         )
         try {
+          $nativeProfileOwnerScript = Join-Path $root 'native-profile-owner.ps1'
+          [IO.File]::WriteAllText($nativeProfileOwnerScript, @'
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class NativeProfileOwnerProbe {
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool GetUserProfileDirectoryW(IntPtr token, StringBuilder path, ref uint size);
+    public static string Read() {
+        IntPtr token;
+        if (!OpenProcessToken(GetCurrentProcess(), 8, out token))
+            throw new InvalidOperationException("Token profile probe failed.");
+        try {
+            uint size = 0;
+            GetUserProfileDirectoryW(token, null, ref size);
+            if (size == 0 || size > 32768)
+                throw new InvalidOperationException("Token profile size invalid.");
+            var path = new StringBuilder((int)size);
+            if (!GetUserProfileDirectoryW(token, path, ref size))
+                throw new InvalidOperationException("Token profile query failed.");
+            return path.ToString();
+        } finally { CloseHandle(token); }
+    }
+}
+"@
+$profileOwner = (Get-Acl -LiteralPath ([NativeProfileOwnerProbe]::Read())).GetOwner(
+  [Security.Principal.SecurityIdentifier]
+).Value
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+  if ($profileOwner -eq $currentIdentity.User.Value -or
+      $profileOwner -notin @('S-1-5-18', 'S-1-5-32-544')) {
+    throw 'Native discovery regression requires a SYSTEM or Administrators profile owner.'
+  }
+} finally { $currentIdentity.Dispose() }
+'@, [Text.UTF8Encoding]::new($false))
+          # Keep the owner probe and native RPC in independent Job lifetimes.
+          $nativeProfileOwnerNonce = '44444444444444444444444444444444'
+          $nativeProfileOwnerJobName =
+            "Local\OpenCoven.Chat.Conformance.$nativeProfileOwnerNonce"
+          $nativeProfileOwnerEnvironment = $nativeDiscoveryEnvironment.Clone()
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeProfileOwnerNonce
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeProfileOwnerJobName
+          $nativeProfileOwnerJob = [OpenCoven.WindowsJobSupervisor]::Create(
+            $nativeProfileOwnerJobName,
+            $isolatedUser
+          )
+          try {
+            $nativeProfileOwner = $nativeProfileOwnerJob.RunAsUser(
+              $isolatedUser,
+              $trustedPwsh,
+              "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
+              $root,
+              $nativeProfileOwnerEnvironment,
+              [TimeSpan]::FromSeconds(30),
+              1MB,
+              1MB
+            )
+            if ($nativeProfileOwner.ExitCode -ne 0 -or
+                $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
+              throw 'Native discovery token-profile owner assertion failed.'
+            }
+          } finally {
+            $nativeProfileOwnerJob.Dispose()
+          }
           $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
             '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
               "`n"
