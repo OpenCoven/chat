@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `078419eeac38ea999fc43f38a019fa4a093f8b79`,
-  tree `e6b71dbc262c51fad01dbf48458ed84ea5e7bdd4`, retained in the
+- Chat conformance driver `2456be72daa92e580fe16cde954fd6eace25a089`,
+  tree `66eb43874130c4a9572ad2e152903adee92b7de4`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1360,13 +1360,13 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,743 | `023709791d08bbad5373a6e4e35cfae22082cce5fcb5ae85e9ade6d1b10b601d` |
+| `.github/workflows/client-v1-conformance.yml` | 511,743 | `c9b7e7bf3e6b484925b34949835dbe215d2debd846ac1148e57399383d572784` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 209,422 | `1f3525c8c60f3e4a8b9b108996c6936801b8b59acfd3a48475bb44fc4f804d82` |
+| `scripts/phase1-conformance.mjs` | 209,340 | `e02a95e70cf343f66b8faf498856ea4927cdf7fa6d234a69bb234fe53a50201b` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
