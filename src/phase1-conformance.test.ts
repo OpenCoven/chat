@@ -5907,3 +5907,100 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(cargoBuildTimeoutMs).toBeGreaterThan(20 * 60_000);
   });
 });
+
+describe('schema-v2 bounded Cave authority diagnostics', () => {
+  test.each([
+    ['timeout', '', 'timeout'],
+    ['timeout', 'FAIL pairing.private', 'timeout'],
+    ['stdout-limit', '', 'output-limit'],
+    ['stderr-limit', '', 'output-limit'],
+    ['spawn', '', 'spawn'],
+    ['tracking', '', 'spawn'],
+    ['supervisor-termination', '', 'supervisor'],
+    ['termination', '', 'supervisor'],
+    [undefined, 'FAIL pairing.ttl-poll-expired private secret', 'assertion.pairing'],
+    [undefined, 'FAIL health.identity private path', 'assertion.health'],
+    [undefined, 'FAIL pairing.a\nFAIL health.b', 'assertion.multiple'],
+    [undefined, 'FAIL arbitrary.private-id', 'assertion.unknown'],
+    [undefined, 'FAIL pairing.a\nFAIL unknown.private', 'assertion.unknown'],
+    [undefined, 'ok pairing.a', 'exit-nonzero'],
+    [undefined, 'private token and path', 'exit-nonzero'],
+    [undefined, 'FAIL pairing.a\nFAIL pairing.a', 'output.invalid'],
+  ])('classifies %s / %s without copying output', async (reason, stdout, category) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const error = new producer.CommandExecutionError('private command label', {
+      reason,
+      code: 1,
+      signal: null,
+      stdout,
+      stderr: 'private credentials',
+    });
+    const diagnostic = producer.schemaV2FailureDiagnostic(
+      error,
+      'phase1.stage.cave-authority.failed',
+    );
+    expect(diagnostic).toBe(`phase1.cave-authority.${category}`);
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+    expect(
+      publicPhase1FailureDiagnostic(new Error(`${diagnostic}: private secret`)),
+    ).toBeUndefined();
+    expect(producer.wrapInfrastructureFailure(new Error(diagnostic), {}).message).toBe(diagnostic);
+  });
+
+  test('classifies signaled Cave exits without disclosing the signal text', async () => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const error = new producer.CommandExecutionError('private', {
+      code: null,
+      signal: 'private-signal',
+      stdout: '',
+      stderr: '',
+    });
+    const diagnostic = producer.schemaV2FailureDiagnostic(
+      error,
+      'phase1.stage.cave-authority.failed',
+    );
+    expect(diagnostic).toBe('phase1.cave-authority.signal');
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+  });
+
+  test('does not relabel unrelated stages or unknown errors', async () => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(
+      producer.schemaV2FailureDiagnostic(
+        new Error('private operator data'),
+        'phase1.stage.cave-authority.failed',
+      ),
+    ).toBe('phase1.stage.cave-authority.failed');
+    const error = new producer.CommandExecutionError('private', {
+      code: 1,
+      stdout: 'FAIL pairing.a',
+      stderr: '',
+    });
+    expect(producer.schemaV2FailureDiagnostic(error, 'phase1.stage.native-scenarios.failed')).toBe(
+      'phase1.stage.native-scenarios.failed',
+    );
+  });
+
+  test('distinguishes missing and malformed records while retaining successful JSON', async () => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const root = mkdtempSync(join(tmpdir(), 'cave-record-diagnostic-'));
+    try {
+      const path = join(root, 'record.json');
+      expect(() => producer.readCaveAuthorityRecord(path)).toThrow(
+        'phase1.cave-authority.record.read',
+      );
+      writeFileSync(path, 'private malformed record');
+      expect(() => producer.readCaveAuthorityRecord(path)).toThrow(
+        'phase1.cave-authority.record.invalid',
+      );
+      writeFileSync(path, '{"private":"unchanged"}');
+      expect(producer.readCaveAuthorityRecord(path)).toEqual({ private: 'unchanged' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
