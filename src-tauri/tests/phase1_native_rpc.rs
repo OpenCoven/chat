@@ -1573,13 +1573,23 @@ fn internal_coven_probe_failure_exits_silently_before_rpc_startup() {
 
 #[test]
 fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
+    // Establish the broken pipe before spawning: dropping ChildStdout afterward
+    // does not rule out a concurrent child temporarily inheriting its read end.
+    let (reader, mut writer) = std::io::pipe().expect("response pipe must be created");
+    drop(reader);
+    assert_eq!(
+        writer
+            .write(b"probe")
+            .expect_err("response pipe must reject writes before RPC startup")
+            .kind(),
+        std::io::ErrorKind::BrokenPipe,
+    );
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(writer)
         .stderr(Stdio::piped())
         .spawn()
         .expect("phase1-native-rpc must start");
-    drop(child.stdout.take().expect("child stdout must be piped"));
     {
         let mut stdin = child.stdin.take().expect("child stdin must be piped");
         writeln!(
