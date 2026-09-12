@@ -2193,6 +2193,83 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(String(outcome)).not.toContain('private');
   });
 
+  test('probes only Windows initial unsafe and preserves probe failures without raw errors', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const calls: string[] = [];
+    const rpc = {
+      ok: async (command: string) => {
+        calls.push(command);
+        throw new Error('private-path-and-sid');
+      },
+    };
+    for (const [outcome, platform] of [
+      ['unsafe', 'linux'],
+      ['unsafe', 'darwin'],
+      ['present', 'win32'],
+      [null, 'win32'],
+      ['unknown', 'win32'],
+    ]) {
+      expect(await producer.observeInitialDiscoverySafety(rpc, outcome, platform)).toBeNull();
+    }
+    expect(calls).toEqual([]);
+    expect(await producer.observeInitialDiscoverySafety(rpc, 'unsafe', 'win32')).toBe('unknown');
+    expect(calls).toEqual(['conformance_discovery_safety']);
+    expect(
+      await producer.observeInitialDiscoverySafety(
+        {
+          ok: async () => ({
+            directories: [['profile', 'owner-acl']],
+          }),
+        },
+        'unsafe',
+        'win32',
+      ),
+    ).toBe('profile-owner-acl');
+  });
+
+  test.each([
+    [{ directories: [['profile', 'owner']] }, 'profile-owner'],
+    [{ directories: [['profile', 'owner-acl']] }, 'profile-owner-acl'],
+    [
+      {
+        directories: [
+          ['profile', 'safe'],
+          ['coven', 'acl'],
+        ],
+      },
+      'coven-acl',
+    ],
+    [
+      {
+        directories: [
+          ['profile', 'safe'],
+          ['coven', 'safe'],
+          ['cave', 'safe'],
+        ],
+      },
+      'directories-safe',
+    ],
+    [{ directories: [['cave', 'owner']] }, 'unknown'],
+    [{ directories: [['profile', 'safe']] }, 'unknown'],
+    [
+      {
+        directories: [
+          ['profile', 'owner'],
+          ['coven', 'safe'],
+        ],
+      },
+      'unknown',
+    ],
+    [{ directories: [['profile', 'private']] }, 'unknown'],
+    [{ directories: [['profile', 'owner', 'private']] }, 'unknown'],
+    [null, 'unknown'],
+  ])('bounds follow-up discovery safety observations', async (response, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(producer.classifyDiscoverySafetyProbe(response)).toBe(expected);
+  });
+
   test.each([
     [
       'native RPC conformance_issue_native_custody_cleanup failed with cleanup_grant_service_unavailable',

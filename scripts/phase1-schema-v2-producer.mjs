@@ -189,6 +189,30 @@ const launchFailureCategories = [
   'initial-present',
   'initial-unavailable',
   'initial-unsafe',
+  'initial-unsafe-probe-profile-type',
+  'initial-unsafe-probe-profile-reparse',
+  'initial-unsafe-probe-profile-owner',
+  'initial-unsafe-probe-profile-owner-acl',
+  'initial-unsafe-probe-profile-acl',
+  'initial-unsafe-probe-profile-missing',
+  'initial-unsafe-probe-profile-unavailable',
+  'initial-unsafe-probe-coven-type',
+  'initial-unsafe-probe-coven-reparse',
+  'initial-unsafe-probe-coven-owner',
+  'initial-unsafe-probe-coven-owner-acl',
+  'initial-unsafe-probe-coven-acl',
+  'initial-unsafe-probe-coven-missing',
+  'initial-unsafe-probe-coven-unavailable',
+  'initial-unsafe-probe-cave-type',
+  'initial-unsafe-probe-cave-reparse',
+  'initial-unsafe-probe-cave-owner',
+  'initial-unsafe-probe-cave-owner-acl',
+  'initial-unsafe-probe-cave-acl',
+  'initial-unsafe-probe-cave-missing',
+  'initial-unsafe-probe-cave-unavailable',
+  'initial-unsafe-probe-directories-safe',
+  'initial-unsafe-probe-unknown',
+
   'initial-invalid',
   'initial-body-limit',
   'initial-service',
@@ -1573,6 +1597,39 @@ export async function runSchemaV2StageAsync(stage, action) {
   }
 }
 
+export async function observeInitialDiscoverySafety(rpc, outcome, platform) {
+  if (outcome !== 'unsafe' || platform !== 'win32') {
+    return null;
+  }
+  try {
+    return classifyDiscoverySafetyProbe(await rpc.ok('conformance_discovery_safety'));
+  } catch {
+    // Preserve the original failure; never publish the probe's raw error.
+    return 'unknown';
+  }
+}
+
+export function classifyDiscoverySafetyProbe(response) {
+  const directories = response?.directories;
+  if (!Array.isArray(directories) || directories.length < 1 || directories.length > 3) {
+    return 'unknown';
+  }
+  const scopes = ['profile', 'coven', 'cave'];
+  const categories = ['type', 'reparse', 'owner', 'owner-acl', 'acl', 'missing', 'unavailable'];
+  for (let index = 0; index < directories.length; index += 1) {
+    const entry = directories[index];
+    if (!Array.isArray(entry) || entry.length !== 2 || entry[0] !== scopes[index]) {
+      return 'unknown';
+    }
+    if (entry[1] !== 'safe') {
+      return index === directories.length - 1 && categories.includes(entry[1])
+        ? `${scopes[index]}-${entry[1]}`
+        : 'unknown';
+    }
+  }
+  return directories.length === 3 ? 'directories-safe' : 'unknown';
+}
+
 export function classifyInitialDiscoveryOutcome(response) {
   if (response?.ok === true) {
     return 'present';
@@ -1630,6 +1687,13 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
     }
     if (message === 'native RPC cave_read_discovery did not return cave_discovery_not_found') {
       return 'phase1.native-scenarios.launch.initial-discovery';
+    }
+    const safetyProbeFailure =
+      /^native RPC initial unsafe follow-up probe ((?:profile|coven|cave)-(?:type|reparse|owner|owner-acl|acl|missing|unavailable)|directories-safe|unknown)$/u.exec(
+        message,
+      );
+    if (safetyProbeFailure !== null) {
+      return `phase1.native-scenarios.launch.initial-unsafe-probe-${safetyProbeFailure[1]}`;
     }
     const initialDiscoveryFailure =
       /^native RPC cave_read_discovery initial outcome (present|unavailable|unsafe|invalid|body-limit|service|unknown)$/u.exec(
@@ -4305,6 +4369,14 @@ async function runNativeScenarios({
       const initialDiscoveryOutcome = classifyInitialDiscoveryOutcome(
         await rpc.request('cave_read_discovery', { operation: rpc.operation() }),
       );
+      const safetyCategory = await observeInitialDiscoverySafety(
+        rpc,
+        initialDiscoveryOutcome,
+        process.platform,
+      );
+      if (safetyCategory !== null) {
+        throw new Error(`native RPC initial unsafe follow-up probe ${safetyCategory}`);
+      }
       if (initialDiscoveryOutcome !== null) {
         throw new Error(
           `native RPC cave_read_discovery initial outcome ${initialDiscoveryOutcome}`,

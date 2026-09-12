@@ -1361,20 +1361,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,602 | `d1fab512c10956b8d55b29aad928acb4ff02d3250e2e01ca95dddfd8aa82671c` |
+| `.github/workflows/client-v1-conformance.yml` | 511,602 | `3ee017cf2fa132905a3df89091fb67a83b600387af5ed96e3c6b7cfbdca0c3b0` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 210,200 | `cbd8c1e68a040286ef6959ffa5b9b1f65289a5532bbc433e01aab938bc4ffc31` |
+| `scripts/phase1-conformance.mjs` | 211,829 | `00b45fe95356695794cb32a64e2c79f2869af56bea8dbd7949bcba2aab8a191d` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 205,202 | `28beefe8045bcad275f23978880b5588282fc98db275a676a9b3f3bcf832fa84` |
+| `scripts/phase1-schema-v2-producer.mjs` | 207,954 | `cecf11f2ab7e80500dcfaa9cb3fca1e534cf9c39a4459a47dacdab6ca27d9da4` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1837,3 +1837,21 @@ public RPC codes; arbitrary error codes, response bodies, paths, handles,
 process identifiers and exception text remain redacted. The expected
 not-found result still proceeds to launch, and all other outcomes still fail
 closed before launch.
+
+### Windows initial discovery safety observations
+
+After Windows returns `unsafe_discovery_record` before launch, the conformance
+producer requests a read-only directory safety observation from the same native
+RPC process. The probe obtains the profile root from the current process token,
+then checks the profile, `.coven`, and `cave` directory handles in order. It stops
+at the first non-safe directory and publishes only a fixed scope and category:
+type, reparse, owner, combined owner/ACL, ACL, missing, or unavailable. It publishes no paths, SIDs,
+ACL contents, handles, or discovery bytes. Caller-selected roots are rejected.
+
+The `initial-unsafe-probe-*` failure remains a failure. It describes a subsequent
+observation, not a captured snapshot of the original rejected read. In particular,
+`directories-safe` does not establish discovery file safety or successful launch.
+Malformed responses and probe errors produce `unknown`. Existing ownership,
+trusted-writer ACL, reparse, and identity acceptance checks remain unchanged.
+Native Windows execution and fresh protected evidence are required to establish
+the actual failing condition; local metadata tests are not that evidence.
