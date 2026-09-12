@@ -1686,7 +1686,10 @@ foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
 )
 `$caveRootAclDenied = `$false
 try {
-  `$rootAcl = [IO.DirectoryInfo]::new(`$caveConformanceTemp).GetAccessControl('Access')
+  `$rootAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
   `$rootAcl.AddAccessRule(
     [Security.AccessControl.FileSystemAccessRule]::new(
       [Security.Principal.WindowsIdentity]::GetCurrent().User,
@@ -1707,7 +1710,10 @@ if (-not `$caveRootAclDenied) {
 `$caveAclProbe = Join-Path `$caveConformanceTemp "acl-repair-$([Guid]::NewGuid().ToString('N'))"
 [IO.Directory]::CreateDirectory(`$caveAclProbe) | Out-Null
 try {
-  `$caveAcl = [IO.DirectoryInfo]::new(`$caveAclProbe).GetAccessControl('Access')
+  `$caveAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveAclProbe),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
   `$caveAcl.SetAccessRuleProtection(`$true, `$false)
   foreach (`$sid in @(
     [Security.Principal.WindowsIdentity]::GetCurrent().User,
