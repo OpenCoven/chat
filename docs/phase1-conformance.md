@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `b0c4f976c4ceadd9bcebab21c40d733e155e48d2`,
-  tree `f677ecff0d7a5793257ca11c7922ffc0fd033b35`, retained in the
+- Chat conformance driver `2456be72daa92e580fe16cde954fd6eace25a089`,
+  tree `66eb43874130c4a9572ad2e152903adee92b7de4`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -871,6 +871,18 @@ bootstrap cleanup first deletes files through the supervisor-controlled parent
 before attempting a read-only-attribute fallback. The native timeout case
 leaves an owner-only staging file in place while quota monitoring runs and
 proves terminal cleanup still removes the complete bootstrap root.
+
+The protected Windows bootstrap also provisions a dedicated 64 MiB Cave
+conformance temp root. The general temp and workspace roots retain their
+`OWNER RIGHTS` read-only ACE, which prevents the isolated producer from
+rewriting their DACLs. The dedicated root instead grants the isolated identity
+explicit full control while retaining the same protected owner, SYSTEM,
+Administrators, and supervisor ACL shape. Only the Cave real-authority child
+receives that root as `TEMP`/`TMP`/`TMPDIR`; its newly created fixture
+descendants can therefore remove inherited supervisor access and enforce
+Cave's stricter discovery-directory ACL without weakening the rest of the
+producer sandbox.
+
 The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
@@ -1348,7 +1360,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,601 | `695e66ad899e8d2817b8cb3a406d1c625aa4c38b38b863f68948ffa5a0b1fa33` |
+| `.github/workflows/client-v1-conformance.yml` | 511,743 | `c9b7e7bf3e6b484925b34949835dbe215d2debd846ac1148e57399383d572784` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1361,7 +1373,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 200,758 | `3e98a7881d53703e38a043a1d28c4c2a06467adabb8c2fc7b5835431803c3d25` |
+| `scripts/phase1-schema-v2-producer.mjs` | 201,595 | `10a66fac1cc2a1f084b680e8a740024310ec4af47506d6b39fea21083e4721cb` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1373,8 +1385,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 330,220 | `8d5e68f9d44049bd00bcdb8291d4e7c542dcdeaf1e15685b619962a12e0f30ca` |
-| `scripts/windows-job-supervisor.test.ps1` | 178,124 | `b22a424e2cf90ea6c06c184cf7bf0ca737f6e0a55e656ecc2ff614b5969b4b64` |
+| `scripts/windows-job-supervisor.cs` | 329,795 | `e790a12671f7a3fce16ff488a72f6b8b4bc094d83073834cdc0e92fef1c10fab` |
+| `scripts/windows-job-supervisor.test.ps1` | 180,439 | `920e5cae9dbb650d627d053100ead7755b26058a46c645331177b6c5757930ea` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 21,401 | `b98a2c18ecf3ca7ee749bfa278cb1132250c1db5fc7cc28920e3384a38066c9c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |

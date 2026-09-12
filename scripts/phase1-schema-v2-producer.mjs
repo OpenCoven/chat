@@ -512,6 +512,14 @@ export function schemaV2NativeBuildEnvironment(environment, platform = process.p
   };
 }
 
+export function caveAuthorityEnvironment(environment, platform = process.platform) {
+  if (platform !== 'win32' || environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP === undefined) {
+    return environment;
+  }
+  const temp = environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP;
+  return { ...environment, TMPDIR: temp, TMP: temp, TEMP: temp };
+}
+
 export function bindMacosKeychainSessionEnvironment(environment, session) {
   environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED = '1';
   environment.PHASE1_TEST_KEYCHAIN = session.keychainPath;
@@ -530,6 +538,7 @@ export function windowsJobBindingEnvironment(
   const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
   const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
   const bootstrapRoot = environment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT;
+  const caveConformanceTemp = environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP;
   const statusStagingDirectory = environment.COVEN_WINDOWS_STATUS_STAGING_DIR;
   const statusStagingSupervisorSid = environment.COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID;
   const statusStagingSidComponents =
@@ -617,6 +626,7 @@ export function windowsJobBindingEnvironment(
     }
   };
   const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot);
+  const canonicalCaveConformanceTemp = requireCanonicalWindowsPath(caveConformanceTemp);
   const canonicalWorkspace = requireCanonicalWindowsPath(workspace);
   const canonicalStatusStagingDirectory = requireCanonicalWindowsPath(statusStagingDirectory);
   const canonicalArtifactDirectory = requireCanonicalWindowsPath(artifactDirectory);
@@ -627,11 +637,14 @@ export function windowsJobBindingEnvironment(
     secondaryTemporaryDirectory,
   );
   requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
+  requireDescendant(canonicalBootstrapRoot, canonicalCaveConformanceTemp);
   requireDescendant(canonicalBootstrapRoot, canonicalStatusStagingDirectory);
   requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
   requireDescendant(canonicalBootstrapRoot, canonicalPnpmCli);
   if (
     windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    canonicalCaveConformanceTemp.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'cave-conformance-temp').toLowerCase() ||
     canonicalStatusStagingDirectory.toLowerCase() !==
       windowsPath.join(canonicalBootstrapRoot, 'status-staging').toLowerCase() ||
     canonicalWorkspace.toLowerCase() !==
@@ -678,6 +691,7 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_JOB_NAME: name,
     OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
     OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: canonicalBootstrapRoot,
+    OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: canonicalCaveConformanceTemp,
     COVEN_WINDOWS_STATUS_STAGING_DIR: canonicalStatusStagingDirectory,
     COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: statusStagingSupervisorSid,
     OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
@@ -3211,7 +3225,7 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
     ],
     {
       cwd: caveRoot,
-      env: environment,
+      env: caveAuthorityEnvironment(environment),
       timeoutMs: caveConformanceTimeoutMs,
     },
   );

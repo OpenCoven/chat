@@ -1239,6 +1239,13 @@ if (
 Write-Host "Windows isolated account validation: $($isolatedUser.ValidationSummary)"
 $ephemeralUserName = $isolatedUser.UserName
 $ephemeralProfilePath = $isolatedUser.OperatingSystemProfilePath
+$caveConformanceTemp = Join-Path $isolatedUser.RootPath 'cave-conformance-temp'
+[IO.Directory]::CreateDirectory($caveConformanceTemp) | Out-Null
+[OpenCoven.WindowsJobSupervisor]::SecureCaveConformanceTempDirectory(
+  $caveConformanceTemp,
+  $isolatedUser.Sid,
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+)
 $operatorPrivateRoot = Join-Path (
   [IO.Path]::GetTempPath()
 ) "opencoven-supervisor-private-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -1254,6 +1261,7 @@ $childEnvironment = @{
   TEMP = $isolatedUser.TempPath
   TMP = $isolatedUser.TempPath
   COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
+  OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP = $caveConformanceTemp
   GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
   OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
@@ -1275,6 +1283,15 @@ function New-IsolatedTestContext {
   $contextEnvironment.TEMP = $contextUser.TempPath
   $contextEnvironment.TMP = $contextUser.TempPath
   $contextEnvironment.COVEN_WINDOWS_STATUS_STAGING_DIR = $contextUser.StatusStagingPath
+  $contextCaveConformanceTemp = Join-Path $contextUser.RootPath 'cave-conformance-temp'
+  [IO.Directory]::CreateDirectory($contextCaveConformanceTemp) | Out-Null
+  [OpenCoven.WindowsJobSupervisor]::SecureCaveConformanceTempDirectory(
+    $contextCaveConformanceTemp,
+    $contextUser.Sid,
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  )
+  $contextEnvironment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP =
+    $contextCaveConformanceTemp
   $contextEnvironment.GITHUB_WORKSPACE = $contextUser.WorkspacePath
   $contextEnvironment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $contextUser.RootPath
   return [pscustomobject]@{
@@ -1642,6 +1659,8 @@ if (
 `$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
 `$temp = [IO.Path]::GetFullPath(`$env:TEMP)
 `$statusStaging = [IO.Path]::GetFullPath(`$env:COVEN_WINDOWS_STATUS_STAGING_DIR)
+`$caveConformanceTemp =
+  [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP)
 `$workspace = [IO.Path]::GetFullPath(`$env:GITHUB_WORKSPACE)
 if (-not `$profile.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user profile is outside the isolated root.'
@@ -1655,6 +1674,9 @@ if (-not `$workspace.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase
 if (-not `$statusStaging.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted status staging directory is outside the isolated root.'
 }
+if (-not `$caveConformanceTemp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted Cave conformance temp directory is outside the isolated root.'
+}
 foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(`$directory)
 }
@@ -1662,6 +1684,36 @@ foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   `$statusStaging,
   `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
 )
+`$caveAclProbe = Join-Path `$caveConformanceTemp "acl-repair-$([Guid]::NewGuid().ToString('N'))"
+[IO.Directory]::CreateDirectory(`$caveAclProbe) | Out-Null
+try {
+  `$caveAcl = [IO.DirectoryInfo]::new(`$caveAclProbe).GetAccessControl('Access')
+  `$caveAcl.SetAccessRuleProtection(`$true, `$false)
+  foreach (`$sid in @(
+    [Security.Principal.WindowsIdentity]::GetCurrent().User,
+    [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+    [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+  )) {
+    `$caveAcl.AddAccessRule(
+      [Security.AccessControl.FileSystemAccessRule]::new(
+        `$sid,
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+          [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+      )
+    )
+  }
+  [IO.FileSystemAclExtensions]::SetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveAclProbe),
+    `$caveAcl
+  )
+} catch {
+  throw "Cave conformance child DACL repair failed."
+} finally {
+  [IO.Directory]::Delete(`$caveAclProbe, `$true)
+}
 `$operatorDenied = `$false
 try {
   [IO.File]::ReadAllText(

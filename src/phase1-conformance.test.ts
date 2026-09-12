@@ -950,6 +950,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const nonce = '0123456789abcdef0123456789abcdef';
     const bootstrapRoot = `C:\\OpenCoven\\opencoven-win32-${nonce}`;
     const workspace = `${bootstrapRoot}\\workspace`;
+    const caveConformanceTemp = `${bootstrapRoot}\\cave-conformance-temp`;
     const artifactDirectory = `${workspace}\\.artifacts`;
     const binding = {
       OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
@@ -959,6 +960,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
       COVEN_WINDOWS_STATUS_STAGING_DIR: `${bootstrapRoot}\\status-staging`,
       COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
+      OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: caveConformanceTemp,
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
@@ -1025,6 +1027,30 @@ describe('Phase 1 real-authority conformance harness', () => {
         'win32',
       ),
     ).toThrow('phase1.stage.invocation.windows-path');
+    for (const caveTempPath of [
+      workspace,
+      `${bootstrapRoot}\\temp`,
+      'C:\\ambient\\cave-conformance-temp',
+    ]) {
+      expect(() =>
+        windowsJobBindingEnvironment(
+          {
+            ...binding,
+            OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: caveTempPath,
+          },
+          'win32',
+        ),
+      ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+    }
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
+          OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: undefined,
+        },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-path');
     expect(() =>
       windowsJobBindingEnvironment({ ...binding, OPENCOVEN_WINDOWS_JOB_REQUIRED: '0' }, 'win32'),
     ).toThrow('phase1.stage.invocation.windows-job-required');
@@ -1079,6 +1105,24 @@ describe('Phase 1 real-authority conformance harness', () => {
         'win32',
       ),
     ).toThrow('phase1.stage.invocation.windows-artifact-binding');
+  });
+
+  test('routes only Windows Cave authority fixtures through the ACL-repairable temp root', () => {
+    const environment = {
+      PATH: 'C:\\trusted\\node',
+      TMPDIR: 'C:\\restricted\\tmp',
+      TMP: 'C:\\restricted\\tmp',
+      TEMP: 'C:\\restricted\\tmp',
+      OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: 'C:\\isolated\\cave-conformance-temp',
+    };
+
+    expect(schemaV2Producer.caveAuthorityEnvironment(environment, 'win32')).toEqual({
+      ...environment,
+      TMPDIR: 'C:\\isolated\\cave-conformance-temp',
+      TMP: 'C:\\isolated\\cave-conformance-temp',
+      TEMP: 'C:\\isolated\\cave-conformance-temp',
+    });
+    expect(schemaV2Producer.caveAuthorityEnvironment(environment, 'linux')).toBe(environment);
   });
 
   test('invokes the pinned pnpm CLI through Node on Windows', () => {
@@ -1357,6 +1401,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
       OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: bootstrapRoot,
+      OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: `${bootstrapRoot}\\cave-conformance-temp`,
       COVEN_WINDOWS_STATUS_STAGING_DIR: `${bootstrapRoot}\\status-staging`,
       COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: 'S-1-5-21-100-200-300-1001',
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
@@ -1422,6 +1467,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
       OPENCOVEN_WINDOWS_JOB_NAME: `Local\\OpenCoven.Chat.Conformance.${nonce}`,
       OPENCOVEN_WINDOWS_SYSTEM_PWSH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: `${bootstrapRoot}\\cave-conformance-temp`,
       OPENCOVEN_WINDOWS_WORKSPACE: workspace,
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
