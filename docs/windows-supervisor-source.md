@@ -1,19 +1,20 @@
 # Bounded Windows supervisor source
 
-Status: preparatory implementation; not yet adopted by the protected workflow.
-Windows profile-root alignment and protected three-platform acceptance remain open.
+The workflow uses the bounded source block. SDK producer rebinding and fresh
+protected validation remain deployment gates. Windows profile-root alignment and
+protected three-platform acceptance remain open.
 
-The protected workflow currently embeds 329,556 bytes of readable C# and occupies
-511,638 bytes of GitHub's 512,000-byte workflow allowance. The source renderer in
-`scripts/windows-supervisor-source.mjs` prepares a compressed literal to recover
-space for the profile lifecycle and shared quota repair. The canonical C# remains
+The previous inline form occupied 511,638 bytes of GitHub's 512,000-byte workflow
+allowance. The bounded form occupies 161,784 bytes and retains the same 329,556
+bytes of C#. The source renderer in `scripts/windows-supervisor-source.mjs`
+recovers space for the profile lifecycle and shared quota repair. The canonical C# remains
 `scripts/windows-job-supervisor.cs`; compression does not change its behavior.
 
 The renderer uses level-9 gzip with a zero timestamp and a platform-neutral OS
 header byte. Generate and verify with the reviewed Node 24.18.1 toolchain and its
 matching zlib implementation. Exact canonical verification intentionally rejects
 alternate compressor output. Cross-platform CI must verify this property before
-workflow adoption; normalizing the header alone is not that proof.
+protected deployment; normalizing the header alone is not that proof.
 
 The PowerShell block checks compressed length and SHA-256 before decompression,
 then reads into an allocation bounded by the reviewed source size. It rejects a
@@ -27,18 +28,19 @@ re-rendering of the entire block. That comparison rejects changed decoder code,
 extra statements, alternate gzip encodings, trailing padding and concatenated
 streams. Runtime hash literals are not an independent source of authority.
 
-## Adoption requirements
+## Verification and remaining deployment gates
 
-- Extract exactly one block from the trusted workflow and bind its source identity
-  to the independently reviewed frozen C# blob.
-- Preserve all existing supervisor assertions over verified decoded plaintext.
+- Chat workflow tests extract exactly one block and bind its source identity to
+  the unchanged canonical C# blob; existing frozen source checks remain in place.
+- Existing supervisor assertions operate on verified decoded plaintext.
 - Verify the complete execution path, including the subsequent compilation call;
   reject later source reassignment or alternate compilation.
 - Update Chat and SDK verification and exact workflow fixtures together before
   dispatching the changed workflow. Retain negative mutation tests for the decoder
   and its execution path.
-- Obtain native Windows validation of the full supervisor. Local PowerShell
-  compilation proves decoding and C# syntax, not Windows runtime behavior.
+- Windows CI checks the committed payload with the pinned Node compressor and
+  compiles the full decoded C# in PowerShell, alongside existing native supervisor
+  behavior tests. Successful local compilation alone is not Windows runtime proof.
 - Then implement actual profile-root alignment and shared aggregate accounting,
   with existing quotas and fail-closed behavior unchanged, followed by fresh
   protected validation of all three platforms.

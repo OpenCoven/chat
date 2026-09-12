@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
@@ -36,26 +37,38 @@ function replacePayload(block: string, bytes: Buffer): string {
 
 function runPowerShell(block: string) {
   const script = `$ErrorActionPreference = 'Stop'\ntry {\n${block}\nAdd-Type -TypeDefinition $jobSupervisorSource -Language CSharp\nWrite-Output 'COMPILED'\n} catch { Write-Output 'REJECTED'; exit 19 }\n`;
-  return spawnSync(
-    'pwsh',
-    [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-EncodedCommand',
-      Buffer.from(script, 'utf16le').toString('base64'),
-    ],
-    {
+  const directory = mkdtempSync(resolve(tmpdir(), 'chat-supervisor-codec-'));
+  try {
+    const scriptPath = resolve(directory, 'compile.ps1');
+    writeFileSync(scriptPath, script);
+    return spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', scriptPath], {
       encoding: 'utf8',
       timeout: 30_000,
-    },
-  );
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 const pwshAvailable =
   spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
 
 describe('bounded Windows supervisor source', () => {
+  test('verifies the checked-in workflow payload with the current platform compressor', () => {
+    const workflow = readFileSync(resolve('.github/workflows/client-v1-conformance.yml'), 'utf8');
+    const start = workflow.indexOf('          # BEGIN bounded Windows supervisor source v1');
+    const endMarker = '          # END bounded Windows supervisor source v1';
+    const end = workflow.indexOf(endMarker, start) + endMarker.length;
+    expect(start).toBeGreaterThan(-1);
+    const block = workflow
+      .slice(start, end)
+      .split('\n')
+      .map((line) => line.slice(10))
+      .join('\n');
+    expect(decodeWindowsSupervisorSource(block, expected)).toEqual(source);
+    if (process.platform === 'win32') expect(pwshAvailable).toBe(true);
+  });
+
   test('uses a platform-neutral gzip header for cross-platform canonical verification', () => {
     const block = renderWindowsSupervisorSource(source);
     const encoded = /\$encodedSupervisor = @'\n([^\n]+)/u.exec(block)?.[1];
@@ -113,6 +126,13 @@ describe('bounded Windows supervisor source', () => {
       expect(() =>
         decodeWindowsSupervisorSource(replacePayload(block, payload), expected),
       ).toThrow();
+  });
+
+  test.skipIf(!pwshAvailable)('PowerShell decodes and compiles the complete supervisor', () => {
+    const result = runPowerShell(renderWindowsSupervisorSource(source));
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('COMPILED');
   });
 
   test.skipIf(!pwshAvailable)('PowerShell decodes and compiles the verified source', () => {

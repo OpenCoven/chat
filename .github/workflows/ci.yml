@@ -720,6 +720,8 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify bounded supervisor source on Windows
+        run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run src/windows-supervisor-source.test.ts
       - name: Reproduce shallow Windows authority checkout
         run: >-
           corepack pnpm@10.34.0 --ignore-workspace exec vitest run
