@@ -4,8 +4,8 @@ The workflow uses the bounded source block. SDK producer rebinding and fresh
 protected validation remain deployment gates. Windows profile-root alignment and
 protected three-platform acceptance remain open.
 
-The previous inline form occupied 511,638 bytes of GitHub's 512,000-byte workflow
-allowance. The bounded form occupies 161,784 bytes and retains the same 329,556
+The previous inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
+allowance. The bounded form occupies 161,836 bytes and retains the same 329,668
 bytes of C#. The source renderer in `scripts/windows-supervisor-source.mjs`
 recovers space for the profile lifecycle and shared quota repair. The canonical C# remains
 `scripts/windows-job-supervisor.cs`; compression does not change its behavior.
@@ -44,3 +44,7 @@ streams. Runtime hash literals are not an independent source of authority.
 - Then implement actual profile-root alignment and shared aggregate accounting,
   with existing quotas and fail-closed behavior unchanged, followed by fresh
   protected validation of all three platforms.
+
+Concurrent Chat #249 moves fixtures beneath a predicted profile path without
+adding that subtree to the shared aggregates. Its production profile ownership
+and accounting gaps must be repaired before this producer is dispatched.
