@@ -1,6 +1,30 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 00:49 UTC
+## Consolidation checkpoint, 2026-09-12 02:27 UTC
+
+Chat [#228](https://github.com/OpenCoven/chat/pull/228) landed as
+`f77b24912ccf2492e6d79adb306da8c858af0595`; SDK
+[#211](https://github.com/OpenCoven/sdk/pull/211) landed as
+`5730979d647deb2f4173851398b0b5f091c13390`. Exact-head CI and binding review
+passed; both validator scopes were read back at the SDK merge.
+
+Protected [run 34666399779](https://github.com/OpenCoven/chat/actions/runs/34666399779)
+passed Linux and macOS. Both records independently passed archive digest,
+schema, private-data scans, exact identities, Cave timing and all 197 ordered
+assertions. Windows failed before the Cave diagnostic path with
+`access-denied; root=harness-execution-aggregate; operation=directory-enumeration`.
+Validation, attestation and aggregation were skipped. Neither a Cave record
+mismatch nor recurrence of the earlier quota-reader token defect is established.
+
+The next diagnostic distinguishes fixed traversal depths at enumeration failure
+without exposing paths or changing permissions, limits or acceptance. Native
+Windows CI, a reviewed frozen producer/SDK binding and fresh protected execution
+remain required. Chat #219, Coven #984, SDK #38 and the final release gate stay
+open; Beads and the authorized Teamwork root record the terminal evidence.
+Chat #86 remains parked on SDK release. Chat and active/dirty/uncertain worktrees
+are preserved; the minimum working set remains unproven.
+
+## Historical consolidation checkpoint, 2026-09-12 00:49 UTC
 
 Chat #227 landed as `c680e0a42087e956285725d02db442bfab676660`; SDK #209
 landed as `cab82608a400d6fd9934cc6f11785eebac16415a`. Both validator scopes

@@ -26,11 +26,14 @@ The September 9 full inventory includes 68 records: 30 closed, one open, and
 37 blocked. Teamwork card text, board Status fields, and missing mirrors are
 being reconciled separately. Preserve `until` gates when projecting blocking
 dependencies. The roadmap records the current protected run and unresolved
-release acceptance; historical phase closures do not satisfy that gate. The latest
-candidate/binding checkpoint records the merged SDK #186 identity repair,
-replacement candidate `1597835325cf3762b51408ff0a565037eeb25f64`, and the
-paired Chat/SDK #189 changes. Their reviewed artifacts and source pins still
-require final producer binding and fresh protected acceptance.
+release acceptance; historical phase closures do not satisfy that gate. The September 12 checkpoint records
+merged Chat #228 and SDK #211, both validator scopes bound to SDK `5730979`,
+and protected run `34666399779`. Linux and macOS records independently passed
+all 197 assertions, identities and timing. Windows failed at quota directory
+enumeration before Cave diagnostics; aggregate acceptance remains incomplete.
+Chat #219, Coven #984, SDK #38 and final gate `cave-ilh1h` remain open. The
+roadmap and Beads retain the terminal evidence and bounded diagnostic follow-up;
+historical phase closures remain unchanged.
 
 ## Tracker Summary
 

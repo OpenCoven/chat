@@ -1348,7 +1348,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 500,326 | `493a5fed24751e6b0c1d2210726ab3af0ae76e89b679357a36ed5b6a0216e6fb` |
+| `.github/workflows/client-v1-conformance.yml` | 501,294 | `6086cf8e4bcdbe575b9b47b2b97f2ab67a806117338719f9e36b0594ad1ff207` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1373,10 +1373,10 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 319,914 | `62b243a47e7646b1dafcc1583101332d9c7004d98ac200bb91bc828867928526` |
+| `scripts/windows-job-supervisor.cs` | 320,762 | `2fe4016a469194eb516abb6665bd3673f33197335399ac37a90ac9ffe880d632` |
 | `scripts/windows-job-supervisor.test.ps1` | 178,124 | `b22a424e2cf90ea6c06c184cf7bf0ca737f6e0a55e656ecc2ff614b5969b4b64` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 13,409 | `2594ddf573f7642eea7e050382dcc523daa5b477852d3db774b570328502a2e8` |
-| `scripts/windows-owner-directory-quota.test.ps1` | 11,176 | `23b0b5106c5d50676622bf74238e465a80c5a6a9d017275d067263673d9ceecb` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 14,364 | `45907af009adf61d395c23b1c8fb9507e4702a7535f83b80981727c307e62e8d` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 17,205 | `8125f8a2166c4cc65e461b3019d2497656aa51e11fdea80eceb7b336aad299c1` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,596 | `fa738d8e93a8132a26e34fbbb58e89f7ac12c13e7298cf923f8db6b31e7097c5` |
@@ -1693,3 +1693,28 @@ These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and
 SDK binding followed by fresh protected execution before identifying the cause
 of the Windows failure.
+
+## Bounded Windows quota traversal depth
+
+Protected run `34666399779` used Chat #228 (`f77b249`) and SDK #211
+(`5730979`). Linux and macOS passed independently verified identities,
+Cave timing and all 197 ordered assertions. Windows failed earlier, at
+`access-denied; root=harness-execution-aggregate; operation=directory-enumeration`.
+The run did not reach the new Cave diagnostic path. It does not establish a
+Cave identity, timing or assertion mismatch, or a recurrence of the earlier
+quota-reader token defect. Validation, attestation and aggregation were skipped.
+
+Quota traversal now distinguishes `directory-enumeration-root`,
+`directory-enumeration-depth-1`, `directory-enumeration-depth-2` and
+`directory-enumeration-depth-3-plus`. Depth starts at each matched quota root,
+including wildcard matches, and saturates at three. Pattern discovery retains
+`pattern-enumeration`. Only these fixed operation labels cross the failure
+boundary; directory names and original exception text remain discarded.
+The first failure, isolated-user reader, accounting, reparse handling, limits
+and fail-closed behavior are unchanged.
+
+The native diagnostic regression denies enumeration at depths 0, 1, 2, 3 and 5
+under direct and wildcard roots, exercises terminal and background monitoring,
+and checks that later failures cannot replace the first depth classification.
+A new frozen producer and SDK binding plus fresh protected execution are still
+required to identify which depth fails on the Windows runner.
