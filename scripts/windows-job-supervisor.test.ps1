@@ -99,6 +99,7 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 & (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-owner-directory-quota.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-delete-pending.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-lifetime.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-isolated-reader.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-identity-cleanup-diagnostics.test.ps1')
