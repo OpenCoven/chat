@@ -429,6 +429,10 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('fits the GitHub Actions 500 KiB workflow file limit', () => {
+    expect(readFileSync(workflowPath).byteLength).toBeLessThanOrEqual(500 * 1024);
+  });
+
   test('pins the exact checked-in Phase 1 harness bytes', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const harness = readFileSync(harnessPath);

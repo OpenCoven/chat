@@ -1,6 +1,6 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 04:28 UTC
+## Consolidation checkpoint, 2026-09-12 04:36 UTC
 
 Chat [#230](https://github.com/OpenCoven/chat/pull/230) merged as
 `09410982d3a85cbfbcdf2d2d193c3a96e8e80f74`; exact-head CI run
@@ -22,10 +22,13 @@ traversal bound, cleanup or acceptance rule changes. SDK #213 has landed as
 `5e76d40a4056dae128c711c875ad8f9a5edbfe20`, binding Chat #230. Both validator
 scopes read back that revision, and protected run
 [34672157833](https://github.com/OpenCoven/chat/actions/runs/34672157833) was
-approved after its supervisor build passed. Linux independently passed archive
-integrity, scans, exact identities, Cave timing and all 197 ordered assertions;
-Darwin and Windows remain pending as of 04:28 UTC. The additional diagnostic
-in #231 requires its own verified landing and subsequent SDK binding. Chat
+approved after its supervisor build passed. Linux and Darwin independently
+passed archive integrity, scans, exact identities, Cave timing and all 197
+ordered assertions each. Windows failed closed at `harness-cargo-registry`,
+`directory-enumeration-depth-3-plus`, with `access-denied`. Validation, attestation
+and aggregation were skipped. This is distinct from the earlier bootstrap
+root observation and establishes no Cave record mismatch. The additional
+diagnostic in #231 requires its own verified landing and subsequent SDK binding. Chat
 #219, Coven #984, SDK #38 and final protected acceptance remain open. Chat and
 active worktrees are preserved.
 
@@ -755,3 +758,12 @@ they were not force-deleted to satisfy a branch-count target.
 Delivery remains incomplete: draft PR readiness, Teamwork mirror synchronization,
 a compatible Beads write path, protected release conformance, and the SDK release
 must still be resolved. Local cleanup is not proof of program completion.
+
+## Protected workflow file-size guard
+
+GitHub rejected the initial #231 workflow at 512,502 bytes because its limit is
+500 KiB (512,000 bytes). Serializing the existing artifact-validation script
+as a quoted YAML scalar reduces the file to 511,839 bytes. The entire parsed
+workflow, including every command and setting, is unchanged. A regression
+check now enforces the GitHub limit; the final workflow size and hash are
+recorded in the conformance guide and must be used by the next SDK binding.
