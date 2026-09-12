@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `64932c955de3aa823732d31abd927d7a91f26632`,
-  tree `a31e6a1e2e004a5094210cea52b3a937db664d94`, retained in the
+- Chat conformance driver `0a2cf1c9815b511bcc53e37360b5b2bafdfe20dd`,
+  tree `8af153dba24817a92b4843a192d80a2fdcf468d7`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,602 | `42f236d3ff80fe761ec21580830464e96ee43f918cd831382ee11be85765af2c` |
+| `.github/workflows/client-v1-conformance.yml` | 511,638 | `67d5a23b0a795b5e8f9f272c0e4be62a4babcef88762dd8b444a2a17647e6e39` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,9 +1386,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,530 | `d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a` |
+| `scripts/windows-job-supervisor.cs` | 329,556 | `de2103afa3c475a9696d68cc3db3cdbfb022731cb35a5a49507148b540b7d0e0` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,748 | `b6835ef6ebadec046086f8f36b5df518d6462e486c3b32a92bff027d316744ea` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1785,8 +1785,10 @@ attributes, enumeration, entry attributes and file-length failures for the
 current bounded traversal node.
 
 After an initial metadata failure, the same validated isolated-user token
-performs one immediate bounded repeat. `transient` means that repeat returned
-or the target disappeared; `persistent` means it threw again. Enumeration
+performs one immediate bounded repeat. `readable` means the callback returned;
+`missing` means it reported a missing file or directory; `persistent` means
+it threw another exception, which need not match the first error. Older bound
+producers reported both readable and missing outcomes as `transient`. Enumeration
 creates a fresh enumerator, entry attributes use a fresh static metadata read,
 and file length uses a fresh metadata object, so each repeat reaches the
 filesystem again. The original failure still terminates production in either

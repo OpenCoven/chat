@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "64932c955de3aa823732d31abd927d7a91f26632"
+    "revision": "0a2cf1c9815b511bcc53e37360b5b2bafdfe20dd"
   },
   "harnessAuthority": {
-    "revision": "64932c955de3aa823732d31abd927d7a91f26632",
-    "tree": "a31e6a1e2e004a5094210cea52b3a937db664d94",
+    "revision": "0a2cf1c9815b511bcc53e37360b5b2bafdfe20dd",
+    "tree": "8af153dba24817a92b4843a192d80a2fdcf468d7",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "b027551647acbe9251f7b184a9e51c69d3a4c4f0",
-        "sha256": "d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a"
+        "blob": "dd9f643230fda1a634f2d5c73e1379f1e9eb8a19",
+        "sha256": "de2103afa3c475a9696d68cc3db3cdbfb022731cb35a5a49507148b540b7d0e0"
       },
       {
         "path": "scripts/contract-canary.mjs",
