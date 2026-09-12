@@ -3130,7 +3130,7 @@ ${pathAssignment}
       ]) {
         expect(source).toContain(`"${scope}"`);
       }
-      for (const repeat of ['none', 'transient', 'persistent']) {
+      for (const repeat of ['none', 'readable', 'missing', 'persistent']) {
         expect(source).toContain(`"${repeat}"`);
       }
       expect(source).toContain(

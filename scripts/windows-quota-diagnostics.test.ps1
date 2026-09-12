@@ -225,6 +225,33 @@ namespace OpenCoven.Tests
     {
         public static int TransientCalls;
         public static int PersistentCalls;
+        public static int MissingFileCalls;
+        public static int MissingDirectoryCalls;
+        public static int ChangedErrorCalls;
+        public static Func<string> MissingFileRead { get { return MissingFile; } }
+        public static Func<string> MissingDirectoryRead { get { return MissingDirectory; } }
+        public static Func<string> ChangedErrorRead { get { return ChangedError; } }
+
+        public static string MissingFile()
+        {
+            MissingFileCalls++;
+            if (MissingFileCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.FileNotFoundException("private-missing-file");
+        }
+
+        public static string MissingDirectory()
+        {
+            MissingDirectoryCalls++;
+            if (MissingDirectoryCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.DirectoryNotFoundException("private-missing-directory");
+        }
+
+        public static string ChangedError()
+        {
+            ChangedErrorCalls++;
+            if (ChangedErrorCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.IOException("private-second-io");
+        }
         public static Func<string> TransientRead { get { return Transient; } }
         public static Func<string> PersistentRead { get { return Persistent; } }
 
@@ -256,8 +283,11 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1) {
 }
 [OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
 foreach ($repeatCase in @(
-    @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'transient', 'TransientCalls'),
-    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'))) {
+    @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'readable', 'TransientCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingFileRead, 'missing', 'MissingFileCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingDirectoryRead, 'missing', 'MissingDirectoryCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::ChangedErrorRead, 'persistent', 'ChangedErrorCalls'))) {
   $caught = $null
   try {
     $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0], $true, [Type]::Missing)) | Out-Null
@@ -283,7 +313,7 @@ try {
 } catch { $freshRepeatError = $_.Exception.GetBaseException() }
 if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
     [OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls -ne 2 -or
-    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($freshRepeatError) -cne 'transient' -or
+    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($freshRepeatError) -cne 'readable' -or
     $contextType.GetProperty('Category', $instanceFlags).GetValue($freshRepeatError) -cne 'access-denied') {
   throw 'Fresh diagnostic metadata read changed the original failure or initial read.'
 }
