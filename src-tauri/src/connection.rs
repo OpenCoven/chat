@@ -2904,9 +2904,10 @@ mod tests {
     #[test]
     fn launch_deadline_begins_before_reservation_and_spawn() {
         let clock = Arc::new(TestLaunchClock::default());
+        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let launcher = Arc::new(DeadlineLauncher::new(
             clock.clone(),
-            Duration::from_secs(30),
+            expected_deadline,
             Box::new(TestChild),
         ));
         let state = deadline_state(
@@ -2919,12 +2920,13 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert_eq!(clock.now(), expected_deadline);
     }
 
     #[test]
     fn readiness_polling_and_backoff_stop_at_the_absolute_deadline() {
         let clock = Arc::new(TestLaunchClock::default());
+        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let discovery = Arc::new(PollingDiscovery {
             clock: clock.clone(),
             reads: AtomicUsize::new(0),
@@ -2943,13 +2945,14 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert_eq!(clock.now(), expected_deadline);
         assert!(discovery.reads.load(Ordering::SeqCst) > 1);
     }
 
     #[test]
     fn hanging_health_cannot_extend_the_launch_attempt() {
         let clock = Arc::new(TestLaunchClock::default());
+        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let state = deadline_state(
             clock.clone(),
             Arc::new(PendingHealth),
@@ -2963,7 +2966,7 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert_eq!(clock.now(), expected_deadline);
         assert_eq!(
             tauri::async_runtime::block_on(state.cave_health(prelaunch_handle))
                 .unwrap_err()
@@ -2975,6 +2978,7 @@ mod tests {
     #[test]
     fn blocking_child_cleanup_is_transferred_without_extending_the_deadline() {
         let clock = Arc::new(TestLaunchClock::default());
+        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let cleanup_started = Arc::new(Barrier::new(2));
         let cleanup_release = Arc::new(Barrier::new(2));
         let child_state = Arc::new(BlockingChildState::default());
@@ -2996,7 +3000,7 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), Duration::from_secs(30));
+        assert_eq!(clock.now(), expected_deadline);
         cleanup_started.wait();
         assert_eq!(child_state.terminated.load(Ordering::SeqCst), 1);
         cleanup_release.wait();
