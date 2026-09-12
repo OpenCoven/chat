@@ -7020,7 +7020,8 @@ namespace OpenCoven
             string directory,
             string searchPattern,
             bool directoriesOnly,
-            int maximumEntries)
+            int maximumEntries,
+            int depth = -1)
         {
             try
             {
@@ -7081,7 +7082,11 @@ namespace OpenCoven
             {
                 throw new QuotaMonitorContextException(
                     null,
-                    directoriesOnly ? "pattern-enumeration" : "directory-enumeration",
+                    directoriesOnly ? "pattern-enumeration" :
+                        depth == 0 ? "directory-enumeration-root" :
+                        depth == 1 ? "directory-enumeration-depth-1" :
+                        depth == 2 ? "directory-enumeration-depth-2" :
+                        depth >= 3 ? "directory-enumeration-depth-3-plus" : "directory-enumeration",
                     error);
             }
         }
@@ -7090,11 +7095,13 @@ namespace OpenCoven
         {
             long total = 0;
             int entries = 0;
-            Stack<string> directories = new Stack<string>();
-            directories.Push(root);
+            // Saturate diagnostic depth; never retain names in failure context.
+            Stack<KeyValuePair<string, int>> directories = new Stack<KeyValuePair<string, int>>();
+            directories.Push(new KeyValuePair<string, int>(root, 0));
             while (directories.Count > 0)
             {
-                string directory = directories.Pop();
+                KeyValuePair<string, int> current = directories.Pop();
+                string directory = current.Key;
                 FileAttributes directoryAttributes;
                 try
                 {
@@ -7116,7 +7123,8 @@ namespace OpenCoven
                     directory,
                     null,
                     false,
-                    MaximumQuotaEntries - entries);
+                    MaximumQuotaEntries - entries,
+                    current.Value);
                 entries = checked(entries + snapshot.Count);
                 foreach (FileSystemInfo entry in snapshot)
                 {
@@ -7139,7 +7147,7 @@ namespace OpenCoven
                     }
                     if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        directories.Push(entry.FullName);
+                        directories.Push(new KeyValuePair<string, int>(entry.FullName, Math.Min(current.Value + 1, 3)));
                     }
                     else
                     {
@@ -7501,6 +7509,10 @@ namespace OpenCoven
                 case "pattern-enumeration":
                 case "directory-attributes":
                 case "directory-enumeration":
+                case "directory-enumeration-root":
+                case "directory-enumeration-depth-1":
+                case "directory-enumeration-depth-2":
+                case "directory-enumeration-depth-3-plus":
                 case "entry-attributes":
                 case "file-length":
                     return operation;

@@ -108,7 +108,7 @@ $unknown = $constructor.Invoke([object[]]@('secret-label', 'secret-operation', [
 foreach ($property in @('Root', 'Operation')) {
   if ($contextType.GetProperty($property, $instanceFlags).GetValue($unknown) -cne 'unknown') { throw "Unbounded $property" }
 }
-foreach ($operation in @('pattern-attributes', 'pattern-enumeration', 'directory-attributes', 'directory-enumeration', 'entry-attributes', 'file-length')) {
+foreach ($operation in @('pattern-attributes', 'pattern-enumeration', 'directory-attributes', 'directory-enumeration', 'directory-enumeration-root', 'directory-enumeration-depth-1', 'directory-enumeration-depth-2', 'directory-enumeration-depth-3-plus', 'entry-attributes', 'file-length')) {
   $operationContext = $constructor.Invoke([object[]]@('status staging', $operation, [IO.IOException]::new('secret-message')))
   if ($contextType.GetProperty('Operation', $instanceFlags).GetValue($operationContext) -cne $operation) { throw 'Lost allowed operation.' }
 }
@@ -140,50 +140,65 @@ Write-Host 'Real filesystem terminal and background context propagation passed.'
 
 # Deny enumeration on a fresh fixture only; restore its original access before
 # deleting it. This exercises real access-denied on Windows and Unix hosts.
-$deniedPath = Join-Path $PSScriptRoot ('.quota-denied-' + [guid]::NewGuid().ToString('N'))
-$null = [IO.Directory]::CreateDirectory($deniedPath)
-$originalAcl = $null
-try {
-  [IO.File]::WriteAllText((Join-Path $deniedPath 'payload'), 'quota')
-  if ($IsWindows) {
-    $originalAcl = Get-Acl -LiteralPath $deniedPath
-    $deniedAcl = Get-Acl -LiteralPath $deniedPath
-    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::ListDirectory, [Security.AccessControl.AccessControlType]::Deny)
-    $deniedAcl.AddAccessRule($rule)
-    Set-Acl -LiteralPath $deniedPath -AclObject $deniedAcl
-  } else {
-    & chmod 000 $deniedPath
-    if ($LASTEXITCODE -ne 0) { throw 'Could not deny quota fixture access.' }
+foreach ($depth in @(0, 1, 2, 3, 5)) {
+  $fixtureRoot = Join-Path $PSScriptRoot ('.quota-denied-' + [guid]::NewGuid().ToString('N'))
+  $deniedPath = $fixtureRoot
+  for ($level = 0; $level -lt $depth; $level++) { $deniedPath = Join-Path $deniedPath ('private-child-' + $level) }
+  $expectedOperation = switch ($depth) {
+    0 { 'directory-enumeration-root' }
+    1 { 'directory-enumeration-depth-1' }
+    2 { 'directory-enumeration-depth-2' }
+    default { 'directory-enumeration-depth-3-plus' }
   }
-  $deniedQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('status staging', $deniedPath, 1MB))
-  $deniedResult = [OpenCoven.WindowsJobRunResult]::new()
-  $terminal.Invoke($null, [object[]]@($deniedResult, $deniedQuotas))
-  if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
-      $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
-      $deniedResult.ResourceQuotaMonitorOperation -cne 'directory-enumeration') { throw 'Native access-denied fixture lost its category/root/operation.' }
-  # Wildcard discovery has a distinct enumeration seam; a caller label that
-  # happens to be valid quota grammar still must not enter diagnostics.
-  $wildcardQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('private-user-label', (Join-Path $deniedPath '*'), 1MB))
-  $wildcardResult = [OpenCoven.WindowsJobRunResult]::new()
-  $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
-  if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
-      $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
-  $deniedState = [Activator]::CreateInstance($stateType, $true)
+  $null = [IO.Directory]::CreateDirectory($deniedPath)
+  $originalAcl = $null
   try {
-    $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
-    if (-not $task.Wait(5000)) { throw 'Native access-denied background check did not terminate.' }
-    foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'status-staging'), @('MonitorErrorOperation', 'directory-enumeration'))) {
-      if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
+    [IO.File]::WriteAllText((Join-Path $deniedPath 'payload'), 'quota')
+    if ($IsWindows) {
+      $originalAcl = Get-Acl -LiteralPath $deniedPath
+      $deniedAcl = Get-Acl -LiteralPath $deniedPath
+      $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::ListDirectory, [Security.AccessControl.AccessControlType]::Deny)
+      $deniedAcl.AddAccessRule($rule)
+      Set-Acl -LiteralPath $deniedPath -AclObject $deniedAcl
+    } else {
+      & chmod 000 $deniedPath
+      if ($LASTEXITCODE -ne 0) { throw 'Could not deny quota fixture access.' }
     }
-  } finally { $deniedState.Dispose() }
-} finally {
-  if ($IsWindows) {
-    if ($null -ne $originalAcl) { Set-Acl -LiteralPath $deniedPath -AclObject $originalAcl }
-  } else {
-    & chmod 700 $deniedPath
-    if ($LASTEXITCODE -ne 0) { throw 'Could not restore quota fixture access.' }
+    foreach ($pathPattern in @($fixtureRoot, ($fixtureRoot + '*'))) {
+      $deniedQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('status staging', $pathPattern, 1MB))
+      $deniedResult = [OpenCoven.WindowsJobRunResult]::new()
+      $terminal.Invoke($null, [object[]]@($deniedResult, $deniedQuotas))
+      if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
+          $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
+          $deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Native access-denied fixture lost its category/root/operation.' }
+      $terminal.Invoke($null, [object[]]@($deniedResult, $malformed))
+      if ($deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Terminal recheck replaced first depth context.' }
+      # Wildcard discovery has a distinct enumeration seam; a caller label that
+      # happens to be valid quota grammar still must not enter diagnostics.
+      $wildcardQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('private-user-label', (Join-Path $deniedPath '*'), 1MB))
+      $wildcardResult = [OpenCoven.WindowsJobRunResult]::new()
+      $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
+      if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
+          $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
+      $deniedState = [Activator]::CreateInstance($stateType, $true)
+      try {
+        $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
+        if (-not $task.Wait(5000)) { throw 'Native access-denied background check did not terminate.' }
+        foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'status-staging'), @('MonitorErrorOperation', $expectedOperation))) {
+          if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
+        }
+      } finally { $deniedState.Dispose() }
+    }
+  } finally {
+    if ($IsWindows) {
+      if ($null -ne $originalAcl) { Set-Acl -LiteralPath $deniedPath -AclObject $originalAcl }
+    } else {
+      & chmod 700 $deniedPath
+      if ($LASTEXITCODE -ne 0) { throw 'Could not restore quota fixture access.' }
+    }
+    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
   }
-  Remove-Item -LiteralPath $deniedPath -Recurse -Force
+  Write-Host 'Native access-denied terminal and background quota context passed.'
+
 }
-Write-Host 'Native access-denied terminal and background quota context passed.'

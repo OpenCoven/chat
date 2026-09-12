@@ -157,7 +157,7 @@ try {
   if (-not $denied.ResourceQuotaExceeded -or -not $denied.ResourceQuotaMonitorError -or
       $denied.ExitCode -eq 0 -or $denied.ResourceQuotaMonitorCategory -cne 'access-denied' -or
       $denied.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
-      $denied.ResourceQuotaMonitorOperation -cne 'directory-enumeration') {
+      $denied.ResourceQuotaMonitorOperation -cne 'directory-enumeration-root') {
     throw 'Owner-only directory did not reproduce the protected terminal quota signature.'
   }
   $state = [Activator]::CreateInstance($stateType, $true)
@@ -167,7 +167,7 @@ try {
   foreach ($pair in @(
       @('MonitorErrorCategory', 'access-denied'),
       @('MonitorErrorRoot', 'harness-execution-aggregate'),
-      @('MonitorErrorOperation', 'directory-enumeration'))) {
+      @('MonitorErrorOperation', 'directory-enumeration-root'))) {
     if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($state) -cne $pair[1]) {
       throw 'Owner-only directory did not reproduce the protected background quota signature.'
     }

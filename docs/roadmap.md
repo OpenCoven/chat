@@ -4,7 +4,13 @@
 
 Chat #228 landed as `f77b24912ccf2492e6d79adb306da8c858af0595`; SDK #211
 landed as `5730979d647deb2f4173851398b0b5f091c13390`. Both validator scopes
-were rotated and read back at the SDK merge. Protected
+were rotated and read back at the SDK merge. Initial protected
+[run 34666399779](https://github.com/OpenCoven/chat/actions/runs/34666399779)
+passed Linux and macOS but failed before the Cave diagnostic path with a
+bounded aggregate quota enumeration access denial. Chat #229 added traversal-
+depth diagnostics without weakening the fail-closed quota monitor.
+
+Protected
 [retry 34667436672](https://github.com/OpenCoven/chat/actions/runs/34667436672)
 passed Linux and macOS and classified Windows as
 `phase1.cave-authority.startup`. Artifact validation, attestation and
