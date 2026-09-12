@@ -1366,14 +1366,14 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 209,340 | `e02a95e70cf343f66b8faf498856ea4927cdf7fa6d234a69bb234fe53a50201b` |
+| `scripts/phase1-conformance.mjs` | 209,422 | `1f3525c8c60f3e4a8b9b108996c6936801b8b59acfd3a48475bb44fc4f804d82` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 200,758 | `3e98a7881d53703e38a043a1d28c4c2a06467adabb8c2fc7b5835431803c3d25` |
+| `scripts/phase1-schema-v2-producer.mjs` | 201,595 | `10a66fac1cc2a1f084b680e8a740024310ec4af47506d6b39fea21083e4721cb` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1385,7 +1385,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 330,220 | `8d5e68f9d44049bd00bcdb8291d4e7c542dcdeaf1e15685b619962a12e0f30ca` |
+| `scripts/windows-job-supervisor.cs` | 329,795 | `e790a12671f7a3fce16ff488a72f6b8b4bc094d83073834cdc0e92fef1c10fab` |
 | `scripts/windows-job-supervisor.test.ps1` | 178,124 | `b22a424e2cf90ea6c06c184cf7bf0ca737f6e0a55e656ecc2ff614b5969b4b64` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 21,401 | `b98a2c18ecf3ca7ee749bfa278cb1132250c1db5fc7cc28920e3384a38066c9c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
