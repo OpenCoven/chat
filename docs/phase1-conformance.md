@@ -136,8 +136,8 @@ diagnostic-only change.
   `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
   backport source retained by the current SDK contract;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
-- Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
-  `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
+- Cave authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`, tree
+  `06ffdd4320b7e05fbe68e2168f6efdb77c585756`, release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
@@ -1693,6 +1693,15 @@ The startup category is now split into fixed timeout, early-exit, health,
 missing-discovery, endpoint-mismatch and pid-mismatch identifiers. These values
 correspond only to already fixed Cave harness messages and reveal no endpoint,
 path, process identifier, response body or child output.
+
+Protected run `34675842331` used Chat #231 (`395a5c9`) and SDK validator
+`d5fcd88`. Linux and macOS passed; Windows reached a healthy Cave listener but
+reported `phase1.cave-authority.startup.discovery.missing`. Cave #5374 fixes
+the failing boundary at authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`:
+an already-owned Windows discovery directory can now have its inherited DACL
+restricted without an unnecessary `WRITE_OWNER` operation. A genuinely foreign
+owner still requires the existing takeover path, and the repaired owner and
+DACL are still re-read and refused unless they are exclusive.
 
 These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and

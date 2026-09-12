@@ -10,7 +10,7 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45"
+    "revision": "82bf6831b4afbe82709a5fe78949d1b16c4d61e1"
   },
   "coven": {
     "repository": "OpenCoven/coven",
@@ -306,7 +306,7 @@
         "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
       }
     ],
-    "caveVersion": "0.3.12",
+    "caveVersion": "0.4.2",
     "covenVersion": "0.1.0",
     "consumerLock": {
       "path": "pnpm-lock.yaml",
@@ -321,8 +321,8 @@
       },
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",
-        "size": 16695,
-        "sha256": "c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186"
+        "size": 18280,
+        "sha256": "806d647f5969e646080713dabaa9d86ac897637e2a823c75085093c5a210a7fe"
       },
       "hpkeVectors": {
         "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",
