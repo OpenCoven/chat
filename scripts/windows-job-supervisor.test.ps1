@@ -1310,6 +1310,7 @@ function Remove-IsolatedTestContext {
 }
 
 try {
+  & (Join-Path $PSScriptRoot 'windows-profile-lifecycle.test.ps1')
   [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
   [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
   [IO.File]::WriteAllText(
