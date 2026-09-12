@@ -5234,18 +5234,6 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
 
-        $nativeDiscoveryScript = Join-Path $root 'native-discovery.ps1'
-        [IO.File]::WriteAllText(
-          $nativeDiscoveryScript,
-          @"
-`$request = '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}'
-`$request | & '$($nativeRpc.Replace("'", "''"))'
-if (`$LASTEXITCODE -ne 0) {
-  exit `$LASTEXITCODE
-}
-"@,
-          [Text.UTF8Encoding]::new($false)
-        )
         $nativeDiscoveryNonce = '33333333333333333333333333333333'
         $nativeDiscoveryJobName =
           "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
@@ -5259,15 +5247,20 @@ if (`$LASTEXITCODE -ne 0) {
           $isolatedUser
         )
         try {
-          $nativeDiscovery = $nativeDiscoveryJob.RunAsUser(
+          $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
+            '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
+              "`n"
+          )
+          $nativeDiscovery = $nativeDiscoveryJob.RunAsUserWithStandardInput(
             $isolatedUser,
-            $trustedPwsh,
-            "-NoLogo -NoProfile -NonInteractive -File `"$nativeDiscoveryScript`"",
+            $nativeRpc,
+            '',
             $root,
             $nativeDiscoveryEnvironment,
             [TimeSpan]::FromSeconds(30),
             1MB,
-            1MB
+            1MB,
+            $nativeDiscoveryRequest
           )
           if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
             throw 'Native discovery profile-root regression probe failed.'
