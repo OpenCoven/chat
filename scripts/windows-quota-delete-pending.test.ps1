@@ -124,13 +124,17 @@ function Get-QuotaObservation([string] $Path) {
     $result = $values -join ':'
     if ($result -cnotin @(
         'access-denied:directory-attributes:persistent',
-        'access-denied:directory-attributes:transient',
+        'access-denied:directory-attributes:readable',
+        'access-denied:directory-attributes:missing',
         'access-denied:directory-enumeration-root:persistent',
-        'access-denied:directory-enumeration-root:transient',
+        'access-denied:directory-enumeration-root:readable',
+        'access-denied:directory-enumeration-root:missing',
         'io:directory-attributes:persistent',
-        'io:directory-attributes:transient',
+        'io:directory-attributes:readable',
+        'io:directory-attributes:missing',
         'io:directory-enumeration-root:persistent',
-        'io:directory-enumeration-root:transient')) {
+        'io:directory-enumeration-root:readable',
+        'io:directory-enumeration-root:missing')) {
       throw 'Unexpected bounded quota classification.'
     }
     return $result
