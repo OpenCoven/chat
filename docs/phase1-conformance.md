@@ -871,6 +871,18 @@ bootstrap cleanup first deletes files through the supervisor-controlled parent
 before attempting a read-only-attribute fallback. The native timeout case
 leaves an owner-only staging file in place while quota monitoring runs and
 proves terminal cleanup still removes the complete bootstrap root.
+
+The protected Windows bootstrap also provisions a dedicated 64 MiB Cave
+conformance temp root. The general temp and workspace roots retain their
+`OWNER RIGHTS` read-only ACE, which prevents the isolated producer from
+rewriting their DACLs. The dedicated root instead grants the isolated identity
+explicit full control while retaining the same protected owner, SYSTEM,
+Administrators, and supervisor ACL shape. Only the Cave real-authority child
+receives that root as `TEMP`/`TMP`/`TMPDIR`; its newly created fixture
+descendants can therefore remove inherited supervisor access and enforce
+Cave's stricter discovery-directory ACL without weakening the rest of the
+producer sandbox.
+
 The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the

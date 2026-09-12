@@ -1,4 +1,8 @@
 export const cargoBuildTimeoutMs: number;
+export function caveAuthorityEnvironment(
+  environment: Record<string, string>,
+  platform?: NodeJS.Platform,
+): Record<string, string>;
 export function windowsJobBindingEnvironment(
   environment?: NodeJS.ProcessEnv,
   platform?: NodeJS.Platform,

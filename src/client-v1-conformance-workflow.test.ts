@@ -1169,6 +1169,7 @@ ${source.slice(start, end)}
         'SetSecurityInfo',
         'DeleteProfileW',
         'SetFileSecurityW',
+        'SecureCaveConformanceTempDirectory',
         'PROTECTED_DACL_SECURITY_INFORMATION',
         'CREATE_SUSPENDED',
         'CreateJobObjectW',
@@ -1848,9 +1849,15 @@ ${source.slice(start, end)}
       'Live root replacement artifact forgery was authorized.',
       '[RootProcessAttack]::Run(',
       'TerminateProcess(root, 0)',
+      'Cave conformance child DACL repair failed.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }
+
+    expect(workflow).toContain('OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP = $caveConformanceTemp');
+    expect(workflow).toContain(
+      "[OpenCoven.WindowsDirectoryQuota]::new(\n                'Cave conformance temp',\n                $caveConformanceTemp,\n                64MB",
+    );
   });
 
   test('runs the native Job Object tree tests in the ordinary Windows CI job', () => {
@@ -2940,6 +2947,7 @@ $ErrorActionPreference = 'Stop'
 $bootstrapRoot = $PWD.Path
 $workspace = $PWD.Path
 $childNodeRoot = $PWD.Path
+$caveConformanceTemp = $PWD.Path
 $currentSid = [pscustomobject]@{ Value = 'S-1-5-21-fixture' }
 $isolatedUser = [pscustomobject]@{
   ProfilePath = $PWD.Path
@@ -3219,6 +3227,7 @@ ${quotaClass}
 '@
 $bootstrapRoot = $PWD.Path
 $workspace = Join-Path $bootstrapRoot 'workspace'
+$caveConformanceTemp = Join-Path $bootstrapRoot 'cave-conformance-temp'
 $isolatedUser = [pscustomobject]@{
   TempPath = (Join-Path $bootstrapRoot 'temp')
   StatusStagingPath = (Join-Path $bootstrapRoot 'status-staging')
@@ -3237,6 +3246,7 @@ ${quotaAssignment}
     // The exact d20d83c build measured this many bytes in node_modules plus .next.
     expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
     expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
+    expect(limits.get('Cave conformance temp')).toBe(64 * 1024 ** 2);
     expect(limits.get('harness execution aggregate')).toBe(10 * 1024 ** 3);
     expect(limits.get('harness build roots')).toBe(4 * 1024 ** 3);
   }, 30_000);

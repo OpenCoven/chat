@@ -802,8 +802,6 @@ jobs:
                       }
                   }
 
-                  // A read owns its duplicate independently of identity disposal. No
-                  // filesystem work or quarantine callback runs under the lifetime lock.
                   internal T RunQuotaRead<T>(Func<T> read)
                   {
                       if (read == null)
@@ -1699,9 +1697,6 @@ jobs:
                       }
                   }
 
-                  // Records one bounded cleanup step failure. The category is a fixed
-                  // step label plus an exception kind and, for native failures, the
-                  // numeric Win32/NetAPI status. No exception text or paths are recorded.
                   private static void RecordCleanupFailure(
                       List<Exception> failures,
                       List<string> categories,
@@ -2450,6 +2445,14 @@ jobs:
                           supervisorSid,
                           FILE_MODIFY_ACCESS,
                           FILE_ALL_ACCESS);
+                  }
+
+                  public static void SecureCaveConformanceTempDirectory(
+                      string path,
+                      string isolatedSid,
+                      string supervisorSid)
+                  {
+                      SecureIsolatedDirectory(path, isolatedSid, supervisorSid, FILE_ALL_ACCESS);
                   }
 
                   private static void SecureIsolatedDirectory(
@@ -7186,8 +7189,6 @@ jobs:
                       return quotaTask.ContinueWith(
                           completed =>
                           {
-                              // Observe a fault and release only the monitor's resources
-                              // after its final access has completed.
                               AggregateException observed = completed.Exception;
                               quotaCancellation.Dispose();
                               quotaFailure.Dispose();
@@ -7293,8 +7294,6 @@ jobs:
                       WindowsDirectoryQuota[] quotas,
                       out WindowsDirectoryQuota exceededQuota)
                   {
-                      // Only the fixed diagnostic entry points pass null. Production
-                      // caller identity is validated by RunAsUserCore and the AsUser APIs.
                       if (isolatedUser == null)
                       {
                           return DirectoryQuotasExceeded(quotas, out exceededQuota);
@@ -9080,6 +9079,13 @@ jobs:
             $bootstrapRoot = Join-Path $runnerTemp "opencoven-win32-$nonce"
             $isolatedUser = [OpenCoven.WindowsIsolatedUser]::Create($bootstrapRoot)
             $workspace = $isolatedUser.WorkspacePath
+            $caveConformanceTemp = Join-Path $bootstrapRoot 'cave-conformance-temp'
+            [IO.Directory]::CreateDirectory($caveConformanceTemp) | Out-Null
+            [OpenCoven.WindowsJobSupervisor]::SecureCaveConformanceTempDirectory(
+              $caveConformanceTemp,
+              $isolatedUser.Sid,
+              [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            )
             $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $isolatedUser)
             Assert-NoReparsePath -Path $bootstrapRoot -Label 'Bootstrap root'
             $bootstrapPin = [OpenCoven.WindowsJobSupervisor]::PinDirectory($bootstrapRoot)
@@ -9237,7 +9243,7 @@ jobs:
             $writeProbe.Dispose()
             throw 'The restricted identity can mutate the Windows process supervisor.'
           } catch [UnauthorizedAccessException] {
-            # The isolated account must have read/execute access without write access.
+            # Expected.
           }
           foreach ($directory in @(
             $env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT,
@@ -9972,6 +9978,7 @@ jobs:
               TMP = $isolatedUser.TempPath
               COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
               COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID = $currentSid.Value
+              OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP = $caveConformanceTemp
               USERPROFILE = $isolatedUser.ProfilePath
               APPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Roaming')
               LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
@@ -10014,6 +10021,11 @@ jobs:
                 'status staging',
                 $isolatedUser.StatusStagingPath,
                 1MB
+              ),
+              [OpenCoven.WindowsDirectoryQuota]::new(
+                'Cave conformance temp',
+                $caveConformanceTemp,
+                64MB
               ),
               [OpenCoven.WindowsDirectoryQuota]::new(
                 'workspace aggregate',

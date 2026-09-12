@@ -48,6 +48,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  caveAuthorityEnvironment,
   classifyCavePluginEvaluationFailure,
   pnpmInvocation,
   runSchemaV2Conformance,
@@ -59,6 +60,7 @@ import { configureSupervisedExecution, runSupervisedSync } from './supervised-ex
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 export {
+  caveAuthorityEnvironment,
   runPowerShellCommandWithArgs,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
@@ -2551,7 +2553,7 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
       ],
       {
         cwd: caveRoot,
-        env: environment,
+        env: caveAuthorityEnvironment(environment),
         timeoutMs: caveConformanceTimeoutMs,
       },
     );

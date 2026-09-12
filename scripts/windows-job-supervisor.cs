@@ -350,8 +350,6 @@ namespace OpenCoven
             }
         }
 
-        // A read owns its duplicate independently of identity disposal. No
-        // filesystem work or quarantine callback runs under the lifetime lock.
         internal T RunQuotaRead<T>(Func<T> read)
         {
             if (read == null)
@@ -1247,9 +1245,6 @@ namespace OpenCoven
             }
         }
 
-        // Records one bounded cleanup step failure. The category is a fixed
-        // step label plus an exception kind and, for native failures, the
-        // numeric Win32/NetAPI status. No exception text or paths are recorded.
         private static void RecordCleanupFailure(
             List<Exception> failures,
             List<string> categories,
@@ -1998,6 +1993,14 @@ namespace OpenCoven
                 supervisorSid,
                 FILE_MODIFY_ACCESS,
                 FILE_ALL_ACCESS);
+        }
+
+        public static void SecureCaveConformanceTempDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            SecureIsolatedDirectory(path, isolatedSid, supervisorSid, FILE_ALL_ACCESS);
         }
 
         private static void SecureIsolatedDirectory(
@@ -6734,8 +6737,6 @@ namespace OpenCoven
             return quotaTask.ContinueWith(
                 completed =>
                 {
-                    // Observe a fault and release only the monitor's resources
-                    // after its final access has completed.
                     AggregateException observed = completed.Exception;
                     quotaCancellation.Dispose();
                     quotaFailure.Dispose();
@@ -6841,8 +6842,6 @@ namespace OpenCoven
             WindowsDirectoryQuota[] quotas,
             out WindowsDirectoryQuota exceededQuota)
         {
-            // Only the fixed diagnostic entry points pass null. Production
-            // caller identity is validated by RunAsUserCore and the AsUser APIs.
             if (isolatedUser == null)
             {
                 return DirectoryQuotasExceeded(quotas, out exceededQuota);
