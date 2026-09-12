@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,671 | `a32b9462c835e3f729190f0c97f5aeb42bf1c13fbf283493c48cbc919954a02c` |
+| `.github/workflows/client-v1-conformance.yml` | 511,602 | `e227d8526b28f2872f2f96a82974f215bcc80f644dc60ee9547d21e294317b31` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,9 +1386,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,629 | `5ceec005588761a6295fabdb91cf410e1ba0a083e09a96d5de4ac418ba0fd806` |
+| `scripts/windows-job-supervisor.cs` | 329,530 | `d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a` |
 | `scripts/windows-job-supervisor.test.ps1` | 181,303 | `6348c9d127a405bb93c008d28fe6bdf12879abd97a9242b7b95e9009430c0922` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 22,486 | `e3e9d3f82511ea63bdc46b7e02df848fd06977f41441a29c4ebedf94b80d3e8a` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1816,7 +1816,8 @@ the fixed scopes `root`, `home`, `temp`, `cache`, `data`, `pnpm-store`,
 `cargo-home`, `checkouts`, `build`, `packages`, `bin`, `native`,
 `compatibility`, or `other`. Native and compatibility workspaces are recognized
 only by their fixed prefixes; no nonce, descendant component, path or exception
-text crosses the diagnostic boundary. This changes only bounded failure
-classification. The isolated-user reader, immediate repeat, limits, byte
-accounting, traversal, reparse handling, first-failure state and fail-closed
-decision are unchanged.
+text crosses the diagnostic boundary. Failures before a matched aggregate root
+is available use the fixed `root` scope rather than `none`. This changes only
+bounded failure classification. The isolated-user reader, immediate repeat,
+limits, byte accounting, traversal, reparse handling, first-failure state and
+fail-closed decision are unchanged.

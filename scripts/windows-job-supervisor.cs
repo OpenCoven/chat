@@ -2908,7 +2908,6 @@ namespace OpenCoven
             }
         }
 
-        // Keep native deletion bound to the managed enumerator's exact path.
         internal static string ToExtendedPath(string fullPath)
         {
             if (fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
@@ -2922,7 +2921,6 @@ namespace OpenCoven
             return @"\\?\" + fullPath;
         }
 
-        // Accept not-found only when managed existence checks agree.
         private static void ThrowUnlessDeleted(
             int error,
             string operation,
@@ -4430,9 +4428,7 @@ namespace OpenCoven
                             typeof(WTS_PROCESS_INFO_EXW));
                     if (information.pUserSid == IntPtr.Zero)
                     {
-                        // Session-0 protected processes expose no readable primary token.
-                        // The locally created supervised identity does, so other unreadable
-                        // owners still fail closed.
+                        // The supervised user has a readable SID; protected session-0 processes may not.
                         if (information.ProcessId == 0 ||
                             information.SessionId == 0)
                         {
@@ -6855,7 +6851,6 @@ namespace OpenCoven
                     {
                         string readRoot = ReadQuotaOperation("pattern-attributes", () =>
                             GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
-                        // Validate the fixed prefix as supervisor; descendant reads stay isolated.
                         bool prefixExists = false;
                         foreach (string prefix in ExpandQuotaPattern(readRoot))
                         {
@@ -6873,10 +6868,20 @@ namespace OpenCoven
                 catch (Exception error)
                 {
                     QuotaMonitorContextException context = error as QuotaMonitorContextException;
+                    string scope = context == null ? null : context.Scope;
+                    if ((String.IsNullOrEmpty(scope) || scope == "none") &&
+                        quota != null &&
+                        String.Equals(
+                            quota.Label,
+                            "harness execution aggregate",
+                            StringComparison.Ordinal))
+                    {
+                        scope = "root";
+                    }
                     throw new QuotaMonitorContextException(
                         quota == null ? null : quota.Label,
                         context == null ? null : context.Operation,
-                        context == null ? null : context.Scope,
+                        scope,
                         context == null ? null : context.Repeat,
                         error);
                 }
@@ -7104,7 +7109,7 @@ namespace OpenCoven
         {
             long total = 0;
             int entries = 0;
-            // Saturate diagnostic depth; never retain names in failure context.
+
             Stack<KeyValuePair<string, int>> directories = new Stack<KeyValuePair<string, int>>();
             directories.Push(new KeyValuePair<string, int>(root, 0));
             while (directories.Count > 0)
@@ -7487,7 +7492,6 @@ namespace OpenCoven
             internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
         }
 
-        // Retain bounded context only, never producer-owned exception text.
         private sealed class QuotaMonitorContextException : Exception
         {
             internal string Category { get; private set; }

@@ -309,6 +309,20 @@ try {
 } finally { $backgroundContext.Dispose() }
 Write-Host 'Real filesystem terminal and background context propagation passed.'
 
+$invalidHarnessQuotas = [OpenCoven.WindowsDirectoryQuota[]]@(
+  [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $invalidPath, 1MB)
+)
+$harnessContextResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($harnessContextResult, $invalidHarnessQuotas))
+if (-not $harnessContextResult.ResourceQuotaMonitorError -or
+    $harnessContextResult.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
+    $harnessContextResult.ResourceQuotaMonitorScope -cne 'root' -or
+    $harnessContextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
+    $harnessContextResult.ResourceQuotaMonitorCategory -cne 'io') {
+  throw 'Pre-traversal harness failure did not receive a bounded root scope.'
+}
+Write-Host 'Pre-traversal harness quota failures receive a bounded scope.'
+
 # Deny enumeration on a fresh fixture only; restore its original access before
 # deleting it. This exercises real access-denied on Windows and Unix hosts.
 foreach ($depth in @(0, 1, 2, 3, 5)) {
