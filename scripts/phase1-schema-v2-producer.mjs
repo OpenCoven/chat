@@ -410,6 +410,14 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.supervisor',
   'phase1.cave-authority.signal',
   'phase1.cave-authority.exit-nonzero',
+  'phase1.cave-authority.cleanup',
+  'phase1.cave-authority.startup',
+  'phase1.cave-authority.pairing',
+  'phase1.cave-authority.reads',
+  'phase1.cave-authority.request',
+  'phase1.cave-authority.phase.setup',
+  'phase1.cave-authority.phase.unconfigured',
+  'phase1.cave-authority.phase.configured',
   'phase1.cave-authority.output.invalid',
   'phase1.cave-authority.record.read',
   'phase1.cave-authority.record.invalid',
@@ -1241,6 +1249,68 @@ export function classifyCargoBuildFailureDiagnostic(baseId, error, platform = pr
   return `${baseId}.unknown`;
 }
 
+export function classifyCavePreAssertionFailure(output) {
+  const text = stripVTControlCharacters(output);
+  const messages = text
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith('client-v1-conformance: '))
+    .map((line) => line.slice('client-v1-conformance: '.length));
+  if (
+    messages.some((message) =>
+      [
+        'Cave readiness timed out after 120 seconds.',
+        'Cave exited before readiness.',
+        'Cave health is not ready.',
+        'Client v1 discovery record is not published.',
+        'Client v1 discovery endpoint does not match the listening Cave.',
+        'Client v1 discovery pid does not match the launched Cave.',
+      ].some((prefix) => message.startsWith(prefix)),
+    )
+  ) {
+    return 'phase1.cave-authority.startup';
+  }
+  if (
+    messages.some((message) =>
+      [
+        'pairing creation stayed rate limited across two attempts',
+        'pairing creation answered ',
+        'approval answered ',
+        'exchange answered ',
+      ].some((prefix) => message.startsWith(prefix)),
+    )
+  ) {
+    return 'phase1.cave-authority.pairing';
+  }
+  if (messages.some((message) => message.startsWith('paging '))) {
+    return 'phase1.cave-authority.reads';
+  }
+  if (
+    messages.some(
+      (message) =>
+        message === 'request timed out' ||
+        /^(?:connect|read|write) (?:ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT)(?: |$)/u.test(message),
+    )
+  ) {
+    return 'phase1.cave-authority.request';
+  }
+  if (
+    messages.some((message) =>
+      /^(?:EACCES|EBUSY|EPERM): [^,\r\n]+, (?:rmdir|unlink) /u.test(message),
+    )
+  ) {
+    return 'phase1.cave-authority.cleanup';
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].startsWith('phase B (admin token configured) on ')) {
+      return 'phase1.cave-authority.phase.configured';
+    }
+    if (messages[index].startsWith('phase A (no admin token) on ')) {
+      return 'phase1.cave-authority.phase.unconfigured';
+    }
+  }
+  return 'phase1.cave-authority.phase.setup';
+}
+
 export function schemaV2FailureDiagnostic(error, activeStage) {
   if (
     error !== null &&
@@ -1384,6 +1454,9 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
         return 'phase1.cave-authority.assertion.unknown';
       if (categories.size > 1) return 'phase1.cave-authority.assertion.multiple';
       if (categories.size === 1) return `phase1.cave-authority.assertion.${[...categories][0]}`;
+      if (assertions.size === 0) {
+        return classifyCavePreAssertionFailure(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+      }
       return 'phase1.cave-authority.exit-nonzero';
     }
   }

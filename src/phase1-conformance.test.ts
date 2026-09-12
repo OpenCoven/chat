@@ -5924,7 +5924,7 @@ describe('schema-v2 bounded Cave authority diagnostics', () => {
     [undefined, 'FAIL arbitrary.private-id', 'assertion.unknown'],
     [undefined, 'FAIL pairing.a\nFAIL unknown.private', 'assertion.unknown'],
     [undefined, 'ok pairing.a', 'exit-nonzero'],
-    [undefined, 'private token and path', 'exit-nonzero'],
+    [undefined, 'private token and path', 'phase.setup'],
     [undefined, 'FAIL pairing.a\nFAIL pairing.a', 'output.invalid'],
   ])('classifies %s / %s without copying output', async (reason, stdout, category) => {
     // @ts-expect-error Executable module intentionally has no declaration file.
@@ -5946,6 +5946,72 @@ describe('schema-v2 bounded Cave authority diagnostics', () => {
       publicPhase1FailureDiagnostic(new Error(`${diagnostic}: private secret`)),
     ).toBeUndefined();
     expect(producer.wrapInfrastructureFailure(new Error(diagnostic), {}).message).toBe(diagnostic);
+  });
+
+  test.each([
+    ['', 'client-v1-conformance: Cave exited before readiness. private path', 'startup'],
+    ['', 'client-v1-conformance: pairing creation answered 500: unlink private path', 'pairing'],
+    ['', 'client-v1-conformance: private path contains rmdir and ECONNRESET', 'phase.setup'],
+    ['', 'client-v1-conformance: connect ECONNREFUSED 127.0.0.1:1', 'request'],
+    [
+      'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      "client-v1-conformance: EPERM: operation not permitted, rmdir 'private path'",
+      'cleanup',
+    ],
+    [
+      'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: pairing creation answered 500: private response',
+      'pairing',
+    ],
+    [
+      'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: paging /private did not terminate within 50 pages',
+      'reads',
+    ],
+    [
+      'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: request timed out',
+      'request',
+    ],
+    [
+      'client-v1-conformance: phase A (no admin token) on http://127.0.0.1:1',
+      'client-v1-conformance: private failure',
+      'phase.unconfigured',
+    ],
+    [
+      'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: private failure',
+      'phase.configured',
+    ],
+    [
+      [
+        'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+        'client-v1-conformance: phase A (no admin token) on http://127.0.0.1:2',
+      ].join('\n'),
+      'client-v1-conformance: private failure',
+      'phase.unconfigured',
+    ],
+    [
+      'private client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: private failure',
+      'phase.setup',
+    ],
+  ])('classifies pre-assertion Cave failure as %s / %s', async (stdout, stderr, category) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const error = new producer.CommandExecutionError('private command label', {
+      code: 1,
+      signal: null,
+      stdout,
+      stderr,
+    });
+    const diagnostic = producer.schemaV2FailureDiagnostic(
+      error,
+      'phase1.stage.cave-authority.failed',
+    );
+    expect(diagnostic).toBe(`phase1.cave-authority.${category}`);
+    expect(diagnostic).not.toContain('private');
+    expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
   });
 
   test('classifies signaled Cave exits without disclosing the signal text', async () => {
