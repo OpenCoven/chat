@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `d183c60836046c339f0e5954390fbc0c5e8d4fd5`,
-  tree `3343573ad067690b8d879d23787e46c5c0cb1751`, retained in the
+- Chat conformance driver `bd9b1f75b7b9b2931c6e065bbeb4e6f765b0d795`,
+  tree `f81e9bc02908cbfe2cdfc5830ce7652369892c3b`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,602 | `c2f11ac329785b6f41f9db81f870f1d8f96ae85e393ae9ab48525aa2fb04444d` |
+| `.github/workflows/client-v1-conformance.yml` | 511,610 | `22d90ba03be4edf04f1118996c9ed30907b54e30df4fc18eb3b4c98a83fa8547` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1374,7 +1374,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 208,640 | `63889e38a254237ab4994c53125f6be719d19aff12dcba437bb8d04a4f3f08ca` |
+| `scripts/phase1-schema-v2-producer.mjs` | 208,647 | `6ba9cc0aa215d83bdcd85798016eca791befa5ef51a70025a4f5faa834f99824` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1898,10 +1898,18 @@ The third Windows attempt crossed the corrected profile-root boundary but the
 producer stopped waiting for `cave_launch` after 10 seconds even though the
 native command has a 30-second absolute readiness deadline.
 
-The schema-v2 producer now gives only `cave_launch` a 35-second RPC response
-budget. All other native RPCs retain the 10-second limit. Rust still owns the
-30-second launch and readiness deadline, child liveness checks, discovery
-pinning, health validation, and cleanup. A native `service_unavailable`
-readiness expiry and an outer transport timeout both map to the existing fixed
-`phase1.native-scenarios.launch.timeout` diagnostic; no paths, process IDs,
-discovery bytes, or child output are exposed.
+The schema-v2 producer initially gave only `cave_launch` a 35-second RPC response
+budget. Protected run `34718514551` proved that transport mismatch was fixed:
+Linux and macOS passed, while Windows reached Rust's own 30-second readiness
+deadline with the launched Cave child still alive and no discovery record.
+
+Cave's fail-closed Windows discovery publisher permits its PowerShell ownership
+and DACL probe to run for up to 60 seconds. The native Windows launch deadline is
+therefore now 75 seconds, and only the producer's `cave_launch` RPC response
+budget is 80 seconds. Non-Windows launch remains bounded at 30 seconds, and all
+other native RPCs retain the 10-second limit. Rust still owns child liveness
+checks, discovery pinning, health validation, and cleanup. A native
+`service_unavailable` readiness expiry and an outer transport timeout both map
+to the existing fixed `phase1.native-scenarios.launch.timeout` diagnostic; no
+paths, SIDs, ACL entries, process IDs, discovery bytes, tokens, or child output
+are exposed.
