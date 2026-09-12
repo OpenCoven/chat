@@ -79,6 +79,7 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
+const caveLaunchRpcTimeoutMs = 35_000;
 const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
@@ -1691,7 +1692,10 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
         }[launchFailure[1]]
       }`;
     }
-    if (message === 'native RPC timed out for cave_launch') {
+    if (
+      message === 'native RPC timed out for cave_launch' ||
+      message === 'native RPC cave_launch failed with service_unavailable'
+    ) {
       return 'phase1.native-scenarios.launch.timeout';
     }
     if (message === 'native RPC closed before responding') {
@@ -3823,9 +3827,18 @@ function assertSuccessfulChildExit(code, signal) {
 }
 
 export class NativeRpcClient {
-  constructor(child, { shutdownTimeoutMs = rpcTimeoutMs } = {}) {
+  constructor(
+    child,
+    {
+      shutdownTimeoutMs = rpcTimeoutMs,
+      requestTimeoutMs = rpcTimeoutMs,
+      caveLaunchTimeoutMs = caveLaunchRpcTimeoutMs,
+    } = {},
+  ) {
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
     this.pending = new Map();
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
@@ -3880,11 +3893,12 @@ export class NativeRpcClient {
     this.sequence += 1;
     const id = `request-${this.sequence}`;
     const request = { id, command, ...(args === undefined ? {} : { args }) };
+    const timeoutMs = command === 'cave_launch' ? this.caveLaunchTimeoutMs : this.requestTimeoutMs;
     return new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         rejectRequest(new Error(`native RPC timed out for ${command}`));
-      }, rpcTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
       this.child.stdin.write(`${JSON.stringify(request)}\n`);
     });

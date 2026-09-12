@@ -291,6 +291,21 @@ class NeverCloseChild extends SynchronousCloseChild {
   };
 }
 
+class DelayedResponseChild extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly stdin = {
+    write: (line: string) => {
+      const request = JSON.parse(line) as { id: string };
+      setTimeout(() => {
+        this.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result: {} })}\n`);
+      }, 20);
+      return true;
+    },
+  };
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+}
+
 describe('Phase 1 real-authority conformance harness', () => {
   test('normalizes the exact observation result map consumed by schema-v2 adaptation', () => {
     const sdk = new Set(['sdk observation']);
@@ -2061,6 +2076,10 @@ describe('Phase 1 real-authority conformance harness', () => {
     [
       'native RPC cave_launch failed with cave_launch_failed',
       'phase1.native-scenarios.launch.process',
+    ],
+    [
+      'native RPC cave_launch failed with service_unavailable',
+      'phase1.native-scenarios.launch.timeout',
     ],
     ['native RPC timed out for cave_launch', 'phase1.native-scenarios.launch.timeout'],
     ['native RPC closed before responding', 'phase1.native-scenarios.launch.rpc-closed'],
@@ -3928,6 +3947,20 @@ describe('Phase 1 real-authority conformance harness', () => {
     const client = new NativeRpcClient(new NeverCloseChild(), { shutdownTimeoutMs: 10 });
 
     await expect(client.close()).rejects.toThrow(/shutdown timed out/);
+  });
+
+  test('extends only the cave launch RPC response budget', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const client = new producer.NativeRpcClient(new DelayedResponseChild(), {
+      requestTimeoutMs: 5,
+      caveLaunchTimeoutMs: 50,
+    });
+
+    await expect(client.request('app_installation_id')).rejects.toThrow(
+      'native RPC timed out for app_installation_id',
+    );
+    await expect(client.request('cave_launch')).resolves.toMatchObject({ ok: true });
   });
 
   test('rejects pending RPC requests when child stdin closes without an unhandled stream error', async () => {
