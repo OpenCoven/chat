@@ -1684,6 +1684,26 @@ foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   `$statusStaging,
   `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
 )
+`$caveRootAclDenied = `$false
+try {
+  `$rootAcl = [IO.DirectoryInfo]::new(`$caveConformanceTemp).GetAccessControl('Access')
+  `$rootAcl.AddAccessRule(
+    [Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.WindowsIdentity]::GetCurrent().User,
+      [Security.AccessControl.FileSystemRights]::FullControl,
+      [Security.AccessControl.AccessControlType]::Allow
+    )
+  )
+  [IO.FileSystemAclExtensions]::SetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    `$rootAcl
+  )
+} catch [UnauthorizedAccessException] {
+  `$caveRootAclDenied = `$true
+}
+if (-not `$caveRootAclDenied) {
+  throw 'Cave conformance root DACL rewrite was authorized.'
+}
 `$caveAclProbe = Join-Path `$caveConformanceTemp "acl-repair-$([Guid]::NewGuid().ToString('N'))"
 [IO.Directory]::CreateDirectory(`$caveAclProbe) | Out-Null
 try {

@@ -2000,7 +2000,8 @@ namespace OpenCoven
             string isolatedSid,
             string supervisorSid)
         {
-            SecureIsolatedDirectory(path, isolatedSid, supervisorSid, FILE_ALL_ACCESS);
+            SecureIsolatedDirectory(
+                path, isolatedSid, supervisorSid, FILE_MODIFY_ACCESS, FILE_ALL_ACCESS, true);
         }
 
         private static void SecureIsolatedDirectory(
@@ -2008,7 +2009,7 @@ namespace OpenCoven
             string isolatedSid,
             string supervisorSid,
             uint isolatedAccess,
-            uint isolatedChildOnlyAccess = 0)
+            uint isolatedChildOnlyAccess = 0, bool childDirs = false)
         {
             EnablePrivilege("SeRestorePrivilege");
             string sddl = "O:" + isolatedSid + "D:P" +
@@ -2018,7 +2019,7 @@ namespace OpenCoven
                 "(A;OICI;0x" + isolatedAccess.ToString("x8") + ";;;" + isolatedSid + ")" +
                 (isolatedChildOnlyAccess == 0
                     ? String.Empty
-                    : "(A;OIIO;0x" +
+                    : (childDirs ? "(A;OICIIO;0x" : "(A;OIIO;0x") +
                         isolatedChildOnlyAccess.ToString("x8") +
                         ";;;" + isolatedSid + ")") +
                 "(A;OICI;0x00020000;;;S-1-3-4)";
@@ -2057,7 +2058,8 @@ namespace OpenCoven
                 isolatedSid,
                 supervisorSid,
                 isolatedAccess,
-                isolatedChildOnlyAccess);
+                isolatedChildOnlyAccess,
+                childDirs);
         }
 
         public static void ProtectSupervisorDirectory(string path)
@@ -2151,7 +2153,7 @@ namespace OpenCoven
             string isolatedSid,
             string supervisorSid,
             uint isolatedAccess,
-            uint isolatedChildOnlyAccess)
+            uint isolatedChildOnlyAccess, bool childDirs = false)
         {
             if (String.IsNullOrWhiteSpace(path) ||
                 !Path.IsPathRooted(path) ||
@@ -2292,7 +2294,8 @@ namespace OpenCoven
                         foundOwner = true;
                     }
                     else if (ace.Header.AceFlags ==
-                            (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE) &&
+                            (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE |
+                                (childDirs ? CONTAINER_INHERIT_ACE : 0)) &&
                         EqualSid(aceSid, expectedOwner) &&
                         ace.Mask == isolatedChildOnlyAccess &&
                         !foundOwnerChildOnly)
