@@ -1300,11 +1300,13 @@ export function classifyCavePreAssertionFailure(output) {
   ) {
     return 'phase1.cave-authority.cleanup';
   }
-  if (text.includes('client-v1-conformance: phase B (admin token configured) on ')) {
-    return 'phase1.cave-authority.phase.configured';
-  }
-  if (text.includes('client-v1-conformance: phase A (no admin token) on ')) {
-    return 'phase1.cave-authority.phase.unconfigured';
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].startsWith('phase B (admin token configured) on ')) {
+      return 'phase1.cave-authority.phase.configured';
+    }
+    if (messages[index].startsWith('phase A (no admin token) on ')) {
+      return 'phase1.cave-authority.phase.unconfigured';
+    }
   }
   return 'phase1.cave-authority.phase.setup';
 }

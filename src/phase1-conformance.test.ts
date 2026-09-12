@@ -5983,6 +5983,19 @@ describe('schema-v2 bounded Cave authority diagnostics', () => {
       'client-v1-conformance: private failure',
       'phase.configured',
     ],
+    [
+      [
+        'client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+        'client-v1-conformance: phase A (no admin token) on http://127.0.0.1:2',
+      ].join('\n'),
+      'client-v1-conformance: private failure',
+      'phase.unconfigured',
+    ],
+    [
+      'private client-v1-conformance: phase B (admin token configured) on http://127.0.0.1:1',
+      'client-v1-conformance: private failure',
+      'phase.setup',
+    ],
   ])('classifies pre-assertion Cave failure as %s / %s', async (stdout, stderr, category) => {
     // @ts-expect-error Executable module intentionally has no declaration file.
     const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
