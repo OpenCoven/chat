@@ -608,7 +608,8 @@ export function windowsJobBindingEnvironment(
   const commandProcessor = environment.COMSPEC;
   const temporaryDirectory = environment.TEMP;
   const secondaryTemporaryDirectory = environment.TMP;
-  const profileRoot = environment.USERPROFILE;
+  const profileRoot = environment.OPENCOVEN_WINDOWS_PROFILE_ROOT;
+  const userProfile = environment.USERPROFILE;
   const executablePath = environment.PATH;
   const pathExtensions = environment.PATHEXT;
   const compilerLibraryPath = environment.LIB;
@@ -690,8 +691,10 @@ export function windowsJobBindingEnvironment(
     secondaryTemporaryDirectory,
   );
   let canonicalProfileRoot;
+  let canonicalUserProfile;
   try {
     canonicalProfileRoot = requireCanonicalWindowsPath(profileRoot);
+    canonicalUserProfile = requireCanonicalWindowsPath(userProfile);
   } catch {
     throw new Error('phase1.stage.invocation.windows-profile');
   }
@@ -758,7 +761,7 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
     OPENCOVEN_WINDOWS_PNPM_CLI: canonicalPnpmCli,
     OPENCOVEN_WINDOWS_PROFILE_ROOT: canonicalProfileRoot,
-    USERPROFILE: canonicalProfileRoot,
+    USERPROFILE: canonicalUserProfile,
     SYSTEMROOT: systemRoot,
     WINDIR: windowsDirectory,
     COMSPEC: commandProcessor,

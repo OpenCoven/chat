@@ -1917,9 +1917,13 @@ Protected run `34718514551` reached Rust's 30-second readiness deadline with the
 Cave child still alive. The Windows reader/publisher path comparison then
 confirmed the unresolved mismatch: the Rust reader intentionally derives the
 profile from the process token, while the producer directed Cave to an
-artifact-local home. The protected producer now validates the supervisor's
-canonical `USERPROFILE`, passes it forward as a dedicated binding, and places
-only the Windows native fixture beneath that ephemeral profile's `.coven/cave`.
+artifact-local home. The supervisor now overwrites
+`OPENCOVEN_WINDOWS_PROFILE_ROOT` after copying the requested child environment,
+using the operating-system profile registered for the restricted process token.
+The protected producer validates that dedicated canonical path independently
+from the bootstrap-local `USERPROFILE` redirect and places only the Windows
+native fixture beneath the token profile's `.coven/cave`. A caller-provided or
+inherited profile-root value therefore cannot redirect fixture publication.
 The fixture is removed only after the native RPC and its nested Cave Job close.
 If graceful shutdown fails, deletion is deferred to the supervisor's existing
 process-termination and profile-deletion boundary.

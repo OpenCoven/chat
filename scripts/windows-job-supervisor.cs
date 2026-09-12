@@ -7439,6 +7439,8 @@ namespace OpenCoven
             values["USERNAME"] = isolatedUser.UserName;
             values["USERDOMAIN"] = Environment.MachineName;
             values["OPENCOVEN_WINDOWS_RESTRICTED_USER_SID"] = isolatedUser.Sid;
+            values["OPENCOVEN_WINDOWS_PROFILE_ROOT"] =
+                isolatedUser.OperatingSystemProfilePath;
             values["OPENCOVEN_WINDOWS_SUPERVISOR_PID"] =
                 Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
             values["OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE"] =

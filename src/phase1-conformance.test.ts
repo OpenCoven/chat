@@ -968,6 +968,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const caveConformanceTemp = `${bootstrapRoot}\\cave-conformance-temp`;
     const artifactDirectory = `${workspace}\\.artifacts`;
     const profileRoot = 'C:\\Users\\opencoven-conformance';
+    const redirectedProfileRoot = `${bootstrapRoot}\\profile`;
     const binding = {
       OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
       OPENCOVEN_WINDOWS_JOB_NONCE: nonce,
@@ -988,7 +989,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       TMP: `${bootstrapRoot}\\temp`,
       PATH: 'C:\\trusted\\node;C:\\trusted\\cargo',
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
-      USERPROFILE: profileRoot,
+      USERPROFILE: redirectedProfileRoot,
+      OPENCOVEN_WINDOWS_PROFILE_ROOT: profileRoot,
       LIB: [
         'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
@@ -1002,7 +1004,6 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     expect(windowsJobBindingEnvironment(binding, 'win32')).toEqual({
       ...binding,
-      OPENCOVEN_WINDOWS_PROFILE_ROOT: profileRoot,
     });
     expect(windowsJobBindingEnvironment(binding, 'linux')).toEqual({});
     for (const supervisorSid of [
@@ -1130,11 +1131,27 @@ describe('Phase 1 real-authority conformance harness', () => {
       windowsJobBindingEnvironment(
         {
           ...binding,
+          OPENCOVEN_WINDOWS_PROFILE_ROOT: 'relative-profile',
+        },
+        'win32',
+      ),
+    ).toThrow('phase1.stage.invocation.windows-profile');
+    expect(() =>
+      windowsJobBindingEnvironment(
+        {
+          ...binding,
           USERPROFILE: 'relative-profile',
         },
         'win32',
       ),
     ).toThrow('phase1.stage.invocation.windows-profile');
+    const supervisorSource = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'),
+      'utf8',
+    );
+    expect(supervisorSource).toMatch(
+      /values\["OPENCOVEN_WINDOWS_PROFILE_ROOT"\]\s*=\s*isolatedUser\.OperatingSystemProfilePath;/,
+    );
   });
 
   test('routes Windows native fixtures through the validated token profile', () => {
@@ -1484,7 +1501,8 @@ describe('Phase 1 real-authority conformance harness', () => {
       TEMP: `${bootstrapRoot}\\temp`,
       TMP: `${bootstrapRoot}\\temp`,
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
-      USERPROFILE: 'C:\\Users\\opencoven-conformance',
+      USERPROFILE: `${bootstrapRoot}\\profile`,
+      OPENCOVEN_WINDOWS_PROFILE_ROOT: 'C:\\Users\\opencoven-conformance',
       LIB: [
         'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64',
         'C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64',
@@ -1543,7 +1561,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: artifactDirectory,
       OPENCOVEN_WINDOWS_SOURCE_RECORD: `${artifactDirectory}\\client-v1-conformance-win32-x64.json`,
       OPENCOVEN_WINDOWS_PROFILE_ROOT: 'C:\\Users\\opencoven-conformance',
-      USERPROFILE: 'C:\\Users\\opencoven-conformance',
+      USERPROFILE: `${bootstrapRoot}\\profile`,
       SYSTEMROOT: 'C:\\Windows',
       WINDIR: 'C:\\Windows',
       COMSPEC: 'C:\\Windows\\System32\\cmd.exe',
