@@ -5246,26 +5246,42 @@ if (`$LASTEXITCODE -ne 0) {
 "@,
           [Text.UTF8Encoding]::new($false)
         )
-        $nativeDiscovery = $jobA.RunAsUser(
-          $isolatedUser,
-          $trustedPwsh,
-          "-NoLogo -NoProfile -NonInteractive -File `"$nativeDiscoveryScript`"",
-          $root,
-          $validNativeEnvironment,
-          [TimeSpan]::FromSeconds(30),
-          1MB,
-          1MB
+        $nativeDiscoveryNonce = '33333333333333333333333333333333'
+        $nativeDiscoveryJobName =
+          "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
+        $nativeDiscoveryEnvironment = $childEnvironment.Clone()
+        $nativeDiscoveryEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeDiscoveryNonce
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeDiscoveryJobName
+        $nativeDiscoveryJob = [OpenCoven.WindowsJobSupervisor]::Create(
+          $nativeDiscoveryJobName,
+          $isolatedUser
         )
-        if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
-          throw 'Native discovery profile-root regression probe failed.'
-        }
-        $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
-        if (
-          $nativeDiscoveryResponse.id -cne 'discovery' -or
-          $nativeDiscoveryResponse.ok -ne $false -or
-          $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
-        ) {
-          throw 'Native discovery rejected the isolated Windows profile root.'
+        try {
+          $nativeDiscovery = $nativeDiscoveryJob.RunAsUser(
+            $isolatedUser,
+            $trustedPwsh,
+            "-NoLogo -NoProfile -NonInteractive -File `"$nativeDiscoveryScript`"",
+            $root,
+            $nativeDiscoveryEnvironment,
+            [TimeSpan]::FromSeconds(30),
+            1MB,
+            1MB
+          )
+          if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
+            throw 'Native discovery profile-root regression probe failed.'
+          }
+          $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
+          if (
+            $nativeDiscoveryResponse.id -cne 'discovery' -or
+            $nativeDiscoveryResponse.ok -ne $false -or
+            $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
+          ) {
+            throw 'Native discovery rejected the isolated Windows profile root.'
+          }
+        } finally {
+          $nativeDiscoveryJob.Dispose()
         }
       } finally {
         $jobB.Dispose()
