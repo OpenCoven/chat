@@ -148,7 +148,7 @@ foreach ($errorCase in $cases) {
 }
 Write-Host 'Root and operation sanitization and first-failure preservation passed.'
 
-$classifyScope = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyBootstrapQuotaScope', $flags)
+$classifyScope = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyQuotaScope', $flags)
 if ($null -eq $classifyScope) { throw 'Missing bounded bootstrap quota scope classifier.' }
 $scopeRoot = 'C:\quota-root'
 $scopeCases = @(
@@ -179,6 +179,32 @@ foreach ($scopeCase in $scopeCases) {
   ))
   if ($actualScope -cne $scopeCase[1] -or $actualScope.Contains('private-nonce')) {
     throw "Bootstrap scope was not bounded: $actualScope"
+  }
+}
+$harnessScopeCases = @(
+  @($scopeRoot, 'root'),
+  @("$scopeRoot\home\.config\private-nonce", 'home'),
+  @("$scopeRoot\tmp\private-nonce", 'temp'),
+  @("$scopeRoot\cache\private-nonce", 'cache'),
+  @("$scopeRoot\data\private-nonce", 'data'),
+  @("$scopeRoot\pnpm-store\private-nonce", 'pnpm-store'),
+  @("$scopeRoot\cargo-home\registry\private-nonce", 'cargo-home'),
+  @("$scopeRoot\checkouts\chat\private-nonce", 'checkouts'),
+  @("$scopeRoot\build\chat-target\private-nonce", 'build'),
+  @("$scopeRoot\packages\sdk\private-nonce", 'packages'),
+  @("$scopeRoot\bin\private-nonce", 'bin'),
+  @("$scopeRoot\native-authority-home\private-nonce", 'native'),
+  @("$scopeRoot\compatibility-current\private-nonce", 'compatibility'),
+  @("$scopeRoot\private-nonce", 'other')
+)
+foreach ($scopeCase in $harnessScopeCases) {
+  $actualScope = $classifyScope.Invoke($null, [object[]]@(
+    'harness execution aggregate',
+    $scopeRoot,
+    $scopeCase[0]
+  ))
+  if ($actualScope -cne $scopeCase[1] -or $actualScope.Contains('private-nonce')) {
+    throw "Harness scope was not bounded: $actualScope"
   }
 }
 foreach ($unscoped in @(
@@ -282,6 +308,20 @@ try {
       $stateType.GetProperty('MonitorErrorOperation', $instanceFlags).GetValue($backgroundContext) -cne 'pattern-attributes') { throw 'Background filesystem failure lost bounded context.' }
 } finally { $backgroundContext.Dispose() }
 Write-Host 'Real filesystem terminal and background context propagation passed.'
+
+$invalidHarnessQuotas = [OpenCoven.WindowsDirectoryQuota[]]@(
+  [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $invalidPath, 1MB)
+)
+$harnessContextResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($harnessContextResult, $invalidHarnessQuotas))
+if (-not $harnessContextResult.ResourceQuotaMonitorError -or
+    $harnessContextResult.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
+    $harnessContextResult.ResourceQuotaMonitorScope -cne 'root' -or
+    $harnessContextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
+    $harnessContextResult.ResourceQuotaMonitorCategory -cne 'io') {
+  throw 'Pre-traversal harness failure did not receive a bounded root scope.'
+}
+Write-Host 'Pre-traversal harness quota failures receive a bounded scope.'
 
 # Deny enumeration on a fresh fixture only; restore its original access before
 # deleting it. This exercises real access-denied on Windows and Unix hosts.

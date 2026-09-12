@@ -3089,7 +3089,7 @@ ${pathAssignment}
       for (const required of [
         'ResourceQuotaMonitorScope',
         'ResourceQuotaMonitorRepeat',
-        'ClassifyBootstrapQuotaScope',
+        'ClassifyQuotaScope',
         'NormalizeQuotaScope',
         'NormalizeQuotaRepeat',
         'scope == null ? "none" : scope',
@@ -3116,6 +3116,16 @@ ${pathAssignment}
         'pnpm-store',
         'npm-cache',
         'counterparts',
+        'home',
+        'cache',
+        'data',
+        'cargo-home',
+        'checkouts',
+        'build',
+        'packages',
+        'bin',
+        'native',
+        'compatibility',
         'other',
       ]) {
         expect(source).toContain(`"${scope}"`);

@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `d86743738b7f7e21de8a34ed01e88c84bc63d868`,
-  tree `812b1311e0e4d6dff0346e89eccc62d824b06d39`, retained in the
+- Chat conformance driver `be656f3cb678e17342c117a1ac84273b61201a1f`,
+  tree `8d68ba022a92037ed44d4894cb913246b46b4013`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,980 | `cd8aef95d27072a69bf13bba3163e67119bfae25ad063d4e603c643e17b672d5` |
+| `.github/workflows/client-v1-conformance.yml` | 511,602 | `e227d8526b28f2872f2f96a82974f215bcc80f644dc60ee9547d21e294317b31` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,9 +1386,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 330,018 | `14bd8f149dc29e66b37191fb47d3ea8d75ff4dee3e38d4e8163f2ced64278eb6` |
+| `scripts/windows-job-supervisor.cs` | 329,530 | `d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a` |
 | `scripts/windows-job-supervisor.test.ps1` | 181,303 | `6348c9d127a405bb93c008d28fe6bdf12879abd97a9242b7b95e9009430c0922` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 21,401 | `b98a2c18ecf3ca7ee749bfa278cb1132250c1db5fc7cc28920e3384a38066c9c` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1799,3 +1799,25 @@ state, cleanup and acceptance remain unchanged. Supervisor-identity validation
 performs only the original read and reports `repeat=none`. Native regression
 coverage verifies the closed scope vocabulary, repeat propagation, unknown
 fallback and absence of private nonce or exception text.
+
+Protected run `34696065397` used the merged launch-diagnostic producer
+`59ea9ca3f557eb2179a1388e705cc5488d7fac9d` and SDK validator
+`42e62ac9e8d7ae5a14f3530d0ce22652ffdc6cd3`. Linux and macOS passed.
+Windows completed toolchain setup, exact checkouts, source verification and
+pnpm installation, then failed closed at `access-denied;
+root=harness-execution-aggregate; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=transient`. Validation,
+attestation and aggregation were skipped. The transient repeat shows only that
+the immediate same-token diagnostic read succeeded or the target disappeared;
+it does not permit partial quota accounting or production retry.
+
+The harness execution aggregate now classifies the current traversal node into
+the fixed scopes `root`, `home`, `temp`, `cache`, `data`, `pnpm-store`,
+`cargo-home`, `checkouts`, `build`, `packages`, `bin`, `native`,
+`compatibility`, or `other`. Native and compatibility workspaces are recognized
+only by their fixed prefixes; no nonce, descendant component, path or exception
+text crosses the diagnostic boundary. Failures before a matched aggregate root
+is available use the fixed `root` scope rather than `none`. This changes only
+bounded failure classification. The isolated-user reader, immediate repeat,
+limits, byte accounting, traversal, reparse handling, first-failure state and
+fail-closed decision are unchanged.

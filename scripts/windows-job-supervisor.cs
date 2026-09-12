@@ -2908,10 +2908,6 @@ namespace OpenCoven
             }
         }
 
-        // Win32 delete calls receive the extended-length form of the managed
-        // enumerator's already-normalized full path so both layers resolve the
-        // same entry: no MAX_PATH truncation and no trailing dot/space
-        // normalization on the native side.
         internal static string ToExtendedPath(string fullPath)
         {
             if (fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
@@ -2925,10 +2921,6 @@ namespace OpenCoven
             return @"\\?\" + fullPath;
         }
 
-        // A not-found status is only accepted when the managed layer agrees the
-        // entry is gone; any other disagreement fails closed with bounded,
-        // path-free context describing the operation, entry class, depth,
-        // path-length bucket and post-failure existence.
         private static void ThrowUnlessDeleted(
             int error,
             string operation,
@@ -4436,26 +4428,7 @@ namespace OpenCoven
                             typeof(WTS_PROCESS_INFO_EXW));
                     if (information.pUserSid == IntPtr.Zero)
                     {
-                        // The Idle process, and the protected system processes
-                        // that live in session 0 -- Secure System, Registry,
-                        // and their kin -- expose no primary token SID to any
-                        // caller, however privileged. Refusing on their
-                        // account made the drain unrunnable on hosts that
-                        // enable virtualization-based security, which is every
-                        // current Windows image.
-                        //
-                        // Skipping them does not widen what this proves. The
-                        // supervised identity is a local account this process
-                        // created and logged on with CreateProcessWithLogonW,
-                        // so its processes hold a readable token and appear in
-                        // this enumeration with a SID to compare. A process
-                        // whose SID cannot be read AT ALL is not one of them.
-                        //
-                        // Anywhere else, an owner this enumeration cannot read
-                        // is an owner it cannot rule out, so the refusal
-                        // stands -- and names the process, because a process
-                        // that exited between enumeration and read and a
-                        // permanently unreadable one demand opposite fixes.
+                        // The supervised user has a readable SID; protected session-0 processes may not.
                         if (information.ProcessId == 0 ||
                             information.SessionId == 0)
                         {
@@ -6878,9 +6851,6 @@ namespace OpenCoven
                     {
                         string readRoot = ReadQuotaOperation("pattern-attributes", () =>
                             GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
-                        // Validate the fixed prefix as the supervisor. The isolated
-                        // token can traverse an ancestor without permission to read
-                        // its attributes. Never retry denied descendant reads here.
                         bool prefixExists = false;
                         foreach (string prefix in ExpandQuotaPattern(readRoot))
                         {
@@ -6898,10 +6868,20 @@ namespace OpenCoven
                 catch (Exception error)
                 {
                     QuotaMonitorContextException context = error as QuotaMonitorContextException;
+                    string scope = context == null ? null : context.Scope;
+                    if ((String.IsNullOrEmpty(scope) || scope == "none") &&
+                        quota != null &&
+                        String.Equals(
+                            quota.Label,
+                            "harness execution aggregate",
+                            StringComparison.Ordinal))
+                    {
+                        scope = "root";
+                    }
                     throw new QuotaMonitorContextException(
                         quota == null ? null : quota.Label,
                         context == null ? null : context.Operation,
-                        context == null ? null : context.Scope,
+                        scope,
                         context == null ? null : context.Repeat,
                         error);
                 }
@@ -7129,14 +7109,14 @@ namespace OpenCoven
         {
             long total = 0;
             int entries = 0;
-            // Saturate diagnostic depth; never retain names in failure context.
+
             Stack<KeyValuePair<string, int>> directories = new Stack<KeyValuePair<string, int>>();
             directories.Push(new KeyValuePair<string, int>(root, 0));
             while (directories.Count > 0)
             {
                 KeyValuePair<string, int> current = directories.Pop();
                 string directory = current.Key;
-                string scope = ClassifyBootstrapQuotaScope(
+                string scope = ClassifyQuotaScope(
                     quotaLabel,
                     root,
                     directory);
@@ -7512,8 +7492,6 @@ namespace OpenCoven
             internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
         }
 
-        // Carry only bounded context across quota catch boundaries. Never retain
-        // the original exception, whose message may contain producer-owned paths.
         private sealed class QuotaMonitorContextException : Exception
         {
             internal string Category { get; private set; }
@@ -7596,6 +7574,16 @@ namespace OpenCoven
                 case "pnpm-store":
                 case "npm-cache":
                 case "counterparts":
+                case "home":
+                case "cache":
+                case "data":
+                case "cargo-home":
+                case "checkouts":
+                case "build":
+                case "packages":
+                case "bin":
+                case "native":
+                case "compatibility":
                 case "other":
                     return scope;
                 default: return "none";
@@ -7693,15 +7681,20 @@ namespace OpenCoven
             return context == null ? "none" : context.Repeat;
         }
 
-        private static string ClassifyBootstrapQuotaScope(
+        private static string ClassifyQuotaScope(
             string quotaLabel,
             string quotaRoot,
             string directory)
         {
-            if (!String.Equals(
-                    quotaLabel,
-                    "bootstrap aggregate",
-                    StringComparison.Ordinal) ||
+            bool bootstrapAggregate = String.Equals(
+                quotaLabel,
+                "bootstrap aggregate",
+                StringComparison.Ordinal);
+            bool harnessAggregate = String.Equals(
+                quotaLabel,
+                "harness execution aggregate",
+                StringComparison.Ordinal);
+            if ((!bootstrapAggregate && !harnessAggregate) ||
                 String.IsNullOrWhiteSpace(quotaRoot) ||
                 String.IsNullOrWhiteSpace(directory))
             {
@@ -7726,6 +7719,25 @@ namespace OpenCoven
                 return "other";
             }
             string first = segments[0];
+            if (harnessAggregate)
+            {
+                switch (first.ToLowerInvariant())
+                {
+                    case "home": return "home";
+                    case "tmp": return "temp";
+                    case "cache": return "cache";
+                    case "data": return "data";
+                    case "pnpm-store": return "pnpm-store";
+                    case "cargo-home": return "cargo-home";
+                    case "checkouts": return "checkouts";
+                    case "build": return "build";
+                    case "packages": return "packages";
+                    case "bin": return "bin";
+                }
+                if (first.StartsWith("native-", StringComparison.OrdinalIgnoreCase)) return "native";
+                if (first.StartsWith("compatibility-", StringComparison.OrdinalIgnoreCase)) return "compatibility";
+                return "other";
+            }
             if (String.Equals(first, "profile", StringComparison.OrdinalIgnoreCase)) return "profile";
             if (String.Equals(first, "temp", StringComparison.OrdinalIgnoreCase)) return "temp";
             if (String.Equals(first, "status-staging", StringComparison.OrdinalIgnoreCase)) return "status-staging";
