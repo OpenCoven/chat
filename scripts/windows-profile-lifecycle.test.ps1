@@ -10,22 +10,23 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 namespace OpenCoven.Tests {
     public static class ProfileLifecycleFixture {
+        private const int ProfilePathCapacity = 260;
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
         private static extern int CreateProfile(string sid, string userName,
-            StringBuilder profilePath, uint capacity);
+            [Out] StringBuilder profilePath, uint capacity);
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true,
             SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetUserProfileDirectoryW(IntPtr token,
             StringBuilder path, ref uint capacity);
         public static string Create(string sid, string userName) {
-            var path = new StringBuilder(32768);
+            var path = new StringBuilder(ProfilePathCapacity);
             int result = CreateProfile(sid, userName, path, (uint)path.Capacity);
             if (result != 0) throw new COMException("Profile fixture creation failed.", result);
             return path.ToString();
         }
         public static void RequireAlreadyExists(string sid, string userName) {
-            var path = new StringBuilder(32768);
+            var path = new StringBuilder(ProfilePathCapacity);
             int result = CreateProfile(sid, userName, path, (uint)path.Capacity);
             if (result != unchecked((int)0x800700B7))
                 throw new InvalidOperationException("Profile fixture duplicate creation was not rejected.");

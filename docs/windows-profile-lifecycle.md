@@ -29,3 +29,11 @@ API references: [CreateProfile](https://learn.microsoft.com/en-us/windows/win32/
 and [GetUserProfileDirectoryW](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getuserprofiledirectoryw).
 
 Tracks `cave-k0aqq.3`. Preserve the chat and active worktrees.
+
+The first native attempt, [CI34718542782](https://github.com/OpenCoven/chat/actions/runs/34718542782),
+failed at `profile-create` with HRESULT `800706F7` before token or child checks.
+That HRESULT wraps `RPC_X_BAD_STUB_DATA`; it does not indicate resource exhaustion.
+The corrected fixture uses a 260-character creation output buffer and explicit
+output marshalling, while retaining dynamic token-query buffer sizing. This is
+a bounded interop hypothesis requiring fresh native validation; the published
+CreateProfile contract does not state an internal RPC capacity range.
