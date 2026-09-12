@@ -136,13 +136,13 @@ diagnostic-only change.
   `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
   backport source retained by the current SDK contract;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
-- Cave authority `d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45`, tree
-  `7ff358ac42a9d94ae5feb1f08e2af64a5513e78e`, release `0.3.12`;
+- Cave authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`, tree
+  `06ffdd4320b7e05fbe68e2168f6efdb77c585756`, release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `1ad4184a043eea731613fbe6d15482a0c1e237a7`,
-  tree `98c9dc4c5380e4ed9861a0f7437a0722cef44708`, retained in the
+- Chat conformance driver `b0c4f976c4ceadd9bcebab21c40d733e155e48d2`,
+  tree `f677ecff0d7a5793257ca11c7922ffc0fd033b35`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1348,12 +1348,12 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,593 | `aaff5f8083c4f93730f8461a4dca0e27709d9c0e913bfdab9366d59e4e35f14e` |
+| `.github/workflows/client-v1-conformance.yml` | 511,601 | `695e66ad899e8d2817b8cb3a406d1c625aa4c38b38b863f68948ffa5a0b1fa33` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,961 | `54c960fac12737013ebf2490c9cae121e7e77c027138eba9e4e3a882bd48c389` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
 | `scripts/phase1-conformance.mjs` | 209,340 | `e02a95e70cf343f66b8faf498856ea4927cdf7fa6d234a69bb234fe53a50201b` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
@@ -1693,6 +1693,15 @@ The startup category is now split into fixed timeout, early-exit, health,
 missing-discovery, endpoint-mismatch and pid-mismatch identifiers. These values
 correspond only to already fixed Cave harness messages and reveal no endpoint,
 path, process identifier, response body or child output.
+
+Protected run `34675842331` used Chat #231 (`395a5c9`) and SDK validator
+`d5fcd88`. Linux and macOS passed; Windows reached a healthy Cave listener but
+reported `phase1.cave-authority.startup.discovery.missing`. Cave #5374 fixes
+the failing boundary at authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`:
+an already-owned Windows discovery directory can now have its inherited DACL
+restricted without an unnecessary `WRITE_OWNER` operation. A genuinely foreign
+owner still requires the existing takeover path, and the repaired owner and
+DACL are still re-read and refused unless they are exclusive.
 
 These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and
