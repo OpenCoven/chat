@@ -2069,6 +2069,34 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.native-scenarios.launch.initial-discovery',
     ],
     [
+      'native RPC cave_read_discovery initial outcome present',
+      'phase1.native-scenarios.launch.initial-present',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome unavailable',
+      'phase1.native-scenarios.launch.initial-unavailable',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome unsafe',
+      'phase1.native-scenarios.launch.initial-unsafe',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome invalid',
+      'phase1.native-scenarios.launch.initial-invalid',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome body-limit',
+      'phase1.native-scenarios.launch.initial-body-limit',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome service',
+      'phase1.native-scenarios.launch.initial-service',
+    ],
+    [
+      'native RPC cave_read_discovery initial outcome unknown',
+      'phase1.native-scenarios.launch.initial-unknown',
+    ],
+    [
       'native RPC did not discover the launched Cave',
       'phase1.native-scenarios.launch.discovery-timeout',
     ],
@@ -2111,6 +2139,13 @@ describe('Phase 1 real-authority conformance harness', () => {
     'timeout',
     'rpc-closed',
     'initial-discovery',
+    'initial-present',
+    'initial-unavailable',
+    'initial-unsafe',
+    'initial-invalid',
+    'initial-body-limit',
+    'initial-service',
+    'initial-unknown',
     'discovery-timeout',
     'health',
     'health-envelope',
@@ -2120,6 +2155,42 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
     expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
     expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+  });
+
+  test.each([
+    [{ ok: false, error: { code: 'cave_discovery_not_found' } }, null],
+    [{ ok: true, result: { private: 'value' } }, 'present'],
+    [{ ok: false, error: { code: 'cave_discovery_unavailable' } }, 'unavailable'],
+    [{ ok: false, error: { code: 'unsafe_discovery_record' } }, 'unsafe'],
+    [{ ok: false, error: { code: 'invalid_discovery_record' } }, 'invalid'],
+    [{ ok: false, error: { code: 'discovery_body_limit' } }, 'body-limit'],
+    [{ ok: false, error: { code: 'service_unavailable' } }, 'service'],
+    [{ ok: false, error: { code: 'private-native-error' } }, 'unknown'],
+    [{ ok: false, error: { code: 'constructor' } }, 'unknown'],
+    [{ ok: false, error: { code: '__proto__' } }, 'unknown'],
+    [{ ok: false, error: { code: 'toString' } }, 'unknown'],
+    [{ ok: false, error: { code: ['unsafe_discovery_record'] } }, 'unknown'],
+    [{ ok: false, error: { code: { toString: 'private' } } }, 'unknown'],
+    [null, 'unknown'],
+    [undefined, 'unknown'],
+    [{ ok: false, error: { code: 7 } }, 'unknown'],
+    [{ private: 'response' }, 'unknown'],
+  ])('bounds the initial discovery response as %s', async (response, expected) => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = (await import('../scripts/phase1-schema-v2-producer.mjs')) as Record<
+      string,
+      unknown
+    >;
+    const classify = producer.classifyInitialDiscoveryOutcome;
+    expect(classify).toBeTypeOf('function');
+    if (typeof classify !== 'function') {
+      return;
+    }
+
+    const outcome = classify(response);
+
+    expect(outcome).toBe(expected);
+    expect(String(outcome)).not.toContain('private');
   });
 
   test.each([

@@ -186,6 +186,13 @@ const launchFailureCategories = [
   'timeout',
   'rpc-closed',
   'initial-discovery',
+  'initial-present',
+  'initial-unavailable',
+  'initial-unsafe',
+  'initial-invalid',
+  'initial-body-limit',
+  'initial-service',
+  'initial-unknown',
   'discovery-timeout',
   'health',
   'health-envelope',
@@ -1566,6 +1573,30 @@ export async function runSchemaV2StageAsync(stage, action) {
   }
 }
 
+export function classifyInitialDiscoveryOutcome(response) {
+  if (response?.ok === true) {
+    return 'present';
+  }
+  const code = response?.ok === false ? response.error?.code : undefined;
+  if (code === 'cave_discovery_not_found') {
+    return null;
+  }
+  switch (code) {
+    case 'cave_discovery_unavailable':
+      return 'unavailable';
+    case 'unsafe_discovery_record':
+      return 'unsafe';
+    case 'invalid_discovery_record':
+      return 'invalid';
+    case 'discovery_body_limit':
+      return 'body-limit';
+    case 'service_unavailable':
+      return 'service';
+    default:
+      return 'unknown';
+  }
+}
+
 export function schemaV2NativeFailureDiagnostic(stage, error) {
   if (stage === 'launch') {
     if (error === undefined) {
@@ -1600,9 +1631,17 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
     if (message === 'native RPC cave_read_discovery did not return cave_discovery_not_found') {
       return 'phase1.native-scenarios.launch.initial-discovery';
     }
+    const initialDiscoveryFailure =
+      /^native RPC cave_read_discovery initial outcome (present|unavailable|unsafe|invalid|body-limit|service|unknown)$/u.exec(
+        message,
+      );
+    if (initialDiscoveryFailure !== null) {
+      return `phase1.native-scenarios.launch.initial-${initialDiscoveryFailure[1]}`;
+    }
     if (message === 'native RPC did not discover the launched Cave') {
       return 'phase1.native-scenarios.launch.discovery-timeout';
     }
+
     if (
       message === 'native RPC timed out for cave_health' ||
       /^native RPC cave_health failed with (invalid_request|unauthorized|scope_denied|not_found|conflict|rate_limited|pairing_denied|pairing_expired|incompatible_version|service_unavailable|reconcile_required|internal_error|invalid_response|timeout|stale_discovery_handle|invalid_native_response)$/u.test(
@@ -4263,11 +4302,14 @@ async function runNativeScenarios({
 
     activeNativeStage = 'launch';
     try {
-      await rpc.error(
-        'cave_read_discovery',
-        { operation: rpc.operation() },
-        'cave_discovery_not_found',
+      const initialDiscoveryOutcome = classifyInitialDiscoveryOutcome(
+        await rpc.request('cave_read_discovery', { operation: rpc.operation() }),
       );
+      if (initialDiscoveryOutcome !== null) {
+        throw new Error(
+          `native RPC cave_read_discovery initial outcome ${initialDiscoveryOutcome}`,
+        );
+      }
       await rpc.ok('cave_launch');
       const discovery = await waitForDiscovery(rpc);
       handle = discovery.handle;
