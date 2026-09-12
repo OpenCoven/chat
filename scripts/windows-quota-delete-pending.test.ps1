@@ -65,13 +65,15 @@ namespace OpenCoven.Tests
             }
             catch { Dispose(); throw; }
         }
-        public static void DenyAttributes(string path, string sid)
+        public static void DenyDirectoryRead(string path, string sid)
         {
-            var descriptor = new RawSecurityDescriptor("D:P(D;;0x80;;;" + sid + ")(A;;FA;;;" + sid + ")");
+            // Deny LIST_DIRECTORY and READ_ATTRIBUTES; GetAttributes alone may still
+            // succeed on native Windows, so require the real traversal to reject.
+            var descriptor = new RawSecurityDescriptor("D:P(D;;0x81;;;" + sid + ")(A;;FA;;;" + sid + ")");
             var bytes = new byte[descriptor.BinaryLength];
             descriptor.GetBinaryForm(bytes, 0);
             if (!SetFileSecurityW(path, 0x80000004u, bytes))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture attribute denial failed.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture directory-read denial failed.");
         }
         public void Dispose()
         {
@@ -162,13 +164,13 @@ try {
   if ((Get-AttributeObservation $pendingPath) -cne 'missing') { throw 'Closed deletion fixture remains accessible.' }
 
   $security = [OpenCoven.Tests.OwnerDirectoryQuotaFixture]::new($deniedPath)
-  [OpenCoven.Tests.DeletePendingDirectoryFixture]::DenyAttributes(
+  [OpenCoven.Tests.DeletePendingDirectoryFixture]::DenyDirectoryRead(
     $deniedPath, [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
   $deniedAttributes = Get-AttributeObservation $deniedPath
   $deniedQuota = Get-QuotaObservation $deniedPath
   Write-Host "ACL-denied fixture: attributes=$deniedAttributes; quota=$deniedQuota."
-  if ($deniedAttributes -cne 'access-denied' -or $deniedQuota -cne 'access-denied:directory-attributes:persistent') {
-    throw 'Explicit attribute denial did not produce the expected control.'
+  if ($deniedQuota -cnotin @('access-denied:directory-attributes:persistent', 'access-denied:directory-enumeration-root:persistent')) {
+    throw 'Explicit directory-read denial did not reject quota traversal.'
   }
   $security.Dispose()
   $security = $null

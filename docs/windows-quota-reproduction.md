@@ -93,7 +93,7 @@ after the owner-directory fixture in the Windows supervisor suite. It uses a
 retained, noninheritable handle and `RemoveDirectoryW`, then verifies the
 handle's `FILE_STANDARD_INFO.DeletePending` and directory flags. It observes
 `File.GetAttributes` and the real `MeasureDirectoryBytes` traversal while that
-handle remains open. Readable baselines and an explicit attribute-read denial
+handle remains open. Readable baselines and an explicit directory-listing and attribute-read denial
 with handle-based ACL restoration provide separate controls. No raw paths,
 SIDs, ACLs, or exception text are printed; I/O observations retain numeric
 HRESULTs. Closing the retained handle must make the path missing, verified
@@ -107,3 +107,13 @@ no production reads, retries, accounting limits, access rules, or source pins.
 
 Windows documents deletion-on-last-handle-close in the
 [RemoveDirectoryW contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-removedirectoryw).
+
+The first native experiment in [CI34715434276](https://github.com/OpenCoven/chat/actions/runs/34715434276)
+verified the pending-deletion state, then observed `attributes=missing` and
+`quota=readable`. It did not reproduce the protected failure. Its initial
+attribute-only deny control also observed readable attributes and traversal,
+so that control was invalid and the test failed. The corrected control denies
+both `FILE_LIST_DIRECTORY` and `FILE_READ_ATTRIBUTES`, requires quota rejection,
+and records the attribute observation independently. Native verification of
+this corrected control remains required; neither fixture identifies the
+protected descendant's cause.
