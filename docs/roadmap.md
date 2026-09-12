@@ -1,6 +1,31 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 03:00 UTC
+## Consolidation checkpoint, 2026-09-12 03:27 UTC
+
+Chat [#229](https://github.com/OpenCoven/chat/pull/229) landed as
+`5f4572c45e19bc17fa8963fb8147b47bc8d0c31c` after all ten CI jobs passed,
+including native Windows quota-depth fixtures, native E2E, packaged Phase 1
+and Desktop. SDK [#212](https://github.com/OpenCoven/sdk/pull/212) landed as
+`33240b9ff5212b1aec0f7f34173cdf899174769e`; its exact-head CI passed both
+Node lanes, all native-keyring platforms and code analysis. The release-runtime
+test and coverage suites each passed all 1,515 tests.
+
+Both validator scopes were read back at SDK `33240b9`. Fresh protected
+[run 34670074847](https://github.com/OpenCoven/chat/actions/runs/34670074847)
+uses Chat `5f4572c`; its supervisor build passed and protected environment
+approval is verified. Platform execution is still pending terminal evidence.
+The preceding completed run `34667436672` classified Windows startup/readiness
+failure; both Unix records independently passed identities, timing, scans and
+all 197 assertions. The separate quota denial in `34666399779` remains distinct.
+
+Chat #230 prepares bounded startup subtypes and retains #229's quota-depth
+source. Its own final CI, actual merge, SDK binding and protected execution
+remain required. Chat #219, Coven #984, SDK #38 and final release acceptance
+stay open. The active Chat quota-depth checkout was restored after concurrent
+removal; it and the SDK validator checkout are locked for the current run.
+Chat and active/dirty/uncertain worktrees remain protected from retirement.
+
+## Historical consolidation checkpoint, 2026-09-12 03:00 UTC
 
 Chat #228 landed as `f77b24912ccf2492e6d79adb306da8c858af0595`; SDK #211
 landed as `5730979d647deb2f4173851398b0b5f091c13390`. Both validator scopes
