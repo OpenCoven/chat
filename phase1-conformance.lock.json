@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "d183c60836046c339f0e5954390fbc0c5e8d4fd5"
+    "revision": "bd9b1f75b7b9b2931c6e065bbeb4e6f765b0d795"
   },
   "harnessAuthority": {
-    "revision": "d183c60836046c339f0e5954390fbc0c5e8d4fd5",
-    "tree": "3343573ad067690b8d879d23787e46c5c0cb1751",
+    "revision": "bd9b1f75b7b9b2931c6e065bbeb4e6f765b0d795",
+    "tree": "f81e9bc02908cbfe2cdfc5830ce7652369892c3b",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "0b5daacf94013baf6d4bc92339b7d1f7f02d8c98",
-        "sha256": "63889e38a254237ab4994c53125f6be719d19aff12dcba437bb8d04a4f3f08ca"
+        "blob": "3ae7b6bf64e23f269b0f6b64bfa1b3dee08aa8c1",
+        "sha256": "6ba9cc0aa215d83bdcd85798016eca791befa5ef51a70025a4f5faa834f99824"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -183,8 +183,8 @@
       },
       {
         "path": "src-tauri/src/connection.rs",
-        "blob": "65ea88062020460b8bd402b91a874a99355660fb",
-        "sha256": "83b45bbb128bfc83f85c6b8d6e471866978effce1919485b6491c8503a7caee1"
+        "blob": "4ee9c0120fbea932736ef3738cb94a6fb41935e8",
+        "sha256": "703c9a2d7c7314346a51bbf5f45a2bc8f7419f3d38ef6b4f22fd2372139bbff3"
       },
       {
         "path": "src-tauri/src/coven.rs",
