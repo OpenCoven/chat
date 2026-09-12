@@ -1387,7 +1387,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 329,530 | `d3a28a37004ee29201b5528189cac11102c5662395fd33a693dedc3c0d859f8a` |
-| `scripts/windows-job-supervisor.test.ps1` | 183,269 | `413891793d73bd91c4be2a4345a38d94924d59efd42289388dc8696a1b9ccaa8` |
+| `scripts/windows-job-supervisor.test.ps1` | 185,863 | `3d6d0d5d4e5f47b57077b445c124084304a1648820f6bcc1d810d5bcd1d713c8` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 23,316 | `f9ee67833519fbe7c9495c1a00d5ff459e03b729c8cdee260722246495371e4c` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
@@ -1862,14 +1862,16 @@ rejection; it is reported only by the follow-up probe as `owner-acl-unavailable`
 For the current user, an ACL-query error remains unavailable. Unknown ACL
 metadata is never treated as a safe ACL.
 
-Protected run `34703851840` used Chat #238
-(`c4a7be83bb1b5dd814f3dbfe247a409dfdf46256`) and SDK #221
-(`204f8432f97a84fa97caa8b959d355000e2ddbca`). Linux and macOS passed.
-Windows reported `phase1.native-scenarios.launch.initial-unsafe`. Because the
-fresh operating-system profile root is validated before the absent `.coven`
-directory, the result isolates the rejection to that root. Windows may assign
-the profile root to LocalSystem or builtin Administrators even though only
-those principals and the isolated user can write it.
+Protected run `34709663093` used Chat #240
+(`8d17c173aa00310755fe912c66d4d3ba088296c4`) and SDK #222
+(`010032083d27ae7bf6807d4451c6c1fb33d68b71`). Linux and macOS records
+passed independent identity, timing and ordered-assertion checks. Windows
+reported `phase1.native-scenarios.launch.initial-unsafe-probe-profile-owner`
+at `2026-09-12T18:27:35.7586103Z`. The follow-up observation identified a
+non-reparse profile directory with a foreign owner and an acceptable writer
+DACL. It does not snapshot the original read or disclose the owner's SID class.
+The native Windows regression separately requires an actual LocalSystem or
+builtin Administrators owner before exercising the newly accepted branch.
 
 The Windows reader therefore accepts the operating-system profile root only
 when its owner is the current user, LocalSystem or builtin Administrators and
@@ -1880,3 +1882,7 @@ existing DACL, identity and file-replacement checks. The Windows supervisor
 regression suite now performs an actual `cave_read_discovery` request under a
 fresh restricted profile and requires the exact `cave_discovery_not_found`
 response before any discovery state exists.
+
+When a trusted profile owner's ACL metadata cannot be queried, the follow-up
+probe reports `unavailable`; the ordinary reader continues to reject the path.
+Unknown ACL metadata is never reported as an observed unsafe ACL or accepted.

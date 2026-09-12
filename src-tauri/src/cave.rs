@@ -572,6 +572,8 @@ fn windows_directory_safety_category(
         "owner-acl"
     } else if !owner_matches {
         "owner"
+    } else if metadata.trusted_writer_dacl.is_none() {
+        "unavailable"
     } else if metadata.trusted_writer_dacl != Some(true) {
         "acl"
     } else {
@@ -1889,6 +1891,21 @@ mod tests {
             trusted_writer_dacl: Some(true),
             ..safe_windows_metadata(1, 2)
         };
+
+        let unavailable_acl = WindowsFileMetadata {
+            trusted_writer_dacl: None,
+            ..system_owned_profile
+        };
+        assert_eq!(
+            super::windows_directory_safety_category(unavailable_acl, true),
+            "unavailable"
+        );
+        assert_eq!(
+            validate_windows_profile_root(unavailable_acl)
+                .unwrap_err()
+                .code,
+            "unsafe_discovery_record"
+        );
 
         assert!(validate_windows_profile_root(system_owned_profile).is_ok());
         assert_eq!(
