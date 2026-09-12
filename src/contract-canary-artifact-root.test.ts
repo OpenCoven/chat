@@ -459,7 +459,7 @@ describe('contract canary temp directory safety', () => {
       sha256: '21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('82bf6831b4afbe82709a5fe78949d1b16c4d61e1');
+    expect(lock.cave.revision).toBe('cb3d22d1f403dd3b94b02668a599a2bf94999e8b');
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',

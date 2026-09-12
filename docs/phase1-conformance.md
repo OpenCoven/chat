@@ -136,8 +136,8 @@ diagnostic-only change.
   `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
   backport source retained by the current SDK contract;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
-- Cave authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`, tree
-  `06ffdd4320b7e05fbe68e2168f6efdb77c585756`, release `0.4.2`;
+- Cave authority `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`, tree
+  `2d05861d243a3a5761c160765c011aa6dde6131f`, release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
@@ -1714,6 +1714,17 @@ an already-owned Windows discovery directory can now have its inherited DACL
 restricted without an unnecessary `WRITE_OWNER` operation. A genuinely foreign
 owner still requires the existing takeover path, and the repaired owner and
 DACL are still re-read and refused unless they are exclusive.
+
+Protected run `34687009654` used Chat #233 (`d495070`) and SDK #216
+(`fcab133`). Linux and macOS passed. Windows passed Cave startup and discovery
+publication, then failed at `phase1.cave-authority.assertion.takeover`. The
+focused takeover proof uniquely allocated its scratch fixture beneath the
+restricted Cave checkout instead of the injected dedicated temp root. Cave
+#5378 fixes that boundary at authority
+`cb3d22d1f403dd3b94b02668a599a2bf94999e8b` by reusing the canonical
+OS-temp fixture helper. The proof, cleanup behavior, general workspace ACLs and
+quota policy remain unchanged. Validation, attestation and aggregation were
+skipped; a newly bound SDK validator and fresh protected matrix are required.
 
 These diagnostics preserve existing commands, deadlines, resource limits,
 record validation and assertion acceptance. They require a frozen harness and
