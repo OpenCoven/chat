@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `87ce946b0d9c7f05ccad2e23b2e1a7b18e9682f2`,
-  tree `93ee63fdbf419bf701f682e87866720c313fc814`, retained in the
+- Chat conformance driver `7d2b855eb4112dcb93d530c5d54f26601e201b6b`,
+  tree `88e85ae4b8f517bf31a07447322ea0f6024dbfd8`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
