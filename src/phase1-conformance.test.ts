@@ -39,7 +39,6 @@ import {
   bootstrapWindowsSupervisor,
   CommandExecutionError,
   cargoBuildTimeoutMs,
-  caveAuthorityEnvironment,
   caveBuildEnvironment,
   classifyPackagingCommandFailure,
   cloneExactCheckout,
@@ -1117,13 +1116,13 @@ describe('Phase 1 real-authority conformance harness', () => {
       OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: 'C:\\isolated\\cave-conformance-temp',
     };
 
-    expect(caveAuthorityEnvironment(environment, 'win32')).toEqual({
+    expect(schemaV2Producer.caveAuthorityEnvironment(environment, 'win32')).toEqual({
       ...environment,
       TMPDIR: 'C:\\isolated\\cave-conformance-temp',
       TMP: 'C:\\isolated\\cave-conformance-temp',
       TEMP: 'C:\\isolated\\cave-conformance-temp',
     });
-    expect(caveAuthorityEnvironment(environment, 'linux')).toBe(environment);
+    expect(schemaV2Producer.caveAuthorityEnvironment(environment, 'linux')).toBe(environment);
   });
 
   test('invokes the pinned pnpm CLI through Node on Windows', () => {
