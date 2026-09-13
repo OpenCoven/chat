@@ -6472,8 +6472,22 @@ describe('schema-v2 bounded Cave discovery details', () => {
       );
       expect(actual).toBe(expected);
       expect(publicPhase1FailureDiagnostic(new Error(actual))).toBe(expected);
+      expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${actual}`)).toBe(expected);
+      expect(
+        publicPhase1FailureDiagnostic(
+          new CommandExecutionError('private command label', {
+            code: 1,
+            signal: null,
+            stdout: '',
+            stderr: `phase1-conformance: ${actual}`,
+          }),
+        ),
+      ).toBe(expected);
       expect(producer.wrapInfrastructureFailure(new Error(actual), {}).message).toBe(expected);
       expect(publicPhase1FailureDiagnostic(new Error(`${actual}: private secret`))).toBeUndefined();
+      expect(
+        extractVerifiedRunnerDiagnostic(`phase1-conformance: ${actual}: private secret`),
+      ).toBeUndefined();
     },
   );
 
