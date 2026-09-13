@@ -10,6 +10,13 @@ $cases = @(
   @($bound, 'entry-bound'),
   @([UnauthorizedAccessException]::new('secret-path'), 'access-denied'),
   @([IO.IOException]::new('secret-path'), 'io'),
+  @([IO.IOException]::new('secret-path', -2147024894), 'io-file-not-found'),
+  @([IO.IOException]::new('secret-path', -2147024893), 'io-path-not-found'),
+  @([IO.IOException]::new('secret-path', -2147024864), 'io-sharing-violation'),
+  @([IO.IOException]::new('secret-path', -2147024863), 'io-lock-violation'),
+  @([IO.IOException]::new('secret-path', -2147024690), 'io-name-too-long'),
+  @([IO.IOException]::new('secret-path', -2147024629), 'io-invalid-directory'),
+  @([IO.IOException]::new('secret-path', -2147024593), 'io-delete-pending'),
   @([OverflowException]::new('secret-path'), 'arithmetic-overflow'),
   @([InvalidOperationException]::new('secret-path'), 'unexpected')
 )
@@ -326,7 +333,8 @@ $invalidQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirector
 $contextResult = [OpenCoven.WindowsJobRunResult]::new()
 $terminal.Invoke($null, [object[]]@($contextResult, $invalidQuotas))
 if (-not $contextResult.ResourceQuotaMonitorError -or $contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or
-    $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or $contextResult.ResourceQuotaMonitorCategory -cne 'io') {
+    $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
+    $contextResult.ResourceQuotaMonitorCategory -cne 'io-name-too-long') {
   throw 'Real terminal filesystem failure lost bounded context.'
 }
 $terminal.Invoke($null, [object[]]@($contextResult, $malformed))
@@ -348,7 +356,7 @@ if (-not $harnessContextResult.ResourceQuotaMonitorError -or
     $harnessContextResult.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
     $harnessContextResult.ResourceQuotaMonitorScope -cne 'root' -or
     $harnessContextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
-    $harnessContextResult.ResourceQuotaMonitorCategory -cne 'io') {
+    $harnessContextResult.ResourceQuotaMonitorCategory -cne 'io-name-too-long') {
   throw 'Pre-traversal harness failure did not receive a bounded root scope.'
 }
 Write-Host 'Pre-traversal harness quota failures receive a bounded scope.'
