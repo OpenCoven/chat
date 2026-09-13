@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `0392645db9ec3b6e06cbc91ed0c09a868a50aea5`,
-  tree `73d764b11de695ef6e047770a936f3fa9d1ec668`, retained in the
+- Chat conformance driver `d38e06e084a4778d4ac643661a502c0de09f1463`,
+  tree `957059fcec0645e3864b71124aa2768c0d5dfe2d`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,778 | `8f17982e473485f2cb228561be507b9427dc01a8043dfc2e34208a4289c6693a` |
+| `.github/workflows/client-v1-conformance.yml` | 511,884 | `7202255edb5f1de3e8be37ecbd3c6ac26296ee7bb2c574fe71d4c672c8ad5594` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,9 +1386,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,668 | `962bcb84af48532bf216770c0f50a023c255c286515f08d1befbf95922b487f3` |
+| `scripts/windows-job-supervisor.cs` | 329,764 | `5e7366c1520e8a6badd4f71e3c4813adf8884c7b6da56e723f5b8d124855dd42` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 25,426 | `b669c4a939337ac5ef721649335d0ca724e0bf0975d04edfb64ed775ae192d0a` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1791,16 +1791,21 @@ it threw another exception, which need not match the first error. Older bound
 producers reported both readable and missing outcomes as `transient`. Enumeration
 creates a fresh enumerator, entry attributes use a fresh static metadata read,
 and file length uses a fresh metadata object, so each repeat reaches the
-filesystem again. The original failure still terminates production in either
-case. Synthetic or unattributed failures use `none`. Initial enumeration metadata and byte accounting are unchanged; fresh metadata
-is requested only by the diagnostic repeat. Supervisor prefix validation and
-non-isolated reads remain single-pass. The repeat never uses the
-supervisor identity, changes an ACL, accepts a partial measurement, or retries
-production. Existing quotas, traversal bounds, reparse handling, first-failure
-state, cleanup and acceptance remain unchanged. Supervisor-identity validation
-performs only the original read and reports `repeat=none`. Native regression
-coverage verifies the closed scope vocabulary, repeat propagation, unknown
-fallback and absence of private nonce or exception text.
+filesystem again. A readable or persistent repeat still terminates production
+with the original bounded failure. A missing repeat is propagated through the
+existing missing-path branch because the measured object no longer consumes
+quota. Enumeration also performs a fresh root-attribute read after collecting
+the retry snapshot, so disappearance during enumeration cannot accept a partial
+measurement. Synthetic or unattributed failures use `none`. Initial enumeration
+metadata and byte accounting are unchanged; fresh metadata is requested only by
+the diagnostic repeat. Supervisor prefix validation and non-isolated reads
+remain single-pass. The repeat never uses the supervisor identity, changes an
+ACL, retries production, or accepts a partial measurement. Existing quotas,
+traversal bounds, reparse handling, first-failure state, cleanup and acceptance
+remain unchanged. Supervisor-identity validation performs only the original
+read and reports `repeat=none`. Native regression coverage verifies the closed
+scope vocabulary, repeat behavior, unknown fallback and absence of private
+nonce or exception text.
 
 Protected run `34696065397` used the merged launch-diagnostic producer
 `59ea9ca3f557eb2179a1388e705cc5488d7fac9d` and SDK validator
@@ -1938,3 +1943,22 @@ existing 10-second transport allowance, for an 85-second Windows
 allowance, and every other RPC remains bounded at 10 seconds. No ownership,
 DACL, identity, quota, liveness, discovery, health, redaction, or attestation
 check is bypassed.
+
+Protected run `34726708513` used merged Chat #249 (`4682a4a`) and SDK #228
+(`c863b58`). Linux and Darwin passed, and Windows passed the frozen supervisor
+build and token-profile alignment before failing at
+`access-denied; root=cave-checkout; scope=none;
+operation=directory-attributes; repeat=missing`. Validation, attestation and
+aggregation were skipped.
+
+The schema-v2 producer removes its `phase1-conformance-run-*` execution root
+before its supervised process exits. The one-second quota monitor can therefore
+observe a Windows directory in its delete-pending transition: the initial
+attribute read is denied and the immediate same-token read reports that the
+directory is gone. The supervisor now treats only that confirmed disappearance
+as the existing missing-path case. A retry that is readable, remains denied, or
+fails differently still fails closed with the original category. The
+post-enumeration root recheck prevents a disappearing directory from yielding a
+successful partial snapshot. Quota values, aggregate coverage, ACL validation,
+reparse rejection, traversal bounds, cleanup ordering and first-failure
+retention are unchanged.
