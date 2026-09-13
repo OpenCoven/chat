@@ -174,19 +174,38 @@ $failAfterCreation = [Action[string,string]] {
   throw 'injected-profile-initialization-failure'
 }
 $injectedFailureObserved = $false
+$cleanupFailureObserved = $false
+$failureKind = 'none'
+$failureHresult = 'none'
+$failureNativeCode = 'none'
 try {
   $unexpectedUser = $createCore.Invoke($null, [object[]]@($failureRoot, $failAfterCreation))
   if ($null -ne $unexpectedUser) { $unexpectedUser.Dispose() }
 } catch {
+  $failure = $_.Exception.GetBaseException()
+  $failureHresult = '{0:X8}' -f $failure.HResult
+  if ($failure -is [ComponentModel.Win32Exception]) { $failureNativeCode = $failure.NativeErrorCode }
+  $failureKind = switch ($failure) {
+    { $_ -is [Security.Principal.IdentityNotMappedException] } { 'sid-translation'; break }
+    { $_ -is [Runtime.InteropServices.COMException] } { 'com'; break }
+    { $_ -is [ComponentModel.Win32Exception] } { 'win32'; break }
+    { $_ -is [Reflection.TargetParameterCountException] } { 'reflection-arity'; break }
+    { $_ -is [ArgumentException] } { 'argument'; break }
+    { $_ -is [Management.Automation.RuntimeException] } { 'powershell'; break }
+    default { 'unexpected' }
+  }
   $cause = $_.Exception
   while ($null -ne $cause) {
-    if ($cause -is [AggregateException]) { throw 'Owned profile initialization cleanup failed.' }
+    if ($cause -is [AggregateException]) { $cleanupFailureObserved = $true }
     if ($cause.Message -ceq 'injected-profile-initialization-failure') { $injectedFailureObserved = $true }
     $cause = $cause.InnerException
   }
 }
-if (-not $injectedFailureObserved -or $null -eq $owned.Path -or $null -eq $owned.UserName) {
-  throw 'Profile initialization failure was not exercised.'
+if ($cleanupFailureObserved -or -not $injectedFailureObserved -or
+    $null -eq $owned.Path -or $null -eq $owned.UserName) {
+  throw ('Profile initialization fixture rejected: sid={0}; path={1}; username={2}; injected={3}; cleanupFailure={4}; kind={5}; hresult={6}; nativeCode={7}.' -f
+    ($null -ne $owned.Sid), ($null -ne $owned.Path), ($null -ne $owned.UserName),
+    $injectedFailureObserved, $cleanupFailureObserved, $failureKind, $failureHresult, $failureNativeCode)
 }
 Assert-ProfileFixtureMissing $owned.Path
 Assert-ProfileFixtureMissing $failureRoot
