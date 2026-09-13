@@ -24,10 +24,12 @@ The schema-1 release manifest is 1,031 bytes with SHA-256
 `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`.
 Both locks record the four exact candidate archive sizes and digests.
 
-Cave authority is the actual diagnostic merge
-`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8` (tree
-`b05c2baa4b586e2523e1803db8d9fd1182ecd148`), version 0.4.3. It includes the
-0.0.1 minimum-client prerequisite and the bounded discovery counterpart.
+Cave authority is the actual Windows ownership repair merge
+`8a06421a705c2d7891c3f44cc580c569f6cbe2c1` (tree
+`aee0a949cfe058f6c50dc95135f1e6579e759a41`), version 0.4.3. It includes the
+0.0.1 minimum-client prerequisite, the bounded discovery diagnostics, and the
+read-only `OWNER RIGHTS` compatibility required by the protected Windows
+profile boundary.
 The packed SDK fixture retains its authenticated compatibility-source
 provenance at `e806655a`; the later diagnostic authority contains that
 ancestor and identical fixture bytes. The Chat fixture mirror uses the same
@@ -60,6 +62,28 @@ After reviewed Chat landing, SDK coordination must bind the actual merged
 producer and these actual consumer, candidate, and authority identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
+
+## Windows OWNER RIGHTS discovery repair
+
+[Protected run 34782181876](https://github.com/OpenCoven/chat/actions/runs/34782181876)
+used Chat `5be5775e43cfdb3424e1a8361e11d5d59cbaaabb` and SDK validator
+`72a2c2467dbef2564ca4ddff2817914672f6580c`. Linux and Darwin passed, while
+Windows failed at `phase1.native-scenarios.launch.discovery-not-found`.
+
+The protected supervisor intentionally creates the real Windows profile's
+`.coven` directory with a protected DACL containing an `OWNER RIGHTS`
+(`S-1-3-4`) `READ_CONTROL` ACE. Cave previously treated that SID as a foreign
+principal and attempted to replace the DACL. The `OWNER RIGHTS` entry suppresses
+the owner's implicit `WRITE_DAC`, so that repair was denied and Cave withheld
+`client-v1-discovery.json`.
+
+OpenCoven/coven-cave#5388 repairs the mismatch at the publisher boundary. Cave
+now includes each ACE's access mask in its bounded ACL report and admits
+`OWNER RIGHTS` only when the ACE is `Allow` and contains none of the existing
+writable-rights mask. Writable owner-rights entries, foreign writers, deny
+entries, inherited DACLs, malformed reports, and unreadable DACLs remain
+refused. The supervisor ACL, quotas, process isolation, waiver policy, discovery
+read validation, and readiness deadlines are unchanged.
 
 ## Bounded discovery decoder prerequisite (historical)
 
@@ -248,8 +272,8 @@ diagnostic-only change.
   `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
   retaining the prior reviewed native production source;
 - SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
-- Cave authority `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
-  `b05c2baa4b586e2523e1803db8d9fd1182ecd148`, release `0.4.3`;
+- Cave authority `8a06421a705c2d7891c3f44cc580c569f6cbe2c1`, tree
+  `aee0a949cfe058f6c50dc95135f1e6579e759a41`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;

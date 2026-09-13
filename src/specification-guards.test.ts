@@ -158,7 +158,7 @@ describe('Phase 1 specification guards', () => {
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.sdk.revision).toBe('77d825d17809cfec2fad4acb9b1526b3c4752f9d');
-    expect(lock.cave.revision).toBe('1bb0a21773fcc2966308ed1900ec6b746fcfdbc8');
+    expect(lock.cave.revision).toBe('8a06421a705c2d7891c3f44cc580c569f6cbe2c1');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.0.1',
