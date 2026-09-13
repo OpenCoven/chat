@@ -7021,6 +7021,8 @@ namespace OpenCoven
                     directoriesOnly,
                     maximumEntries);
             }
+            catch (FileNotFoundException) { return new List<FileSystemInfo>(); }
+            catch (DirectoryNotFoundException) { return new List<FileSystemInfo>(); }
             catch (Exception error)
             {
                 string repeat = repeatDiagnostic ? ClassifyQuotaReadRepeat(() =>
@@ -7029,6 +7031,7 @@ namespace OpenCoven
                         searchPattern,
                         directoriesOnly,
                         maximumEntries)) : "none";
+                if (repeat == "missing") return new List<FileSystemInfo>();
                 throw new QuotaMonitorContextException(
                     null,
                     directoriesOnly ? "pattern-enumeration" :
@@ -7049,49 +7052,18 @@ namespace OpenCoven
             int maximumEntries)
         {
             List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
-            IEnumerable<FileSystemInfo> entries;
-            IEnumerator<FileSystemInfo> enumerator;
-            try
+            DirectoryInfo directoryInfo = new DirectoryInfo(directory);
+            IEnumerable<FileSystemInfo> entries = directoriesOnly
+                ? directoryInfo.EnumerateDirectories(
+                    searchPattern,
+                    SearchOption.TopDirectoryOnly)
+                : directoryInfo.EnumerateFileSystemInfos(
+                    "*",
+                    SearchOption.TopDirectoryOnly);
+            using (IEnumerator<FileSystemInfo> enumerator = entries.GetEnumerator())
             {
-                DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-                entries = directoriesOnly
-                    ? directoryInfo.EnumerateDirectories(
-                        searchPattern,
-                        SearchOption.TopDirectoryOnly)
-                    : directoryInfo.EnumerateFileSystemInfos(
-                        "*",
-                        SearchOption.TopDirectoryOnly);
-                enumerator = entries.GetEnumerator();
-            }
-            catch (FileNotFoundException)
-            {
-                return snapshot;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return snapshot;
-            }
-            using (enumerator)
-            {
-                while (true)
+                while (enumerator.MoveNext())
                 {
-                    bool moved;
-                    try
-                    {
-                        moved = enumerator.MoveNext();
-                    }
-                    catch (FileNotFoundException)
-                    {
-                        break;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        break;
-                    }
-                    if (!moved)
-                    {
-                        break;
-                    }
                     if (snapshot.Count >= maximumEntries)
                     {
                         throw new QuotaEntryBoundException();
@@ -7651,11 +7623,14 @@ namespace OpenCoven
             catch (DirectoryNotFoundException) { throw; }
             catch (Exception error)
             {
+                string repeat = repeatDiagnostic ?
+                    ClassifyQuotaReadRepeat(repeatRead ?? read) : "none";
+                if (repeat == "missing") throw new DirectoryNotFoundException();
                 throw new QuotaMonitorContextException(
                     null,
                     operation,
                     null,
-                    repeatDiagnostic ? ClassifyQuotaReadRepeat(repeatRead ?? read) : "none",
+                    repeat,
                     error);
             }
         }
