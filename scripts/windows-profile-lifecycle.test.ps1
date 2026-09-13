@@ -179,7 +179,8 @@ $failureKind = 'none'
 $failureHresult = 'none'
 $failureNativeCode = 'none'
 try {
-  $unexpectedUser = $createCore.Invoke($null, [object[]]@($failureRoot, $failAfterCreation))
+  # Reflection does not unwrap the PSObject emitted by Join-Path for string parameters.
+  $unexpectedUser = $createCore.Invoke($null, [object[]]@([string]$failureRoot, $failAfterCreation))
   if ($null -ne $unexpectedUser) { $unexpectedUser.Dispose() }
 } catch {
   $failure = $_.Exception.GetBaseException()

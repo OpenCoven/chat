@@ -1,7 +1,48 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const source = readFileSync('scripts/windows-job-supervisor.cs', 'utf8');
+const pwshAvailable =
+  spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
+
+test.skipIf(!pwshAvailable)(
+  'profile failure fixture reaches its callback through reflection',
+  () => {
+    const fixture = readFileSync('scripts/windows-profile-lifecycle.test.ps1', 'utf8');
+    const root = fixture.match(/^\$failureRoot = .+$/mu)?.[0];
+    const invocation = fixture.match(/^ {2}\$unexpectedUser = \$createCore\.Invoke\(.+$/mu)?.[0];
+    expect(root).toBeDefined();
+    expect(invocation).toBeDefined();
+    const result = spawnSync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public static class ProfileArgumentProbe { public static void Run(string root, System.Action<string,string> callback) { callback("sid", root); } }'
+${root}
+$createCore = [ProfileArgumentProbe].GetMethod('Run')
+$owned = @{ Path = $null }
+$failAfterCreation = [Action[string,string]] { param($sid, $path); $owned.Path = $path; throw 'injected-profile-initialization-failure' }
+$observed = $false
+try {
+${invocation}
+} catch {
+  if ($_.Exception.GetBaseException().Message -ceq 'injected-profile-initialization-failure') { $observed = $true }
+}
+if (-not $observed -or $owned.Path -cne $failureRoot) { throw 'Reflection did not reach the failure callback.' }
+`,
+      ],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  },
+);
 
 describe('production Windows profile ownership boundary', () => {
   test('records actual profile ownership before verification and never predicts the profile path', () => {
