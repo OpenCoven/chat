@@ -1962,4 +1962,4 @@ exceptions now leave the enumeration core rather than ending the loop with a
 partial snapshot; the wrapper discards that snapshot and applies the same
 missing-path result. Quota values, aggregate coverage, ACL validation, reparse
 rejection, traversal bounds, cleanup ordering and first-failure retention are
-unchanged.
+unchanged. A missing root contributes no retained bytes to that scan.
