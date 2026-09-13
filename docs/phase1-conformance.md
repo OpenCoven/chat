@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `d38e06e084a4778d4ac643661a502c0de09f1463`,
-  tree `957059fcec0645e3864b71124aa2768c0d5dfe2d`, retained in the
+- Chat conformance driver `b1d2c2135673c3b9c6e32598a013357ff2a04928`,
+  tree `fab275ec4d12307f7b64fda9671a1cf1e30665c1`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 511,884 | `7202255edb5f1de3e8be37ecbd3c6ac26296ee7bb2c574fe71d4c672c8ad5594` |
+| `.github/workflows/client-v1-conformance.yml` | 511,052 | `9557c6cd5e5938fa22a1193891ac45fa7c540fd95c678606350e25602a09073a` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,7 +1386,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,764 | `5e7366c1520e8a6badd4f71e3c4813adf8884c7b6da56e723f5b8d124855dd42` |
+| `scripts/windows-job-supervisor.cs` | 329,192 | `de5b7861f8a6f219ce04d7bf7fd83559765d50c1ff1c9bf14f47259198940cb3` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 25,426 | `b669c4a939337ac5ef721649335d0ca724e0bf0975d04edfb64ed775ae192d0a` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
@@ -1957,8 +1957,9 @@ observe a Windows directory in its delete-pending transition: the initial
 attribute read is denied and the immediate same-token read reports that the
 directory is gone. The supervisor now treats only that confirmed disappearance
 as the existing missing-path case. A retry that is readable, remains denied, or
-fails differently still fails closed with the original category. The
-post-enumeration root recheck prevents a disappearing directory from yielding a
-successful partial snapshot. Quota values, aggregate coverage, ACL validation,
-reparse rejection, traversal bounds, cleanup ordering and first-failure
-retention are unchanged.
+fails differently still fails closed with the original category. Missing-path
+exceptions now leave the enumeration core rather than ending the loop with a
+partial snapshot; the wrapper discards that snapshot and applies the same
+missing-path result. Quota values, aggregate coverage, ACL validation, reparse
+rejection, traversal bounds, cleanup ordering and first-failure retention are
+unchanged.
