@@ -3095,8 +3095,9 @@ ${pathAssignment}
         'scope == null ? "none" : scope',
         'repeat == null ? "none" : repeat',
         'catch (QuotaMonitorContextException error)',
-        'throw new DirectoryNotFoundException();',
-        'File.GetAttributes(directory);',
+        'if (repeat == "missing") throw new DirectoryNotFoundException();',
+        'if (repeat == "missing") return new List<FileSystemInfo>();',
+        'catch (DirectoryNotFoundException) { return new List<FileSystemInfo>(); }',
       ]) {
         expect(source).toContain(required);
       }
@@ -3135,6 +3136,12 @@ ${pathAssignment}
       for (const repeat of ['none', 'readable', 'missing', 'persistent']) {
         expect(source).toContain(`"${repeat}"`);
       }
+      const snapshotCore = source.slice(
+        source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore('),
+        source.indexOf('private static long MeasureDirectoryBytes(', source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore(')),
+      );
+      expect(snapshotCore).not.toContain('catch (FileNotFoundException)');
+      expect(snapshotCore).not.toContain('catch (DirectoryNotFoundException)');
       expect(source).toContain(
         '() => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName)',
       );
