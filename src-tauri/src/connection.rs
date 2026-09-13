@@ -557,6 +557,9 @@ fn abandon_launch(
             if launch_matches || spawn_matches {
                 runtime.launch_in_flight = false;
             }
+            if spawn_matches {
+                runtime.spawn_in_flight = None;
+            }
             if let Some(launch) = runtime
                 .launch
                 .as_mut()
@@ -1541,6 +1544,9 @@ impl NativeConnectionState {
                 Err(error) if error.code == "service_unavailable" => {
                     readiness_failure = LaunchReadinessFailure::DiscoveryUnavailable;
                     return Err(readiness_failure.diagnostic());
+                }
+                Err(error) if error.code == "cave_discovery_unavailable" => {
+                    readiness_failure = LaunchReadinessFailure::DiscoveryUnavailable;
                 }
                 Err(error) if error.code == "cave_discovery_not_found" => {
                     readiness_failure = LaunchReadinessFailure::DiscoveryNotFound;
@@ -2956,6 +2962,21 @@ mod tests {
         }
     }
 
+    struct DropThenInlineTaskRunner {
+        calls: AtomicUsize,
+    }
+
+    impl CaveTaskRunner for DropThenInlineTaskRunner {
+        fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                drop(task);
+            } else {
+                task();
+            }
+            Ok(())
+        }
+    }
+
     fn expected_launch_stage(code: &'static str) -> &'static str {
         #[cfg(feature = "phase1-conformance")]
         {
@@ -3077,6 +3098,29 @@ mod tests {
     }
 
     #[test]
+    fn closed_launch_worker_does_not_block_a_subsequent_launch() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock,
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(DropThenInlineTaskRunner {
+                calls: AtomicUsize::new(0),
+            }),
+        );
+
+        let first = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+        assert_eq!(
+            first.code,
+            expected_launch_stage("cave_launch_worker_closed")
+        );
+
+        tauri::async_runtime::block_on(state.cave_launch()).unwrap();
+    }
+
+    #[test]
     fn readiness_polling_and_backoff_stop_at_the_absolute_deadline() {
         let clock = Arc::new(TestLaunchClock::default());
         let discovery = Arc::new(PollingDiscovery {
@@ -3108,13 +3152,13 @@ mod tests {
     fn launch_reports_discovery_reader_unavailability_without_detail() {
         let clock = Arc::new(TestLaunchClock::default());
         let state = deadline_state_with_discovery(
-            clock,
+            clock.clone(),
             Arc::new(ImmediateHealth),
             Arc::new(ReadyLauncher {
                 launches: AtomicUsize::new(0),
             }),
             Arc::new(StaticFailureDiscovery {
-                code: "service_unavailable",
+                code: "cave_discovery_unavailable",
             }),
             Arc::new(InlineTaskRunner),
         );
@@ -3125,6 +3169,7 @@ mod tests {
             error.code,
             expected_launch_stage("cave_launch_discovery_unavailable")
         );
+        assert_eq!(clock.now(), Duration::from_secs(30));
     }
 
     #[test]
