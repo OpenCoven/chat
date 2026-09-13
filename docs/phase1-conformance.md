@@ -1305,12 +1305,19 @@ Launch diagnostics also retain a fixed operation boundary for otherwise unknown
 errors: initial discovery, launch RPC, post-launch discovery, or health. Discovery
 RPC timeouts distinguish the initial read from the post-launch polling read.
 These identifiers contain no response data and preserve the first failure.
-Protected run `34741820511` passed Linux and macOS (197 assertions each), but
-Windows failed with `phase1.native-scenarios.launch.launch-rpc-unknown` before
-pairing. The native launch implementation uses the fixed `service_unavailable`
-code when its absolute readiness deadline expires; the next diagnostic binding
-therefore distinguishes that allowlisted result from every other launch-RPC
-failure without exposing response data or arbitrary error text.
+Protected run `34738396429` passed Linux and macOS (197 assertions each), but
+Windows failed with `phase1.native-scenarios.launch.unknown` before pairing.
+The operation boundary and root cause remain unproven until fresh protected
+validation uses this diagnostic source and its reviewed validator binding.
+
+Protected run `34741820511` then passed all 197 assertions on each Unix platform,
+with independently verified identities and timing. Windows narrowed the failure
+to `phase1.native-scenarios.launch.launch-rpc-unknown`. Launch diagnostics now
+retain the declared native return codes for connection state, an existing launch,
+a stale attempt, child exit, service availability, invalid native response, and
+reconciliation. `service_unavailable` has several native causes and is not proof
+of a readiness timeout. Arbitrary native error text remains outside the public
+allowlist. Fresh protected validation is required to identify the return code.
 
 The initial pairing stage further distinguishes create, poll, and exchange RPC
 failures using a fixed native-code allowlist, operation timeouts, RPC closure,
@@ -1389,20 +1396,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,054 | `abf2df132782c7fcb47b2c8619ba633980d2a5db7c272a2387c9365f5ee74b9a` |
+| `.github/workflows/client-v1-conformance.yml` | 166,338 | `382511d71338d588d934cb3eee3f95caa657163221744e3acebe204f880fd7e4` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 217,086 | `dc288444c2a4f7a9bbff0dfc24493880162cbda075892b3e171c118ea3b7db1d` |
+| `scripts/phase1-conformance.mjs` | 217,459 | `2a6eed7bf97a6201fb7b3aaa05827628231368c3644793c92a20d4d8389dadea` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 213,647 | `ae398905a99d4a73e413bb77a465c09ea97f974bce88d3dc7a3de2ad9161dfbb` |
+| `scripts/phase1-schema-v2-producer.mjs` | 214,231 | `afa00bc6b8bd6705acb90f4ba17fcc18e98a5e7f6234df384440205134fe8bd1` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1414,8 +1421,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 349,530 | `b7ec5455ad394b58cafd93cc85c7e87da37b04cdbd6f936aad0a1768432064df` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,043 | `883cccc5266058155d6d7a29ecb8b407010aa170a1b2e7f062d2be65338af06c` |
+| `scripts/windows-job-supervisor.cs` | 350,211 | `20b7881696e00dd9f1aae780fdeb9474d4144c76d030f272eceb05a0caae5c2d` |
+| `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
@@ -1935,7 +1942,8 @@ plus the existing 10-second transport allowance. Other native RPCs and shutdown
 retain their existing limits. Rust still owns launch readiness, child liveness,
 discovery pinning, health validation, and cleanup. Only an observed outer RPC
 timeout maps to `phase1.native-scenarios.launch.timeout`. A native
-`service_unavailable` response remains `phase1.native-scenarios.launch.unknown`
+`service_unavailable` response maps to
+`phase1.native-scenarios.launch.service-unavailable`
 because that code also represents worker completion loss and generation
 overflow. No paths, process IDs, discovery bytes, or child output are exposed.
 
@@ -1985,3 +1993,14 @@ these failures into skippable absence. Its merge ancestry is integrated here,
 while strict first-failure handling and its regression coverage are retained.
 The bounded repeat remains diagnostic only. Fresh protected evidence is still
 required after the actual Chat merge and SDK rebinding.
+
+The isolated-SID drain retains the SID-verified process handle through termination
+and reaping. If termination reports access denied, only a signaled zero-time wait
+on that same handle permits the existing wait and exit-code checks to continue.
+Live-process denial, failed waits, and unverified exit codes remain failures. The
+Windows runtime suite exercises exited handles and restricted live handles.
+
+Chat #257 publishes `phase1.native-scenarios.launch.service-unavailable`; this
+integration preserves that identifier alongside the six other allowlisted native
+launch codes and the retained-handle termination correction. Service unavailability
+is an observed native result and does not by itself establish a timeout.
