@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '832d0b32c5f4dc3531ed81176b4de36fbe1e5956',
-      sha256: '20b7881696e00dd9f1aae780fdeb9474d4144c76d030f272eceb05a0caae5c2d',
+      blob: '9ba3284eafac595e8bf2bd6b598832f346e0750a',
+      sha256: '281acdeba5ee8dd022fd0451bd4ede6af8431aba8810f1683ce7077cc627fcb0',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'e846861148287017c37a41b175a879d5025ea925',
-      sha256: '382511d71338d588d934cb3eee3f95caa657163221744e3acebe204f880fd7e4',
+      blob: '47b38128f9cdf3df80db0acf0e4ddd1fe58a95d2',
+      sha256: '9a65a6113fa16f5534d0b5c0277f3afa6561334d7937497db669141c3d8952eb',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
