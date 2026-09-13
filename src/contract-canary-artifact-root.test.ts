@@ -316,37 +316,37 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('1597835325cf3762b51408ff0a565037eeb25f64');
+    expect(lock.sdk.revision).toBe('77d825d17809cfec2fad4acb9b1526b3c4752f9d');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
-      version: '0.1.0',
-      sha256: 'a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5',
+      version: '0.0.1',
+      sha256: 'd641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
-      version: '0.1.0',
-      releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-      vendorFile: 'sdk-core-0.1.0.tgz',
-      size: 33284,
-      sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
+      version: '0.0.1',
+      releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+      vendorFile: 'sdk-core-0.0.1.tgz',
+      size: 33308,
+      sha256: '5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b',
     });
 
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
-      version: '0.1.0',
-      releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-      vendorFile: 'cave-client-0.1.0.tgz',
-      size: 82000,
-      sha256: '21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858',
+      version: '0.0.1',
+      releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+      vendorFile: 'cave-client-0.0.1.tgz',
+      size: 83218,
+      sha256: 'c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('d20d83c46ba0c32433ce8dc6a358fb14b6bd0e45');
+    expect(lock.cave.revision).toBe('1bb0a21773fcc2966308ed1900ec6b746fcfdbc8');
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
+        sha256: '0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',

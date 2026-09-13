@@ -26,23 +26,23 @@ const packageVersionPattern = /^\d+\.\d+\.\d+$/;
 const SDK_ARTIFACTS = Object.freeze({
   core: {
     packageName: '@opencoven/sdk-core',
-    fileName: 'sdk-core-0.1.0.tgz',
-    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+    fileName: 'sdk-core-0.0.1.tgz',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
   },
   cave: {
     packageName: '@opencoven/cave-client',
-    fileName: 'cave-client-0.1.0.tgz',
-    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+    fileName: 'cave-client-0.0.1.tgz',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
   },
   coven: {
     packageName: '@opencoven/coven-client',
-    fileName: 'coven-client-0.1.0.tgz',
-    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
+    fileName: 'coven-client-0.0.1.tgz',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
   },
   sdk: {
     packageName: '@opencoven/sdk',
-    fileName: 'sdk-0.1.0.tgz',
-    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
+    fileName: 'sdk-0.0.1.tgz',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
   },
 });
 const CAVE_PRODUCER_ARTIFACTS = Object.freeze({
@@ -154,7 +154,7 @@ function validateSdkArtifacts(artifacts) {
       !Object.hasOwn(artifact, 'size') ||
       !Object.hasOwn(artifact, 'sha256') ||
       artifact.packageName !== expected.packageName ||
-      artifact.version !== '0.1.0' ||
+      artifact.version !== '0.0.1' ||
       artifact.releaseFile !== expected.releaseFile ||
       artifact.vendorFile !== expected.fileName ||
       !Number.isSafeInteger(artifact.size) ||
