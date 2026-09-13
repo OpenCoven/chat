@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "3c41ff4d2f7b8165c5c0549d906301d9390d080b",
-        "sha256": "b7ec5455ad394b58cafd93cc85c7e87da37b04cdbd6f936aad0a1768432064df"
+        "blob": "449143711ef690e432fb6d3fd21def7e7ca30e1c",
+        "sha256": "0f6caeb8e02f6ad4a5009328d9604b4391c5796eb276f15f40444b2e81ef8601"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "ee1270ba35c08b0899ee6106da9b8a60ac7ccb2d",
-        "sha256": "abf2df132782c7fcb47b2c8619ba633980d2a5db7c272a2387c9365f5ee74b9a"
+        "blob": "4b570d981a0332cb1c293c319bdf2f1688a0d471",
+        "sha256": "32cd440533c5b83d2f8ac98460518e06377804a8f2ffb21f0c63db5b11630a7b"
       }
     ],
     "productionDeltas": [
