@@ -1396,7 +1396,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,054 | `c9c2d950bd781f3f7a2298aa04d1f15023f829fae5f35b55325e23ae4518d8e4` |
+| `.github/workflows/client-v1-conformance.yml` | 166,338 | `e595a6f49132f5ee46958af9dd0ec858e62ac5373adc30a9ddc398f13078a668` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1421,8 +1421,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 349,530 | `b7ec5455ad394b58cafd93cc85c7e87da37b04cdbd6f936aad0a1768432064df` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,043 | `883cccc5266058155d6d7a29ecb8b407010aa170a1b2e7f062d2be65338af06c` |
+| `scripts/windows-job-supervisor.cs` | 350,211 | `20b7881696e00dd9f1aae780fdeb9474d4144c76d030f272eceb05a0caae5c2d` |
+| `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
@@ -1993,3 +1993,9 @@ these failures into skippable absence. Its merge ancestry is integrated here,
 while strict first-failure handling and its regression coverage are retained.
 The bounded repeat remains diagnostic only. Fresh protected evidence is still
 required after the actual Chat merge and SDK rebinding.
+
+The isolated-SID drain retains the SID-verified process handle through termination
+and reaping. If termination reports access denied, only a signaled zero-time wait
+on that same handle permits the existing wait and exit-code checks to continue.
+Live-process denial, failed waits, and unverified exit codes remain failures. The
+Windows runtime suite exercises exited handles and restricted live handles.

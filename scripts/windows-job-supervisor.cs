@@ -4615,31 +4615,7 @@ namespace OpenCoven
                         throw new InvalidOperationException(
                             "Matching isolated-SID process identity changed.");
                     }
-                    if (!TerminateProcess(process, 1))
-                    {
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "Matching isolated-SID process termination failed.");
-                    }
-                    uint wait = WaitForSingleObject(process, 30000);
-                    if (wait != WAIT_OBJECT_0)
-                    {
-                        if (wait == WAIT_TIMEOUT)
-                        {
-                            throw new TimeoutException(
-                                "Matching isolated-SID process did not terminate.");
-                        }
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "Matching isolated-SID process wait failed.");
-                    }
-                    uint exitCode;
-                    if (!GetExitCodeProcess(process, out exitCode) ||
-                        exitCode == STILL_ACTIVE)
-                    {
-                        throw new InvalidOperationException(
-                            "Matching isolated-SID process could not be reaped.");
-                    }
+                    TerminateAndReapMatchingProcess(process);
                 }
                 finally
                 {
@@ -4647,6 +4623,49 @@ namespace OpenCoven
                 }
             }
             return matches.Count;
+        }
+
+        private static bool CanConfirmTerminatedProcess(int terminationError, uint waitResult)
+        {
+            return terminationError == ERROR_ACCESS_DENIED && waitResult == WAIT_OBJECT_0;
+        }
+
+        private static void TerminateAndReapMatchingProcess(IntPtr process)
+        {
+            if (!TerminateProcess(process, 1))
+            {
+                int terminationError = Marshal.GetLastWin32Error();
+                // A retained handle can outlive the process. Confirm exit on that
+                // same SID-verified handle before accepting access denied.
+                uint observedWait = terminationError == ERROR_ACCESS_DENIED
+                    ? WaitForSingleObject(process, 0)
+                    : UInt32.MaxValue;
+                if (!CanConfirmTerminatedProcess(terminationError, observedWait))
+                {
+                    throw new Win32Exception(
+                        terminationError,
+                        "Matching isolated-SID process termination failed.");
+                }
+            }
+            uint wait = WaitForSingleObject(process, 30000);
+            if (wait != WAIT_OBJECT_0)
+            {
+                if (wait == WAIT_TIMEOUT)
+                {
+                    throw new TimeoutException(
+                        "Matching isolated-SID process did not terminate.");
+                }
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Matching isolated-SID process wait failed.");
+            }
+            uint exitCode;
+            if (!GetExitCodeProcess(process, out exitCode) ||
+                exitCode == STILL_ACTIVE)
+            {
+                throw new InvalidOperationException(
+                    "Matching isolated-SID process could not be reaped.");
+            }
         }
 
         private static bool RevalidateFailedProcessOpen(
