@@ -81,3 +81,25 @@ describe('production Windows profile ownership boundary', () => {
     );
   });
 });
+
+// This fixture reaches the real Dispose guard without provisioning native resources.
+test.skipIf(!pwshAvailable)(
+  'incomplete quarantine retains the identity across cleanup retries',
+  () => {
+    const result = spawnSync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        'scripts/windows-identity-cleanup-diagnostics.test.ps1',
+      ],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Bounded identity cleanup Dispose diagnostics passed.');
+  },
+  30_000,
+);
