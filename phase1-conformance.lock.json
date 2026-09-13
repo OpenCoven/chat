@@ -10,7 +10,7 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "cb3d22d1f403dd3b94b02668a599a2bf94999e8b"
+    "revision": "1bb0a21773fcc2966308ed1900ec6b746fcfdbc8"
   },
   "coven": {
     "repository": "OpenCoven/coven",
@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "1623d87a0a385e3d2b7b961e0474b600ed26951c"
+    "revision": "323c05749dc5d0f970989e85c3859dc178f44944"
   },
   "harnessAuthority": {
-    "revision": "1623d87a0a385e3d2b7b961e0474b600ed26951c",
-    "tree": "4cd127150901a9554937997825ecc218648d71ad",
+    "revision": "323c05749dc5d0f970989e85c3859dc178f44944",
+    "tree": "02950571efd37ef1d1fd7fcc56cf446e9447a0fd",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -61,8 +61,8 @@
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "422ac534e03a4d731c77a545b5a9cfce022abd8b",
-        "sha256": "8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6"
+        "blob": "13e208c7e7dc2632325a0e83528cce93ab7b039c",
+        "sha256": "f390496763afe00d4e6031c04fa7aa90f1d5f0809d4780354820ac3b3ce7f11d"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "d0886d99edac99cd4b207c52341f8b9268c2573e",
-        "sha256": "aa8bf611c954f26a65bab30aefb61ec974a7451c01bb88413b178947bb6d91c2"
+        "blob": "236229d5716e0c47f583bef3cbf120f2fe93e592",
+        "sha256": "ca937fb3a39d97e1cc06d208c12e5afdddb029b5b8b13da6f541be464c98b02c"
       }
     ],
     "productionDeltas": [
@@ -306,7 +306,7 @@
         "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
       }
     ],
-    "caveVersion": "0.4.2",
+    "caveVersion": "0.4.3",
     "covenVersion": "0.1.0",
     "consumerLock": {
       "path": "pnpm-lock.yaml",
@@ -316,13 +316,13 @@
     "caveArtifacts": {
       "assertionEngine": {
         "path": "scripts/client-v1-conformance.mjs",
-        "size": 146472,
-        "sha256": "a3f16292f0200711c44553bb6874d64f19e94474ae7e9412127ac4c705b79f2c"
+        "size": 150592,
+        "sha256": "3e18320712aafb5208e5eddb66b1916208b5b208aec8a5d79a8d900c7909cc92"
       },
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",
         "size": 18280,
-        "sha256": "806d647f5969e646080713dabaa9d86ac897637e2a823c75085093c5a210a7fe"
+        "sha256": "0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede"
       },
       "hpkeVectors": {
         "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",
