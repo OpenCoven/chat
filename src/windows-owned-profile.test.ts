@@ -44,12 +44,17 @@ if (-not $observed -or $owned.Path -cne $failureRoot) { throw 'Reflection did no
   },
 );
 
+function factorySource(startMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf('internal void ThrowIfDisposed()', start);
+  expect(start, 'factory start delimiter').toBeGreaterThanOrEqual(0);
+  expect(end, 'factory end delimiter').toBeGreaterThan(start);
+  return source.slice(start, end);
+}
+
 describe('production Windows profile ownership boundary', () => {
   test('records actual profile ownership before verification and never predicts the profile path', () => {
-    const factory = source.slice(
-      source.indexOf('public static WindowsIsolatedUser Create('),
-      source.indexOf('public void Disable('),
-    );
+    const factory = factorySource('public static WindowsIsolatedUser Create(');
     expect(factory).not.toContain('Path.Combine(GetProfilesRoot(), userName)');
     expect(factory).toContain('return CreateCore(rootPath, null);');
     const owned = factory.indexOf('ownedProfilePath = profileBuffer.ToString();');
@@ -63,10 +68,7 @@ describe('production Windows profile ownership boundary', () => {
   });
 
   test('deletes only a successfully created profile before removing its fresh account on failure', () => {
-    const factory = source.slice(
-      source.indexOf('private static WindowsIsolatedUser CreateCore('),
-      source.indexOf('public void Disable('),
-    );
+    const factory = factorySource('private static WindowsIsolatedUser CreateCore(');
     const cleanup = factory.slice(factory.indexOf('catch (Exception original)'));
     expect(cleanup).toContain('if (ownedProfilePath != null)');
     expect(cleanup.indexOf('DeleteOperatingSystemProfile(sid, ownedProfilePath)')).toBeGreaterThan(
