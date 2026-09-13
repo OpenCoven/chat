@@ -1572,7 +1572,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-job-supervisor.cs` | 352,878 | `d08748d1a7ce3cc3964ce4520cc501f514d5777ed102ac5f57ebc20b75e7bb65` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 29,480 | `b2160b083f6db3c4e6a328b026350c9ae80a2d688482849705705396ded1a998` |
-| `scripts/windows-owner-directory-quota.test.ps1` | 14,130 | `ccfea4b189ba719ba4d882c32cee4431ecc639f2cf15c73caf6ce1e2821762ae` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 22,072 | `144f1e0f95617070d8ba55b697b0cab2aff0ede9e9524e8ae2141bcff0e38476` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 6,025 | `43688191fcbf8807d5e33ba811f14b0f8a6e780fef30ae2e3f494d540608bdb2` |

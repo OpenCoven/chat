@@ -158,6 +158,34 @@ namespace OpenCoven.Tests
             BeforeReadableRepeat();
             return ReadSnapshot();
         }
+
+        public static string ReadPersistentOutcome(
+            System.Reflection.MethodInfo readBoundedSnapshot,
+            string directory)
+        {
+            try
+            {
+                readBoundedSnapshot.Invoke(
+                    null,
+                    new object[] { directory, "*", false, 10, 3, true });
+            }
+            catch (System.Reflection.TargetInvocationException error)
+            {
+                Exception context = error.InnerException;
+                if (context == null) throw;
+                Type type = context.GetType();
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance;
+                return String.Format(
+                    "{0}|{1}|{2}",
+                    type.GetProperty("Category", flags).GetValue(context),
+                    type.GetProperty("Operation", flags).GetValue(context),
+                    type.GetProperty("Repeat", flags).GetValue(context));
+            }
+            throw new InvalidOperationException(
+                "Persistent native directory denial unexpectedly succeeded.");
+        }
     }
 }
 '@
@@ -215,26 +243,11 @@ try {
   }
 
   [OpenCoven.Tests.QuotaSnapshotReadFixture]::DirectoryPath = $directory
-  $persistentRead = $null
-  try {
-    $readBoundedSnapshot.Invoke($null, [object[]]@(
-      $directory,
-      '*',
-      $false,
-      10,
-      3,
-      $true
-    )) | Out-Null
-  } catch {
-    $persistentRead = $_.Exception.InnerException
-    if ($persistentRead -is [Reflection.TargetInvocationException]) {
-      $persistentRead = $persistentRead.InnerException
-    }
-  }
-  if ($null -eq $persistentRead -or
-      $persistentRead.GetType().GetProperty('Category', $instanceFlags).GetValue($persistentRead) -cne 'access-denied' -or
-      $persistentRead.GetType().GetProperty('Operation', $instanceFlags).GetValue($persistentRead) -cne 'directory-enumeration-depth-3-plus' -or
-      $persistentRead.GetType().GetProperty('Repeat', $instanceFlags).GetValue($persistentRead) -cne 'persistent') {
+  $persistentOutcome = [OpenCoven.Tests.QuotaSnapshotReadFixture]::ReadPersistentOutcome(
+    $readBoundedSnapshot,
+    $directory
+  )
+  if ($persistentOutcome -cne 'access-denied|directory-enumeration-depth-3-plus|persistent') {
     throw 'Persistent native directory denial did not remain fail-closed.'
   }
   [OpenCoven.Tests.QuotaSnapshotReadFixture]::BeforeReadableRepeat = [Action]{
