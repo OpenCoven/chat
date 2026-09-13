@@ -141,9 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `0392645db9ec3b6e06cbc91ed0c09a868a50aea5`,
-  tree `73d764b11de695ef6e047770a936f3fa9d1ec668`, retained in the
-  producer ancestry;
+- Chat conformance driver at `harnessAuthority.revision` and `.tree` in
+  `phase1-conformance.lock.json`, retained in the producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1361,7 +1360,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 161,836 | `5ede379e5ecc1daba21ddb9ba64b7b588093d3dfd9f895075279fc3125ef9f8d` |
+| `.github/workflows/client-v1-conformance.yml` | 162,808 | `34bb62aba217e8f7a655d1ce800acbe7d92b235779b9e72c38231721dad1eeb9` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1386,7 +1385,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,668 | `962bcb84af48532bf216770c0f50a023c255c286515f08d1befbf95922b487f3` |
+| `scripts/windows-job-supervisor.cs` | 333,599 | `c456cfbf8c38fb953783f9e59d6109550d5eb6241b1a4fbd04a6ddaedcc39d8e` |
 | `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |

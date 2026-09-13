@@ -48,3 +48,16 @@ streams. Runtime hash literals are not an independent source of authority.
 Concurrent Chat #249 moves fixtures beneath a predicted profile path without
 adding that subtree to the shared aggregates. Its production profile ownership
 and accounting gaps must be repaired before this producer is dispatched.
+
+## Owned profile lifecycle repair
+
+The follow-up source creates the fresh account profile with `CreateProfile`,
+records ownership before any subsequent validation, and checks the returned path
+against the retained token. Initialization failures delete the owned profile
+before removing the account. The native fixture exercises that production catch
+and verifies profile-directory, registry, account, and artifact-root removal.
+
+This lifecycle change requires native Windows validation. It does not yet add
+profile `.coven` bytes to the existing shared aggregates or retain directory
+handles for that subtree. Those accounting and identity checks remain required
+before SDK rebinding and protected dispatch.

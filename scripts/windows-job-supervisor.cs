@@ -159,6 +159,13 @@ namespace OpenCoven
 
         public static WindowsIsolatedUser Create(string rootPath)
         {
+            return CreateCore(rootPath, null);
+        }
+
+        private static WindowsIsolatedUser CreateCore(
+            string rootPath,
+            Action<string, string> afterProfileCreated)
+        {
             if (String.IsNullOrWhiteSpace(rootPath) || !Path.IsPathRooted(rootPath))
             {
                 throw new ArgumentException(
@@ -175,6 +182,7 @@ namespace OpenCoven
             string passwordValue = null;
             string sid = null;
             bool accountCreated = false;
+            string ownedProfilePath = null;
             SafeAccessTokenHandle validatedQuotaToken = null;
             try
             {
@@ -221,6 +229,20 @@ namespace OpenCoven
                 EnsureUsersGroupMembership(userName);
                 string validationSummary =
                     ValidateStandardUser(userName, passwordValue, sid, out validatedQuotaToken);
+
+                StringBuilder profileBuffer = new StringBuilder(260);
+                int profileResult = CreateProfile(sid, userName, profileBuffer, (uint)profileBuffer.Capacity);
+                if (profileResult != 0)
+                {
+                    throw new COMException("Ephemeral Windows profile creation failed.", profileResult);
+                }
+                // Ownership must survive every subsequent validation failure.
+                ownedProfilePath = profileBuffer.ToString();
+                if (afterProfileCreated != null)
+                {
+                    afterProfileCreated(sid, ownedProfilePath);
+                }
+                VerifyCreatedProfile(ownedProfilePath, validatedQuotaToken);
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
@@ -274,7 +296,7 @@ namespace OpenCoven
                     tempPath,
                     statusStagingPath,
                     workspacePath,
-                    Path.Combine(GetProfilesRoot(), userName),
+                    ownedProfilePath,
                     validationSummary,
                     validatedQuotaToken);
                 validatedQuotaToken = null;
@@ -285,7 +307,13 @@ namespace OpenCoven
                 List<Exception> cleanupFailures = new List<Exception>();
                 if (validatedQuotaToken != null)
                 {
-                    validatedQuotaToken.Dispose();
+                    try { validatedQuotaToken.Dispose(); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
+                }
+                if (ownedProfilePath != null)
+                {
+                    try { WindowsJobSupervisor.DeleteOperatingSystemProfile(sid, ownedProfilePath); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
                 }
                 if (Directory.Exists(fullRoot))
                 {
@@ -1103,11 +1131,48 @@ namespace OpenCoven
             return Convert.ToBase64String(bytes) + "aA1!";
         }
 
+        private static void VerifyCreatedProfile(
+            string createdProfilePath,
+            SafeAccessTokenHandle token)
+        {
+            string profilesRoot = GetProfilesRoot().TrimEnd('\\') + "\\";
+            if (String.IsNullOrWhiteSpace(createdProfilePath) ||
+                !Path.IsPathFullyQualified(createdProfilePath) ||
+                !String.Equals(Path.GetFullPath(createdProfilePath), createdProfilePath, StringComparison.OrdinalIgnoreCase) ||
+                !createdProfilePath.StartsWith(profilesRoot, StringComparison.OrdinalIgnoreCase) ||
+                createdProfilePath.Length <= profilesRoot.Length)
+            {
+                throw new InvalidOperationException("Created profile path is outside the Windows profile root.");
+            }
+            FileAttributes attributes = File.GetAttributes(createdProfilePath);
+            if ((attributes & FileAttributes.Directory) == 0 ||
+                (attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Created profile path is not an ordinary directory.");
+            }
+            uint capacity = 0;
+            bool sized = GetUserProfileDirectoryW(token, null, ref capacity);
+            int sizeError = Marshal.GetLastWin32Error();
+            if (sized || sizeError != ERROR_INSUFFICIENT_BUFFER || capacity == 0 || capacity > 32768)
+            {
+                throw new InvalidOperationException("Validated token profile size is unavailable.");
+            }
+            StringBuilder tokenProfile = new StringBuilder(checked((int)capacity));
+            if (!GetUserProfileDirectoryW(token, tokenProfile, ref capacity))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Validated token profile query failed.");
+            }
+            if (!String.Equals(createdProfilePath, tokenProfile.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Created profile and validated token profile disagree.");
+            }
+        }
+
         private static string GetProfilesRoot()
         {
             uint length = 0;
             GetProfilesDirectoryW(null, ref length);
-            if (length == 0 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
+            if (length == 0 || length > 32768 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
@@ -1461,6 +1526,15 @@ namespace OpenCoven
         private static extern bool ConvertSidToStringSidW(
             IntPtr sid,
             out IntPtr stringSid);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int CreateProfile(
+            string sid, string userName, [Out] StringBuilder profilePath, uint capacity);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetUserProfileDirectoryW(
+            SafeAccessTokenHandle token, StringBuilder profilePath, ref uint capacity);
 
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
