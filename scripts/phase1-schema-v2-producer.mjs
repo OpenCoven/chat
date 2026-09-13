@@ -224,7 +224,11 @@ const pairingFailureCategories = [
   'admin-http-5xx',
   'unknown',
 ];
+const launchFailureBoundaries = new Set(['initial-discovery', 'launch-rpc', 'discovery', 'health']);
 const launchFailureCategories = [
+  ...[...launchFailureBoundaries].map((boundary) => `${boundary}-unknown`),
+  'initial-discovery-timeout',
+  'discovery-rpc-timeout',
   'not-installed',
   'configuration-invalid',
   'process',
@@ -1724,7 +1728,7 @@ export function classifyInitialDiscoveryOutcome(response) {
   }
 }
 
-export function schemaV2NativeFailureDiagnostic(stage, error) {
+export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
   if (stage === 'pairing') {
     if (error === undefined) return 'phase1.native-scenarios.pairing';
     const message =
@@ -1811,7 +1815,17 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
     if (message === 'launched Cave returned an invalid health envelope') {
       return 'phase1.native-scenarios.launch.health-envelope';
     }
-    return 'phase1.native-scenarios.launch.unknown';
+    if (message === 'native RPC timed out for cave_read_discovery') {
+      if (launchBoundary === 'initial-discovery') {
+        return 'phase1.native-scenarios.launch.initial-discovery-timeout';
+      }
+      if (launchBoundary === 'discovery') {
+        return 'phase1.native-scenarios.launch.discovery-rpc-timeout';
+      }
+    }
+    return launchFailureBoundaries.has(launchBoundary)
+      ? `phase1.native-scenarios.launch.${launchBoundary}-unknown`
+      : 'phase1.native-scenarios.launch.unknown';
   }
   if (stage === 'cleanup-grant') {
     if (error === undefined) {
@@ -1889,10 +1903,10 @@ export function schemaV2NativeFailureDiagnostic(stage, error) {
     : 'phase1.stage.native-scenarios.failed';
 }
 
-export function retainSchemaV2NativeFailure(existingFailure, stage, error) {
+export function retainSchemaV2NativeFailure(existingFailure, stage, error, launchBoundary) {
   return (
     existingFailure ??
-    new Error(schemaV2NativeFailureDiagnostic(stage, error), {
+    new Error(schemaV2NativeFailureDiagnostic(stage, error, launchBoundary), {
       cause: error,
     })
   );
@@ -4499,6 +4513,7 @@ async function runNativeScenarios({
     }
 
     activeNativeStage = 'launch';
+    let activeLaunchBoundary = 'initial-discovery';
     try {
       const initialDiscoveryOutcome = classifyInitialDiscoveryOutcome(
         await rpc.request('cave_read_discovery', { operation: rpc.operation() }),
@@ -4516,9 +4531,12 @@ async function runNativeScenarios({
           `native RPC cave_read_discovery initial outcome ${initialDiscoveryOutcome}`,
         );
       }
+      activeLaunchBoundary = 'launch-rpc';
       await rpc.ok('cave_launch');
+      activeLaunchBoundary = 'discovery';
       const discovery = await waitForDiscovery(rpc);
       handle = discovery.handle;
+      activeLaunchBoundary = 'health';
       const health = await rpc.ok('cave_health', {
         handle,
         operation: rpc.operation(),
@@ -4538,7 +4556,12 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
-      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
+      scenarioFailure = retainSchemaV2NativeFailure(
+        scenarioFailure,
+        activeNativeStage,
+        error,
+        activeLaunchBoundary,
+      );
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
