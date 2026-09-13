@@ -3138,7 +3138,10 @@ ${pathAssignment}
       }
       const snapshotCore = source.slice(
         source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore('),
-        source.indexOf('private static long MeasureDirectoryBytes(', source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore(')),
+        source.indexOf(
+          'private static long MeasureDirectoryBytes(',
+          source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore('),
+        ),
       );
       expect(snapshotCore).not.toContain('catch (FileNotFoundException)');
       expect(snapshotCore).not.toContain('catch (DirectoryNotFoundException)');
