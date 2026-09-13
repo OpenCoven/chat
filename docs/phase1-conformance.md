@@ -141,8 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `b1d2c2135673c3b9c6e32598a013357ff2a04928`,
-  tree `fab275ec4d12307f7b64fda9671a1cf1e30665c1`, retained in the
+- Chat conformance driver `ccf10dae9472a5dd84670be5bca3726280608479`,
+  tree `fcb4570b0e2f19092bd03d595e4deb514f0fc0b0`, retained in the
   producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
@@ -1361,7 +1361,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 161,836 | `5ede379e5ecc1daba21ddb9ba64b7b588093d3dfd9f895075279fc3125ef9f8d` |
+| `.github/workflows/client-v1-conformance.yml` | 161,808 | `ad52f1e1b83d70617866bd454aa55865135bc31db301390214596e6aeae6881d` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |

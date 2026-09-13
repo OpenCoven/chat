@@ -5,7 +5,7 @@ protected validation remain deployment gates. Windows profile-root alignment and
 protected three-platform acceptance remain open.
 
 The previous inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
-allowance. The bounded form occupies 161,836 bytes and retains the same 329,668
+allowance. The bounded form occupies 161,808 bytes and retains the current 329,192
 bytes of C#. The source renderer in `scripts/windows-supervisor-source.mjs`
 recovers space for the profile lifecycle and shared quota repair. The canonical C# remains
 `scripts/windows-job-supervisor.cs`; compression does not change its behavior.
