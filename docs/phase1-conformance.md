@@ -13,7 +13,55 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
-## Bounded discovery diagnostics adoption
+## SDK 0.0.1 candidate and diagnostic authority adoption
+
+The current target uses the exact private SDK candidate from
+`77d825d17809cfec2fad4acb9b1526b3c4752f9d` (tree
+`697764ae382ca56d6fde39b9929405d86e739d67`), not repacked or relabelled 0.1.0
+archives. Its runtime SHA-256 is
+`75373cee44e210b6f95491d1e1276506f217a275094835baba6170d919f68801`.
+The schema-1 release manifest is 1,031 bytes with SHA-256
+`d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`.
+Both locks record the four exact candidate archive sizes and digests.
+
+Cave authority is the actual diagnostic merge
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8` (tree
+`b05c2baa4b586e2523e1803db8d9fd1182ecd148`), version 0.4.3. It includes the
+0.0.1 minimum-client prerequisite and the bounded discovery counterpart.
+The packed SDK fixture retains its authenticated compatibility-source
+provenance at `e806655a`; the later diagnostic authority contains that
+ancestor and identical fixture bytes. The Chat fixture mirror uses the same
+JSON values with repository formatting. Coven authority is unchanged.
+
+Exact archive and source digests already pin this candidate's fixture bytes.
+The current canary and frozen-consumer verifier additionally require direct
+packed/current fixture byte equality after the existing provenance, ancestry,
+historical-byte, and current-checkout digest checks. The generic historical
+validator still supports authenticated older fixtures; neither current entrypoint
+uses that permissive comparison policy. Native harness happy-path fixtures now
+advertise minimum client 0.0.1, with a regression against the adopted contract
+fixture. Those test-only changes advance the `connection.rs` native delta
+identity without changing the frozen production consumer or native behavior.
+
+`chat.revision` and `chatAuthority.tree` identify a separate production
+consumer prepared from the prior `0da8c474` source. All production native
+files remain unchanged; its consumer lock and SDK archives are rebound from
+their actual committed bytes. The production canary also receives the already
+reviewed non-publishing artifact entrypoint, so private candidate verification
+does not invoke the publication CLI. The executable harness retains all ten
+reviewed native production deltas, including current launch-worker recovery
+and exclusion. Its actual source commit is frozen separately in
+`harnessAuthority`, with matching Windows/Unix module tables.
+
+The production source ancestry and the subsequent source-bound harness commit
+must be preserved by a true merge, not squash or rebase. Historical evidence
+and the historical SDK fixture below are not rewritten as current acceptance.
+After reviewed Chat landing, SDK coordination must bind the actual merged
+producer and these actual consumer, candidate, and authority identities.
+No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
+scope rotation, or package publication is established by this prerequisite.
+
+## Bounded discovery decoder prerequisite (historical)
 
 The decoder accepts the finite read/publication diagnostics emitted by
 [OpenCoven/coven-cave#5377](https://github.com/OpenCoven/coven-cave/pull/5377):
@@ -38,7 +86,18 @@ at the frozen source revision. The combined source preserves the bounded
 native launch diagnostics, aborted-worker recovery, live-worker exclusion,
 and corresponding native production deltas from OpenCoven/chat#259, together
 with the child-stderr discovery regression coverage added in `6755a3d`.
-The Cave counterpart is now frozen at merge
+This PR requires an actual merge commit to preserve the pinned source ancestry.
+
+The decoder-only binding did not adopt the Cave counterpart or change Cave
+fixture provenance, ACLs, identity checks, quotas, or readiness deadlines.
+It retained Cave `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`; the current
+candidate adoption above advances that authority separately. A real Windows
+diagnostic pair and protected acceptance remain unproven by decoder delivery
+alone.
+
+## Cave-only adoption on main (historical)
+
+OpenCoven/chat#262 froze the Cave counterpart at merge
 `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
 `b05c2baa4b586e2523e1803db8d9fd1182ecd148`, which descends from the prior
 `cb3d22d1f403dd3b94b02668a599a2bf94999e8b` authority and includes reviewed
@@ -52,20 +111,21 @@ is pre-adoption evidence from merged Chat
 `56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and Darwin passed. Windows
 failed only at `phase1.native-scenarios.launch.discovery-not-found`; artifact
 validation, attestations, and aggregation were skipped, so no aggregate exists.
-The next protected run with Cave `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`
-is diagnostic-only and is needed to identify the bounded read/publication
-categories. It does not claim protected acceptance.
+That Cave-only adoption called for a diagnostic run with Cave
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8` to identify bounded read/publication
+categories; it did not establish protected acceptance.
 
-The rebind preserves ACL isolation, waiver-disabled execution, quotas,
+That rebind preserved ACL isolation, waiver-disabled execution, quotas,
 immutable authority and exact Git-object verification, privacy-bounded output,
 deadlines, readiness acceptance rules, cleanup, attestations, and fail-closed
-behavior. The existing Chat decoder is unchanged. The harness authority
-advances only to metadata freeze `323c05749dc5d0f970989e85c3859dc178f44944`,
+behavior. The Chat decoder was unchanged. That step froze harness authority at `323c05749dc5d0f970989e85c3859dc178f44944`,
 tree `02950571efd37ef1d1fd7fcc56cf446e9447a0fd`, to bind the exact `0.4.3`
-lock parser and matching workflow integrity tables. This branch must land with
-an actual merge commit so that pinned source remains an ancestor.
+lock parser and matching workflow integrity tables. Main retained that source
+through true merge `cd4be039fd9f49268791dd439b5c024476189ed0`. The current SDK
+candidate integration preserves both ancestries and binds the combined source
+separately; it does not reuse the older SDK candidate or harness pin.
 
-## Frozen GLib source adoption
+## Frozen GLib source adoption (historical)
 
 The production binding and prior diagnostic harness below retain the reviewed
 GLib iterator backport. The current executable harness commit and tree are
@@ -184,29 +244,29 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `0da8c4749f57e63601b29d66032f80c9bbac1cb5`, tree
-  `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
-  backport source retained by the current SDK contract;
-- SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
+- Chat production `636f7da96fa178c2c14648f84137091b15a1cb8a`, tree
+  `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
+  retaining the prior reviewed native production source;
+- SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
 - Cave authority `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
   `b05c2baa4b586e2523e1803db8d9fd1182ecd148`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver at `harnessAuthority.revision` and `.tree` in
-  `phase1-conformance.lock.json`, retained in the producer ancestry;
-- SDK evidence contract and registry
+- Chat conformance driver `d55b40c3315035be4267424b5d5d55c416bb609d`, tree
+  `ceb98c9ace85138ef8ddab5a6f7a0aeb7d2008fb`, retained in the producer ancestry;
+- Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
+  `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-SDK PR #189 froze the replacement candidate and Chat source contract.
-The protected validator last used by run 34647484742 is SDK #206 merge
+SDK PR #189 froze the preceding candidate and Chat source contract.
+The protected validator used by historical run 34647484742 is SDK #206 merge
 `c774ba4ba473dae99ea8fe712989ae33ef5d5184`, which binds Chat producer
 `e7dfc135bb7341d4cfc5b7f0fcf4004843868809` and the preceding Coven source.
-Adopting Coven #1015 requires a new SDK source/producer binding before another
-protected dispatch. The frozen
+The current SDK/Cave adoption requires a new SDK source/producer binding after
+reviewed Chat landing and before another protected dispatch. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
@@ -1484,12 +1544,12 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,782 | `ca937fb3a39d97e1cc06d208c12e5afdddb029b5b8b13da6f541be464c98b02c` |
-| `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
+| `.github/workflows/client-v1-conformance.yml` | 166,782 | `a64fcdaf3fbd51e6cc0d3eb293ec5ac6a27df820182f0e89c272ce9cadfea566` |
+| `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,960 | `f390496763afe00d4e6031c04fa7aa90f1d5f0809d4780354820ac3b3ce7f11d` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d` |
 | `scripts/phase1-conformance.mjs` | 217,978 | `2d21af2960b0ac27f5af7c9cb70a84f7518593a1e3b7ec2f45e61bd0817ad100` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
@@ -1497,7 +1557,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 216,232 | `b3a932db41b18156be06fad9b9ca50bcc991bc15cb48ed1ebe6fcc07eb92d3bc` |
+| `scripts/phase1-schema-v2-producer.mjs` | 216,232 | `f770e12475c5c4614bcc2f08c18bf947ad457800272ac8a0ed30cfa3333da2ed` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

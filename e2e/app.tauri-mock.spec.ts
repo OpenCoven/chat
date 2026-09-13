@@ -44,7 +44,7 @@ test('renders the Phase 1 read-only happy path through the mocked Tauri boundary
 
     const health = {
       apiVersion: '1.0',
-      minimumClientVersion: '0.1.0',
+      minimumClientVersion: '0.0.1',
       capabilities,
       operations,
       data: {

@@ -2,11 +2,11 @@
   "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "0da8c4749f57e63601b29d66032f80c9bbac1cb5"
+    "revision": "636f7da96fa178c2c14648f84137091b15a1cb8a"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "1597835325cf3762b51408ff0a565037eeb25f64"
+    "revision": "77d825d17809cfec2fad4acb9b1526b3c4752f9d"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "323c05749dc5d0f970989e85c3859dc178f44944"
+    "revision": "d55b40c3315035be4267424b5d5d55c416bb609d"
   },
   "harnessAuthority": {
-    "revision": "323c05749dc5d0f970989e85c3859dc178f44944",
-    "tree": "02950571efd37ef1d1fd7fcc56cf446e9447a0fd",
+    "revision": "d55b40c3315035be4267424b5d5d55c416bb609d",
+    "tree": "ceb98c9ace85138ef8ddab5a6f7a0aeb7d2008fb",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -61,8 +61,8 @@
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "13e208c7e7dc2632325a0e83528cce93ab7b039c",
-        "sha256": "f390496763afe00d4e6031c04fa7aa90f1d5f0809d4780354820ac3b3ce7f11d"
+        "blob": "4191787c4a31a49f0b29c5ecd59b9964be156af5",
+        "sha256": "f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "ef4cd0987c45f0404f596d7a067bb720311f01f6",
-        "sha256": "b3a932db41b18156be06fad9b9ca50bcc991bc15cb48ed1ebe6fcc07eb92d3bc"
+        "blob": "f08df862dd083b901793b30bef6bc567584d683c",
+        "sha256": "f770e12475c5c4614bcc2f08c18bf947ad457800272ac8a0ed30cfa3333da2ed"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -121,8 +121,8 @@
       },
       {
         "path": "scripts/contract-canary.mjs",
-        "blob": "fc0403721bbd487c11350430ce673bf3913bdb7f",
-        "sha256": "1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380"
+        "blob": "f4c72220cd200dba09aa9aeea05cd905b7cec435",
+        "sha256": "a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958"
       },
       {
         "path": "scripts/supervised-exec.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "236229d5716e0c47f583bef3cbf120f2fe93e592",
-        "sha256": "ca937fb3a39d97e1cc06d208c12e5afdddb029b5b8b13da6f541be464c98b02c"
+        "blob": "a45c9311de3dd1b33688270bfbaae015fd8163f8",
+        "sha256": "a64fcdaf3fbd51e6cc0d3eb293ec5ac6a27df820182f0e89c272ce9cadfea566"
       }
     ],
     "productionDeltas": [
@@ -183,8 +183,8 @@
       },
       {
         "path": "src-tauri/src/connection.rs",
-        "blob": "bbd83f058fd1015bd266b8c0e7fb2bd335a23275",
-        "sha256": "f299464ee1ed7c2fdb005f785362157f387229310a593ae9f40d4b6e1dbe7fe4"
+        "blob": "8b34f84f64d3cd98ec42b8790af13078ff375a71",
+        "sha256": "c3083254eed56b87514db43dcd9d45bac1200cdbc49895c72350a0957f2a323d"
       },
       {
         "path": "src-tauri/src/coven.rs",
@@ -204,7 +204,7 @@
     ]
   },
   "chatAuthority": {
-    "tree": "7be1737c4aae02493660d39a2d6f6fdf4dd9e696",
+    "tree": "8e20adb1d55f17fb5b5a833bad6c9535d41c98ce",
     "files": [
       {
         "path": "src-tauri/Cargo.toml",
@@ -273,37 +273,37 @@
   },
   "release": {
     "sdkManifest": {
-      "version": "0.1.0",
-      "sha256": "a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5"
+      "version": "0.0.1",
+      "sha256": "d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca"
     },
     "sdkArtifacts": [
       {
         "packageName": "@opencoven/sdk-core",
-        "releaseFile": "tarballs/core/opencoven-sdk-core-0.1.0.tgz",
-        "vendorFile": "sdk-core-0.1.0.tgz",
-        "size": 33284,
-        "sha256": "9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe"
+        "releaseFile": "tarballs/core/opencoven-sdk-core-0.0.1.tgz",
+        "vendorFile": "sdk-core-0.0.1.tgz",
+        "size": 33308,
+        "sha256": "5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b"
       },
       {
         "packageName": "@opencoven/cave-client",
-        "releaseFile": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
-        "vendorFile": "cave-client-0.1.0.tgz",
-        "size": 82000,
-        "sha256": "21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858"
+        "releaseFile": "tarballs/cave/opencoven-cave-client-0.0.1.tgz",
+        "vendorFile": "cave-client-0.0.1.tgz",
+        "size": 83218,
+        "sha256": "c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f"
       },
       {
         "packageName": "@opencoven/coven-client",
-        "releaseFile": "tarballs/coven/opencoven-coven-client-0.1.0.tgz",
-        "vendorFile": "coven-client-0.1.0.tgz",
-        "size": 33009,
-        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+        "releaseFile": "tarballs/coven/opencoven-coven-client-0.0.1.tgz",
+        "vendorFile": "coven-client-0.0.1.tgz",
+        "size": 42960,
+        "sha256": "e2d4d27c05b51eb1eb5d34d15134b73d4e2c416d72c32de18ace9a908d51c14a"
       },
       {
         "packageName": "@opencoven/sdk",
-        "releaseFile": "tarballs/sdk/opencoven-sdk-0.1.0.tgz",
-        "vendorFile": "sdk-0.1.0.tgz",
-        "size": 15833,
-        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+        "releaseFile": "tarballs/sdk/opencoven-sdk-0.0.1.tgz",
+        "vendorFile": "sdk-0.0.1.tgz",
+        "size": 16025,
+        "sha256": "5318c4c6d511f0bcda42e4fd88168f549fc3ea74a516d7a4b2004e1c5023c4b4"
       }
     ],
     "caveVersion": "0.4.3",
@@ -311,7 +311,7 @@
     "consumerLock": {
       "path": "pnpm-lock.yaml",
       "size": 56222,
-      "sha256": "aa514bcde77a8e572ceb25d06ce500a897e39d2ed0095ad1557572c04e0ae95b"
+      "sha256": "5c9d0bd1d9438006970d9d7dc86186beb578c0eaff597f59a8277b94187d191d"
     },
     "caveArtifacts": {
       "assertionEngine": {

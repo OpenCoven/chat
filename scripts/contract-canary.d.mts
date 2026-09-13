@@ -112,6 +112,7 @@ export function assertPackedFixtureMatchesCaveCheckout(
   lock: ContractCanaryPackedFixtureLock,
   harnessRoot: string,
   caveRoot: string,
+  options?: { requireCurrentFixtureMatch?: boolean },
 ): void;
 export function verifyFrozenPackedConsumer(options: {
   chatRoot?: string;

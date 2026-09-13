@@ -3419,10 +3419,10 @@ async function packageLockedArtifacts(
   });
 
   const packageNames = {
-    core: 'sdk-core-0.1.0.tgz',
-    cave: 'cave-client-0.1.0.tgz',
-    coven: 'coven-client-0.1.0.tgz',
-    sdk: 'sdk-0.1.0.tgz',
+    core: 'sdk-core-0.0.1.tgz',
+    cave: 'cave-client-0.0.1.tgz',
+    coven: 'coven-client-0.0.1.tgz',
+    sdk: 'sdk-0.0.1.tgz',
   };
   const frozenTarballs = Object.fromEntries(
     Object.entries(packageNames).map(([key, name]) => [

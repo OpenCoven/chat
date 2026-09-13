@@ -221,7 +221,7 @@ function sha256(bytes: Buffer | string) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function createCaveAuthorityFixture() {
+function createCaveAuthorityFixture({ differentCurrentFixture = false } = {}) {
   const scratchRoot = createRepoLocalScratchRoot('cave-authority');
   const caveRoot = resolve(scratchRoot, 'cave');
   const harnessRoot = resolve(scratchRoot, 'harness');
@@ -257,6 +257,15 @@ function createCaveAuthorityFixture() {
   const nonAncestorCommit = runGit(['rev-parse', 'HEAD'], caveRoot);
   runGit(['checkout', 'main'], caveRoot);
 
+  const currentFixtureBytes = differentCurrentFixture
+    ? Buffer.from('current Cave contract fixture\n', 'utf8')
+    : fixtureBytes;
+  const currentFixtureDigest = sha256(currentFixtureBytes);
+  writeFileSync(resolve(authorityDirectory, 'contract-fixture.json'), currentFixtureBytes);
+  writeFileSync(
+    resolve(authorityDirectory, 'contract-fixture.sha256'),
+    `${currentFixtureDigest}\n`,
+  );
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.json'), vectorBytes);
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.sha256'), `${vectorDigest}\n`);
   runGit(['add', '.'], caveRoot);
@@ -294,7 +303,7 @@ function createCaveAuthorityFixture() {
         contractFixture: {
           path: 'src/lib/server/client-v1/contract-fixture.json',
           digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-          sha256: fixtureDigest,
+          sha256: currentFixtureDigest,
         },
         hpkeVectors: {
           path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -434,29 +443,29 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('1597835325cf3762b51408ff0a565037eeb25f64');
+    expect(lock.sdk.revision).toBe('77d825d17809cfec2fad4acb9b1526b3c4752f9d');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
-      version: '0.1.0',
-      sha256: 'a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5',
+      version: '0.0.1',
+      sha256: 'd641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
-      version: '0.1.0',
-      releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-      vendorFile: 'sdk-core-0.1.0.tgz',
-      size: 33284,
-      sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
+      version: '0.0.1',
+      releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+      vendorFile: 'sdk-core-0.0.1.tgz',
+      size: 33308,
+      sha256: '5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b',
     });
 
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
-      version: '0.1.0',
-      releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-      vendorFile: 'cave-client-0.1.0.tgz',
-      size: 82000,
-      sha256: '21f03dd75d16aa40803d336490981ee83bc63ca69eeb090824eeb0eba9df0858',
+      version: '0.0.1',
+      releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+      vendorFile: 'cave-client-0.0.1.tgz',
+      size: 83218,
+      sha256: 'c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('1bb0a21773fcc2966308ed1900ec6b746fcfdbc8');
@@ -567,7 +576,7 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '1597835325cf3762b51408ff0a565037eeb25f64',
+        revision: '77d825d17809cfec2fad4acb9b1526b3c4752f9d',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
@@ -595,7 +604,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: '1597835325cf3762b51408ff0a565037eeb25f64',
+        revision: '77d825d17809cfec2fad4acb9b1526b3c4752f9d',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
@@ -674,6 +683,34 @@ describe('contract canary temp directory safety', () => {
 });
 
 describe('packed Cave authority artifact validation', () => {
+  test('current candidate accepts identical bytes from an authenticated historical ancestor', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).not.toThrow();
+  }, 30_000);
+
+  test('current candidate rejects independently valid but different historical fixture bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).toThrow('Packed Cave fixture bytes did not match the reviewed current producer.');
+  }, 30_000);
+
+  test('historical fixture validation still permits authenticated older contract bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).not.toThrow();
+  }, 30_000);
+
   test('accepts exact historical fixture provenance and reviewed HPKE vector bytes', () => {
     const fixture = createCaveAuthorityFixture();
 
@@ -977,6 +1014,11 @@ describe('contract canary checkout cleanliness', () => {
         /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
       );
       expect(canary).toContain('assertPackedFixtureMatchesCaveCheckout');
+      expect(
+        canary.match(
+          /assertPackedFixtureMatchesCaveCheckout\(lock, harnessRoot, (?:options\.)?caveRoot, \{\s*requireCurrentFixtureMatch: true,\s*\}\)/g,
+        ),
+      ).toHaveLength(2);
     });
 
     test('generates and executes a verifier for every shipped public entrypoint', () => {

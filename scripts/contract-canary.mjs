@@ -37,23 +37,23 @@ export const FROZEN_PACKED_CONSUMER_STAGES = Object.freeze([
 const SDK_ARTIFACTS = Object.freeze({
   core: {
     packageName: '@opencoven/sdk-core',
-    fileName: 'sdk-core-0.1.0.tgz',
-    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
+    fileName: 'sdk-core-0.0.1.tgz',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
   },
   cave: {
     packageName: '@opencoven/cave-client',
-    fileName: 'cave-client-0.1.0.tgz',
-    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
+    fileName: 'cave-client-0.0.1.tgz',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
   },
   coven: {
     packageName: '@opencoven/coven-client',
-    fileName: 'coven-client-0.1.0.tgz',
-    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
+    fileName: 'coven-client-0.0.1.tgz',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
   },
   sdk: {
     packageName: '@opencoven/sdk',
-    fileName: 'sdk-0.1.0.tgz',
-    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
+    fileName: 'sdk-0.0.1.tgz',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
   },
 });
 const CAVE_PRODUCER_ARTIFACTS = Object.freeze({
@@ -165,7 +165,7 @@ function validateSdkArtifacts(artifacts) {
       !Object.hasOwn(artifact, 'size') ||
       !Object.hasOwn(artifact, 'sha256') ||
       artifact.packageName !== expected.packageName ||
-      artifact.version !== '0.1.0' ||
+      artifact.version !== '0.0.1' ||
       artifact.releaseFile !== expected.releaseFile ||
       artifact.vendorFile !== expected.fileName ||
       !Number.isSafeInteger(artifact.size) ||
@@ -552,7 +552,9 @@ export function verifyFrozenPackedConsumer({
     onStage('isolation');
     assertIsolatedPackedInstall(harnessRoot);
     onStage('fixture');
-    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot, {
+      requireCurrentFixtureMatch: true,
+    });
     onStage('build');
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     onStage('verify');
@@ -1079,7 +1081,12 @@ function assertIsolatedPackedInstall(harnessRoot) {
   }
 }
 
-export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {
+export function assertPackedFixtureMatchesCaveCheckout(
+  lock,
+  harnessRoot,
+  caveRoot,
+  { requireCurrentFixtureMatch = false } = {},
+) {
   const fixtureDirectory = resolve(
     harnessRoot,
     'node_modules',
@@ -1163,6 +1170,15 @@ export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRo
     }
   }
 
+  const reviewedFixture = lock.cave.artifacts.contractFixture;
+  if (
+    requireCurrentFixtureMatch &&
+    (installedDigest !== reviewedFixture.sha256 ||
+      !installedFixture.equals(readFileSync(resolve(caveRoot, reviewedFixture.path))))
+  ) {
+    throw new Error('Packed Cave fixture bytes did not match the reviewed current producer.');
+  }
+
   const packedVectorDigest = readFileSync(installedVectorDigestPath, 'utf8').trim().toLowerCase();
   const reviewedVector = lock.cave.artifacts.hpkeVectors;
   if (
@@ -1207,7 +1223,9 @@ export function main(argv = process.argv.slice(2)) {
     createHarness(harnessRoot, frozen);
     installHarnessOfflineAfterWarming(harnessRoot);
     assertIsolatedPackedInstall(harnessRoot);
-    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot, {
+      requireCurrentFixtureMatch: true,
+    });
 
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);
