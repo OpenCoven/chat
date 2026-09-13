@@ -1929,11 +1929,30 @@ The fixture is removed only after the native RPC and its nested Cave Job close.
 If graceful shutdown fails, deletion is deferred to the supervisor's existing
 process-termination and profile-deletion boundary.
 
-Cave's fail-closed Windows discovery publisher permits its PowerShell ownership
-and DACL probe to run for up to 60 seconds. Rust therefore uses a 75-second
-Windows-only launch deadline. Both harness clients allow that deadline plus the
-existing 10-second transport allowance, for an 85-second Windows
-`cave_launch` budget. Non-Windows launch remains 30 seconds plus the transport
-allowance, and every other RPC remains bounded at 10 seconds. No ownership,
-DACL, identity, quota, liveness, discovery, health, redaction, or attestation
-check is bypassed.
+The Windows readiness deadline remains 30 seconds, with a 40-second
+`cave_launch` response budget in both clients. The earlier 75/85-second
+increase was not supported by the observed profile-root mismatch and is
+reverted. Other RPCs retain their existing limits.
+
+The supervisor now creates the actual owned profile before launching the
+restricted child and verifies token/profile agreement. Its retained profile
+and application directory handles request directory-list access without delete
+sharing so replacement is rejected by Windows sharing checks. The owned
+application subtree is charged to the existing bootstrap and harness aggregate
+budgets. Quarantine must complete before those handles are released and owned
+profile/account cleanup proceeds.
+
+Protected run `34726708513` used merged Chat #249 (`4682a4a`) and SDK #228
+(`c863b58`). Linux and Darwin passed. Windows failed at
+`access-denied; root=cave-checkout; scope=none;
+operation=directory-attributes; repeat=missing`. Validation, attestation and
+aggregation were skipped. The Unix records independently passed source and
+Cave record identity, timing, and all 197 ordered assertions.
+
+The missing retry proves pathname absence on that read. It does not distinguish
+completed deletion from rename/replacement, prove zero retained bytes, or erase
+an already observed entry-bound violation. Chat #253 landed a conversion of
+these failures into skippable absence. Its merge ancestry is integrated here,
+while strict first-failure handling and its regression coverage are retained.
+The bounded repeat remains diagnostic only. Fresh protected evidence is still
+required after the actual Chat merge and SDK rebinding.
