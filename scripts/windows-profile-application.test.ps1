@@ -17,6 +17,32 @@ function Read-ApplicationQuota {
   return $result
 }
 try {
+  # Contrast the metadata-only handle with the actual retained-profile opener.
+  # Both handles omit delete sharing; only the list-access handle enforces it.
+  $metadataOpen = [OpenCoven.WindowsJobSupervisor].GetMethod('OpenArtifactDirectory',
+    $flags, $null, [type[]]@([string]), $null)
+  $pinnedOpen = [OpenCoven.WindowsJobSupervisor].GetMethod('OpenOwnedProfileDirectory', $flags)
+  foreach ($control in @(@($metadataOpen, $true), @($pinnedOpen, $false))) {
+    $controlPath = Join-Path $context.User.RootPath ('pin-control-' + [Guid]::NewGuid().ToString('N'))
+    $movedPath = $controlPath + '-moved'
+    [IO.Directory]::CreateDirectory($controlPath) | Out-Null
+    $handle = $null
+    $moved = $false
+    try {
+      $pointer = $control[0].Invoke($null, [object[]]@([string]$controlPath))
+      $handle = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new([IntPtr]$pointer, $true)
+      try { [IO.Directory]::Move($controlPath, $movedPath); $moved = $true }
+      catch {
+        $cause = $_.Exception.GetBaseException()
+        if ($cause -isnot [IO.IOException] -or ($cause.HResult -band 0xffff) -ne 32) { throw }
+      }
+      if ($moved -ne $control[1]) { throw 'Directory sharing control did not match its access mode.' }
+    } finally {
+      if ($null -ne $handle) { $handle.Dispose() }
+      if ($moved) { [IO.Directory]::Move($movedPath, $controlPath) }
+      [IO.Directory]::Delete($controlPath)
+    }
+  }
   [IO.File]::WriteAllBytes((Join-Path $context.User.RootPath 'artifact.bin'), [byte[]]::new(600))
   [IO.File]::WriteAllBytes((Join-Path $app 'application.bin'), [byte[]]::new(600))
   $result = Read-ApplicationQuota

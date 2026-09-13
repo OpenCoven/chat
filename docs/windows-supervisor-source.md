@@ -77,3 +77,10 @@ The previous unknown failure did not establish a need to increase them.
 These changes require native Windows verification, actual-merge SDK rebinding,
 and fresh protected validation. Local compilation and arithmetic tests alone do
 not establish the filesystem, ACL, quarantine or three-platform guarantees.
+
+Retained profile and application handles request directory-list access in addition
+to metadata reads. Metadata-only handles do not activate Windows delete-sharing
+checks, even when FILE_SHARE_DELETE is omitted. The native fixture compares both
+access modes and requires a sharing violation from the retained-profile opener;
+its existing profile/application replacement checks remain mandatory. See the
+[Microsoft sharing algorithm](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/82b364ce-6d7b-422f-8d88-4db32eea809a). Native acceptance of this correction remains pending.

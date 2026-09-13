@@ -1822,6 +1822,7 @@ namespace OpenCoven
         private const uint PROCESS_ALL_ACCESS = 0x001fffff;
         private const uint FILE_ALL_ACCESS = 0x001f01ff;
         private const uint FILE_MODIFY_ACCESS = 0x001301bf;
+        private const uint FILE_LIST_DIRECTORY = 0x00000001;
         private const uint FILE_READ_ATTRIBUTES = 0x00000080;
         private const uint FILE_SHARE_READ = 0x00000001;
         private const uint FILE_SHARE_WRITE = 0x00000002;
@@ -2150,7 +2151,7 @@ namespace OpenCoven
         internal static WindowsOwnedProfileApplication CreateOwnedProfileApplication(
             string profilePath, string isolatedSid)
         {
-            SafeFileHandle profile = new SafeFileHandle(OpenArtifactDirectory(profilePath), true);
+            SafeFileHandle profile = new SafeFileHandle(OpenOwnedProfileDirectory(profilePath), true);
             SafeFileHandle application = null;
             try
             {
@@ -2175,7 +2176,7 @@ namespace OpenCoven
                         throw new Win32Exception(Marshal.GetLastWin32Error(), "Fresh application directory creation failed.");
                 }
                 finally { LocalFree(descriptor); }
-                application = new SafeFileHandle(OpenArtifactDirectory(applicationPath), true);
+                application = new SafeFileHandle(OpenOwnedProfileDirectory(applicationPath), true);
                 ValidateOwnedProfileApplication(profile.DangerousGetHandle(), application.DangerousGetHandle(),
                     profilePath, applicationPath, isolatedSid);
                 WindowsOwnedProfileApplication registered = new WindowsOwnedProfileApplication(
@@ -5858,12 +5859,24 @@ namespace OpenCoven
             return value;
         }
 
+        private static IntPtr OpenOwnedProfileDirectory(string path)
+        {
+            // Metadata-only opens do not participate in delete-sharing checks.
+            // Directory list access activates those checks without granting write access.
+            return OpenArtifactDirectory(path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL);
+        }
+
         private static IntPtr OpenArtifactDirectory(string path)
+        {
+            return OpenArtifactDirectory(path, FILE_READ_ATTRIBUTES | READ_CONTROL);
+        }
+
+        private static IntPtr OpenArtifactDirectory(string path, uint desiredAccess)
         {
             SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
             IntPtr handle = CreateFileW(
                 path,
-                FILE_READ_ATTRIBUTES | READ_CONTROL,
+                desiredAccess,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 ref attributes,
                 OPEN_EXISTING,

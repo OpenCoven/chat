@@ -1360,7 +1360,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 165,838 | `934524e4ad02384d5898da8fb3d6ab5585e362c018ef3f7322d966dfe2b5c152` |
+| `.github/workflows/client-v1-conformance.yml` | 166,054 | `56d9d912a152e3c4d281fa8260040eae3bfd29a6ea67bc2cc71b924850e72273` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1385,7 +1385,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 348,924 | `452dc6b0a7f25c1fde94c3dc029b013b919d951d71457ae652458114c25531ec` |
+| `scripts/windows-job-supervisor.cs` | 349,530 | `b7ec5455ad394b58cafd93cc85c7e87da37b04cdbd6f936aad0a1768432064df` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,043 | `883cccc5266058155d6d7a29ecb8b407010aa170a1b2e7f062d2be65338af06c` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
