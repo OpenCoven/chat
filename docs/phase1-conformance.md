@@ -1313,6 +1313,10 @@ pairing stage. Artifact validation, aggregation, and attestation were skipped.
 That result does not establish the pairing failure subtype or protected
 acceptance. These diagnostics require a new frozen source, reviewed SDK binding,
 and fresh protected run before they can identify that subtype.
+The diagnostic source is frozen at `28a341142584cbeda27a722e360eb88933ff53a6`,
+tree `a432ec1b0e9bb4bdf4d6fc880877ec2b8e9ff623`; the binding commit preserves
+that ancestry and all 25 harness file identities. PR #254 requests `ci:full`
+to run packaged Phase 1 conformance before landing.
 
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
