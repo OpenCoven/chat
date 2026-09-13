@@ -3148,6 +3148,29 @@ ${pathAssignment}
     }
   });
 
+  test('bounds Windows quota I/O failures to reviewed HRESULT categories', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'), 'utf8'),
+    ];
+    for (const source of sources) {
+      expect(source).toContain('ClassifyQuotaIoError');
+      for (const category of [
+        'io-file-not-found',
+        'io-path-not-found',
+        'io-sharing-violation',
+        'io-lock-violation',
+        'io-name-too-long',
+        'io-invalid-directory',
+        'io-delete-pending',
+      ]) {
+        expect(source).toContain(`"${category}"`);
+      }
+      expect(source).toContain('return "io";');
+    }
+  });
+
   test.each([
     {
       name: 'quota exceeded',

@@ -1855,8 +1855,14 @@ namespace OpenCoven
         private const int ERROR_FILE_NOT_FOUND = 2;
         private const int ERROR_PATH_NOT_FOUND = 3;
         private const int ERROR_SHARING_VIOLATION = 32;
+        private const int ERROR_LOCK_VIOLATION = 33;
         private const int ERROR_INVALID_PARAMETER = 87;
+        private const int ERROR_FILENAME_EXCED_RANGE = 206;
+        private const int ERROR_DIRECTORY = 267;
+        private const int ERROR_DELETE_PENDING = 303;
         private const int ERROR_NOT_FOUND = 1168;
+        private const int HRESULT_WIN32_MASK = unchecked((int)0xffff0000);
+        private const int HRESULT_WIN32_PREFIX = unchecked((int)0x80070000);
         private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
         private const int SCHED_E_TASK_NOT_RUNNING = unchecked((int)0x8004130b);
@@ -8173,8 +8179,28 @@ namespace OpenCoven
             if (error is QuotaEntryBoundException) return "entry-bound";
             if (error is UnauthorizedAccessException) return "access-denied";
             if (error is OverflowException) return "arithmetic-overflow";
-            if (error is IOException) return "io";
+            IOException ioError = error as IOException;
+            if (ioError != null) return ClassifyQuotaIoError(ioError);
             return "unexpected";
+        }
+
+        private static string ClassifyQuotaIoError(IOException error)
+        {
+            if ((error.HResult & HRESULT_WIN32_MASK) != HRESULT_WIN32_PREFIX)
+            {
+                return "io";
+            }
+            switch (error.HResult & 0xffff)
+            {
+                case ERROR_FILE_NOT_FOUND: return "io-file-not-found";
+                case ERROR_PATH_NOT_FOUND: return "io-path-not-found";
+                case ERROR_SHARING_VIOLATION: return "io-sharing-violation";
+                case ERROR_LOCK_VIOLATION: return "io-lock-violation";
+                case ERROR_FILENAME_EXCED_RANGE: return "io-name-too-long";
+                case ERROR_DIRECTORY: return "io-invalid-directory";
+                case ERROR_DELETE_PENDING: return "io-delete-pending";
+                default: return "io";
+            }
         }
 
         private sealed class DirectoryQuotaFailureState : IDisposable

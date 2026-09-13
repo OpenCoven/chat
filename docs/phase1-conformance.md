@@ -1319,6 +1319,25 @@ reconciliation. `service_unavailable` has several native causes and is not proof
 of a readiness timeout. Arbitrary native error text remains outside the public
 allowlist. Fresh protected validation is required to identify the return code.
 
+Protected run `34746733029`, using Chat `717fe222` and SDK validator
+`369a6c1`, passed Linux and macOS but failed earlier in the Windows bootstrap
+while the Cave checkout was being installed. The bounded result was
+`io; root=cave-checkout; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=persistent`. The generic
+I/O category cannot distinguish a missing or renamed directory represented as
+a base `IOException` from a sharing violation, lock violation, overlong name,
+invalid directory, or delete-pending state.
+
+The next diagnostic classifies only reviewed Win32 HRESULT values as
+`io-file-not-found`, `io-path-not-found`, `io-sharing-violation`,
+`io-lock-violation`, `io-name-too-long`, `io-invalid-directory`, or
+`io-delete-pending`; all other I/O failures remain `io`. It does not publish
+paths or exception messages and does not change traversal, retries, ACLs,
+limits, accounting, termination, or fail-closed behavior.
+The real overlong-path fixture preserves that boundary across runtimes:
+Windows currently reports its unreviewed HRESULT as `io`, while Unix hosts
+report the reviewed filename-too-long HRESULT as `io-name-too-long`.
+
 The initial pairing stage further distinguishes create, poll, and exchange RPC
 failures using a fixed native-code allowlist, operation timeouts, RPC closure,
 missing authority, response assertions, and admin HTTP status classes. Unknown
@@ -1396,7 +1415,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,338 | `382511d71338d588d934cb3eee3f95caa657163221744e3acebe204f880fd7e4` |
+| `.github/workflows/client-v1-conformance.yml` | 166,774 | `9a65a6113fa16f5534d0b5c0277f3afa6561334d7937497db669141c3d8952eb` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1421,9 +1440,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 350,211 | `20b7881696e00dd9f1aae780fdeb9474d4144c76d030f272eceb05a0caae5c2d` |
+| `scripts/windows-job-supervisor.cs` | 351,497 | `281acdeba5ee8dd022fd0451bd4ede6af8431aba8810f1683ce7077cc627fcb0` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 25,774 | `c9a9a82a1d90da0da6a95732048946f83917de91bda76ac4a36cfaecdf6e0d42` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -1604,7 +1623,8 @@ success and refreshed protected acceptance remain required.
 Protected run `34580621067` passed Linux and Darwin, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove
 a byte quota was exceeded. The supervisor now retains only fixed categories:
-`entry-bound`, `access-denied`, `arithmetic-overflow`, `io`, or `unexpected`.
+`entry-bound`, `access-denied`, `arithmetic-overflow`, the bounded Win32 I/O
+subcategories documented above, `io`, or `unexpected`.
 The first monitor failure retains its category, normalized quota-root identifier
 and filesystem operation through background monitoring and terminal rechecks.
 Operation codes distinguish pattern attributes/enumeration, directory
