@@ -79,9 +79,9 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
-export function caveLaunchRpcTimeoutForPlatform(platform = process.platform) {
-  const nativeReadinessTimeoutMs = platform === 'win32' ? 75_000 : 30_000;
-  return nativeReadinessTimeoutMs + rpcTimeoutMs;
+export function caveLaunchRpcTimeoutForPlatform(_platform = process.platform) {
+  // Preserve the reviewed native readiness deadline plus the RPC transport budget.
+  return 30_000 + rpcTimeoutMs;
 }
 const caveLaunchRpcTimeoutMs = caveLaunchRpcTimeoutForPlatform();
 const caveConformanceTimeoutMs = 15 * 60_000;
@@ -2202,7 +2202,6 @@ export function nativeScenarioHomes(artifactRootPath, environment, platform = pr
       isolatedHome,
       covenHome,
       caveHome: pathApi.resolve(covenHome, 'cave'),
-      removeCovenHome: false,
     };
   }
   const profileRoot = environment.OPENCOVEN_WINDOWS_PROFILE_ROOT;
@@ -2220,16 +2219,7 @@ export function nativeScenarioHomes(artifactRootPath, environment, platform = pr
     isolatedHome,
     covenHome,
     caveHome: windowsPath.join(covenHome, 'cave'),
-    removeCovenHome: true,
   };
-}
-
-export function cleanupNativeScenarioHome(covenHome, removeCovenHome, rpcClosed) {
-  if (!removeCovenHome || !rpcClosed) {
-    return false;
-  }
-  rmSync(covenHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-  return true;
 }
 
 function runCommand(
@@ -4326,7 +4316,7 @@ async function runNativeScenarios({
   platform,
   compatibilityPassed,
 }) {
-  const { isolatedHome, covenHome, caveHome, removeCovenHome } = nativeScenarioHomes(
+  const { isolatedHome, covenHome, caveHome } = nativeScenarioHomes(
     artifactRoot.rootPath,
     environment,
   );
@@ -4345,7 +4335,6 @@ async function runNativeScenarios({
     throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
   }
   let rpc;
-  let rpcClosed = true;
   let handle;
   let credentialId;
   const nativeInstanceIds = new Set();
@@ -4425,7 +4414,6 @@ async function runNativeScenarios({
     };
     activeNativeStage = 'rpc-start';
     rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
-    rpcClosed = false;
     let installationId = 'phase1-installation-1';
     if (platformEnvironment !== undefined) {
       activeNativeStage = 'native-preflight';
@@ -4969,15 +4957,6 @@ async function runNativeScenarios({
     try {
       activeNativeStage = 'cleanup-rpc';
       await rpc.close();
-      rpcClosed = true;
-    } catch (error) {
-      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
-    }
-  }
-  if (removeCovenHome && rpcClosed) {
-    try {
-      activeNativeStage = 'cleanup';
-      cleanupNativeScenarioHome(covenHome, removeCovenHome, rpcClosed);
     } catch (error) {
       cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
     }

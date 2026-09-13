@@ -21,14 +21,7 @@ use crate::{
     NativeConnectionState,
 };
 
-fn launch_readiness_deadline_for_platform(is_windows: bool) -> Duration {
-    if is_windows {
-        // Cave's fail-closed Windows discovery ACL probe is itself bounded at 60 seconds.
-        Duration::from_secs(75)
-    } else {
-        Duration::from_secs(30)
-    }
-}
+const LAUNCH_READINESS_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 struct LaunchDeadline {
@@ -39,7 +32,7 @@ struct LaunchDeadline {
 impl LaunchDeadline {
     fn start(clock: Arc<dyn CaveClock>) -> Self {
         Self {
-            expires_at: clock.now() + launch_readiness_deadline_for_platform(cfg!(windows)),
+            expires_at: clock.now() + LAUNCH_READINESS_DEADLINE,
             clock,
         }
     }
@@ -2890,24 +2883,11 @@ mod tests {
     }
 
     #[test]
-    fn windows_launch_budget_covers_the_bounded_discovery_acl_probe() {
-        assert_eq!(
-            launch_readiness_deadline_for_platform(true),
-            Duration::from_secs(75)
-        );
-        assert_eq!(
-            launch_readiness_deadline_for_platform(false),
-            Duration::from_secs(30)
-        );
-    }
-
-    #[test]
     fn launch_deadline_begins_before_reservation_and_spawn() {
         let clock = Arc::new(TestLaunchClock::default());
-        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let launcher = Arc::new(DeadlineLauncher::new(
             clock.clone(),
-            expected_deadline,
+            Duration::from_secs(30),
             Box::new(TestChild),
         ));
         let state = deadline_state(
@@ -2920,13 +2900,12 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), expected_deadline);
+        assert_eq!(clock.now(), Duration::from_secs(30));
     }
 
     #[test]
     fn readiness_polling_and_backoff_stop_at_the_absolute_deadline() {
         let clock = Arc::new(TestLaunchClock::default());
-        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let discovery = Arc::new(PollingDiscovery {
             clock: clock.clone(),
             reads: AtomicUsize::new(0),
@@ -2945,14 +2924,13 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), expected_deadline);
+        assert_eq!(clock.now(), Duration::from_secs(30));
         assert!(discovery.reads.load(Ordering::SeqCst) > 1);
     }
 
     #[test]
     fn hanging_health_cannot_extend_the_launch_attempt() {
         let clock = Arc::new(TestLaunchClock::default());
-        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let state = deadline_state(
             clock.clone(),
             Arc::new(PendingHealth),
@@ -2966,7 +2944,7 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), expected_deadline);
+        assert_eq!(clock.now(), Duration::from_secs(30));
         assert_eq!(
             tauri::async_runtime::block_on(state.cave_health(prelaunch_handle))
                 .unwrap_err()
@@ -2978,7 +2956,6 @@ mod tests {
     #[test]
     fn blocking_child_cleanup_is_transferred_without_extending_the_deadline() {
         let clock = Arc::new(TestLaunchClock::default());
-        let expected_deadline = launch_readiness_deadline_for_platform(cfg!(windows));
         let cleanup_started = Arc::new(Barrier::new(2));
         let cleanup_release = Arc::new(Barrier::new(2));
         let child_state = Arc::new(BlockingChildState::default());
@@ -3000,7 +2977,7 @@ mod tests {
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
         assert_eq!(error.code, "service_unavailable");
-        assert_eq!(clock.now(), expected_deadline);
+        assert_eq!(clock.now(), Duration::from_secs(30));
         cleanup_started.wait();
         assert_eq!(child_state.terminated.load(Ordering::SeqCst), 1);
         cleanup_release.wait();
@@ -3054,7 +3031,7 @@ mod tests {
         tauri::async_runtime::block_on(state.cave_launch()).unwrap();
 
         assert_eq!(clock.now(), Duration::from_secs(20));
-        assert!(clock.now() <= launch_readiness_deadline_for_platform(cfg!(windows)));
+        assert!(clock.now() <= LAUNCH_READINESS_DEADLINE);
     }
 
     #[test]

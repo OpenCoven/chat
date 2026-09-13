@@ -40,6 +40,53 @@ namespace OpenCoven
         }
     }
 
+    internal sealed class WindowsOwnedProfileApplication : IDisposable
+    {
+        private readonly object sync = new object();
+        private readonly SafeFileHandle profile;
+        private readonly SafeFileHandle application;
+        private readonly string profilePath;
+        private readonly string sid;
+        internal string Path { get; private set; }
+
+        internal WindowsOwnedProfileApplication(
+            SafeFileHandle profileHandle, SafeFileHandle applicationHandle,
+            string ownedProfilePath, string applicationPath, string isolatedSid)
+        {
+            profile = profileHandle;
+            application = applicationHandle;
+            profilePath = ownedProfilePath;
+            Path = applicationPath;
+            sid = isolatedSid;
+        }
+
+        internal T ReadVerified<T>(Func<string, T> read)
+        {
+            lock (sync)
+            {
+                if (profile.IsClosed || application.IsClosed)
+                    throw new ObjectDisposedException("WindowsOwnedProfileApplication");
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                T result = read(Path);
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                return result;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (sync)
+            {
+                application.Dispose();
+                profile.Dispose();
+            }
+        }
+    }
+
     public sealed class WindowsIsolatedUser : IDisposable
     {
         private const uint NERR_SUCCESS = 0;
@@ -96,6 +143,7 @@ namespace OpenCoven
 
         private readonly object quotaTokenSync = new object();
         private SafeAccessTokenHandle quotaToken;
+        private WindowsOwnedProfileApplication ownedApplication;
         private string password;
         private bool accountDisabled;
         private Action quarantineIsolatedIdentity;
@@ -183,6 +231,7 @@ namespace OpenCoven
             string sid = null;
             bool accountCreated = false;
             string ownedProfilePath = null;
+            WindowsOwnedProfileApplication ownedApplication = null;
             SafeAccessTokenHandle validatedQuotaToken = null;
             try
             {
@@ -287,6 +336,10 @@ namespace OpenCoven
                     sid,
                     supervisor.Value);
 
+                ownedApplication = WindowsJobSupervisor.CreateOwnedProfileApplication(ownedProfilePath, sid);
+                WindowsIdentity.RunImpersonated(validatedQuotaToken,
+                    () => ownedApplication.ReadVerified(path => true));
+
                 WindowsIsolatedUser created = new WindowsIsolatedUser(
                     userName,
                     passwordValue,
@@ -299,6 +352,8 @@ namespace OpenCoven
                     ownedProfilePath,
                     validationSummary,
                     validatedQuotaToken);
+                created.ownedApplication = ownedApplication;
+                ownedApplication = null;
                 validatedQuotaToken = null;
                 return created;
             }
@@ -308,6 +363,11 @@ namespace OpenCoven
                 if (validatedQuotaToken != null)
                 {
                     try { validatedQuotaToken.Dispose(); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
+                }
+                if (ownedApplication != null)
+                {
+                    try { ownedApplication.Dispose(); }
                     catch (Exception error) { cleanupFailures.Add(error); }
                 }
                 if (ownedProfilePath != null)
@@ -376,6 +436,14 @@ namespace OpenCoven
             {
                 throw new ObjectDisposedException("WindowsIsolatedUser");
             }
+        }
+
+        internal T ReadOwnedProfileApplication<T>(Func<string, T> read)
+        {
+            ThrowIfDisposed();
+            if (ownedApplication == null)
+                throw new InvalidOperationException("Owned profile application is not registered.");
+            return ownedApplication.ReadVerified(read);
         }
 
         internal T RunQuotaRead<T>(Func<T> read)
@@ -1219,6 +1287,23 @@ namespace OpenCoven
                     }
                 }
             }
+            if (quarantineIsolatedIdentity != null)
+            {
+                try
+                {
+                    if (!isQuarantineComplete())
+                        throw new InvalidOperationException("Owned process quarantine is incomplete.");
+                }
+                catch (Exception error)
+                {
+                    RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine-check", error);
+                }
+                if (cleanupFailures.Count != 0)
+                    throw new InvalidOperationException(
+                        "Ephemeral Windows identity cleanup deferred: " +
+                            String.Join(",", cleanupCategories.ToArray()) + ".",
+                        new AggregateException(cleanupFailures.ToArray()));
+            }
             SafeAccessTokenHandle retiredQuotaToken;
             lock (quotaTokenSync)
             {
@@ -1229,6 +1314,14 @@ namespace OpenCoven
             if (retiredQuotaToken != null)
             {
                 retiredQuotaToken.Dispose();
+            }
+            try
+            {
+                if (ownedApplication != null) ownedApplication.Dispose();
+            }
+            catch (Exception error)
+            {
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-pins", error);
             }
             try
             {
@@ -1608,7 +1701,16 @@ namespace OpenCoven
         public string PathPattern { get; private set; }
         public long MaxBytes { get; private set; }
 
+        public bool IncludeOwnedProfileApplication { get; private set; }
+
         public WindowsDirectoryQuota(string label, string pathPattern, long maxBytes)
+            : this(label, pathPattern, maxBytes, false)
+        {
+        }
+
+        public WindowsDirectoryQuota(
+            string label, string pathPattern, long maxBytes,
+            bool includeOwnedProfileApplication)
         {
             if (String.IsNullOrWhiteSpace(label) || label.Length > 120)
             {
@@ -1664,6 +1766,7 @@ namespace OpenCoven
             Label = label;
             PathPattern = pathPattern;
             MaxBytes = maxBytes;
+            IncludeOwnedProfileApplication = includeOwnedProfileApplication;
         }
     }
 
@@ -2043,6 +2146,150 @@ namespace OpenCoven
                 LocalFree(expectedOwner);
             }
         }
+
+        internal static WindowsOwnedProfileApplication CreateOwnedProfileApplication(
+            string profilePath, string isolatedSid)
+        {
+            SafeFileHandle profile = new SafeFileHandle(OpenArtifactDirectory(profilePath), true);
+            SafeFileHandle application = null;
+            try
+            {
+                ValidateProfileDirectorySecurity(profile.DangerousGetHandle(), isolatedSid, false);
+                string applicationPath = Path.Combine(profilePath, ".coven");
+                EnablePrivilege("SeRestorePrivilege");
+                string sddl = "O:" + isolatedSid + "D:P" +
+                    "(A;OICI;0x001f01ff;;;SY)(A;OICI;0x001f01ff;;;BA)" +
+                    "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                    "(A;OICIIO;0x001f01ff;;;" + isolatedSid + ")" +
+                    "(A;OICI;0x00020000;;;S-1-3-4)";
+                IntPtr descriptor;
+                uint descriptorLength;
+                if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl, SDDL_REVISION_1, out descriptor, out descriptorLength))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Application ACL creation failed.");
+                try
+                {
+                    SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
+                    attributes.lpSecurityDescriptor = descriptor;
+                    if (!CreateDirectoryW(applicationPath, ref attributes))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Fresh application directory creation failed.");
+                }
+                finally { LocalFree(descriptor); }
+                application = new SafeFileHandle(OpenArtifactDirectory(applicationPath), true);
+                ValidateOwnedProfileApplication(profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, applicationPath, isolatedSid);
+                WindowsOwnedProfileApplication registered = new WindowsOwnedProfileApplication(
+                    profile, application, profilePath, applicationPath, isolatedSid);
+                profile = null;
+                application = null;
+                return registered;
+            }
+            finally
+            {
+                if (application != null) application.Dispose();
+                if (profile != null) profile.Dispose();
+            }
+        }
+
+        internal static void ValidateOwnedProfileApplication(
+            IntPtr profile, IntPtr application, string profilePath, string applicationPath, string isolatedSid)
+        {
+            ValidateOwnedProfilePath(profile, profilePath, isolatedSid, false);
+            ValidateOwnedProfilePath(application, applicationPath, isolatedSid, true);
+        }
+
+        private static void ValidateOwnedProfilePath(
+            IntPtr retained, string path, string isolatedSid, bool application)
+        {
+            ValidateProfileDirectorySecurity(retained, isolatedSid, application);
+            using (SafeFileHandle current = new SafeFileHandle(OpenArtifactDirectory(path), true))
+            {
+                ValidateProfileDirectorySecurity(current.DangerousGetHandle(), isolatedSid, application);
+                if (!SameFileIdentity(
+                    QueryFileInformation(retained, "Retained profile identity query failed."),
+                    QueryFileInformation(current.DangerousGetHandle(), "Current profile identity query failed.")))
+                    throw new IOException("Owned profile path identity changed.");
+            }
+        }
+
+        private static void ValidateProfileDirectorySecurity(IntPtr handle, string isolatedSid, bool application)
+        {
+            FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(handle, "Profile directory attributes unavailable.");
+            if (GetFileType(handle) != FILE_TYPE_DISK ||
+                (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                throw new IOException("Profile path is not a non-reparse disk directory.");
+            IntPtr isolated = IntPtr.Zero, system = IntPtr.Zero, administrators = IntPtr.Zero, ownerRights = IntPtr.Zero;
+            IntPtr owner = IntPtr.Zero, dacl = IntPtr.Zero, descriptor = IntPtr.Zero;
+            try
+            {
+                isolated = ConvertSid(isolatedSid, "Profile owner SID invalid.");
+                system = ConvertSid("S-1-5-18", "Profile SYSTEM SID invalid.");
+                administrators = ConvertSid("S-1-5-32-544", "Profile Administrators SID invalid.");
+                ownerRights = ConvertSid("S-1-3-4", "Profile OWNER RIGHTS SID invalid.");
+                uint status = GetSecurityInfo(handle, SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner, IntPtr.Zero, out dacl, IntPtr.Zero, out descriptor);
+                if (status != 0 || owner == IntPtr.Zero || dacl == IntPtr.Zero || descriptor == IntPtr.Zero ||
+                    !(EqualSid(owner, isolated) || (!application &&
+                        (EqualSid(owner, system) || EqualSid(owner, administrators)))))
+                    throw new IOException("Profile directory ownership or DACL is unsafe.");
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision) ||
+                    (application && (control & SE_DACL_PROTECTED) == 0))
+                    throw new IOException("Application DACL is not protected.");
+                ACL_SIZE_INFORMATION information;
+                if (!GetAclInformation(dacl, out information,
+                    (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)), AclSizeInformation) ||
+                    (application && information.AceCount != 5))
+                    throw new IOException("Profile DACL shape is invalid.");
+                bool[] found = new bool[5];
+                for (uint index = 0; index < information.AceCount; index++)
+                {
+                    IntPtr pointer;
+                    if (!GetAce(dacl, index, out pointer) || pointer == IntPtr.Zero)
+                        throw new IOException("Profile ACE could not be read.");
+                    ACCESS_ALLOWED_ACE ace = (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(pointer, typeof(ACCESS_ALLOWED_ACE));
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
+                        throw new IOException("Profile DACL contains an unsupported ACE.");
+                    IntPtr sid = new IntPtr(pointer.ToInt64() + Marshal.OffsetOf(typeof(ACCESS_ALLOWED_ACE), "SidStart").ToInt64());
+                    bool trusted = EqualSid(sid, isolated) || EqualSid(sid, system) || EqualSid(sid, administrators);
+                    // Same writable rights and trusted writer set as native Windows discovery.
+                    if ((ace.Mask & 0x500d0156u) != 0 && !trusted)
+                        throw new IOException("Profile directory permits an untrusted writer.");
+                    if (!application) continue;
+                    int slot = -1;
+                    byte inherited = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+                    if (ace.Header.AceFlags == inherited)
+                    {
+                        if (EqualSid(sid, system) && ace.Mask == FILE_ALL_ACCESS) slot = 0;
+                        else if (EqualSid(sid, administrators) && ace.Mask == FILE_ALL_ACCESS) slot = 1;
+                        else if (EqualSid(sid, isolated) && ace.Mask == FILE_MODIFY_ACCESS) slot = 2;
+                        else if (EqualSid(sid, ownerRights) && ace.Mask == READ_CONTROL) slot = 3;
+                    }
+                    else if (ace.Header.AceFlags == (inherited | INHERIT_ONLY_ACE) &&
+                        EqualSid(sid, isolated) && ace.Mask == FILE_ALL_ACCESS) slot = 4;
+                    if (slot < 0 || found[slot]) throw new IOException("Application ACL is not exact.");
+                    found[slot] = true;
+                }
+                if (application)
+                    foreach (bool present in found)
+                        if (!present) throw new IOException("Application ACL is incomplete.");
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero) LocalFree(descriptor);
+                FreeLocalSid(ownerRights);
+                FreeLocalSid(administrators);
+                FreeLocalSid(system);
+                FreeLocalSid(isolated);
+            }
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(string path, ref SECURITY_ATTRIBUTES attributes);
 
         internal static void SecureIsolatedDirectory(
             string path,
@@ -6917,6 +7164,10 @@ namespace OpenCoven
                 try
                 {
                     bool exceeded;
+                    if (quota.IncludeOwnedProfileApplication)
+                    {
+                        ValidateOwnedProfileAggregateDefinition(isolatedUser, quota);
+                    }
                     if (isolatedUser == null)
                     {
                         exceeded = DirectoryQuotaExceeded(quota, Path.GetPathRoot(quota.PathPattern));
@@ -6930,8 +7181,17 @@ namespace OpenCoven
                         {
                             prefixExists = true;
                         }
-                        if (!prefixExists) continue;
-                        exceeded = isolatedUser.RunQuotaRead(() => DirectoryQuotaExceeded(quota, readRoot, true));
+                        if (!prefixExists)
+                        {
+                            if (quota.IncludeOwnedProfileApplication)
+                                throw new IOException("Owned aggregate root is missing.");
+                            continue;
+                        }
+                        exceeded = isolatedUser.RunQuotaRead(() =>
+                            quota.IncludeOwnedProfileApplication
+                                ? isolatedUser.ReadOwnedProfileApplication(applicationPath =>
+                                    DirectoryQuotaExceeded(quota, readRoot, true, applicationPath))
+                                : DirectoryQuotaExceeded(quota, readRoot, true));
                     }
                     if (exceeded)
                     {
@@ -6963,6 +7223,21 @@ namespace OpenCoven
             return false;
         }
 
+        private static void ValidateOwnedProfileAggregateDefinition(
+            WindowsIsolatedUser isolatedUser, WindowsDirectoryQuota quota)
+        {
+            if (isolatedUser == null)
+                throw new ArgumentException("Owned application accounting requires an isolated user.");
+            bool bootstrap = quota.Label == "bootstrap aggregate" &&
+                String.Equals(quota.PathPattern, isolatedUser.RootPath, StringComparison.OrdinalIgnoreCase);
+            bool harness = quota.Label == "harness execution aggregate" &&
+                String.Equals(quota.PathPattern,
+                    Path.Combine(isolatedUser.TempPath, "phase1-conformance-run-*"),
+                    StringComparison.OrdinalIgnoreCase);
+            if (!bootstrap && !harness)
+                throw new ArgumentException("Owned application accounting requires an exact aggregate definition.");
+        }
+
         private static string GetIsolatedQuotaReadRoot(string isolatedRoot, string pattern)
         {
             string root = Path.GetFullPath(isolatedRoot).Replace('/', '\\').TrimEnd('\\');
@@ -6986,8 +7261,14 @@ namespace OpenCoven
             return root;
         }
 
-        private static bool DirectoryQuotaExceeded(WindowsDirectoryQuota quota, string readRoot, bool repeatDiagnostic = false)
+        private static bool DirectoryQuotaExceeded(
+            WindowsDirectoryQuota quota, string readRoot,
+            bool repeatDiagnostic = false, string ownedProfileApplication = null)
         {
+            if (quota.IncludeOwnedProfileApplication != (ownedProfileApplication != null))
+            {
+                throw new ArgumentException("Application quota requires its supervisor-owned root.");
+            }
             long total = 0;
             foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot, repeatDiagnostic))
             {
@@ -6997,7 +7278,14 @@ namespace OpenCoven
                     quota.Label, repeatDiagnostic));
                 if (total > quota.MaxBytes) return true;
             }
-            return false;
+            if (ownedProfileApplication != null)
+            {
+                total = checked(total + MeasureDirectoryBytes(
+                    ownedProfileApplication,
+                    quota.MaxBytes - Math.Min(total, quota.MaxBytes),
+                    quota.Label, repeatDiagnostic));
+            }
+            return total > quota.MaxBytes;
         }
 
         private static IEnumerable<string> ExpandQuotaPattern(string pattern)

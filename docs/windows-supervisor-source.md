@@ -1,11 +1,11 @@
 # Bounded Windows supervisor source
 
 The workflow uses the bounded source block. SDK producer rebinding and fresh
-protected validation remain deployment gates. Windows profile-root alignment and
-protected three-platform acceptance remain open.
+protected validation remain deployment gates. Native Windows verification of profile-root alignment and protected
+three-platform acceptance remain open.
 
-The previous inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
-allowance. The bounded form occupies 161,836 bytes and retains the same 329,668
+At the compression checkpoint, the inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
+allowance. The initial bounded form occupied 161,836 bytes and retained the same 329,668
 bytes of C#. The source renderer in `scripts/windows-supervisor-source.mjs`
 recovers space for the profile lifecycle and shared quota repair. The canonical C# remains
 `scripts/windows-job-supervisor.cs`; compression does not change its behavior.
@@ -41,13 +41,13 @@ streams. Runtime hash literals are not an independent source of authority.
 - Windows CI checks the committed payload with the pinned Node compressor and
   compiles the full decoded C# in PowerShell, alongside existing native supervisor
   behavior tests. Successful local compilation alone is not Windows runtime proof.
-- Then implement actual profile-root alignment and shared aggregate accounting,
-  with existing quotas and fail-closed behavior unchanged, followed by fresh
-  protected validation of all three platforms.
+- Verify actual profile-root alignment and shared aggregate accounting natively,
+  with existing quotas unchanged, followed by fresh protected validation of all
+  three platforms.
 
-Concurrent Chat #249 moves fixtures beneath a predicted profile path without
-adding that subtree to the shared aggregates. Its production profile ownership
-and accounting gaps must be repaired before this producer is dispatched.
+Chat #249 moved fixtures beneath a predicted profile path without adding that
+subtree to the shared aggregates. The lifecycle and accounting repairs below
+require native verification before this producer is dispatched.
 
 ## Owned profile lifecycle repair
 
@@ -57,7 +57,23 @@ against the retained token. Initialization failures delete the owned profile
 before removing the account. The native fixture exercises that production catch
 and verifies profile-directory, registry, account, and artifact-root removal.
 
-This lifecycle change requires native Windows validation. It does not yet add
-profile `.coven` bytes to the existing shared aggregates or retain directory
-handles for that subtree. Those accounting and identity checks remain required
-before SDK rebinding and protected dispatch.
+The accounting follow-up atomically creates `.coven` with a strict application
+ACL and retains handles for that directory and its profile ancestor. Profile
+owner/writer validation matches native discovery; application ACL validation
+requires the exact isolated-user, SYSTEM, Administrators and OWNER RIGHTS rules.
+The supervisor checks current path identities, type and security before and
+after each aggregate measurement under the retained isolated token.
+
+Only the exact bootstrap and harness aggregates include application bytes, using
+their existing 12 GiB and 10 GiB ceilings and one remaining-byte budget per
+aggregate. Component quotas retain their existing behavior. The supervisor owns
+cleanup: failed quarantine retains the token and pins for retry; successful
+quarantine and terminal accounting precede pin release and profile deletion.
+The producer no longer recursively removes the pinned application directory.
+
+The prior 30-second native readiness and 40-second RPC deadlines are restored.
+The previous unknown failure did not establish a need to increase them.
+
+These changes require native Windows verification, actual-merge SDK rebinding,
+and fresh protected validation. Local compilation and arithmetic tests alone do
+not establish the filesystem, ACL, quarantine or three-platform guarantees.

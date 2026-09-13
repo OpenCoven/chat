@@ -3269,14 +3269,21 @@ $isolatedUser = [pscustomobject]@{
 ${quotaAssignment}
 [Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
 `;
-    const quotas: { Label: string; MaxBytes: number }[] = JSON.parse(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-        encoding: 'utf8',
-        timeout: 15_000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    );
+    const quotas: { Label: string; MaxBytes: number; IncludeOwnedProfileApplication: boolean }[] =
+      JSON.parse(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          timeout: 15_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
     const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
+    expect(
+      quotas
+        .filter((quota) => quota.IncludeOwnedProfileApplication)
+        .map((quota) => quota.Label)
+        .sort(),
+    ).toEqual(['bootstrap aggregate', 'harness execution aggregate']);
     // The exact d20d83c build measured this many bytes in node_modules plus .next.
     expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
     expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
