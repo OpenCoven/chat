@@ -4,9 +4,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import * as ts from 'typescript';
 import { describe, expect, test } from 'vitest';
+import { decodeWindowsSupervisorSource } from '../scripts/windows-supervisor-source.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
@@ -84,21 +84,27 @@ function workflowStep(workflow: string, name: string): string {
 }
 
 function embeddedWindowsSupervisorSource(workflow: string): string {
-  const startMarker = "          $jobSupervisorSource = @'\n";
-  const endMarker = "\n          '@\n";
+  const startMarker = '          # BEGIN bounded Windows supervisor source v1';
+  const endMarker = '          # END bounded Windows supervisor source v1';
+  expect(workflow.split(startMarker)).toHaveLength(2);
+  expect(workflow.split(endMarker)).toHaveLength(2);
   const start = workflow.indexOf(startMarker);
-  if (start < 0) {
-    throw new Error('missing inline Windows Job Object supervisor source');
-  }
-  const end = workflow.indexOf(endMarker, start + startMarker.length);
-  if (end < 0) {
-    throw new Error('unterminated inline Windows Job Object supervisor source');
-  }
-  return `${workflow
-    .slice(start + startMarker.length, end)
+  const end = workflow.indexOf(endMarker, start) + endMarker.length;
+  const block = workflow
+    .slice(start, end)
     .split('\n')
-    .map((line) => line.replace(/^ {10}/u, ''))
-    .join('\n')}\n`;
+    .map((line) => line.slice(10))
+    .join('\n');
+  const source = readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'));
+  expect(workflow.slice(end)).toMatch(
+    /^\n {10}Add-Type -TypeDefinition \$jobSupervisorSource -Language CSharp\n/u,
+  );
+  expect(workflow.match(/\$jobSupervisorSource\s*=/gu)).toHaveLength(1);
+  expect(workflow.match(/Add-Type -TypeDefinition \$jobSupervisorSource/gu)).toHaveLength(1);
+  return decodeWindowsSupervisorSource(block, {
+    size: source.length,
+    sha256: createHash('sha256').update(source).digest('hex'),
+  }).toString('utf8');
 }
 
 function embeddedWindowsChildBootstrapSource(workflow: string): string {
