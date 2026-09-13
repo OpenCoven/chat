@@ -13,6 +13,40 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
+## Bounded discovery decoder prerequisite
+
+The decoder accepts the finite read/publication diagnostics emitted by
+[OpenCoven/coven-cave#5377](https://github.com/OpenCoven/coven-cave/pull/5377):
+
+```text
+client-v1-conformance: Client v1 discovery record is not published. [read=<read>; publication=<publication>]
+```
+
+The seven read categories and twelve publication categories are enumerated in
+`CAVE_DISCOVERY_FAILURE_DIAGNOSTICS`. Only exact combinations pass both public
+diagnostic gates. Unknown categories or malformed details retain the generic
+`phase1.cave-authority.startup.discovery.missing` identifier; raw details are
+never copied. Command failures and assertion results retain precedence over
+these pre-assertion diagnostics, and the first attributed startup message wins.
+
+The combined decoder and native launch behavior are frozen at the actual
+committed `harnessAuthority.revision` and `.tree` in
+`phase1-conformance.lock.json`. Both trusted Windows and Unix module tables
+bind those exact source bytes. The guide's workflow digest describes the
+producer workflow; the lock's workflow entry describes the workflow committed
+at the frozen source revision. The combined source preserves the bounded
+native launch diagnostics, aborted-worker recovery, live-worker exclusion,
+and corresponding native production deltas from OpenCoven/chat#259, together
+with the child-stderr discovery regression coverage added in `6755a3d`.
+This PR requires an actual merge commit to preserve the pinned source ancestry.
+
+This binding does not adopt the Cave counterpart or change Cave fixture
+provenance, ACLs, identity checks, quotas, or readiness deadlines. Cave remains
+at `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`. Adopting the reviewed Cave
+diagnostics and binding the final merged Chat producer in the SDK validator
+remain separate coordination steps. A real Windows diagnostic pair and
+protected acceptance remain unproven by decoder delivery alone.
+
 ## Frozen GLib source adoption
 
 The production binding and prior diagnostic harness below retain the reviewed
@@ -1432,20 +1466,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,774 | `4fe0dd31a6da95d441db5c4f430dc5afca652b2867b4477aebe29484afc7f2c2` |
+| `.github/workflows/client-v1-conformance.yml` | 166,774 | `aa8bf611c954f26a65bab30aefb61ec974a7451c01bb88413b178947bb6d91c2` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 217,899 | `84d46cab4f86b81b19dd89acfdd29941b43746b357e47e7157dcad8fb96228e6` |
+| `scripts/phase1-conformance.mjs` | 217,978 | `2d21af2960b0ac27f5af7c9cb70a84f7518593a1e3b7ec2f45e61bd0817ad100` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 214,922 | `2be720918945346548d07b7ccebf7cca1fbe22e3c4e38044bc2686f72e41027e` |
+| `scripts/phase1-schema-v2-producer.mjs` | 216,232 | `b3a932db41b18156be06fad9b9ca50bcc991bc15cb48ed1ebe6fcc07eb92d3bc` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

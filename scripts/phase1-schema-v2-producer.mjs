@@ -88,6 +88,36 @@ const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
 const ownedProcessGroupsSupported = process.platform !== 'win32';
+export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
+  [
+    'not-found',
+    'access-denied',
+    'operation-not-permitted',
+    'not-directory',
+    'other-read-error',
+    'invalid-json',
+    'invalid-shape',
+  ].flatMap((read) =>
+    [
+      'not-observed',
+      'output-limit',
+      'disabled-other',
+      'root-owner-unverified',
+      'root-owner-shared',
+      'target-owner-unverified',
+      'target-owner-shared',
+      'root-not-directory',
+      'root-symlink',
+      'target-not-file',
+      'endpoint-invalid',
+      'authority-init',
+    ].map(
+      (publication) =>
+        `phase1.cave-authority.startup.discovery.missing.read.${read}.publication.${publication}`,
+    ),
+  ),
+);
+const caveDiscoveryFailureDiagnosticSet = new Set(CAVE_DISCOVERY_FAILURE_DIAGNOSTICS);
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
 const schemaV2NativeFailureStages = new Set([
   'fixture-daemon',
@@ -534,6 +564,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.startup.exit',
   'phase1.cave-authority.startup.health',
   'phase1.cave-authority.startup.discovery.missing',
+  ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
   'phase1.cave-authority.startup.discovery.endpoint',
   'phase1.cave-authority.startup.discovery.pid',
   'phase1.cave-authority.pairing',
@@ -1421,6 +1452,16 @@ export function classifyCavePreAssertionFailure(output) {
   for (const message of messages) {
     const startup = startupDiagnostics.find(([prefix]) => message.startsWith(prefix));
     if (startup !== undefined) {
+      if (startup[1] === 'startup.discovery.missing') {
+        const detail =
+          /^Client v1 discovery record is not published\. \[read=([a-z-]+); publication=([a-z-]+)\]$/u.exec(
+            message,
+          );
+        if (detail) {
+          const diagnostic = `phase1.cave-authority.startup.discovery.missing.read.${detail[1]}.publication.${detail[2]}`;
+          if (caveDiscoveryFailureDiagnosticSet.has(diagnostic)) return diagnostic;
+        }
+      }
       return `phase1.cave-authority.${startup[1]}`;
     }
   }
