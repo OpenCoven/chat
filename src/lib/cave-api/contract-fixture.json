@@ -67,11 +67,7 @@
           "sha256FileName": "hpke-bound-v1-vectors.sha256"
         }
       },
-      "modes": [
-        "off",
-        "advertise",
-        "enforce"
-      ]
+      "modes": ["off", "advertise", "enforce"]
     },
     "capabilities": [
       "health",
@@ -135,9 +131,7 @@
       {
         "binding": "none",
         "credential": "none",
-        "families": [
-          "health"
-        ],
+        "families": ["health"],
         "id": "health.read",
         "ingress": "public",
         "method": "GET",
@@ -147,9 +141,7 @@
       {
         "binding": "none",
         "credential": "none",
-        "families": [
-          "pairing"
-        ],
+        "families": ["pairing"],
         "id": "pairing.create",
         "ingress": "public",
         "method": "POST",
@@ -159,9 +151,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "pairing-secret",
-        "families": [
-          "pairing"
-        ],
+        "families": ["pairing"],
         "id": "pairing.poll",
         "ingress": "public",
         "method": "GET",
@@ -171,9 +161,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "pairing-secret",
-        "families": [
-          "pairing"
-        ],
+        "families": ["pairing"],
         "id": "pairing.exchange",
         "ingress": "public",
         "method": "POST",
@@ -183,9 +171,7 @@
       {
         "binding": "none",
         "credential": "admin",
-        "families": [
-          "pairing"
-        ],
+        "families": ["pairing"],
         "id": "pairing.admin.list",
         "ingress": "admin",
         "method": "GET",
@@ -195,9 +181,7 @@
       {
         "binding": "none",
         "credential": "admin",
-        "families": [
-          "pairing"
-        ],
+        "families": ["pairing"],
         "id": "pairing.admin.decide",
         "ingress": "admin",
         "method": "POST",
@@ -207,9 +191,7 @@
       {
         "binding": "none",
         "credential": "admin",
-        "families": [
-          "credentials"
-        ],
+        "families": ["credentials"],
         "id": "credentials.admin.list",
         "ingress": "admin",
         "method": "GET",
@@ -219,9 +201,7 @@
       {
         "binding": "none",
         "credential": "admin",
-        "families": [
-          "credentials"
-        ],
+        "families": ["credentials"],
         "id": "credentials.admin.revoke",
         "ingress": "admin",
         "method": "DELETE",
@@ -231,9 +211,7 @@
       {
         "binding": "none",
         "credential": "admin",
-        "families": [
-          "health"
-        ],
+        "families": ["health"],
         "id": "status.admin.read",
         "ingress": "admin",
         "method": "GET",
@@ -243,10 +221,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "familiars",
-          "cursors"
-        ],
+        "families": ["familiars", "cursors"],
         "id": "familiars.list",
         "ingress": "authenticated",
         "method": "GET",
@@ -256,9 +231,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "familiar-contract"
-        ],
+        "families": ["familiar-contract"],
         "id": "familiars.contract.read",
         "ingress": "authenticated",
         "method": "GET",
@@ -268,9 +241,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "familiar-analytics"
-        ],
+        "families": ["familiar-analytics"],
         "id": "familiars.analytics.read",
         "ingress": "authenticated",
         "method": "GET",
@@ -280,10 +251,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "projects",
-          "cursors"
-        ],
+        "families": ["projects", "cursors"],
         "id": "projects.list",
         "ingress": "authenticated",
         "method": "GET",
@@ -293,10 +261,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "conversations",
-          "cursors"
-        ],
+        "families": ["conversations", "cursors"],
         "id": "conversations.list",
         "ingress": "authenticated",
         "method": "GET",
@@ -306,9 +271,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "conversations"
-        ],
+        "families": ["conversations"],
         "id": "conversations.read",
         "ingress": "authenticated",
         "method": "GET",
@@ -318,10 +281,7 @@
       {
         "binding": "hpke-bound-v1",
         "credential": "bearer",
-        "families": [
-          "conversation-messages",
-          "cursors"
-        ],
+        "families": ["conversation-messages", "cursors"],
         "id": "messages.list",
         "ingress": "authenticated",
         "method": "GET",
@@ -544,10 +504,7 @@
           "lastUsedAt": null,
           "revocationReason": null,
           "revokedAt": null,
-          "scopes": [
-            "chat:read",
-            "chat:write"
-          ]
+          "scopes": ["chat:read", "chat:write"]
         }
       },
       "minimumClientVersion": "0.0.1",
