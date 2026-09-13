@@ -144,7 +144,10 @@ test.each(launchNativeCodes)(
   (code) => {
     const cause = new Error(`native RPC cave_launch failed with ${code}`);
     const failure = producer.retainSchemaV2NativeFailure(null, 'launch', cause, 'launch-rpc');
-    const diagnostic = `phase1.native-scenarios.launch.rpc-${code.replaceAll('_', '-')}`;
+    const diagnostic =
+      code === 'service_unavailable'
+        ? 'phase1.native-scenarios.launch.service-unavailable'
+        : `phase1.native-scenarios.launch.rpc-${code.replaceAll('_', '-')}`;
     expect(failure.message).toBe(diagnostic);
     expect(failure.cause).toBe(cause);
     expect(

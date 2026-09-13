@@ -230,11 +230,11 @@ const launchRpcFailureCodes = new Set([
   'cave_launch_in_progress',
   'stale_connection_attempt',
   'cave_exited',
-  'service_unavailable',
   'invalid_native_response',
   'reconcile_required',
 ]);
 const launchFailureCategories = [
+  'service-unavailable',
   ...[...launchRpcFailureCodes].map((code) => `rpc-${code.replaceAll('_', '-')}`),
   ...[...launchFailureBoundaries].map((boundary) => `${boundary}-unknown`),
   'initial-discovery-timeout',
@@ -1786,6 +1786,9 @@ export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
           cave_launch_failed: 'process',
         }[launchFailure[1]]
       }`;
+    }
+    if (message === 'native RPC cave_launch failed with service_unavailable') {
+      return 'phase1.native-scenarios.launch.service-unavailable';
     }
     const nativeLaunchFailure = /^native RPC cave_launch failed with ([a-z_]+)$/u.exec(message);
     if (nativeLaunchFailure !== null && launchRpcFailureCodes.has(nativeLaunchFailure[1])) {
