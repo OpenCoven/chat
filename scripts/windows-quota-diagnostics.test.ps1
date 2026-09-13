@@ -327,14 +327,16 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
 Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
 
 # A real overlong filesystem name exercises the terminal/background catches on
-# every platform, including exact operation context at the attribute read.
+# every platform. Windows reports an unreviewed runtime HRESULT as generic I/O;
+# Unix hosts expose the reviewed filename-too-long HRESULT.
 $invalidPath = [IO.Path]::Combine($PSScriptRoot, ('q' * 1024))
+$invalidPathCategory = if ($IsWindows) { 'io' } else { 'io-name-too-long' }
 $invalidQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('bootstrap aggregate', $invalidPath, 1MB))
 $contextResult = [OpenCoven.WindowsJobRunResult]::new()
 $terminal.Invoke($null, [object[]]@($contextResult, $invalidQuotas))
 if (-not $contextResult.ResourceQuotaMonitorError -or $contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or
     $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
-    $contextResult.ResourceQuotaMonitorCategory -cne 'io-name-too-long') {
+    $contextResult.ResourceQuotaMonitorCategory -cne $invalidPathCategory) {
   throw "Real terminal filesystem failure lost bounded context: category=$($contextResult.ResourceQuotaMonitorCategory); root=$($contextResult.ResourceQuotaMonitorRoot); operation=$($contextResult.ResourceQuotaMonitorOperation)."
 }
 $terminal.Invoke($null, [object[]]@($contextResult, $malformed))
@@ -356,7 +358,7 @@ if (-not $harnessContextResult.ResourceQuotaMonitorError -or
     $harnessContextResult.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
     $harnessContextResult.ResourceQuotaMonitorScope -cne 'root' -or
     $harnessContextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
-    $harnessContextResult.ResourceQuotaMonitorCategory -cne 'io-name-too-long') {
+    $harnessContextResult.ResourceQuotaMonitorCategory -cne $invalidPathCategory) {
   throw 'Pre-traversal harness failure did not receive a bounded root scope.'
 }
 Write-Host 'Pre-traversal harness quota failures receive a bounded scope.'

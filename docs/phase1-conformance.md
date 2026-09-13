@@ -1334,6 +1334,9 @@ The next diagnostic classifies only reviewed Win32 HRESULT values as
 `io-delete-pending`; all other I/O failures remain `io`. It does not publish
 paths or exception messages and does not change traversal, retries, ACLs,
 limits, accounting, termination, or fail-closed behavior.
+The real overlong-path fixture preserves that boundary across runtimes:
+Windows currently reports its unreviewed HRESULT as `io`, while Unix hosts
+report the reviewed filename-too-long HRESULT as `io-name-too-long`.
 
 The initial pairing stage further distinguishes create, poll, and exchange RPC
 failures using a fixed native-code allowlist, operation timeouts, RPC closure,
@@ -1439,7 +1442,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 351,497 | `281acdeba5ee8dd022fd0451bd4ede6af8431aba8810f1683ce7077cc627fcb0` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 25,402 | `2d0890f14939e6a126486f8b878a3c48295a2dd3b34e31d76bbb78f3ab3d163c` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 25,712 | `72087d41f68469bde2061f3dcec15817b62237ae0d57564b41544b2a971002bb` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
