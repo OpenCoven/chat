@@ -85,8 +85,8 @@ const expectedBehaviorAuthority = {
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '7641e698372fd32ea914afbd8e7695cb00145160',
-      sha256: '2a6eed7bf97a6201fb7b3aaa05827628231368c3644793c92a20d4d8389dadea',
+      blob: '5ad8d90a90beb847c1d6bf2d45ab31d7a09eb8eb',
+      sha256: '84d46cab4f86b81b19dd89acfdd29941b43746b357e47e7157dcad8fb96228e6',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '228cabfb6e67e846bcb1d5bd5719f17661b52ea8',
-      sha256: 'afa00bc6b8bd6705acb90f4ba17fcc18e98a5e7f6234df384440205134fe8bd1',
+      blob: '93f2a504a11006d85b8614260aa0d3c6a997d3ff',
+      sha256: '2be720918945346548d07b7ccebf7cca1fbe22e3c4e38044bc2686f72e41027e',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',

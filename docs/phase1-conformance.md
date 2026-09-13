@@ -1338,6 +1338,23 @@ The real overlong-path fixture preserves that boundary across runtimes:
 Windows currently reports its unreviewed HRESULT as `io`, while Unix hosts
 report the reviewed filename-too-long HRESULT as `io-name-too-long`.
 
+Protected run `34756443652`, using Chat `421beab1` and SDK validator
+`8b46f9cf`, passed Linux and macOS and progressed beyond the Windows Cave
+checkout quota monitor. Windows then returned
+`phase1.native-scenarios.launch.service-unavailable` from the native
+`cave_launch` RPC. That code can represent launch-worker scheduling or
+completion, the absolute spawn/readiness deadline, discovery availability or
+validation, health readiness, or post-health discovery revalidation.
+
+The next diagnostic retains only fixed conformance-build categories for those
+boundaries: `spawn-timeout`, `worker-unavailable`, `worker-closed`,
+`discovery-not-found`, `discovery-unavailable`, `discovery-rejected`,
+`health-unavailable`, or `revalidation-unavailable`. Production builds continue
+to return `service_unavailable`; no paths, process output, exception text, or
+discovery contents cross the public boundary. The diagnostic does not change
+the 30-second deadline, polling, retries, launch containment, health checks,
+discovery validation, or cleanup behavior.
+
 The initial pairing stage further distinguishes create, poll, and exchange RPC
 failures using a fixed native-code allowlist, operation timeouts, RPC closure,
 missing authority, response assertions, and admin HTTP status classes. Unknown
@@ -1421,14 +1438,14 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 217,459 | `2a6eed7bf97a6201fb7b3aaa05827628231368c3644793c92a20d4d8389dadea` |
+| `scripts/phase1-conformance.mjs` | 217,899 | `84d46cab4f86b81b19dd89acfdd29941b43746b357e47e7157dcad8fb96228e6` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 214,231 | `afa00bc6b8bd6705acb90f4ba17fcc18e98a5e7f6234df384440205134fe8bd1` |
+| `scripts/phase1-schema-v2-producer.mjs` | 214,922 | `2be720918945346548d07b7ccebf7cca1fbe22e3c4e38044bc2686f72e41027e` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
