@@ -141,8 +141,8 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "7900ab8086b03f100c3b09868bb575937f978d82",
-        "sha256": "62319ddc6de9a7f5e20a7abbc801410cdfe71f3770c0d7e3dd32f9f3c3248819"
+        "blob": "c0cbfce43ab56715eb31b4d7813d94e6e40cc725",
+        "sha256": "a4ed6cea6d9ce627a1556630e68d330d0706f85c3912f82e3078a7ebbfd67a64"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
