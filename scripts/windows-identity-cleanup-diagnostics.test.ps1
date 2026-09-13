@@ -23,9 +23,8 @@ Write-Host 'Bounded identity cleanup classification passed.'
 
 # Drive the real Dispose path on an identity that was never provisioned. No
 # local account, profile or directory is created; the quarantine callbacks are
-# the only forced failures, so the first two categories are deterministic on
-# every platform. Native lookups of the unprovisioned name may add trailing
-# categories; each must still pair with exactly one retained inner exception.
+# the only forced failures. Cleanup must stop before any native account/profile
+# operation, retain all three ordered failures, and remain retryable on every platform.
 $instanceFlags = [Reflection.BindingFlags]'NonPublic,Instance'
 $identity = [Runtime.Serialization.FormatterServices]::GetUninitializedObject($identityType)
 # Constructor bypass also skips field initializers. Keep the lifetime gate real
@@ -71,7 +70,7 @@ $failure = $null
 try { $identity.Dispose() } catch { $failure = $_.Exception }
 while ($null -ne $failure -and $failure -is [Management.Automation.MethodInvocationException]) { $failure = $failure.InnerException }
 if ($null -eq $failure) { throw 'Identity cleanup did not fail closed.' }
-$prefix = 'Ephemeral Windows identity cleanup failed: quarantine-check:io,quarantine:access-denied'
+$prefix = 'Ephemeral Windows identity cleanup deferred: quarantine-check:io,quarantine:access-denied'
 if (-not $failure.Message.StartsWith($prefix, [StringComparison]::Ordinal)) { throw "Unexpected cleanup diagnostic: $($failure.Message)" }
 if (-not $failure.Message.EndsWith('.', [StringComparison]::Ordinal)) { throw 'Cleanup diagnostic is unterminated.' }
 if ($failure.Message.Contains($secret) -or $failure.Message.Contains($missingRoot)) { throw 'Cleanup diagnostic leaked identity or path text.' }
@@ -79,11 +78,17 @@ $aggregate = $failure.InnerException -as [AggregateException]
 if ($null -eq $aggregate) { throw 'Original cleanup failures were not retained.' }
 $categories = $failure.Message.Substring($prefix.Length - 'quarantine-check:io,quarantine:access-denied'.Length).TrimEnd('.').Split(',')
 if ($categories.Count -ne $aggregate.InnerExceptions.Count) { throw 'Cleanup categories do not pair with retained failures.' }
-if ($aggregate.InnerExceptions[0] -isnot [IO.IOException] -or $aggregate.InnerExceptions[1] -isnot [UnauthorizedAccessException]) { throw 'Cleanup failure order was not preserved.' }
+if ($aggregate.InnerExceptions.Count -ne 3 -or $aggregate.InnerExceptions[0] -isnot [IO.IOException] -or $aggregate.InnerExceptions[1] -isnot [UnauthorizedAccessException] -or $aggregate.InnerExceptions[2] -isnot [IO.IOException]) { throw 'Cleanup failure order was not preserved.' }
 foreach ($category in $categories) {
   if ($category -notmatch '^[a-z-]+:(win32-\d+(\[[a-z0-9=;-]+\])?|access-denied|not-found|io|invalid-operation|timeout|unexpected)$') { throw "Unbounded cleanup category: $category" }
 }
-if (-not $identityType.GetField('disposed', $instanceFlags).GetValue($identity)) { throw 'Identity was not marked disposed after cleanup failure.' }
-try { $identity.Dispose() } catch { throw 'Repeated Dispose must be idempotent.' }
+if ($identityType.GetField('disposed', $instanceFlags).GetValue($identity)) { throw 'Incomplete quarantine retired the identity.' }
+$retryFailure = $null
+try { $identity.Dispose() } catch { $retryFailure = $_.Exception }
+while ($null -ne $retryFailure -and $retryFailure -is [Management.Automation.MethodInvocationException]) { $retryFailure = $retryFailure.InnerException }
+if ($null -eq $retryFailure -or $retryFailure.Message -cne $failure.Message -or
+    $identityType.GetField('disposed', $instanceFlags).GetValue($identity)) {
+  throw 'Repeated incomplete quarantine did not retain ownership and reject cleanup.'
+}
 if (Test-Path -LiteralPath $missingRoot) { throw 'Cleanup diagnostics created the missing root.' }
 Write-Host 'Bounded identity cleanup Dispose diagnostics passed.'

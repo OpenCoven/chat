@@ -19,11 +19,16 @@ namespace OpenCoven.Tests {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetUserProfileDirectoryW(IntPtr token,
             StringBuilder path, ref uint capacity);
-        public static string Create(string sid, string userName) {
-            var path = new StringBuilder(ProfilePathCapacity);
-            int result = CreateProfile(sid, userName, path, (uint)path.Capacity);
-            if (result != 0) throw new COMException("Profile fixture creation failed.", result);
-            return path.ToString();
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern int NetUserGetInfo(string server, string user, int level, out IntPtr info);
+        [DllImport("netapi32.dll")]
+        private static extern int NetApiBufferFree(IntPtr info);
+        public static void RequireAccountMissing(string userName) {
+            IntPtr info;
+            int result = NetUserGetInfo(null, userName, 0, out info);
+            try {
+                if (result != 2221) throw new InvalidOperationException("Owned account removal was not verified.");
+            } finally { if (info != IntPtr.Zero) NetApiBufferFree(info); }
         }
         public static void RequireAlreadyExists(string sid, string userName) {
             var path = new StringBuilder(ProfilePathCapacity);
@@ -55,9 +60,6 @@ namespace OpenCoven.Tests {
 }
 '@
 
-$profileDelete = [OpenCoven.WindowsJobSupervisor].GetMethod(
-  'DeleteOperatingSystemProfile', [Reflection.BindingFlags]'NonPublic,Static')
-if ($null -eq $profileDelete) { throw 'Profile deletion seam is missing.' }
 function Assert-ProfileFixtureMissing([string]$Path) {
   try {
     [IO.File]::GetAttributes($Path) | Out-Null
@@ -69,18 +71,14 @@ function Assert-ProfileFixtureMissing([string]$Path) {
   throw 'Profile fixture survived cleanup.'
 }
 
-foreach ($injectFailure in @($false, $true)) {
+& {
   $context = New-IsolatedTestContext -Label 'profile-lifecycle'
   $createdProfile = $null
   $job = $null
-  $injectedFailureObserved = $false
   $cleanupFailed = $false
   $stage = 'profile-create'
   try {
-    # Record the returned owned path before any verification can throw.
-    $createdProfile = [OpenCoven.Tests.ProfileLifecycleFixture]::Create(
-      $context.User.Sid, $context.User.UserName)
-    if ($injectFailure) { throw 'injected-profile-initialization-failure' }
+    $createdProfile = $context.User.OperatingSystemProfilePath
     $stage = 'token-agreement'
     $tokenProfile = [OpenCoven.Tests.ProfileLifecycleFixture]::ReadTokenProfile($context.User)
     if (-not [IO.Path]::IsPathFullyQualified($createdProfile) -or
@@ -139,32 +137,81 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
       throw 'Child launch after explicit profile creation failed.'
     }
   } catch {
-    if ($injectFailure -and $_.Exception.GetBaseException().Message -ceq
-        'injected-profile-initialization-failure') {
-      $injectedFailureObserved = $true
-    } else {
-      $cause = $_.Exception.GetBaseException()
-      if ($cause -is [Runtime.InteropServices.COMException]) {
-        throw ('Native profile lifecycle assertion failed: stage={0}; hresult={1:X8}.' -f $stage, $cause.HResult)
-      }
-      throw "Native profile lifecycle assertion failed: stage=$stage."
+    $cause = $_.Exception.GetBaseException()
+    if ($cause -is [Runtime.InteropServices.COMException]) {
+      throw ('Native profile lifecycle assertion failed: stage={0}; hresult={1:X8}.' -f $stage, $cause.HResult)
     }
+    throw "Native profile lifecycle assertion failed: stage=$stage."
   } finally {
     if ($null -ne $job) {
       try { $job.Dispose() } catch { $cleanupFailed = $true }
     }
-    if ($null -ne $createdProfile) {
-      try {
-        $profileDelete.Invoke($null, [object[]]@($context.User.Sid, $createdProfile)) | Out-Null
-        Assert-ProfileFixtureMissing $createdProfile
-      } catch { $cleanupFailed = $true }
-    }
     try { Remove-IsolatedTestContext -Context $context } catch { $cleanupFailed = $true }
-    try { Assert-ProfileFixtureMissing $context.User.RootPath } catch { $cleanupFailed = $true }
+    try {
+      Assert-ProfileFixtureMissing $createdProfile
+      Assert-ProfileFixtureMissing $context.User.RootPath
+      if (Test-Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($context.User.Sid)") {
+        throw 'Owned profile registry entry survived cleanup.'
+      }
+      [OpenCoven.Tests.ProfileLifecycleFixture]::RequireAccountMissing($context.User.UserName)
+    } catch { $cleanupFailed = $true }
     if ($cleanupFailed) { throw 'Native profile lifecycle cleanup failed.' }
   }
-  if ($injectFailure -and -not $injectedFailureObserved) {
-    throw 'Profile initialization failure was not exercised.'
+}
+
+# Exercise the production initialization catch after successful profile ownership.
+$createCore = [OpenCoven.WindowsIsolatedUser].GetMethod(
+  'CreateCore', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $createCore) { throw 'Owned profile initialization seam is missing.' }
+$failureRoot = Join-Path ([IO.Path]::GetTempPath()) "opencoven-profile-failure-$PID-$([Guid]::NewGuid().ToString('N'))"
+$owned = @{ Sid = $null; Path = $null; UserName = $null }
+$failAfterCreation = [Action[string,string]] {
+  param($sid, $path)
+  $owned.Sid = $sid
+  $owned.Path = $path
+  $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+  $owned.UserName = $identity.Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+  throw 'injected-profile-initialization-failure'
+}
+$injectedFailureObserved = $false
+$cleanupFailureObserved = $false
+$failureKind = 'none'
+$failureHresult = 'none'
+$failureNativeCode = 'none'
+try {
+  # Reflection does not unwrap the PSObject emitted by Join-Path for string parameters.
+  $unexpectedUser = $createCore.Invoke($null, [object[]]@([string]$failureRoot, $failAfterCreation))
+  if ($null -ne $unexpectedUser) { $unexpectedUser.Dispose() }
+} catch {
+  $failure = $_.Exception.GetBaseException()
+  $failureHresult = '{0:X8}' -f $failure.HResult
+  if ($failure -is [ComponentModel.Win32Exception]) { $failureNativeCode = $failure.NativeErrorCode }
+  $failureKind = switch ($failure) {
+    { $_ -is [Security.Principal.IdentityNotMappedException] } { 'sid-translation'; break }
+    { $_ -is [Runtime.InteropServices.COMException] } { 'com'; break }
+    { $_ -is [ComponentModel.Win32Exception] } { 'win32'; break }
+    { $_ -is [Reflection.TargetParameterCountException] } { 'reflection-arity'; break }
+    { $_ -is [ArgumentException] } { 'argument'; break }
+    { $_ -is [Management.Automation.RuntimeException] } { 'powershell'; break }
+    default { 'unexpected' }
+  }
+  $cause = $_.Exception
+  while ($null -ne $cause) {
+    if ($cause -is [AggregateException]) { $cleanupFailureObserved = $true }
+    if ($cause.Message -ceq 'injected-profile-initialization-failure') { $injectedFailureObserved = $true }
+    $cause = $cause.InnerException
   }
 }
-Write-Host 'Native profile lifecycle fixture passed: token agreement, child launch, duplicate rejection, and failure cleanup.'
+if ($cleanupFailureObserved -or -not $injectedFailureObserved -or
+    $null -eq $owned.Path -or $null -eq $owned.UserName) {
+  throw ('Profile initialization fixture rejected: sid={0}; path={1}; username={2}; injected={3}; cleanupFailure={4}; kind={5}; hresult={6}; nativeCode={7}.' -f
+    ($null -ne $owned.Sid), ($null -ne $owned.Path), ($null -ne $owned.UserName),
+    $injectedFailureObserved, $cleanupFailureObserved, $failureKind, $failureHresult, $failureNativeCode)
+}
+Assert-ProfileFixtureMissing $owned.Path
+Assert-ProfileFixtureMissing $failureRoot
+if (Test-Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($owned.Sid)") {
+  throw 'Failed initialization left an owned profile registry entry.'
+}
+[OpenCoven.Tests.ProfileLifecycleFixture]::RequireAccountMissing($owned.UserName)
+Write-Host 'Native profile lifecycle fixture passed: token agreement, child launch, duplicate rejection, and production failure cleanup.'

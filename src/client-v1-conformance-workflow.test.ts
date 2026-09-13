@@ -3085,7 +3085,7 @@ ${pathAssignment}
     }
   });
 
-  test('accepts confirmed Windows quota-root disappearance while keeping other reads fail-closed', () => {
+  test('bounds Windows quota scope and repeat diagnostics without changing fail-closed accounting', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const sources = [
       embeddedWindowsSupervisorSource(workflow),
@@ -3101,9 +3101,6 @@ ${pathAssignment}
         'scope == null ? "none" : scope',
         'repeat == null ? "none" : repeat',
         'catch (QuotaMonitorContextException error)',
-        'if (repeat == "missing") throw new DirectoryNotFoundException();',
-        'if (repeat == "missing") return new List<FileSystemInfo>();',
-        'catch (DirectoryNotFoundException) { return new List<FileSystemInfo>(); }',
       ]) {
         expect(source).toContain(required);
       }
@@ -3142,15 +3139,6 @@ ${pathAssignment}
       for (const repeat of ['none', 'readable', 'missing', 'persistent']) {
         expect(source).toContain(`"${repeat}"`);
       }
-      const snapshotCore = source.slice(
-        source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore('),
-        source.indexOf(
-          'private static long MeasureDirectoryBytes(',
-          source.indexOf('private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore('),
-        ),
-      );
-      expect(snapshotCore).not.toContain('catch (FileNotFoundException)');
-      expect(snapshotCore).not.toContain('catch (DirectoryNotFoundException)');
       expect(source).toContain(
         '() => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName)',
       );
@@ -3281,14 +3269,21 @@ $isolatedUser = [pscustomobject]@{
 ${quotaAssignment}
 [Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
 `;
-    const quotas: { Label: string; MaxBytes: number }[] = JSON.parse(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-        encoding: 'utf8',
-        timeout: 15_000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    );
+    const quotas: { Label: string; MaxBytes: number; IncludeOwnedProfileApplication: boolean }[] =
+      JSON.parse(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          timeout: 15_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
     const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
+    expect(
+      quotas
+        .filter((quota) => quota.IncludeOwnedProfileApplication)
+        .map((quota) => quota.Label)
+        .sort(),
+    ).toEqual(['bootstrap aggregate', 'harness execution aggregate']);
     // The exact d20d83c build measured this many bytes in node_modules plus .next.
     expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
     expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);

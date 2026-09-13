@@ -1573,17 +1573,35 @@ fn internal_coven_probe_failure_exits_silently_before_rpc_startup() {
 
 #[test]
 fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
-    // Establish the broken pipe before spawning: dropping ChildStdout afterward
-    // does not rule out a concurrent child temporarily inheriting its read end.
-    let (reader, mut writer) = std::io::pipe().expect("response pipe must be created");
-    drop(reader);
-    assert_eq!(
+    #[cfg(unix)]
+    let writer = {
+        // A concurrent fork can retain a pipe reader until exec, even after our
+        // reader is dropped. Shut down the socket's shared write direction so
+        // every duplicate is unwritable regardless of inherited peer handles.
+        let (_reader, mut writer) =
+            std::os::unix::net::UnixStream::pair().expect("response socket pair must be created");
         writer
-            .write(b"probe")
-            .expect_err("response pipe must reject writes before RPC startup")
-            .kind(),
-        std::io::ErrorKind::BrokenPipe,
-    );
+            .shutdown(std::net::Shutdown::Write)
+            .expect("response writes must be shut down");
+        assert_eq!(
+            writer.write(b"probe").unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe,
+        );
+        Stdio::from(std::os::fd::OwnedFd::from(writer))
+    };
+    #[cfg(not(unix))]
+    let writer = {
+        let (reader, mut writer) = std::io::pipe().expect("response pipe must be created");
+        drop(reader);
+        assert_eq!(
+            writer
+                .write(b"probe")
+                .expect_err("response pipe must reject writes before RPC startup")
+                .kind(),
+            std::io::ErrorKind::BrokenPipe,
+        );
+        Stdio::from(writer)
+    };
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
         .stdin(Stdio::piped())
         .stdout(writer)

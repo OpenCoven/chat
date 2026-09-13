@@ -1166,32 +1166,15 @@ describe('Phase 1 real-authority conformance harness', () => {
       isolatedHome: 'C:\\OpenCoven\\bootstrap\\workspace\\.artifacts\\run\\native-authority-home',
       covenHome: 'C:\\Users\\opencoven-conformance\\.coven',
       caveHome: 'C:\\Users\\opencoven-conformance\\.coven\\cave',
-      removeCovenHome: true,
     });
     expect(schemaV2Producer.nativeScenarioHomes('/artifacts/run', {}, 'linux')).toEqual({
       isolatedHome: '/artifacts/run/native-authority-home',
       covenHome: '/artifacts/run/native-authority-home/coven',
       caveHome: '/artifacts/run/native-authority-home/coven/cave',
-      removeCovenHome: false,
     });
     expect(() => schemaV2Producer.nativeScenarioHomes('C:\\artifacts\\run', {}, 'win32')).toThrow(
       'phase1.native-scenarios.profile-home',
     );
-  });
-
-  test('removes native profile state only after the RPC process has closed', () => {
-    expect(schemaV2Producer.cleanupNativeScenarioHome).toBeTypeOf('function');
-    const root = mkdtempSync(resolve(tmpdir(), 'phase1-native-profile-cleanup-'));
-    const covenHome = resolve(root, '.coven');
-    try {
-      mkdirSync(covenHome);
-      expect(schemaV2Producer.cleanupNativeScenarioHome(covenHome, true, false)).toBe(false);
-      expect(existsSync(covenHome)).toBe(true);
-      expect(schemaV2Producer.cleanupNativeScenarioHome(covenHome, true, true)).toBe(true);
-      expect(existsSync(covenHome)).toBe(false);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 
   test('routes only Windows Cave authority fixtures through the ACL-repairable temp root', () => {
@@ -2134,8 +2117,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(nativeScenarios.match(/scenarioFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
       8,
     );
+    // Application-directory cleanup now belongs to the supervisor after pin release.
     expect(nativeScenarios.match(/cleanupFailure = retainSchemaV2NativeFailure\(/gu)).toHaveLength(
-      5,
+      4,
     );
     expect(nativeScenarios).not.toContain('cause.message');
   });
@@ -4105,7 +4089,7 @@ describe('Phase 1 real-authority conformance harness', () => {
       const timeoutForPlatform = module.caveLaunchRpcTimeoutForPlatform as (
         platform: NodeJS.Platform,
       ) => number;
-      expect(timeoutForPlatform('win32')).toBe(85_000);
+      expect(timeoutForPlatform('win32')).toBe(40_000);
       expect(timeoutForPlatform('linux')).toBe(40_000);
       const timeoutMs = timeoutForPlatform(process.platform);
       vi.useFakeTimers();

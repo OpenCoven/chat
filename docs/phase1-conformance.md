@@ -141,9 +141,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `ccf10dae9472a5dd84670be5bca3726280608479`,
-  tree `fcb4570b0e2f19092bd03d595e4deb514f0fc0b0`, retained in the
-  producer ancestry;
+- Chat conformance driver at `harnessAuthority.revision` and `.tree` in
+  `phase1-conformance.lock.json`, retained in the producer ancestry;
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1361,7 +1360,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 161,808 | `ad52f1e1b83d70617866bd454aa55865135bc31db301390214596e6aeae6881d` |
+| `.github/workflows/client-v1-conformance.yml` | 166,054 | `56d9d912a152e3c4d281fa8260040eae3bfd29a6ea67bc2cc71b924850e72273` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1374,7 +1373,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 210,859 | `8aca42e269b6ea473af4e0b4638087d2cfa899b0a3ab0abcb64f67c98162a911` |
+| `scripts/phase1-schema-v2-producer.mjs` | 210,172 | `3f0734f77b48cd54ec6e559f3d278df985866210187a67863135cda991a6619f` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1386,13 +1385,13 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 329,192 | `de5b7861f8a6f219ce04d7bf7fd83559765d50c1ff1c9bf14f47259198940cb3` |
-| `scripts/windows-job-supervisor.test.ps1` | 186,976 | `1111edca2c13abf8738d930f17b5249f91bf5992ed46f334616691b9fd671cea` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 25,426 | `b669c4a939337ac5ef721649335d0ca724e0bf0975d04edfb64ed775ae192d0a` |
+| `scripts/windows-job-supervisor.cs` | 349,530 | `b7ec5455ad394b58cafd93cc85c7e87da37b04cdbd6f936aad0a1768432064df` |
+| `scripts/windows-job-supervisor.test.ps1` | 187,043 | `883cccc5266058155d6d7a29ecb8b407010aa170a1b2e7f062d2be65338af06c` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 24,826 | `7bfbddc5b3dac374b50a76eb04e9ffea3ce40179ef6defebaa48dbc2245af527` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,596 | `fa738d8e93a8132a26e34fbbb58e89f7ac12c13e7298cf923f8db6b31e7097c5` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 6,025 | `43688191fcbf8807d5e33ba811f14b0f8a6e780fef30ae2e3f494d540608bdb2` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
@@ -1791,21 +1790,16 @@ it threw another exception, which need not match the first error. Older bound
 producers reported both readable and missing outcomes as `transient`. Enumeration
 creates a fresh enumerator, entry attributes use a fresh static metadata read,
 and file length uses a fresh metadata object, so each repeat reaches the
-filesystem again. A readable or persistent repeat still terminates production
-with the original bounded failure. A missing repeat is propagated through the
-existing missing-path branch because the measured object no longer consumes
-quota. Enumeration also performs a fresh root-attribute read after collecting
-the retry snapshot, so disappearance during enumeration cannot accept a partial
-measurement. Synthetic or unattributed failures use `none`. Initial enumeration
-metadata and byte accounting are unchanged; fresh metadata is requested only by
-the diagnostic repeat. Supervisor prefix validation and non-isolated reads
-remain single-pass. The repeat never uses the supervisor identity, changes an
-ACL, retries production, or accepts a partial measurement. Existing quotas,
-traversal bounds, reparse handling, first-failure state, cleanup and acceptance
-remain unchanged. Supervisor-identity validation performs only the original
-read and reports `repeat=none`. Native regression coverage verifies the closed
-scope vocabulary, repeat behavior, unknown fallback and absence of private
-nonce or exception text.
+filesystem again. The original failure still terminates production in either
+case. Synthetic or unattributed failures use `none`. Initial enumeration metadata and byte accounting are unchanged; fresh metadata
+is requested only by the diagnostic repeat. Supervisor prefix validation and
+non-isolated reads remain single-pass. The repeat never uses the
+supervisor identity, changes an ACL, accepts a partial measurement, or retries
+production. Existing quotas, traversal bounds, reparse handling, first-failure
+state, cleanup and acceptance remain unchanged. Supervisor-identity validation
+performs only the original read and reports `repeat=none`. Native regression
+coverage verifies the closed scope vocabulary, repeat propagation, unknown
+fallback and absence of private nonce or exception text.
 
 Protected run `34696065397` used the merged launch-diagnostic producer
 `59ea9ca3f557eb2179a1388e705cc5488d7fac9d` and SDK validator
@@ -1935,31 +1929,30 @@ The fixture is removed only after the native RPC and its nested Cave Job close.
 If graceful shutdown fails, deletion is deferred to the supervisor's existing
 process-termination and profile-deletion boundary.
 
-Cave's fail-closed Windows discovery publisher permits its PowerShell ownership
-and DACL probe to run for up to 60 seconds. Rust therefore uses a 75-second
-Windows-only launch deadline. Both harness clients allow that deadline plus the
-existing 10-second transport allowance, for an 85-second Windows
-`cave_launch` budget. Non-Windows launch remains 30 seconds plus the transport
-allowance, and every other RPC remains bounded at 10 seconds. No ownership,
-DACL, identity, quota, liveness, discovery, health, redaction, or attestation
-check is bypassed.
+The Windows readiness deadline remains 30 seconds, with a 40-second
+`cave_launch` response budget in both clients. The earlier 75/85-second
+increase was not supported by the observed profile-root mismatch and is
+reverted. Other RPCs retain their existing limits.
+
+The supervisor now creates the actual owned profile before launching the
+restricted child and verifies token/profile agreement. Its retained profile
+and application directory handles request directory-list access without delete
+sharing so replacement is rejected by Windows sharing checks. The owned
+application subtree is charged to the existing bootstrap and harness aggregate
+budgets. Quarantine must complete before those handles are released and owned
+profile/account cleanup proceeds.
 
 Protected run `34726708513` used merged Chat #249 (`4682a4a`) and SDK #228
-(`c863b58`). Linux and Darwin passed, and Windows passed the frozen supervisor
-build and token-profile alignment before failing at
+(`c863b58`). Linux and Darwin passed. Windows failed at
 `access-denied; root=cave-checkout; scope=none;
 operation=directory-attributes; repeat=missing`. Validation, attestation and
-aggregation were skipped.
+aggregation were skipped. The Unix records independently passed source and
+Cave record identity, timing, and all 197 ordered assertions.
 
-The schema-v2 producer removes its `phase1-conformance-run-*` execution root
-before its supervised process exits. The one-second quota monitor can therefore
-observe a Windows directory in its delete-pending transition: the initial
-attribute read is denied and the immediate same-token read reports that the
-directory is gone. The supervisor now treats only that confirmed disappearance
-as the existing missing-path case. A retry that is readable, remains denied, or
-fails differently still fails closed with the original category. Missing-path
-exceptions now leave the enumeration core rather than ending the loop with a
-partial snapshot; the wrapper discards that snapshot and applies the same
-missing-path result. Quota values, aggregate coverage, ACL validation, reparse
-rejection, traversal bounds, cleanup ordering and first-failure retention are
-unchanged. A missing root contributes no retained bytes to that scan.
+The missing retry proves pathname absence on that read. It does not distinguish
+completed deletion from rename/replacement, prove zero retained bytes, or erase
+an already observed entry-bound violation. Chat #253 landed a conversion of
+these failures into skippable absence. Its merge ancestry is integrated here,
+while strict first-failure handling and its regression coverage are retained.
+The bounded repeat remains diagnostic only. Fresh protected evidence is still
+required after the actual Chat merge and SDK rebinding.

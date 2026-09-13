@@ -285,6 +285,8 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1) {
 foreach ($repeatCase in @(
     @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'readable', 'TransientCalls'),
     @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingFileRead, 'missing', 'MissingFileCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingDirectoryRead, 'missing', 'MissingDirectoryCalls'),
     @([OpenCoven.Tests.QuotaRepeatProbe]::ChangedErrorRead, 'persistent', 'ChangedErrorCalls'))) {
   $caught = $null
   try {
@@ -302,22 +304,6 @@ foreach ($repeatCase in @(
     throw "Quota repeat classification changed: $($repeatCase[1])"
   }
 }
-foreach ($missingCase in @(
-    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingFileRead, [IO.DirectoryNotFoundException], 'MissingFileCalls'),
-    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingDirectoryRead, [IO.DirectoryNotFoundException], 'MissingDirectoryCalls'))) {
-  $caught = $null
-  try {
-    $readQuota.Invoke($null, [object[]]@('entry-attributes', $missingCase[0], $true, [Type]::Missing)) | Out-Null
-  } catch {
-    $caught = $_.Exception.GetBaseException()
-  }
-  if ($null -eq $caught -or
-      -not $missingCase[1].IsInstanceOfType($caught) -or
-      [OpenCoven.Tests.QuotaRepeatProbe].GetField($missingCase[2]).GetValue($null) -ne 2 -or
-      $caught.ToString().Contains('private-first')) {
-    throw "Quota disappearance was not preserved: $($missingCase[1].Name)"
-  }
-}
 [OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
 [OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls = 1
 try {
@@ -331,7 +317,7 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
     $contextType.GetProperty('Category', $instanceFlags).GetValue($freshRepeatError) -cne 'access-denied') {
   throw 'Fresh diagnostic metadata read changed the original failure or initial read.'
 }
-Write-Host 'Quota retries accept confirmed disappearance and otherwise remain fail-closed.'
+Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
 
 # A real overlong filesystem name exercises the terminal/background catches on
 # every platform, including exact operation context at the attribute read.
