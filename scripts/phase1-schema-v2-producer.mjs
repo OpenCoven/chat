@@ -191,6 +191,7 @@ const pairingRpcFailureCodes = new Set([
   'not_found',
   'conflict',
   'rate_limited',
+  'pairing_pending',
   'pairing_denied',
   'pairing_expired',
   'incompatible_version',
