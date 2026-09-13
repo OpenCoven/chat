@@ -1539,6 +1539,10 @@ describe('Phase 1 SDK source contract authority', () => {
 
     const historicalPhase1Lock = {
       ...phase1Lock,
+      sdk: {
+        repository: 'OpenCoven/sdk',
+        revision: '1597835325cf3762b51408ff0a565037eeb25f64',
+      },
       cave: {
         repository: 'OpenCoven/coven-cave',
         revision: 'd20d83c46ba0c32433ce8dc6a358fb14b6bd0e45',
@@ -1561,6 +1565,9 @@ describe('Phase 1 SDK source contract authority', () => {
     ).not.toThrow();
     expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, adoptedGlibPhase1Lock)).toThrow(
       'Phase 1 chat pin does not match the SDK frozen contract.',
+    );
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).toThrow(
+      'Phase 1 sdk pin does not match the SDK frozen contract.',
     );
     expect(frozenLock.sources).toMatchObject({
       cave: {

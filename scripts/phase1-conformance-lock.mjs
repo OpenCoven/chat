@@ -29,23 +29,23 @@ const repositoryKeys = ['chat', 'sdk', 'cave', 'coven'];
 const canonicalSdkArtifacts = Object.freeze([
   {
     packageName: '@opencoven/sdk-core',
-    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-    vendorFile: 'sdk-core-0.1.0.tgz',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+    vendorFile: 'sdk-core-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/cave-client',
-    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-    vendorFile: 'cave-client-0.1.0.tgz',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+    vendorFile: 'cave-client-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/coven-client',
-    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
-    vendorFile: 'coven-client-0.1.0.tgz',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
+    vendorFile: 'coven-client-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/sdk',
-    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
-    vendorFile: 'sdk-0.1.0.tgz',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
+    vendorFile: 'sdk-0.0.1.tgz',
   },
 ]);
 const productionChatAuthorityPaths = Object.freeze([
@@ -339,7 +339,7 @@ function normalizeRelease(value) {
     'release.sdkManifest must contain exactly version and sha256.',
   );
   if (
-    manifest.version !== '0.1.0' ||
+    manifest.version !== '0.0.1' ||
     typeof manifest.sha256 !== 'string' ||
     !digestPattern.test(manifest.sha256)
   ) {
@@ -376,7 +376,7 @@ function normalizeRelease(value) {
   if (createHash('sha256').update(canonicalManifest).digest('hex') !== manifest.sha256) {
     throw new Error('release SDK manifest digest does not match canonical package metadata.');
   }
-  if (release.caveVersion !== '0.4.2' || release.covenVersion !== '0.1.0') {
+  if (release.caveVersion !== '0.4.3' || release.covenVersion !== '0.1.0') {
     throw new Error('release authority versions are invalid.');
   }
   const consumerLock = normalizeFileArtifact(
