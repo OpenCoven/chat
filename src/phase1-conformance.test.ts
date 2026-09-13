@@ -2139,7 +2139,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ],
     [
       'native RPC cave_launch failed with service_unavailable',
-      'phase1.native-scenarios.launch.unknown',
+      'phase1.native-scenarios.launch.rpc-service-unavailable',
     ],
     ['native RPC timed out for cave_launch', 'phase1.native-scenarios.launch.timeout'],
     ['native RPC closed before responding', 'phase1.native-scenarios.launch.rpc-closed'],

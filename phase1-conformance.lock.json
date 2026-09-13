@@ -26,8 +26,8 @@
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "0b8176e23b72ce4b69c58e05133226d7f7692a46",
-        "sha256": "693703809c82875ddfaa795d0318419f5592f6c7b53a3b284e75bad29b27521c"
+        "blob": "94d3d9b4f1000b779e44ce1be1609c6233e5bb73",
+        "sha256": "804762019b5f3c40b9b8cb313482b3604f149a9e956e8ff485f94695e10e5fab"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "22cbdebb1e951982c81f267b3159fee8d5d146d8",
-        "sha256": "6441993c9f2fa526d6d171e4b9d00139391fd79d8499cd5514c5e87091cc55d0"
+        "blob": "e96c612b0d0dea1f1a0e360b386070d27dbc03ee",
+        "sha256": "8184029a69ea7c8227535c47190da843bf3537db0dc4087e8614e39e19e9bede"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "ae3bcdddea3849f667609a37268870d8f92632fd",
-        "sha256": "abdceb1797792b6dcc1823d38572e8d3c4c830ea34f9bb61467a7817adac3016"
+        "blob": "6706870969ccd1f06eb4f1e5863249dc19a0602f",
+        "sha256": "c9c2d950bd781f3f7a2298aa04d1f15023f829fae5f35b55325e23ae4518d8e4"
       }
     ],
     "productionDeltas": [
