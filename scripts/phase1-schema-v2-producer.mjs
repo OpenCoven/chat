@@ -184,6 +184,45 @@ const cleanupGrantFailureCategories = [
   'response',
   'unknown',
 ];
+const pairingRpcFailureCodes = new Set([
+  'invalid_request',
+  'unauthorized',
+  'scope_denied',
+  'not_found',
+  'conflict',
+  'rate_limited',
+  'pairing_denied',
+  'pairing_expired',
+  'incompatible_version',
+  'service_unavailable',
+  'reconcile_required',
+  'internal_error',
+  'invalid_response',
+  'timeout',
+  'stale_discovery_handle',
+  'invalid_native_response',
+  'invalid_native_input',
+  'secure_store_unavailable',
+  'keychain_failure',
+]);
+const pairingMessageCategories = new Map([
+  ['native RPC closed before responding', 'rpc-closed'],
+  ['no native authority handle', 'authority-handle'],
+  ['native pairing creation omitted its request ID', 'creation-response'],
+  ['native pairing did not begin pending', 'pending-status'],
+  ['native pairing was not approved', 'approved-status'],
+  ['native pairing exchange returned an unsafe result', 'exchange-response'],
+]);
+const pairingFailureCategories = [
+  ...pairingMessageCategories.values(),
+  ...['create', 'poll', 'exchange'].flatMap((operation) =>
+    [...pairingRpcFailureCodes].map((code) => `${operation}.${code.replaceAll('_', '-')}`),
+  ),
+  'admin-http-3xx',
+  'admin-http-4xx',
+  'admin-http-5xx',
+  'unknown',
+];
 const launchFailureCategories = [
   'not-installed',
   'configuration-invalid',
@@ -492,6 +531,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.assertion.unknown',
   'phase1.stage.native-scenarios.failed',
   ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+  ...pairingFailureCategories.map((category) => `phase1.native-scenarios.pairing.${category}`),
   ...launchFailureCategories.map((category) => `phase1.native-scenarios.launch.${category}`),
   ...cleanupGrantFailureCategories.map(
     (category) => `phase1.native-scenarios.cleanup-grant.${category}`,
@@ -1684,6 +1724,30 @@ export function classifyInitialDiscoveryOutcome(response) {
 }
 
 export function schemaV2NativeFailureDiagnostic(stage, error) {
+  if (stage === 'pairing') {
+    if (error === undefined) return 'phase1.native-scenarios.pairing';
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    let category = pairingMessageCategories.get(message) ?? 'unknown';
+    const rpc = /^native RPC cave_pairing_(create|poll|exchange) failed with ([a-z_]+)$/u.exec(
+      message,
+    );
+    const timeout = /^native RPC timed out for cave_pairing_(create|poll|exchange)$/u.exec(message);
+    const admin = /^Cave admin mutation failed with HTTP ([345])[0-9]{2}$/u.exec(message);
+    if (rpc !== null && pairingRpcFailureCodes.has(rpc[2])) {
+      category = `${rpc[1]}.${rpc[2].replaceAll('_', '-')}`;
+    } else if (timeout !== null) {
+      category = `${timeout[1]}.timeout`;
+    } else if (admin !== null) {
+      category = `admin-http-${admin[1]}xx`;
+    }
+    return `phase1.native-scenarios.pairing.${category}`;
+  }
   if (stage === 'launch') {
     if (error === undefined) {
       return 'phase1.native-scenarios.launch';
