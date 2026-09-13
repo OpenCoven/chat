@@ -226,7 +226,10 @@ try {
       $true
     )) | Out-Null
   } catch {
-    $persistentRead = $_.Exception.GetBaseException()
+    $persistentRead = $_.Exception.InnerException
+    if ($persistentRead -is [Reflection.TargetInvocationException]) {
+      $persistentRead = $persistentRead.InnerException
+    }
   }
   if ($null -eq $persistentRead -or
       $persistentRead.GetType().GetProperty('Category', $instanceFlags).GetValue($persistentRead) -cne 'access-denied' -or
