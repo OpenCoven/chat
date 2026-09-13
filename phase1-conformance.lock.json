@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "d06416ed629840da6ee0b8c1dc9a5e722348ab88"
+    "revision": "86e07e07167e066af4408037ff44a4ff72ee741c"
   },
   "harnessAuthority": {
-    "revision": "d06416ed629840da6ee0b8c1dc9a5e722348ab88",
-    "tree": "bab9a88da24ebd10775b0567cff8614976acca59",
+    "revision": "86e07e07167e066af4408037ff44a4ff72ee741c",
+    "tree": "1556a9bd326cf7f04b417216f8b7f23599a7c4a4",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
