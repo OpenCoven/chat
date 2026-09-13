@@ -221,7 +221,7 @@ function sha256(bytes: Buffer | string) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function createCaveAuthorityFixture() {
+function createCaveAuthorityFixture({ differentCurrentFixture = false } = {}) {
   const scratchRoot = createRepoLocalScratchRoot('cave-authority');
   const caveRoot = resolve(scratchRoot, 'cave');
   const harnessRoot = resolve(scratchRoot, 'harness');
@@ -257,6 +257,15 @@ function createCaveAuthorityFixture() {
   const nonAncestorCommit = runGit(['rev-parse', 'HEAD'], caveRoot);
   runGit(['checkout', 'main'], caveRoot);
 
+  const currentFixtureBytes = differentCurrentFixture
+    ? Buffer.from('current Cave contract fixture\n', 'utf8')
+    : fixtureBytes;
+  const currentFixtureDigest = sha256(currentFixtureBytes);
+  writeFileSync(resolve(authorityDirectory, 'contract-fixture.json'), currentFixtureBytes);
+  writeFileSync(
+    resolve(authorityDirectory, 'contract-fixture.sha256'),
+    `${currentFixtureDigest}\n`,
+  );
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.json'), vectorBytes);
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.sha256'), `${vectorDigest}\n`);
   runGit(['add', '.'], caveRoot);
@@ -294,7 +303,7 @@ function createCaveAuthorityFixture() {
         contractFixture: {
           path: 'src/lib/server/client-v1/contract-fixture.json',
           digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-          sha256: fixtureDigest,
+          sha256: currentFixtureDigest,
         },
         hpkeVectors: {
           path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -674,6 +683,34 @@ describe('contract canary temp directory safety', () => {
 });
 
 describe('packed Cave authority artifact validation', () => {
+  test('current candidate accepts identical bytes from an authenticated historical ancestor', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).not.toThrow();
+  }, 30_000);
+
+  test('current candidate rejects independently valid but different historical fixture bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).toThrow('Packed Cave fixture bytes did not match the reviewed current producer.');
+  }, 30_000);
+
+  test('historical fixture validation still permits authenticated older contract bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).not.toThrow();
+  }, 30_000);
+
   test('accepts exact historical fixture provenance and reviewed HPKE vector bytes', () => {
     const fixture = createCaveAuthorityFixture();
 
@@ -977,6 +1014,11 @@ describe('contract canary checkout cleanliness', () => {
         /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
       );
       expect(canary).toContain('assertPackedFixtureMatchesCaveCheckout');
+      expect(
+        canary.match(
+          /assertPackedFixtureMatchesCaveCheckout\(lock, harnessRoot, (?:options\.)?caveRoot, \{\s*requireCurrentFixtureMatch: true,\s*\}\)/g,
+        ),
+      ).toHaveLength(2);
     });
 
     test('generates and executes a verifier for every shipped public entrypoint', () => {

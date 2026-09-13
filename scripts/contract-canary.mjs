@@ -552,7 +552,9 @@ export function verifyFrozenPackedConsumer({
     onStage('isolation');
     assertIsolatedPackedInstall(harnessRoot);
     onStage('fixture');
-    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot, {
+      requireCurrentFixtureMatch: true,
+    });
     onStage('build');
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     onStage('verify');
@@ -1079,7 +1081,12 @@ function assertIsolatedPackedInstall(harnessRoot) {
   }
 }
 
-export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRoot) {
+export function assertPackedFixtureMatchesCaveCheckout(
+  lock,
+  harnessRoot,
+  caveRoot,
+  { requireCurrentFixtureMatch = false } = {},
+) {
   const fixtureDirectory = resolve(
     harnessRoot,
     'node_modules',
@@ -1163,6 +1170,15 @@ export function assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, caveRo
     }
   }
 
+  const reviewedFixture = lock.cave.artifacts.contractFixture;
+  if (
+    requireCurrentFixtureMatch &&
+    (installedDigest !== reviewedFixture.sha256 ||
+      !installedFixture.equals(readFileSync(resolve(caveRoot, reviewedFixture.path))))
+  ) {
+    throw new Error('Packed Cave fixture bytes did not match the reviewed current producer.');
+  }
+
   const packedVectorDigest = readFileSync(installedVectorDigestPath, 'utf8').trim().toLowerCase();
   const reviewedVector = lock.cave.artifacts.hpkeVectors;
   if (
@@ -1207,7 +1223,9 @@ export function main(argv = process.argv.slice(2)) {
     createHarness(harnessRoot, frozen);
     installHarnessOfflineAfterWarming(harnessRoot);
     assertIsolatedPackedInstall(harnessRoot);
-    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot);
+    assertPackedFixtureMatchesCaveCheckout(lock, harnessRoot, options.caveRoot, {
+      requireCurrentFixtureMatch: true,
+    });
 
     runPnpm(['--ignore-workspace', 'run', 'build'], harnessRoot);
     runPnpm(['--ignore-workspace', 'run', 'verify'], harnessRoot);

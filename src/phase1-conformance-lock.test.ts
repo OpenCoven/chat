@@ -120,13 +120,13 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/contract-canary.mjs',
-      blob: '22b6e23ca225f8a323ecd283fd12f864056225c6',
-      sha256: '65d47a2ec7aa7682c23eff4fcc0c615cc13ca27b3d73d700ac39fdfb3a71c9a6',
+      blob: 'f4c72220cd200dba09aa9aeea05cd905b7cec435',
+      sha256: 'a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '930188fe86152355ff1bd833c886bbe8f1e13eae',
-      sha256: '8c809071fb3fb95cd982e3892e21581f69605fd00c7c58ebf961275787e76010',
+      blob: 'dde9b692572188af6e915ff8f1c73ff4df5dc295',
+      sha256: 'f902dde1d89dbf9a253351939ad1c32c27441c2f151631c7825ca7f9f68cac50',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',

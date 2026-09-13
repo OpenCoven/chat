@@ -1834,10 +1834,21 @@ mod tests {
         read_status: u16,
     }
 
+    #[test]
+    fn health_fixture_uses_the_adopted_contract_minimum() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../src/lib/cave-api/contract-fixture.json"))
+                .expect("adopted contract fixture must be valid JSON");
+        assert_eq!(
+            client_v1_health_envelope()["minimumClientVersion"],
+            fixture["contract"]["minimumClientVersion"]
+        );
+    }
+
     fn client_v1_health_envelope() -> Value {
         json!({
             "apiVersion": "1.0",
-            "minimumClientVersion": "0.1.0",
+            "minimumClientVersion": "0.0.1",
             "capabilities": [
                 "health",
                 "pairing",
@@ -1937,7 +1948,7 @@ mod tests {
                 status_code: self.read_status,
                 payload: json!({
                     "apiVersion": "1.0",
-                    "minimumClientVersion": "0.1.0",
+                    "minimumClientVersion": "0.0.1",
                     "capabilities": ["familiars", "cursors"],
                     "operations": ["familiars.list"],
                     "data": { "familiars": [] },
@@ -2331,7 +2342,7 @@ mod tests {
                 status_code: 200,
                 payload: json!({
                     "apiVersion": "1.0",
-                    "minimumClientVersion": "0.1.0",
+                    "minimumClientVersion": "0.0.1",
                     "capabilities": ["familiars", "cursors"],
                     "operations": ["familiars.list"],
                     "data": { "familiars": [] },

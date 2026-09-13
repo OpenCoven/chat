@@ -33,6 +33,16 @@ provenance at `e806655a`; the later diagnostic authority contains that
 ancestor and identical fixture bytes. The Chat fixture mirror uses the same
 JSON values with repository formatting. Coven authority is unchanged.
 
+Exact archive and source digests already pin this candidate's fixture bytes.
+The current canary and frozen-consumer verifier additionally require direct
+packed/current fixture byte equality after the existing provenance, ancestry,
+historical-byte, and current-checkout digest checks. The generic historical
+validator still supports authenticated older fixtures; neither current entrypoint
+uses that permissive comparison policy. Native harness happy-path fixtures now
+advertise minimum client 0.0.1, with a regression against the adopted contract
+fixture. Those test-only changes advance the `connection.rs` native delta
+identity without changing the frozen production consumer or native behavior.
+
 `chat.revision` and `chatAuthority.tree` identify a separate production
 consumer prepared from the prior `0da8c474` source. All production native
 files remain unchanged; its consumer lock and SDK archives are rebound from
@@ -1504,8 +1514,8 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,774 | `8c809071fb3fb95cd982e3892e21581f69605fd00c7c58ebf961275787e76010` |
-| `scripts/contract-canary.mjs` | 40,116 | `65d47a2ec7aa7682c23eff4fcc0c615cc13ca27b3d73d700ac39fdfb3a71c9a6` |
+| `.github/workflows/client-v1-conformance.yml` | 166,774 | `f902dde1d89dbf9a253351939ad1c32c27441c2f151631c7825ca7f9f68cac50` |
+| `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |

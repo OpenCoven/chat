@@ -121,8 +121,8 @@
       },
       {
         "path": "scripts/contract-canary.mjs",
-        "blob": "22b6e23ca225f8a323ecd283fd12f864056225c6",
-        "sha256": "65d47a2ec7aa7682c23eff4fcc0c615cc13ca27b3d73d700ac39fdfb3a71c9a6"
+        "blob": "f4c72220cd200dba09aa9aeea05cd905b7cec435",
+        "sha256": "a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958"
       },
       {
         "path": "scripts/supervised-exec.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "930188fe86152355ff1bd833c886bbe8f1e13eae",
-        "sha256": "8c809071fb3fb95cd982e3892e21581f69605fd00c7c58ebf961275787e76010"
+        "blob": "dde9b692572188af6e915ff8f1c73ff4df5dc295",
+        "sha256": "f902dde1d89dbf9a253351939ad1c32c27441c2f151631c7825ca7f9f68cac50"
       }
     ],
     "productionDeltas": [
@@ -183,8 +183,8 @@
       },
       {
         "path": "src-tauri/src/connection.rs",
-        "blob": "bbd83f058fd1015bd266b8c0e7fb2bd335a23275",
-        "sha256": "f299464ee1ed7c2fdb005f785362157f387229310a593ae9f40d4b6e1dbe7fe4"
+        "blob": "8b34f84f64d3cd98ec42b8790af13078ff375a71",
+        "sha256": "c3083254eed56b87514db43dcd9d45bac1200cdbc49895c72350a0957f2a323d"
       },
       {
         "path": "src-tauri/src/coven.rs",
