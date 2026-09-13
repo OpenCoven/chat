@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'dde9b692572188af6e915ff8f1c73ff4df5dc295',
-      sha256: 'f902dde1d89dbf9a253351939ad1c32c27441c2f151631c7825ca7f9f68cac50',
+      blob: 'a45c9311de3dd1b33688270bfbaae015fd8163f8',
+      sha256: 'a64fcdaf3fbd51e6cc0d3eb293ec5ac6a27df820182f0e89c272ce9cadfea566',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',

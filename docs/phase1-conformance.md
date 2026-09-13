@@ -95,6 +95,36 @@ candidate adoption above advances that authority separately. A real Windows
 diagnostic pair and protected acceptance remain unproven by decoder delivery
 alone.
 
+## Cave-only adoption on main (historical)
+
+OpenCoven/chat#262 froze the Cave counterpart at merge
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
+`b05c2baa4b586e2523e1803db8d9fd1182ecd148`, which descends from the prior
+`cb3d22d1f403dd3b94b02668a599a2bf94999e8b` authority and includes reviewed
+head `90fbebf45316984890dd4695503a62e89e24e3ae`. The adoption advances the
+whole exact Cave source, release `0.4.3`, assertion engine, and contract fixture;
+it does not reinterpret the change as a root-cause repair.
+
+[Protected run 34763766701](https://github.com/OpenCoven/chat/actions/runs/34763766701)
+is pre-adoption evidence from merged Chat
+`311dda625b20aaa91c7bf2b19718387ec56acab0` with SDK validator
+`56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and Darwin passed. Windows
+failed only at `phase1.native-scenarios.launch.discovery-not-found`; artifact
+validation, attestations, and aggregation were skipped, so no aggregate exists.
+That Cave-only adoption called for a diagnostic run with Cave
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8` to identify bounded read/publication
+categories; it did not establish protected acceptance.
+
+That rebind preserved ACL isolation, waiver-disabled execution, quotas,
+immutable authority and exact Git-object verification, privacy-bounded output,
+deadlines, readiness acceptance rules, cleanup, attestations, and fail-closed
+behavior. The Chat decoder was unchanged. That step froze harness authority at `323c05749dc5d0f970989e85c3859dc178f44944`,
+tree `02950571efd37ef1d1fd7fcc56cf446e9447a0fd`, to bind the exact `0.4.3`
+lock parser and matching workflow integrity tables. Main retained that source
+through true merge `cd4be039fd9f49268791dd439b5c024476189ed0`. The current SDK
+candidate integration preserves both ancestries and binds the combined source
+separately; it does not reuse the older SDK candidate or harness pin.
+
 ## Frozen GLib source adoption (historical)
 
 The production binding and prior diagnostic harness below retain the reviewed
@@ -1514,7 +1544,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,774 | `f902dde1d89dbf9a253351939ad1c32c27441c2f151631c7825ca7f9f68cac50` |
+| `.github/workflows/client-v1-conformance.yml` | 166,782 | `a64fcdaf3fbd51e6cc0d3eb293ec5ac6a27df820182f0e89c272ce9cadfea566` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
