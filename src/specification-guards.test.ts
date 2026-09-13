@@ -158,7 +158,7 @@ describe('Phase 1 specification guards', () => {
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.sdk.revision).toBe('1597835325cf3762b51408ff0a565037eeb25f64');
-    expect(lock.cave.revision).toBe('cb3d22d1f403dd3b94b02668a599a2bf94999e8b');
+    expect(lock.cave.revision).toBe('1bb0a21773fcc2966308ed1900ec6b746fcfdbc8');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
@@ -202,7 +202,7 @@ describe('Phase 1 specification guards', () => {
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: '806d647f5969e646080713dabaa9d86ac897637e2a823c75085093c5a210a7fe',
+        sha256: '0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',

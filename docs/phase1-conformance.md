@@ -13,7 +13,7 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
-## Bounded discovery decoder prerequisite
+## Bounded discovery diagnostics adoption
 
 The decoder accepts the finite read/publication diagnostics emitted by
 [OpenCoven/coven-cave#5377](https://github.com/OpenCoven/coven-cave/pull/5377):
@@ -38,14 +38,30 @@ at the frozen source revision. The combined source preserves the bounded
 native launch diagnostics, aborted-worker recovery, live-worker exclusion,
 and corresponding native production deltas from OpenCoven/chat#259, together
 with the child-stderr discovery regression coverage added in `6755a3d`.
-This PR requires an actual merge commit to preserve the pinned source ancestry.
+The Cave counterpart is now frozen at merge
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
+`b05c2baa4b586e2523e1803db8d9fd1182ecd148`, which descends from the prior
+`cb3d22d1f403dd3b94b02668a599a2bf94999e8b` authority and includes reviewed
+head `90fbebf45316984890dd4695503a62e89e24e3ae`. The adoption advances the
+whole exact Cave source, release `0.4.3`, assertion engine, and contract fixture;
+it does not reinterpret the change as a root-cause repair.
 
-This binding does not adopt the Cave counterpart or change Cave fixture
-provenance, ACLs, identity checks, quotas, or readiness deadlines. Cave remains
-at `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`. Adopting the reviewed Cave
-diagnostics and binding the final merged Chat producer in the SDK validator
-remain separate coordination steps. A real Windows diagnostic pair and
-protected acceptance remain unproven by decoder delivery alone.
+[Protected run 34763766701](https://github.com/OpenCoven/chat/actions/runs/34763766701)
+is pre-adoption evidence from merged Chat
+`311dda625b20aaa91c7bf2b19718387ec56acab0` with SDK validator
+`56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and Darwin passed. Windows
+failed only at `phase1.native-scenarios.launch.discovery-not-found`; artifact
+validation, attestations, and aggregation were skipped, so no aggregate exists.
+The next protected run with Cave `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`
+is diagnostic-only and is needed to identify the bounded read/publication
+categories. It does not claim protected acceptance.
+
+The rebind preserves ACL isolation, waiver-disabled execution, quotas,
+immutable authority and exact Git-object verification, privacy-bounded output,
+deadlines, readiness acceptance rules, cleanup, attestations, and fail-closed
+behavior. The existing Chat decoder and combined harness authority remain
+unchanged unless the immutable source binding sequence advances them solely to
+freeze this lock-parser version update.
 
 ## Frozen GLib source adoption
 
@@ -170,8 +186,8 @@ diagnostic-only change.
   `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
   backport source retained by the current SDK contract;
 - SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
-- Cave authority `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`, tree
-  `2d05861d243a3a5761c160765c011aa6dde6131f`, release `0.4.2`;
+- Cave authority `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
+  `b05c2baa4b586e2523e1803db8d9fd1182ecd148`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
