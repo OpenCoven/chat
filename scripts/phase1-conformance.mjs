@@ -48,6 +48,7 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
   caveLaunchRpcTimeoutForPlatform,
   classifyCavePluginEvaluationFailure,
   pnpmInvocation,
@@ -807,6 +808,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.cave-authority.startup.exit',
   'phase1.cave-authority.startup.health',
   'phase1.cave-authority.startup.discovery.missing',
+  ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
   'phase1.cave-authority.startup.discovery.endpoint',
   'phase1.cave-authority.startup.discovery.pid',
   'phase1.cave-authority.pairing',

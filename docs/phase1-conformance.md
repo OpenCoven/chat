@@ -13,6 +13,29 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
+## Bounded discovery decoder prerequisite
+
+The decoder accepts the finite read/publication diagnostics emitted by
+[OpenCoven/coven-cave#5377](https://github.com/OpenCoven/coven-cave/pull/5377):
+
+```text
+client-v1-conformance: Client v1 discovery record is not published. [read=<read>; publication=<publication>]
+```
+
+The seven read categories and twelve publication categories are enumerated in
+`CAVE_DISCOVERY_FAILURE_DIAGNOSTICS`. Only exact combinations pass both public
+diagnostic gates. Unknown categories or malformed details retain the generic
+`phase1.cave-authority.startup.discovery.missing` identifier; raw details are
+never copied. Command failures and assertion results retain precedence over
+these pre-assertion diagnostics, and the first attributed startup message wins.
+
+This decoder change does not adopt the Cave counterpart or change frozen
+authority bindings, ACLs, identity checks, quotas, or readiness deadlines.
+After the reviewed changes land, a separate binding update must freeze the
+actual Cave authority and Chat harness/producer revisions and coordinate the
+SDK validator. A real Windows diagnostic pair and protected acceptance remain
+unproven by decoder delivery alone.
+
 ## Frozen GLib source adoption
 
 The production binding and prior diagnostic harness below retain the reviewed

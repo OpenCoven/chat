@@ -6428,6 +6428,96 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 });
 
+describe('schema-v2 bounded Cave discovery details', () => {
+  const reads = [
+    'not-found',
+    'access-denied',
+    'operation-not-permitted',
+    'not-directory',
+    'other-read-error',
+    'invalid-json',
+    'invalid-shape',
+  ];
+  const publications = [
+    'not-observed',
+    'output-limit',
+    'disabled-other',
+    'root-owner-unverified',
+    'root-owner-shared',
+    'target-owner-unverified',
+    'target-owner-shared',
+    'root-not-directory',
+    'root-symlink',
+    'target-not-file',
+    'endpoint-invalid',
+    'authority-init',
+  ];
+  const prefix = 'client-v1-conformance: Client v1 discovery record is not published.';
+
+  test.each(reads.flatMap((read) => publications.map((publication) => [read, publication])))(
+    'retains fixed read %s and publication %s categories through both public gates',
+    async (read, publication) => {
+      // @ts-expect-error Executable module intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const error = new producer.CommandExecutionError('private command label', {
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: `${prefix} [read=${read}; publication=${publication}]`,
+      });
+      const expected = `phase1.cave-authority.startup.discovery.missing.read.${read}.publication.${publication}`;
+      const actual = producer.schemaV2FailureDiagnostic(
+        error,
+        'phase1.stage.cave-authority.failed',
+      );
+      expect(actual).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(actual))).toBe(expected);
+      expect(producer.wrapInfrastructureFailure(new Error(actual), {}).message).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(`${actual}: private secret`))).toBeUndefined();
+    },
+  );
+
+  test.each([
+    ['[read=private-secret; publication=not-observed]', ''],
+    ['[read=not-found; publication=private-secret]', ''],
+    ['[read=not-found; publication=not-observed] private-secret', ''],
+    ['[read=not-found; publication=not-observed; token=private-secret]', ''],
+    ['[publication=not-observed; read=not-found]', ''],
+    ['[read=not-found;publication=not-observed]', ''],
+    [
+      '[read=not-found; publication=not-observed]\nprivate-secret',
+      '.read.not-found.publication.not-observed',
+    ],
+  ])('keeps unknown or malformed detail private: %s', async (suffix, detail) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const actual = producer.classifyCavePreAssertionFailure(`${prefix} ${suffix}`);
+    expect(actual).not.toContain('private-secret');
+    expect(actual).toBe(`phase1.cave-authority.startup.discovery.missing${detail}`);
+  });
+
+  test.each([
+    ['timeout', '', 'timeout'],
+    ['stderr-limit', '', 'output-limit'],
+    ['supervisor-termination', '', 'supervisor'],
+    [undefined, 'FAIL pairing.private', 'assertion.pairing'],
+    [undefined, 'ok pairing.private', 'exit-nonzero'],
+  ])('preserves command and assertion precedence for %s / %s', async (reason, stdout, category) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const error = new producer.CommandExecutionError('private label', {
+      reason,
+      code: 1,
+      signal: null,
+      stdout,
+      stderr: `${prefix} [read=not-found; publication=root-owner-unverified]`,
+    });
+    expect(producer.schemaV2FailureDiagnostic(error, 'phase1.stage.cave-authority.failed')).toBe(
+      `phase1.cave-authority.${category}`,
+    );
+  });
+});
+
 describe('schema-v2 bounded Cave authority diagnostics', () => {
   test.each([
     ['timeout', '', 'timeout'],
