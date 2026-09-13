@@ -59,9 +59,11 @@ categories. It does not claim protected acceptance.
 The rebind preserves ACL isolation, waiver-disabled execution, quotas,
 immutable authority and exact Git-object verification, privacy-bounded output,
 deadlines, readiness acceptance rules, cleanup, attestations, and fail-closed
-behavior. The existing Chat decoder and combined harness authority remain
-unchanged unless the immutable source binding sequence advances them solely to
-freeze this lock-parser version update.
+behavior. The existing Chat decoder is unchanged. The harness authority
+advances only to metadata freeze `323c05749dc5d0f970989e85c3859dc178f44944`,
+tree `02950571efd37ef1d1fd7fcc56cf446e9447a0fd`, to bind the exact `0.4.3`
+lock parser and matching workflow integrity tables. This branch must land with
+an actual merge commit so that pinned source remains an ancestor.
 
 ## Frozen GLib source adoption
 
