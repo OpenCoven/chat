@@ -2141,6 +2141,38 @@ describe('Phase 1 real-authority conformance harness', () => {
       'native RPC cave_launch failed with service_unavailable',
       'phase1.native-scenarios.launch.service-unavailable',
     ],
+    [
+      'native RPC cave_launch failed with cave_launch_spawn_timeout',
+      'phase1.native-scenarios.launch.spawn-timeout',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_worker_unavailable',
+      'phase1.native-scenarios.launch.worker-unavailable',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_worker_closed',
+      'phase1.native-scenarios.launch.worker-closed',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_discovery_not_found',
+      'phase1.native-scenarios.launch.discovery-not-found',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_discovery_unavailable',
+      'phase1.native-scenarios.launch.discovery-unavailable',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_discovery_rejected',
+      'phase1.native-scenarios.launch.discovery-rejected',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_health_unavailable',
+      'phase1.native-scenarios.launch.health-unavailable',
+    ],
+    [
+      'native RPC cave_launch failed with cave_launch_revalidation_unavailable',
+      'phase1.native-scenarios.launch.revalidation-unavailable',
+    ],
     ['native RPC timed out for cave_launch', 'phase1.native-scenarios.launch.timeout'],
     ['native RPC closed before responding', 'phase1.native-scenarios.launch.rpc-closed'],
     [
@@ -2216,6 +2248,14 @@ describe('Phase 1 real-authority conformance harness', () => {
     'configuration-invalid',
     'process',
     'service-unavailable',
+    'spawn-timeout',
+    'worker-unavailable',
+    'worker-closed',
+    'discovery-not-found',
+    'discovery-unavailable',
+    'discovery-rejected',
+    'health-unavailable',
+    'revalidation-unavailable',
     'timeout',
     'rpc-closed',
     'initial-discovery',

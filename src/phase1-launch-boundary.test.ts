@@ -134,18 +134,37 @@ const launchNativeCodes = [
   'cave_launch_in_progress',
   'stale_connection_attempt',
   'cave_exited',
+  'cave_launch_spawn_timeout',
+  'cave_launch_worker_unavailable',
+  'cave_launch_worker_closed',
+  'cave_launch_discovery_not_found',
+  'cave_launch_discovery_unavailable',
+  'cave_launch_discovery_rejected',
+  'cave_launch_health_unavailable',
+  'cave_launch_revalidation_unavailable',
   'service_unavailable',
   'invalid_native_response',
   'reconcile_required',
 ];
+const launchStageCodes = new Set([
+  'cave_launch_spawn_timeout',
+  'cave_launch_worker_unavailable',
+  'cave_launch_worker_closed',
+  'cave_launch_discovery_not_found',
+  'cave_launch_discovery_unavailable',
+  'cave_launch_discovery_rejected',
+  'cave_launch_health_unavailable',
+  'cave_launch_revalidation_unavailable',
+]);
 
 test.each(launchNativeCodes)(
   'propagates declared launch error %s through both boundaries',
   (code) => {
     const cause = new Error(`native RPC cave_launch failed with ${code}`);
     const failure = producer.retainSchemaV2NativeFailure(null, 'launch', cause, 'launch-rpc');
-    const diagnostic =
-      code === 'service_unavailable'
+    const diagnostic = launchStageCodes.has(code)
+      ? `phase1.native-scenarios.launch.${code.replace(/^cave_launch_/u, '').replaceAll('_', '-')}`
+      : code === 'service_unavailable'
         ? 'phase1.native-scenarios.launch.service-unavailable'
         : `phase1.native-scenarios.launch.rpc-${code.replaceAll('_', '-')}`;
     expect(failure.message).toBe(diagnostic);

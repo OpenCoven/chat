@@ -54,6 +54,51 @@ fn launch_deadline_expired() -> NativeDiagnostic {
     NativeDiagnostic::new("service_unavailable", true)
 }
 
+#[derive(Clone, Copy)]
+enum LaunchReadinessFailure {
+    DiscoveryNotFound,
+    DiscoveryUnavailable,
+    DiscoveryRejected,
+    HealthUnavailable,
+    RevalidationUnavailable,
+}
+
+impl LaunchReadinessFailure {
+    fn diagnostic(self) -> NativeDiagnostic {
+        let code = match self {
+            Self::DiscoveryNotFound => "cave_launch_discovery_not_found",
+            Self::DiscoveryUnavailable => "cave_launch_discovery_unavailable",
+            Self::DiscoveryRejected => "cave_launch_discovery_rejected",
+            Self::HealthUnavailable => "cave_launch_health_unavailable",
+            Self::RevalidationUnavailable => "cave_launch_revalidation_unavailable",
+        };
+        launch_stage_unavailable(code)
+    }
+}
+
+fn launch_stage_unavailable(code: &'static str) -> NativeDiagnostic {
+    #[cfg(feature = "phase1-conformance")]
+    {
+        NativeDiagnostic::new(code, true)
+    }
+    #[cfg(not(feature = "phase1-conformance"))]
+    {
+        let _ = code;
+        launch_deadline_expired()
+    }
+}
+
+fn classify_launch_stage_error(
+    error: NativeDiagnostic,
+    stage_code: &'static str,
+) -> NativeDiagnostic {
+    if error.code == "service_unavailable" {
+        launch_stage_unavailable(stage_code)
+    } else {
+        error
+    }
+}
+
 #[derive(Clone)]
 struct PendingPairing {
     request_id: String,
@@ -569,7 +614,10 @@ fn start_launch_worker(
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let worker_runtime = runtime.clone();
     if let Err(error) = task_runner.execute(Box::new(move || {
-        let result = deadline.check().and_then(|_| launcher.launch());
+        let result = deadline
+            .check()
+            .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))
+            .and_then(|_| launcher.launch());
         let mut child_to_cleanup = None;
         let outcome = match result {
             Ok(child) => match worker_runtime.lock() {
@@ -1338,7 +1386,9 @@ impl NativeConnectionState {
 
     pub(crate) async fn cave_launch(&self) -> NativeResult<()> {
         let deadline = LaunchDeadline::start(self.clock.clone());
-        deadline.check()?;
+        deadline
+            .check()
+            .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))?;
         let reservation = {
             let mut runtime = self.runtime()?;
             let pending_cleanup = runtime.reap_launch();
@@ -1348,7 +1398,9 @@ impl NativeConnectionState {
             {
                 Err(pending_cleanup)
             } else {
-                deadline.check()?;
+                deadline
+                    .check()
+                    .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))?;
                 runtime.invalidate_discovery_attempt()?;
                 runtime.clear_authority_state();
                 runtime.launch_in_flight = true;
@@ -1380,18 +1432,34 @@ impl NativeConnectionState {
             self.launcher.clone(),
             deadline.clone(),
             generation,
-        )?;
-        await_until_deadline(&deadline, self.sleeper.as_ref(), async move {
-            launch_complete
-                .await
-                .unwrap_or_else(|_| Err(NativeDiagnostic::new("service_unavailable", true)))
+        )
+        .map_err(|error| classify_launch_stage_error(error, "cave_launch_worker_unavailable"))?;
+        let launch_runtime = self.runtime.clone();
+        let launch_result = await_until_deadline(&deadline, self.sleeper.as_ref(), async move {
+            launch_complete.await.unwrap_or_else(|_| {
+                // A closed result channel proves this worker can no longer publish a result.
+                // Timeout or cancellation alone does not prove that the worker has stopped.
+                if let Ok(mut runtime) = launch_runtime.lock() {
+                    if runtime.spawn_in_flight == Some(generation) {
+                        runtime.spawn_in_flight = None;
+                    }
+                }
+                Err(launch_stage_unavailable("cave_launch_worker_closed"))
+            })
         })
-        .await??;
-        deadline.check()?;
+        .await
+        .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))?;
+        launch_result?;
+        deadline
+            .check()
+            .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))?;
 
         let mut backoff = Duration::from_millis(100);
+        let mut readiness_failure = LaunchReadinessFailure::DiscoveryNotFound;
         loop {
-            deadline.check()?;
+            deadline
+                .check()
+                .map_err(|_| readiness_failure.diagnostic())?;
             {
                 let mut runtime = self.runtime()?;
                 if runtime.generation != generation
@@ -1421,6 +1489,7 @@ impl NativeConnectionState {
             match record {
                 Ok(record) => {
                     if let Ok(authority) = pin_owner_discovery_record(&record, generation) {
+                        readiness_failure = LaunchReadinessFailure::HealthUnavailable;
                         let health = await_until_deadline(
                             &deadline,
                             self.sleeper.as_ref(),
@@ -1430,6 +1499,7 @@ impl NativeConnectionState {
                         if let Ok(Ok(response)) = health {
                             if require_success(&response).is_ok() {
                                 let instance_id = health_instance_id(&response.payload)?;
+                                readiness_failure = LaunchReadinessFailure::RevalidationUnavailable;
                                 let revalidated = run_blocking_until_deadline(
                                     &deadline,
                                     self.sleeper.as_ref(),
@@ -1443,11 +1513,13 @@ impl NativeConnectionState {
                                 match revalidated {
                                     Ok(record) if authority.matches_owner_record(&record) => {}
                                     Err(error) if error.code == "service_unavailable" => {
-                                        return Err(error);
+                                        return Err(readiness_failure.diagnostic());
                                     }
                                     _ => continue,
                                 }
-                                deadline.check()?;
+                                deadline
+                                    .check()
+                                    .map_err(|_| readiness_failure.diagnostic())?;
                                 let mut runtime = self.runtime()?;
                                 if runtime.launch.as_ref().is_some_and(|launch| {
                                     launch.generation == generation
@@ -1468,14 +1540,29 @@ impl NativeConnectionState {
                                 ));
                             }
                         } else if health.is_err() {
-                            return Err(launch_deadline_expired());
+                            return Err(readiness_failure.diagnostic());
                         }
+                    } else {
+                        readiness_failure = LaunchReadinessFailure::DiscoveryRejected;
                     }
                 }
-                Err(error) if error.code == "service_unavailable" => return Err(error),
-                Err(_) => {}
+                Err(error) if error.code == "service_unavailable" => {
+                    readiness_failure = LaunchReadinessFailure::DiscoveryUnavailable;
+                    return Err(readiness_failure.diagnostic());
+                }
+                Err(error) if error.code == "cave_discovery_unavailable" => {
+                    readiness_failure = LaunchReadinessFailure::DiscoveryUnavailable;
+                }
+                Err(error) if error.code == "cave_discovery_not_found" => {
+                    readiness_failure = LaunchReadinessFailure::DiscoveryNotFound;
+                }
+                Err(_) => {
+                    readiness_failure = LaunchReadinessFailure::DiscoveryRejected;
+                }
             }
-            let remaining = deadline.remaining()?;
+            let remaining = deadline
+                .remaining()
+                .map_err(|_| readiness_failure.diagnostic())?;
             self.sleeper.sleep(backoff.min(remaining)).await;
             backoff = (backoff * 2).min(Duration::from_secs(2));
         }
@@ -2761,6 +2848,32 @@ mod tests {
         }
     }
 
+    struct StaticFailureDiscovery {
+        code: &'static str,
+    }
+
+    impl CaveDiscoveryReader for StaticFailureDiscovery {
+        fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+            Err(NativeDiagnostic::new(self.code, true))
+        }
+    }
+
+    struct RecordThenFailureDiscovery {
+        reads: AtomicUsize,
+        record: OwnerDiscoveryRecord,
+        code: &'static str,
+    }
+
+    impl CaveDiscoveryReader for RecordThenFailureDiscovery {
+        fn read(&self) -> NativeResult<OwnerDiscoveryRecord> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(self.record.clone())
+            } else {
+                Err(NativeDiagnostic::new(self.code, true))
+            }
+        }
+    }
+
     struct AdvancingDiscovery {
         clock: Arc<TestLaunchClock>,
         record: OwnerDiscoveryRecord,
@@ -2838,6 +2951,49 @@ mod tests {
         }
     }
 
+    struct RejectingTaskRunner;
+
+    impl CaveTaskRunner for RejectingTaskRunner {
+        fn execute(&self, _task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            Err(NativeDiagnostic::new("service_unavailable", true))
+        }
+    }
+
+    struct DroppingTaskRunner;
+
+    impl CaveTaskRunner for DroppingTaskRunner {
+        fn execute(&self, _task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            Ok(())
+        }
+    }
+
+    struct DropThenInlineTaskRunner {
+        calls: AtomicUsize,
+    }
+
+    impl CaveTaskRunner for DropThenInlineTaskRunner {
+        fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                drop(task);
+            } else {
+                task();
+            }
+            Ok(())
+        }
+    }
+
+    fn expected_launch_stage(code: &'static str) -> &'static str {
+        #[cfg(feature = "phase1-conformance")]
+        {
+            code
+        }
+        #[cfg(not(feature = "phase1-conformance"))]
+        {
+            let _ = code;
+            "service_unavailable"
+        }
+    }
+
     #[derive(Default)]
     struct BlockingChildState {
         terminated: AtomicUsize,
@@ -2899,8 +3055,123 @@ mod tests {
 
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
-        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_spawn_timeout")
+        );
         assert_eq!(clock.now(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn launch_reports_worker_scheduling_failure_without_detail() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock,
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(RejectingTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_worker_unavailable")
+        );
+    }
+
+    #[test]
+    fn launch_reports_a_closed_worker_channel_without_detail() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock,
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(DroppingTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_worker_closed")
+        );
+    }
+
+    #[test]
+    fn abandoning_a_live_spawn_retains_its_exclusion_fence() {
+        struct BlockingLauncher {
+            entered: Arc<Barrier>,
+            release: Arc<Barrier>,
+        }
+        impl CaveLauncher for BlockingLauncher {
+            fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+                self.entered.wait();
+                self.release.wait();
+                Ok(Box::new(TestChild))
+            }
+        }
+        struct JoiningRunner(Mutex<Option<std::thread::JoinHandle<()>>>);
+        impl CaveTaskRunner for JoiningRunner {
+            fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+                *self.0.lock().unwrap() = Some(std::thread::spawn(task));
+                Ok(())
+            }
+        }
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let runtime = Arc::new(Mutex::new(super::ConnectionRuntime {
+            generation: 7,
+            launch_in_flight: true,
+            ..Default::default()
+        }));
+        let runner = Arc::new(JoiningRunner(Mutex::new(None)));
+        let receiver = super::start_launch_worker(
+            runtime.clone(),
+            runner.clone(),
+            Arc::new(BlockingLauncher {
+                entered: entered.clone(),
+                release: release.clone(),
+            }),
+            super::LaunchDeadline::start(Arc::new(TestLaunchClock::default())),
+            7,
+        )
+        .unwrap();
+        entered.wait();
+        super::abandon_launch(runtime.clone(), runner.clone(), 7);
+        let fence_while_worker_live = runtime.lock().unwrap().spawn_in_flight;
+        release.wait();
+        runner.0.lock().unwrap().take().unwrap().join().unwrap();
+        assert!(tauri::async_runtime::block_on(receiver).unwrap().is_err());
+        assert_eq!(fence_while_worker_live, Some(7));
+        assert_eq!(runtime.lock().unwrap().spawn_in_flight, None);
+    }
+
+    #[test]
+    fn closed_launch_worker_does_not_block_a_subsequent_launch() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state(
+            clock,
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(DropThenInlineTaskRunner {
+                calls: AtomicUsize::new(0),
+            }),
+        );
+
+        let first = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+        assert_eq!(
+            first.code,
+            expected_launch_stage("cave_launch_worker_closed")
+        );
+
+        tauri::async_runtime::block_on(state.cave_launch()).unwrap();
     }
 
     #[test]
@@ -2923,9 +3194,85 @@ mod tests {
 
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
-        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_discovery_not_found")
+        );
         assert_eq!(clock.now(), Duration::from_secs(30));
         assert!(discovery.reads.load(Ordering::SeqCst) > 1);
+    }
+
+    #[test]
+    fn launch_reports_discovery_reader_unavailability_without_detail() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state_with_discovery(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticFailureDiscovery {
+                code: "cave_discovery_unavailable",
+            }),
+            Arc::new(InlineTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_discovery_unavailable")
+        );
+        assert_eq!(clock.now(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn launch_reports_rejected_discovery_records_without_detail() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state_with_discovery(
+            clock.clone(),
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(StaticFailureDiscovery {
+                code: "unsafe_discovery_record",
+            }),
+            Arc::new(InlineTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_discovery_rejected")
+        );
+        assert_eq!(clock.now(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn launch_reports_post_health_revalidation_unavailability_without_detail() {
+        let clock = Arc::new(TestLaunchClock::default());
+        let state = deadline_state_with_discovery(
+            clock,
+            Arc::new(ImmediateHealth),
+            Arc::new(ReadyLauncher {
+                launches: AtomicUsize::new(0),
+            }),
+            Arc::new(RecordThenFailureDiscovery {
+                reads: AtomicUsize::new(0),
+                record: deadline_record(),
+                code: "service_unavailable",
+            }),
+            Arc::new(InlineTaskRunner),
+        );
+
+        let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
+
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_revalidation_unavailable")
+        );
     }
 
     #[test]
@@ -2943,7 +3290,10 @@ mod tests {
 
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
-        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_health_unavailable")
+        );
         assert_eq!(clock.now(), Duration::from_secs(30));
         assert_eq!(
             tauri::async_runtime::block_on(state.cave_health(prelaunch_handle))
@@ -2976,7 +3326,10 @@ mod tests {
 
         let error = tauri::async_runtime::block_on(state.cave_launch()).unwrap_err();
 
-        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(
+            error.code,
+            expected_launch_stage("cave_launch_health_unavailable")
+        );
         assert_eq!(clock.now(), Duration::from_secs(30));
         cleanup_started.wait();
         assert_eq!(child_state.terminated.load(Ordering::SeqCst), 1);
