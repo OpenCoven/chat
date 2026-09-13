@@ -183,8 +183,8 @@
       },
       {
         "path": "src-tauri/src/connection.rs",
-        "blob": "583ea52db9854bba3ffe1191f4db086ec7578deb",
-        "sha256": "33e478a9c474fd67b974bf5eea19b069d8ca494cf176f49d2353f8e1090ade99"
+        "blob": "2f4f8b0ff1bbdd34510f509685205936d00c5a67",
+        "sha256": "c4b103d3286da896acbba8fa6d6b7da086b55828a35b90aa00e6088b28253198"
       },
       {
         "path": "src-tauri/src/coven.rs",
