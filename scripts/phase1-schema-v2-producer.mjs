@@ -233,8 +233,21 @@ const launchRpcFailureCodes = new Set([
   'invalid_native_response',
   'reconcile_required',
 ]);
+const launchStageFailureCodes = new Set([
+  'cave_launch_spawn_timeout',
+  'cave_launch_worker_unavailable',
+  'cave_launch_worker_closed',
+  'cave_launch_discovery_not_found',
+  'cave_launch_discovery_unavailable',
+  'cave_launch_discovery_rejected',
+  'cave_launch_health_unavailable',
+  'cave_launch_revalidation_unavailable',
+]);
 const launchFailureCategories = [
   'service-unavailable',
+  ...[...launchStageFailureCodes].map((code) =>
+    code.replace(/^cave_launch_/u, '').replaceAll('_', '-'),
+  ),
   ...[...launchRpcFailureCodes].map((code) => `rpc-${code.replaceAll('_', '-')}`),
   ...[...launchFailureBoundaries].map((boundary) => `${boundary}-unknown`),
   'initial-discovery-timeout',
@@ -1791,6 +1804,11 @@ export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
       return 'phase1.native-scenarios.launch.service-unavailable';
     }
     const nativeLaunchFailure = /^native RPC cave_launch failed with ([a-z_]+)$/u.exec(message);
+    if (nativeLaunchFailure !== null && launchStageFailureCodes.has(nativeLaunchFailure[1])) {
+      return `phase1.native-scenarios.launch.${nativeLaunchFailure[1]
+        .replace(/^cave_launch_/u, '')
+        .replaceAll('_', '-')}`;
+    }
     if (nativeLaunchFailure !== null && launchRpcFailureCodes.has(nativeLaunchFailure[1])) {
       return `phase1.native-scenarios.launch.rpc-${nativeLaunchFailure[1].replaceAll('_', '-')}`;
     }
