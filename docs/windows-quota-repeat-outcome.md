@@ -14,16 +14,37 @@ follow-up read:
 - `persistent`: it threw another exception; this need not match the first error.
 - `none`: no diagnostic follow-up was requested.
 
-Every outcome preserves the original failure and rejects the quota measurement.
-There is no additional read, wait, measurement acceptance, identity switch,
-permission change, or change to any resource ceiling. These are observations
-at follow-up time, not proof of the original filesystem state.
+Protected run
+[34773356378](https://github.com/OpenCoven/chat/actions/runs/34773356378)
+later failed while Cave was being built with `access-denied`,
+`root=cave-checkout`, `directory-enumeration-depth-3-plus`, and
+`repeat=readable`. The monitor had discarded a fresh complete snapshot produced
+by the same bounded traversal immediately after the first enumeration failure.
+
+Directory enumeration now accepts only that `readable` result. The retry uses
+the same validated isolated-user token, directory, search pattern, entry limit,
+reparse rejection, and byte-accounting path as the first attempt. The first
+attempt's partial list is discarded; only a fresh traversal that completes
+under the existing bounds can become the measurement. There is no wait, third
+read, identity switch, permission change, or resource-ceiling change.
+
+`missing` and `persistent` repeats remain terminal, as do every initial failure
+other than `UnauthorizedAccessException`. Attribute and file-length reads keep
+their existing fail-closed diagnostic-only repeats. The terminal check performs
+the same bounded recovery and still rejects any path that cannot produce a
+complete readable snapshot.
 
 Managed regression coverage exercises both missing exception types, a successful
-follow-up, repeated access denial, and a different second error. It requires
-exactly two callback calls, the original access-denied category, and suppression
-of private exception text. Existing single-pass, first-failure, terminal and
-background diagnostic checks remain in place.
+metadata follow-up, repeated access denial, and a different second error. A
+separate snapshot regression requires exactly two calls and verifies that the
+accepted result contains the complete fresh directory contents. Native Windows
+coverage first holds a real owner-only ACL denial across both reads and requires
+the bounded `persistent` failure. The isolated-reader fixture then denies the
+validated isolated identity, temporarily reverts only for the fixture ACL
+restoration, verifies impersonation is restored before the second enumeration,
+and requires two identity-checked reads to return the complete fresh snapshot.
+A subsequent 512-byte limit check proves the production accounting path still
+enforces the byte quota.
 
 Status: local diagnostic tests pass after a demonstrated failing regression.
 Native Windows validation, reviewed frozen-source binding, SDK rebinding and

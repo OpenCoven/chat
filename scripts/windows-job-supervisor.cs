@@ -7413,29 +7413,63 @@ namespace OpenCoven
             int maximumEntries,
             int depth = -1, bool repeatDiagnostic = false)
         {
-            try
-            {
-                return ReadBoundedDirectorySnapshotCore(
+            string operation = directoriesOnly ? "pattern-enumeration" :
+                depth == 0 ? "directory-enumeration-root" :
+                depth == 1 ? "directory-enumeration-depth-1" :
+                depth == 2 ? "directory-enumeration-depth-2" :
+                depth >= 3 ? "directory-enumeration-depth-3-plus" : "directory-enumeration";
+            return ReadDirectorySnapshotOperation(
+                operation,
+                () => ReadBoundedDirectorySnapshotCore(
                     directory,
                     searchPattern,
                     directoriesOnly,
-                    maximumEntries);
-            }
-            catch (Exception error)
-            {
-                string repeat = repeatDiagnostic ? ClassifyQuotaReadRepeat(() =>
-                    ReadBoundedDirectorySnapshotCore(
+                    maximumEntries),
+                repeatDiagnostic,
+                () => ReadBoundedDirectorySnapshotCore(
                         directory,
                         searchPattern,
                         directoriesOnly,
-                        maximumEntries)) : "none";
+                        maximumEntries,
+                        true));
+        }
+
+        private static List<FileSystemInfo> ReadDirectorySnapshotOperation(
+            string operation,
+            Func<List<FileSystemInfo>> read,
+            bool repeatDiagnostic,
+            Func<List<FileSystemInfo>> repeatRead = null)
+        {
+            try { return read(); }
+            catch (Exception error)
+            {
+                string repeat = "none";
+                if (repeatDiagnostic && error is UnauthorizedAccessException)
+                {
+                    try
+                    {
+                        return (repeatRead ?? read)();
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        repeat = "missing";
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        repeat = "missing";
+                    }
+                    catch
+                    {
+                        repeat = "persistent";
+                    }
+                }
+                else if (repeatDiagnostic)
+                {
+                    repeat = ClassifyQuotaReadRepeat(repeatRead ?? read);
+                }
                 throw new QuotaMonitorContextException(
                     null,
-                    directoriesOnly ? "pattern-enumeration" :
-                        depth == 0 ? "directory-enumeration-root" :
-                        depth == 1 ? "directory-enumeration-depth-1" :
-                        depth == 2 ? "directory-enumeration-depth-2" :
-                        depth >= 3 ? "directory-enumeration-depth-3-plus" : "directory-enumeration",
+                    operation,
                     null,
                     repeat,
                     error);
@@ -7446,7 +7480,8 @@ namespace OpenCoven
             string directory,
             string searchPattern,
             bool directoriesOnly,
-            int maximumEntries)
+            int maximumEntries,
+            bool requireComplete = false)
         {
             List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
             IEnumerable<FileSystemInfo> entries;
@@ -7465,10 +7500,12 @@ namespace OpenCoven
             }
             catch (FileNotFoundException)
             {
+                if (requireComplete) throw;
                 return snapshot;
             }
             catch (DirectoryNotFoundException)
             {
+                if (requireComplete) throw;
                 return snapshot;
             }
             using (enumerator)
@@ -7482,10 +7519,12 @@ namespace OpenCoven
                     }
                     catch (FileNotFoundException)
                     {
+                        if (requireComplete) throw;
                         break;
                     }
                     catch (DirectoryNotFoundException)
                     {
+                        if (requireComplete) throw;
                         break;
                     }
                     if (!moved)

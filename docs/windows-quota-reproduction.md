@@ -117,3 +117,32 @@ both `FILE_LIST_DIRECTORY` and `FILE_READ_ATTRIBUTES`, requires quota rejection,
 and records the attribute observation independently. Native verification of
 this corrected control remains required; neither fixture identifies the
 protected descendant's cause.
+
+## Complete readable snapshot recovery
+
+Protected run
+[34773356378](https://github.com/OpenCoven/chat/actions/runs/34773356378)
+failed during the Cave build with `access-denied`, `root=cave-checkout`,
+`directory-enumeration-depth-3-plus`, and `repeat=readable`. This establishes
+that the same isolated identity could complete a fresh enumeration immediately
+after the first attempt failed. It does not identify the private descendant or
+prove whether build-directory replacement, deletion completion, or another
+filesystem transition caused the first denial.
+
+The accounting defect was that the monitor discarded that complete fresh
+snapshot and terminated the producer. The repaired enumeration path accepts a
+second result only when the first failure is `UnauthorizedAccessException` and
+the second invocation of the same bounded snapshot core completes. A missing
+or failing repeat remains terminal. Non-access-denied failures and non-directory
+metadata reads preserve the diagnostic-only repeat behavior.
+
+The native fixtures supply deterministic controls without changing production
+ACLs. The owner-directory fixture keeps a real owner-only denial in place for
+both enumerations and requires `repeat=persistent`. The isolated-reader fixture
+then applies a real enumeration denial to the validated isolated identity,
+checks both recovery callbacks run under that identity, temporarily reverts
+only to restore the fixture ACL, verifies the retry is back under the isolated
+identity before enumerating, and requires the fresh complete snapshot.
+Independent terminal checks below and above the byte limit exercise the
+production accounting path. It retains the existing path, entry, byte,
+reparse, process, output, and time bounds.

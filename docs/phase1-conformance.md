@@ -253,8 +253,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `d55b40c3315035be4267424b5d5d55c416bb609d`, tree
-  `ceb98c9ace85138ef8ddab5a6f7a0aeb7d2008fb`, retained in the producer ancestry;
+- Chat conformance driver `ad8d5f3e5e937c398c5d6d8f7bbbb190b4ed499a`, tree
+  `dd4ffa0af4c39aefee9fc675ba5c804d7fe0e678`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1544,7 +1544,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,782 | `a64fcdaf3fbd51e6cc0d3eb293ec5ac6a27df820182f0e89c272ce9cadfea566` |
+| `.github/workflows/client-v1-conformance.yml` | 167,054 | `e0d848fc82bd97d968b661a442420174d0690dd108d9a2c926c292f6505fb342` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1569,11 +1569,11 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 351,497 | `281acdeba5ee8dd022fd0451bd4ede6af8431aba8810f1683ce7077cc627fcb0` |
+| `scripts/windows-job-supervisor.cs` | 352,878 | `d08748d1a7ce3cc3964ce4520cc501f514d5777ed102ac5f57ebc20b75e7bb65` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 25,774 | `c9a9a82a1d90da0da6a95732048946f83917de91bda76ac4a36cfaecdf6e0d42` |
-| `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 29,480 | `b2160b083f6db3c4e6a328b026350c9ae80a2d688482849705705396ded1a998` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 22,262 | `fb6365248bd8286fa03a950e387f0925ff2c818e72ffc1676e4fc327636b5f03` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 6,025 | `43688191fcbf8807d5e33ba811f14b0f8a6e780fef30ae2e3f494d540608bdb2` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
@@ -2153,3 +2153,25 @@ Chat #257 publishes `phase1.native-scenarios.launch.service-unavailable`; this
 integration preserves that identifier alongside the six other allowlisted native
 launch codes and the retained-handle termination correction. Service unavailability
 is an observed native result and does not by itself establish a timeout.
+
+Protected run `34773356378` used Chat `3a1f4e3` and SDK validator
+`372fa9d`. Linux and Darwin passed. Windows failed during active Cave packaging
+with `access-denied; root=cave-checkout; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=readable`. No Windows
+record was produced, so validation, attestation, and aggregation were skipped.
+
+The fresh same-token enumeration had completed under the existing entry bound,
+but the monitor discarded it and terminated the producer because every repeat
+was diagnostic-only. Directory snapshots now recover only this narrow case:
+an initial `UnauthorizedAccessException` followed immediately by a successful
+fresh invocation of the same bounded snapshot core. The failed attempt's
+partial entries are never used. Missing and persistent repeats, all
+non-access-denied failures, and metadata reads remain fail-closed. Quota byte
+limits, entry limits, reparse rejection, isolated identity, polling cadence,
+process quarantine, cleanup, and private diagnostics remain unchanged.
+
+Portable coverage demonstrates the prior failure before the repair and verifies
+the returned fresh snapshot. Native Windows coverage keeps a real owner-only
+denial across both reads to prove persistent denial remains terminal, then
+restores only the test fixture between reads and verifies complete snapshot
+accounting plus a real byte-limit breach.

@@ -11,8 +11,9 @@ $instanceFlags = [Reflection.BindingFlags]'NonPublic,Instance'
 $terminal = [OpenCoven.WindowsJobSupervisor].GetMethod('ApplyTerminalDirectoryQuotaCheckAsUser', $staticFlags)
 $monitor = [OpenCoven.WindowsJobSupervisor].GetMethod('MonitorDirectoryQuotasAsUserAsync', $staticFlags)
 $read = [OpenCoven.WindowsIsolatedUser].GetMethod('RunQuotaRead', $instanceFlags)
+$readSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadDirectorySnapshotOperation', $staticFlags)
 $stateType = [OpenCoven.WindowsJobSupervisor].GetNestedType('DirectoryQuotaFailureState', [Reflection.BindingFlags]'NonPublic')
-foreach ($contract in @($terminal, $monitor, $read, $stateType)) {
+foreach ($contract in @($terminal, $monitor, $read, $readSnapshot, $stateType)) {
   if ($null -eq $contract) { throw 'Isolated quota reader contract is missing.' }
 }
 $readString = $read.MakeGenericMethod([type[]]@([string]))
@@ -24,6 +25,60 @@ using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 namespace OpenCoven.Tests {
+    public static class QuotaReadableRepeatProbe {
+        public static int Calls;
+
+        public static System.Collections.Generic.List<System.IO.FileSystemInfo> Run(
+            object identity,
+            MethodInfo quotaReadMethod,
+            MethodInfo snapshotOperation,
+            object restoration,
+            string directory,
+            string expectedSid) {
+            Calls = 0;
+            Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> read = () => {
+                AssertIdentity(expectedSid);
+                Interlocked.Increment(ref Calls);
+                var snapshot = new System.Collections.Generic.List<System.IO.FileSystemInfo>();
+                foreach (System.IO.FileSystemInfo entry in new System.IO.DirectoryInfo(directory).EnumerateFileSystemInfos(
+                    "*",
+                    System.IO.SearchOption.TopDirectoryOnly)) {
+                    snapshot.Add(entry);
+                }
+                return snapshot;
+            };
+            Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> repeatRead = () => {
+                AssertIdentity(expectedSid);
+                WindowsIdentity.RunImpersonated(
+                    Microsoft.Win32.SafeHandles.SafeAccessTokenHandle.InvalidHandle,
+                    () => restoration.GetType().GetMethod("Restore").Invoke(restoration, null));
+                AssertIdentity(expectedSid);
+                return read();
+            };
+            Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> recovery = () =>
+                (System.Collections.Generic.List<System.IO.FileSystemInfo>)snapshotOperation.Invoke(
+                    null,
+                    new object[] {
+                        "directory-enumeration-depth-3-plus",
+                        read,
+                        true,
+                        repeatRead
+                    });
+            MethodInfo genericRead = quotaReadMethod.MakeGenericMethod(
+                typeof(System.Collections.Generic.List<System.IO.FileSystemInfo>));
+            return (System.Collections.Generic.List<System.IO.FileSystemInfo>)genericRead.Invoke(
+                identity,
+                new object[] { recovery });
+        }
+
+        private static void AssertIdentity(string expectedSid) {
+            using (WindowsIdentity current = WindowsIdentity.GetCurrent()) {
+                if (!String.Equals(current.User.Value, expectedSid, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Readable quota retry escaped the isolated identity.");
+            }
+        }
+    }
+
     public static class QuotaReadPathProbe {
         private static string ReadOutcome(Action read) {
             try { read(); return "ok"; }
@@ -214,7 +269,7 @@ try {
   $enumerationDenied = Join-Path $identity.TempPath 'phase1-conformance-run-enumeration-denied'
   [IO.Directory]::CreateDirectory($enumerationDenied) | Out-Null
   [IO.File]::WriteAllText((Join-Path $enumerationDenied 'payload'), 'bounded')
-  $enumerationAcl = Get-Acl -LiteralPath $enumerationDenied
+  $enumerationLease = [OpenCoven.Tests.OwnerDirectoryQuotaFixture]::new($enumerationDenied)
   try {
     $denialAcl = Get-Acl -LiteralPath $enumerationDenied
     $denialAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
@@ -234,11 +289,24 @@ try {
         $enumerationResult.ResourceQuotaMonitorRepeat -cne 'persistent') {
       throw 'Isolated enumeration did not retain the original failure and bounded repeat.'
     }
+    $snapshot = [OpenCoven.Tests.QuotaReadableRepeatProbe]::Run(
+      $identity,
+      $read,
+      $readSnapshot,
+      $enumerationLease,
+      $enumerationDenied,
+      $identity.Sid
+    )
+    if ([OpenCoven.Tests.QuotaReadableRepeatProbe]::Calls -ne 2 -or
+        $snapshot.Count -ne 1 -or $snapshot[0].Name -cne 'payload' -or
+        [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne $supervisorSid) {
+      throw 'Isolated readable enumeration retry did not return one complete snapshot and restore supervisor identity.'
+    }
   } finally {
-    Set-Acl -LiteralPath $enumerationDenied -AclObject $enumerationAcl
+    $enumerationLease.Dispose()
     Remove-Item -LiteralPath $enumerationDenied -Recurse -Force
   }
-  Write-Host 'Isolated enumeration repeat remains bounded and fail-closed.'
+  Write-Host 'Isolated enumeration repeats remain bounded, identity-stable, and fail-closed unless a complete retry succeeds.'
   $state = [Activator]::CreateInstance($stateType, $true)
   $cancel = [Threading.CancellationTokenSource]::new(5000)
   $task = $monitor.Invoke($null, [object[]]@($identity, $over, $state, $cancel.Token))

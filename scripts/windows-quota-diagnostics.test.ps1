@@ -227,6 +227,8 @@ Write-Host 'Bootstrap quota scope classification is fixed and path-free.'
 if (-not ('OpenCoven.Tests.QuotaRepeatProbe' -as [type])) {
   Add-Type -Language CSharp -TypeDefinition @'
 using System;
+using System.Collections.Generic;
+using System.IO;
 namespace OpenCoven.Tests
 {
     public static class QuotaRepeatProbe
@@ -236,6 +238,8 @@ namespace OpenCoven.Tests
         public static int MissingFileCalls;
         public static int MissingDirectoryCalls;
         public static int ChangedErrorCalls;
+        public static int SnapshotCalls;
+        public static string SnapshotDirectory;
         public static Func<string> MissingFileRead { get { return MissingFile; } }
         public static Func<string> MissingDirectoryRead { get { return MissingDirectory; } }
         public static Func<string> ChangedErrorRead { get { return ChangedError; } }
@@ -274,6 +278,26 @@ namespace OpenCoven.Tests
         {
             PersistentCalls++;
             throw new UnauthorizedAccessException("private-persistent");
+        }
+
+        public static Func<List<FileSystemInfo>> TransientSnapshotRead
+        {
+            get { return TransientSnapshot; }
+        }
+
+        public static List<FileSystemInfo> TransientSnapshot()
+        {
+            SnapshotCalls++;
+            if (SnapshotCalls == 1)
+                throw new UnauthorizedAccessException("private-transient-snapshot");
+            var snapshot = new List<FileSystemInfo>();
+            foreach (var entry in new DirectoryInfo(SnapshotDirectory).EnumerateFileSystemInfos(
+                "*",
+                SearchOption.TopDirectoryOnly))
+            {
+                snapshot.Add(entry);
+            }
+            return snapshot;
         }
     }
 }
@@ -326,6 +350,80 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
   throw 'Fresh diagnostic metadata read changed the original failure or initial read.'
 }
 Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
+
+$readSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadDirectorySnapshotOperation', $flags)
+if ($null -eq $readSnapshot) { throw 'Missing readable directory-snapshot recovery.' }
+$snapshotRoot = Join-Path $PSScriptRoot ('.quota-readable-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($snapshotRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $snapshotRoot 'payload'), 'quota')
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $snapshotRoot
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls = 0
+  $snapshot = $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientSnapshotRead,
+    $true,
+    [Type]::Missing
+  ))
+  if ([OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls -ne 2 -or
+      $snapshot.Count -ne 1 -or $snapshot[0].Name -cne 'payload') {
+    throw 'Readable repeat did not return the complete fresh directory snapshot.'
+  }
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $null
+  Remove-Item -LiteralPath $snapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'Readable directory-snapshot repeat supplies the accepted bounded measurement.'
+
+$snapshotCore = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ReadBoundedDirectorySnapshotCore',
+  $flags,
+  $null,
+  [type[]]@([string], [string], [bool], [int], [bool]),
+  $null
+)
+if ($null -eq $snapshotCore) { throw 'Missing complete-snapshot enforcement.' }
+$missingSnapshotPath = [string](Join-Path $snapshotRoot 'missing')
+$missingSnapshot = $null
+try {
+  $snapshotCore.Invoke($null, [object[]]@(
+    $missingSnapshotPath,
+    '*',
+    $false,
+    10,
+    $true
+  )) | Out-Null
+} catch {
+  $missingSnapshot = $_.Exception.GetBaseException()
+}
+if ($missingSnapshot -isnot [IO.DirectoryNotFoundException]) {
+  throw 'Required-complete snapshot accepted a missing directory.'
+}
+$boundedSnapshotRoot = Join-Path $PSScriptRoot ('.quota-bounded-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($boundedSnapshotRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $boundedSnapshotRoot 'first'), 'quota')
+  [IO.File]::WriteAllText((Join-Path $boundedSnapshotRoot 'second'), 'quota')
+  $boundedSnapshotError = $null
+  try {
+    $snapshotCore.Invoke($null, [object[]]@(
+      [string]$boundedSnapshotRoot,
+      '*',
+      $false,
+      1,
+      $true
+    )) | Out-Null
+  } catch {
+    $boundedSnapshotError = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $boundedSnapshotError -or
+      $boundedSnapshotError.GetType().Name -cne 'QuotaEntryBoundException') {
+    throw 'Required-complete snapshot did not preserve the entry bound.'
+  }
+} finally {
+  Remove-Item -LiteralPath $boundedSnapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'Readable recovery requires a complete bounded directory snapshot.'
 
 # A real overlong filesystem name exercises the terminal/background catches on
 # every platform. Windows reports an unreviewed runtime HRESULT as generic I/O;
