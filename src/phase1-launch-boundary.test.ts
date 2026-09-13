@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { expect, test } from 'vitest';
 import {
   extractVerifiedRunnerDiagnostic,
@@ -62,3 +65,66 @@ test('preserves an existing specific classification', () => {
     ),
   ).toBe('phase1.native-scenarios.launch.timeout');
 });
+
+// Execute the production launch block with controlled RPC failures so boundary
+// assignments, their order, and the catch path are covered without native state.
+const producerSource = readFileSync(
+  resolve(import.meta.dirname, '../scripts/phase1-schema-v2-producer.mjs'),
+  'utf8',
+);
+const launchStart = producerSource.indexOf("    activeNativeStage = 'launch';");
+const launchEnd = producerSource.indexOf("    activeNativeStage = 'pairing';", launchStart);
+const launchScenario = producerSource.slice(launchStart, launchEnd);
+
+test.each(['initial-discovery', 'launch-rpc', 'discovery', 'health'])(
+  'runtime launch block reports a failure injected at %s',
+  async (boundary) => {
+    expect(launchStart).toBeGreaterThan(0);
+    expect(launchEnd).toBeGreaterThan(launchStart);
+    const cause = new Error('injected private failure');
+    const calls: string[] = [];
+    const visit = (operation: string) => {
+      calls.push(operation);
+      if (operation === boundary) throw cause;
+    };
+    const outcome = await runInNewContext(
+      `(async () => {
+        let activeNativeStage, handle, scenarioFailure = null;
+        const observations = {}, nativeInstanceIds = new Set(), results = [];
+        ${launchScenario}
+        return { scenarioFailure, results };
+      })()`,
+      {
+        classifyInitialDiscoveryOutcome: producer.classifyInitialDiscoveryOutcome,
+        retainSchemaV2NativeFailure: producer.retainSchemaV2NativeFailure,
+        observeInitialDiscoverySafety: async () => null,
+        waitForDiscovery: async () => {
+          visit('discovery');
+          return { handle: 'test-handle' };
+        },
+        rpc: {
+          operation: () => 'test-operation',
+          request: async (command: string) => {
+            expect(command).toBe('cave_read_discovery');
+            visit('initial-discovery');
+            return { ok: false, error: { code: 'cave_discovery_not_found' } };
+          },
+          ok: async (command: string) => {
+            expect(['cave_launch', 'cave_health']).toContain(command);
+            visit(command === 'cave_launch' ? 'launch-rpc' : 'health');
+            return { apiVersion: '1.0', data: { pairingRequired: true } };
+          },
+        },
+        process: { platform: 'win32', stderr: { write: () => {} } },
+        addAssertion: (results: string[], _id: string, status: string) => results.push(status),
+      },
+    );
+    const ordered = ['initial-discovery', 'launch-rpc', 'discovery', 'health'];
+    expect(calls).toEqual(ordered.slice(0, ordered.indexOf(boundary) + 1));
+    expect(outcome.results).toEqual(['failed']);
+    expect(outcome.scenarioFailure.cause).toBe(cause);
+    expect(publicPhase1FailureDiagnostic(outcome.scenarioFailure)).toBe(
+      `phase1.native-scenarios.launch.${boundary}-unknown`,
+    );
+  },
+);
