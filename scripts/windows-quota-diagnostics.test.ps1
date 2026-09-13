@@ -335,7 +335,7 @@ $terminal.Invoke($null, [object[]]@($contextResult, $invalidQuotas))
 if (-not $contextResult.ResourceQuotaMonitorError -or $contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or
     $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
     $contextResult.ResourceQuotaMonitorCategory -cne 'io-name-too-long') {
-  throw 'Real terminal filesystem failure lost bounded context.'
+  throw "Real terminal filesystem failure lost bounded context: category=$($contextResult.ResourceQuotaMonitorCategory); root=$($contextResult.ResourceQuotaMonitorRoot); operation=$($contextResult.ResourceQuotaMonitorOperation)."
 }
 $terminal.Invoke($null, [object[]]@($contextResult, $malformed))
 if ($contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes') { throw 'Terminal recheck replaced first context.' }
