@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 import {
@@ -54,6 +54,31 @@ const pwshAvailable =
   spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
 
 describe('bounded Windows supervisor source', () => {
+  test('retains exact workflow and C# bytes under Windows-style checkout', () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'chat-codec-checkout-'));
+    const paths = [
+      '.github/workflows/client-v1-conformance.yml',
+      'scripts/windows-job-supervisor.cs',
+    ];
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', directory, ...args], { stdio: 'pipe' });
+    try {
+      git('init', '--quiet');
+      git('config', 'core.autocrlf', 'true');
+      for (const path of [...paths, '.gitattributes']) {
+        mkdirSync(dirname(resolve(directory, path)), { recursive: true });
+        writeFileSync(resolve(directory, path), readFileSync(resolve(path)));
+      }
+      git('add', '.');
+      for (const path of paths) rmSync(resolve(directory, path));
+      git('checkout', '--', ...paths);
+      for (const path of paths)
+        expect(readFileSync(resolve(directory, path))).toEqual(readFileSync(resolve(path)));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test('verifies the checked-in workflow payload with the current platform compressor', () => {
     const workflow = readFileSync(resolve('.github/workflows/client-v1-conformance.yml'), 'utf8');
     const start = workflow.indexOf('          # BEGIN bounded Windows supervisor source v1');
