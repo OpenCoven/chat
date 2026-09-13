@@ -557,9 +557,6 @@ fn abandon_launch(
             if launch_matches || spawn_matches {
                 runtime.launch_in_flight = false;
             }
-            if spawn_matches {
-                runtime.spawn_in_flight = None;
-            }
             if let Some(launch) = runtime
                 .launch
                 .as_mut()
@@ -1437,10 +1434,18 @@ impl NativeConnectionState {
             generation,
         )
         .map_err(|error| classify_launch_stage_error(error, "cave_launch_worker_unavailable"))?;
+        let launch_runtime = self.runtime.clone();
         let launch_result = await_until_deadline(&deadline, self.sleeper.as_ref(), async move {
-            launch_complete
-                .await
-                .unwrap_or_else(|_| Err(launch_stage_unavailable("cave_launch_worker_closed")))
+            launch_complete.await.unwrap_or_else(|_| {
+                // A closed result channel proves this worker can no longer publish a result.
+                // Timeout or cancellation alone does not prove that the worker has stopped.
+                if let Ok(mut runtime) = launch_runtime.lock() {
+                    if runtime.spawn_in_flight == Some(generation) {
+                        runtime.spawn_in_flight = None;
+                    }
+                }
+                Err(launch_stage_unavailable("cave_launch_worker_closed"))
+            })
         })
         .await
         .map_err(|_| launch_stage_unavailable("cave_launch_spawn_timeout"))?;
@@ -3095,6 +3100,55 @@ mod tests {
             error.code,
             expected_launch_stage("cave_launch_worker_closed")
         );
+    }
+
+    #[test]
+    fn abandoning_a_live_spawn_retains_its_exclusion_fence() {
+        struct BlockingLauncher {
+            entered: Arc<Barrier>,
+            release: Arc<Barrier>,
+        }
+        impl CaveLauncher for BlockingLauncher {
+            fn launch(&self) -> NativeResult<Box<dyn CaveChild>> {
+                self.entered.wait();
+                self.release.wait();
+                Ok(Box::new(TestChild))
+            }
+        }
+        struct JoiningRunner(Mutex<Option<std::thread::JoinHandle<()>>>);
+        impl CaveTaskRunner for JoiningRunner {
+            fn execute(&self, task: Box<dyn FnOnce() + Send>) -> NativeResult<()> {
+                *self.0.lock().unwrap() = Some(std::thread::spawn(task));
+                Ok(())
+            }
+        }
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let runtime = Arc::new(Mutex::new(super::ConnectionRuntime {
+            generation: 7,
+            launch_in_flight: true,
+            ..Default::default()
+        }));
+        let runner = Arc::new(JoiningRunner(Mutex::new(None)));
+        let receiver = super::start_launch_worker(
+            runtime.clone(),
+            runner.clone(),
+            Arc::new(BlockingLauncher {
+                entered: entered.clone(),
+                release: release.clone(),
+            }),
+            super::LaunchDeadline::start(Arc::new(TestLaunchClock::default())),
+            7,
+        )
+        .unwrap();
+        entered.wait();
+        super::abandon_launch(runtime.clone(), runner.clone(), 7);
+        let fence_while_worker_live = runtime.lock().unwrap().spawn_in_flight;
+        release.wait();
+        runner.0.lock().unwrap().take().unwrap().join().unwrap();
+        assert!(tauri::async_runtime::block_on(receiver).unwrap().is_err());
+        assert_eq!(fence_while_worker_live, Some(7));
+        assert_eq!(runtime.lock().unwrap().spawn_in_flight, None);
     }
 
     #[test]
