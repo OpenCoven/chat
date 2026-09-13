@@ -1391,7 +1391,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-owner-directory-quota.test.ps1` | 11,186 | `41a028dae853502af7f06463983e74d0a798070a538852b7d8bb2773cb3e7fe3` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 18,928 | `247778f13c4238d8b7a9f1e004571d91709790654e246896357fc497514476a6` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 5,596 | `fa738d8e93a8132a26e34fbbb58e89f7ac12c13e7298cf923f8db6b31e7097c5` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 6,025 | `43688191fcbf8807d5e33ba811f14b0f8a6e780fef30ae2e3f494d540608bdb2` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
