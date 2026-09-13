@@ -61,8 +61,8 @@
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "422ac534e03a4d731c77a545b5a9cfce022abd8b",
-        "sha256": "8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6"
+        "blob": "13e208c7e7dc2632325a0e83528cce93ab7b039c",
+        "sha256": "f390496763afe00d4e6031c04fa7aa90f1d5f0809d4780354820ac3b3ce7f11d"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -146,8 +146,8 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "d0886d99edac99cd4b207c52341f8b9268c2573e",
-        "sha256": "aa8bf611c954f26a65bab30aefb61ec974a7451c01bb88413b178947bb6d91c2"
+        "blob": "236229d5716e0c47f583bef3cbf120f2fe93e592",
+        "sha256": "ca937fb3a39d97e1cc06d208c12e5afdddb029b5b8b13da6f541be464c98b02c"
       }
     ],
     "productionDeltas": [
