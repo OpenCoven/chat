@@ -142,31 +142,39 @@ describe('bounded Windows supervisor source', () => {
     expect(result.stdout).toContain('COMPILED');
   });
 
-  test.skipIf(!pwshAvailable)(
-    'PowerShell rejects invalid size, digest and payload before compilation',
-    () => {
-      const block = renderWindowsSupervisorSource(sentinel);
-      for (const invalid of [
-        block.replace(
-          `$supervisorSourceSize = ${sentinel.length}`,
-          `$supervisorSourceSize = ${sentinel.length - 1}`,
-        ),
-        block.replace(
-          `$supervisorSourceSize = ${sentinel.length}`,
-          `$supervisorSourceSize = ${sentinel.length + 1}`,
-        ),
-        block.replace(sha256(sentinel), '0'.repeat(64)),
-        block.replace("$encodedSupervisor = @'\n", "$encodedSupervisor = @'\n!"),
-        replacePayload(block, Buffer.from('not gzip')),
-        replacePayload(block, gzipSync(Buffer.from([0xff])))
-          .replace(`$supervisorSourceSize = ${sentinel.length}`, '$supervisorSourceSize = 1')
-          .replace(sha256(sentinel), sha256(Buffer.from([0xff]))),
-      ]) {
-        const result = runPowerShell(invalid);
-        expect(result.error).toBeUndefined();
-        expect(result.status, result.stderr).toBe(19);
-        expect(result.stdout).not.toContain('COMPILED');
-      }
+  const block = renderWindowsSupervisorSource(sentinel);
+  const invalidSources = [
+    [
+      'truncated size',
+      block.replace(
+        `$supervisorSourceSize = ${sentinel.length}`,
+        `$supervisorSourceSize = ${sentinel.length - 1}`,
+      ),
+    ],
+    [
+      'oversized declaration',
+      block.replace(
+        `$supervisorSourceSize = ${sentinel.length}`,
+        `$supervisorSourceSize = ${sentinel.length + 1}`,
+      ),
+    ],
+    ['source digest', block.replace(sha256(sentinel), '0'.repeat(64))],
+    ['invalid base64', block.replace("$encodedSupervisor = @'\n", "$encodedSupervisor = @'\n!")],
+    ['invalid gzip', replacePayload(block, Buffer.from('not gzip'))],
+    [
+      'invalid UTF-8',
+      replacePayload(block, gzipSync(Buffer.from([0xff])))
+        .replace(`$supervisorSourceSize = ${sentinel.length}`, '$supervisorSourceSize = 1')
+        .replace(sha256(sentinel), sha256(Buffer.from([0xff]))),
+    ],
+  ];
+  test.skipIf(!pwshAvailable).each(invalidSources)(
+    'PowerShell rejects %s before compilation',
+    (_label, invalid) => {
+      const result = runPowerShell(invalid);
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(19);
+      expect(result.stdout).not.toContain('COMPILED');
     },
   );
 });
