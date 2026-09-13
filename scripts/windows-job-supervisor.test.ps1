@@ -96,6 +96,7 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
   throw 'Reviewed Windows Job Object supervisor source is missing.'
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
+& (Join-Path $PSScriptRoot 'windows-process-termination-race.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-owner-directory-quota.test.ps1')

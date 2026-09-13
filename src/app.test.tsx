@@ -172,8 +172,14 @@ describe('App', () => {
       );
       fireEvent.click(await screen.findByRole('option', { name: /Import parent/ }));
       fireEvent.click(await screen.findByRole('button', { name: /Retained side note/ }));
-      fireEvent.click(await screen.findByRole('checkbox', { name: /Source text/ }));
-      fireEvent.click(screen.getByRole('button', { name: 'Review Bring back' }));
+      const sourceMessage = await screen.findByRole('checkbox', { name: /Source text/ });
+      fireEvent.click(sourceMessage);
+      const reviewButton = screen.getByRole('button', { name: 'Review Bring back' });
+      await waitFor(() => {
+        expect(sourceMessage).toBeChecked();
+        expect(reviewButton).toBeEnabled();
+      });
+      fireEvent.click(reviewButton);
       fireEvent.change(await screen.findByRole('textbox', { name: 'Reviewed excerpt' }), {
         target: { value: 'Late imported excerpt' },
       });

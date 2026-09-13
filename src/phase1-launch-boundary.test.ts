@@ -128,3 +128,48 @@ test.each(['initial-discovery', 'launch-rpc', 'discovery', 'health'])(
     );
   },
 );
+
+const launchNativeCodes = [
+  'connection_state_unavailable',
+  'cave_launch_in_progress',
+  'stale_connection_attempt',
+  'cave_exited',
+  'service_unavailable',
+  'invalid_native_response',
+  'reconcile_required',
+];
+
+test.each(launchNativeCodes)(
+  'propagates declared launch error %s through both boundaries',
+  (code) => {
+    const cause = new Error(`native RPC cave_launch failed with ${code}`);
+    const failure = producer.retainSchemaV2NativeFailure(null, 'launch', cause, 'launch-rpc');
+    const diagnostic =
+      code === 'service_unavailable'
+        ? 'phase1.native-scenarios.launch.service-unavailable'
+        : `phase1.native-scenarios.launch.rpc-${code.replaceAll('_', '-')}`;
+    expect(failure.message).toBe(diagnostic);
+    expect(failure.cause).toBe(cause);
+    expect(
+      producer.schemaV2FailureDiagnostic(failure, 'phase1.stage.native-scenarios.failed'),
+    ).toBe(diagnostic);
+    expect(publicPhase1FailureDiagnostic(failure)).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+    expect(producer.retainSchemaV2NativeFailure(failure, 'pairing', new Error('later'))).toBe(
+      failure,
+    );
+  },
+);
+
+test.each(['private-token', 'service_unavailable private-token', '__proto__', 'constructor'])(
+  'does not publish arbitrary launch error code %s',
+  (code) => {
+    expect(
+      producer.schemaV2NativeFailureDiagnostic(
+        'launch',
+        new Error(`native RPC cave_launch failed with ${code}`),
+        'launch-rpc',
+      ),
+    ).toBe('phase1.native-scenarios.launch.launch-rpc-unknown');
+  },
+);
