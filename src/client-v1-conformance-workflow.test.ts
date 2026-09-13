@@ -3079,7 +3079,7 @@ ${pathAssignment}
     }
   });
 
-  test('bounds Windows quota scope and repeat diagnostics without changing fail-closed accounting', () => {
+  test('accepts confirmed Windows quota-root disappearance while keeping other reads fail-closed', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const sources = [
       embeddedWindowsSupervisorSource(workflow),
@@ -3095,6 +3095,8 @@ ${pathAssignment}
         'scope == null ? "none" : scope',
         'repeat == null ? "none" : repeat',
         'catch (QuotaMonitorContextException error)',
+        'throw new DirectoryNotFoundException();',
+        'File.GetAttributes(directory);',
       ]) {
         expect(source).toContain(required);
       }

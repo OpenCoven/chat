@@ -7024,11 +7024,12 @@ namespace OpenCoven
             catch (Exception error)
             {
                 string repeat = repeatDiagnostic ? ClassifyQuotaReadRepeat(() =>
-                    ReadBoundedDirectorySnapshotCore(
-                        directory,
-                        searchPattern,
-                        directoriesOnly,
-                        maximumEntries)) : "none";
+                {
+                    List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshotCore(
+                        directory, searchPattern, directoriesOnly, maximumEntries);
+                    File.GetAttributes(directory);
+                    return snapshot;
+                }) : "none";
                 throw new QuotaMonitorContextException(
                     null,
                     directoriesOnly ? "pattern-enumeration" :
@@ -7632,11 +7633,11 @@ namespace OpenCoven
             }
             catch (FileNotFoundException)
             {
-                return "missing";
+                throw new DirectoryNotFoundException();
             }
             catch (DirectoryNotFoundException)
             {
-                return "missing";
+                throw;
             }
             catch
             {
