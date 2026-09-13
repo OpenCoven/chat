@@ -40,7 +40,8 @@ separate snapshot regression requires exactly two calls and verifies that the
 accepted result contains the complete fresh directory contents. Native Windows
 coverage first holds a real owner-only ACL denial across both reads and requires
 the bounded `persistent` failure. The isolated-reader fixture then denies the
-validated isolated identity, restores only that fixture ACL between attempts,
+validated isolated identity, temporarily reverts only for the fixture ACL
+restoration, verifies impersonation is restored before the second enumeration,
 and requires two identity-checked reads to return the complete fresh snapshot.
 A subsequent 512-byte limit check proves the production accounting path still
 enforces the byte quota.

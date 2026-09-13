@@ -140,8 +140,9 @@ The native fixtures supply deterministic controls without changing production
 ACLs. The owner-directory fixture keeps a real owner-only denial in place for
 both enumerations and requires `repeat=persistent`. The isolated-reader fixture
 then applies a real enumeration denial to the validated isolated identity,
-checks both recovery callbacks run under that identity, restores only the
-fixture ACL between attempts, and requires the fresh complete snapshot.
+checks both recovery callbacks run under that identity, temporarily reverts
+only to restore the fixture ACL, verifies the retry is back under the isolated
+identity before enumerating, and requires the fresh complete snapshot.
 Independent terminal checks below and above the byte limit exercise the
-production accounting path. It retains the existing path, entry, byte, reparse,
-process, output, and time bounds.
+production accounting path. It retains the existing path, entry, byte,
+reparse, process, output, and time bounds.

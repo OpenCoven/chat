@@ -49,7 +49,10 @@ namespace OpenCoven.Tests {
             };
             Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> repeatRead = () => {
                 AssertIdentity(expectedSid);
-                restoration.GetType().GetMethod("Restore").Invoke(restoration, null);
+                WindowsIdentity.RunImpersonated(
+                    Microsoft.Win32.SafeHandles.SafeAccessTokenHandle.InvalidHandle,
+                    () => restoration.GetType().GetMethod("Restore").Invoke(restoration, null));
+                AssertIdentity(expectedSid);
                 return read();
             };
             Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> recovery = () =>
