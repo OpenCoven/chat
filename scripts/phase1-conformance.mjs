@@ -413,6 +413,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.launch.not-installed',
   'phase1.native-scenarios.launch.configuration-invalid',
   'phase1.native-scenarios.launch.process',
+  'phase1.native-scenarios.launch.service-unavailable',
   'phase1.native-scenarios.launch.timeout',
   'phase1.native-scenarios.launch.rpc-closed',
   'phase1.native-scenarios.launch.initial-discovery',

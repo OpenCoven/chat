@@ -1305,10 +1305,12 @@ Launch diagnostics also retain a fixed operation boundary for otherwise unknown
 errors: initial discovery, launch RPC, post-launch discovery, or health. Discovery
 RPC timeouts distinguish the initial read from the post-launch polling read.
 These identifiers contain no response data and preserve the first failure.
-Protected run `34738396429` passed Linux and macOS (197 assertions each), but
-Windows failed with `phase1.native-scenarios.launch.unknown` before pairing.
-The operation boundary and root cause remain unproven until fresh protected
-validation uses this diagnostic source and its reviewed validator binding.
+Protected run `34741820511` passed Linux and macOS (197 assertions each), but
+Windows failed with `phase1.native-scenarios.launch.launch-rpc-unknown` before
+pairing. The native launch implementation uses the fixed `service_unavailable`
+code when its absolute readiness deadline expires; the next diagnostic binding
+therefore distinguishes that allowlisted result from every other launch-RPC
+failure without exposing response data or arbitrary error text.
 
 The initial pairing stage further distinguishes create, poll, and exchange RPC
 failures using a fixed native-code allowlist, operation timeouts, RPC closure,
@@ -1387,20 +1389,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 166,054 | `abdceb1797792b6dcc1823d38572e8d3c4c830ea34f9bb61467a7817adac3016` |
+| `.github/workflows/client-v1-conformance.yml` | 166,054 | `abf2df132782c7fcb47b2c8619ba633980d2a5db7c272a2387c9365f5ee74b9a` |
 | `scripts/contract-canary.mjs` | 40,116 | `1683e2484a228b89ee241b9b434f277895bb6113fa1c2f7051267563b2582380` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `8cfcd89aca252a9c4c6f23932012e8b443341030963dae2d2a5a57650492b3b6` |
-| `scripts/phase1-conformance.mjs` | 217,030 | `693703809c82875ddfaa795d0318419f5592f6c7b53a3b284e75bad29b27521c` |
+| `scripts/phase1-conformance.mjs` | 217,086 | `dc288444c2a4f7a9bbff0dfc24493880162cbda075892b3e171c118ea3b7db1d` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 213,469 | `6441993c9f2fa526d6d171e4b9d00139391fd79d8499cd5514c5e87091cc55d0` |
+| `scripts/phase1-schema-v2-producer.mjs` | 213,647 | `ae398905a99d4a73e413bb77a465c09ea97f974bce88d3dc7a3de2ad9161dfbb` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

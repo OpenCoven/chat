@@ -232,6 +232,7 @@ const launchFailureCategories = [
   'not-installed',
   'configuration-invalid',
   'process',
+  'service-unavailable',
   'timeout',
   'rpc-closed',
   'initial-discovery',
@@ -1776,6 +1777,9 @@ export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
           cave_launch_failed: 'process',
         }[launchFailure[1]]
       }`;
+    }
+    if (message === 'native RPC cave_launch failed with service_unavailable') {
+      return 'phase1.native-scenarios.launch.service-unavailable';
     }
     if (message === 'native RPC timed out for cave_launch') {
       return 'phase1.native-scenarios.launch.timeout';
