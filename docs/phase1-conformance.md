@@ -204,29 +204,29 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `0da8c4749f57e63601b29d66032f80c9bbac1cb5`, tree
-  `7be1737c4aae02493660d39a2d6f6fdf4dd9e696`, the reviewed GLib
-  backport source retained by the current SDK contract;
-- SDK package candidate `1597835325cf3762b51408ff0a565037eeb25f64`;
-- Cave authority `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`, tree
-  `2d05861d243a3a5761c160765c011aa6dde6131f`, release `0.4.2`;
+- Chat production `636f7da96fa178c2c14648f84137091b15a1cb8a`, tree
+  `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
+  retaining the prior reviewed native production source;
+- SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
+- Cave authority `1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
+  `b05c2baa4b586e2523e1803db8d9fd1182ecd148`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver at `harnessAuthority.revision` and `.tree` in
-  `phase1-conformance.lock.json`, retained in the producer ancestry;
-- SDK evidence contract and registry
+- Chat conformance driver `d32a44a88945ead83e7a7bb42f4c000e24319e7d`, tree
+  `c7bbffb726da7b32b40acdfd53d736d3281f136e`, retained in the producer ancestry;
+- Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `a0f4bffb4619856997668371d0cf471d35c085b884ff5b3082510d0006ebb2d5`;
+  `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-SDK PR #189 froze the replacement candidate and Chat source contract.
-The protected validator last used by run 34647484742 is SDK #206 merge
+SDK PR #189 froze the preceding candidate and Chat source contract.
+The protected validator used by historical run 34647484742 is SDK #206 merge
 `c774ba4ba473dae99ea8fe712989ae33ef5d5184`, which binds Chat producer
 `e7dfc135bb7341d4cfc5b7f0fcf4004843868809` and the preceding Coven source.
-Adopting Coven #1015 requires a new SDK source/producer binding before another
-protected dispatch. The frozen
+The current SDK/Cave adoption requires a new SDK source/producer binding after
+reviewed Chat landing and before another protected dispatch. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the

@@ -1585,7 +1585,7 @@ describe('Phase 1 SDK source contract authority', () => {
     });
     expect(frozenLock.candidate).toMatchObject({
       repository: 'OpenCoven/sdk',
-      commit: phase1Lock.sdk.revision,
+      commit: historicalPhase1Lock.sdk.revision,
     });
     expect(frozenLock.evidenceProducer).toMatchObject({
       status: 'compatible',
