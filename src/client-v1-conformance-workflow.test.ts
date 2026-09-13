@@ -3085,7 +3085,7 @@ ${pathAssignment}
     }
   });
 
-  test('bounds Windows quota scope and repeat diagnostics without changing fail-closed accounting', () => {
+  test('accepts only a complete readable Windows directory snapshot repeat', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const sources = [
       embeddedWindowsSupervisorSource(workflow),
@@ -3098,6 +3098,9 @@ ${pathAssignment}
         'ClassifyQuotaScope',
         'NormalizeQuotaScope',
         'NormalizeQuotaRepeat',
+        'ReadDirectorySnapshotOperation',
+        'repeatDiagnostic && error is UnauthorizedAccessException',
+        'return (repeatRead ?? read)();',
         'scope == null ? "none" : scope',
         'repeat == null ? "none" : repeat',
         'catch (QuotaMonitorContextException error)',
@@ -3144,6 +3147,9 @@ ${pathAssignment}
       );
       expect(source).toContain(
         '() => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length',
+      );
+      expect(source).toMatch(
+        /return ReadDirectorySnapshotOperation\(\s*operation,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries\),\s*repeatDiagnostic,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries,\s*true\)\);/u,
       );
     }
   });

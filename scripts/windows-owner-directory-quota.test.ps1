@@ -14,13 +14,17 @@ $terminal = [OpenCoven.WindowsJobSupervisor].GetMethod('ApplyTerminalDirectoryQu
 $monitor = [OpenCoven.WindowsJobSupervisor].GetMethod('MonitorDirectoryQuotasAsync', $staticFlags)
 $stateType = [OpenCoven.WindowsJobSupervisor].GetNestedType('DirectoryQuotaFailureState', [Reflection.BindingFlags]'NonPublic')
 $enablePrivilege = [OpenCoven.WindowsJobSupervisor].GetMethod('EnablePrivilege', $staticFlags)
-foreach ($method in @($terminal, $monitor, $stateType, $enablePrivilege)) {
+$readSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadDirectorySnapshotOperation', $staticFlags)
+$readBoundedSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadBoundedDirectorySnapshot', $staticFlags)
+foreach ($method in @($terminal, $monitor, $stateType, $enablePrivilege, $readSnapshot, $readBoundedSnapshot)) {
   if ($null -eq $method) { throw 'Native owner-directory fixture contract is missing.' }
 }
 if (-not ('OpenCoven.Tests.OwnerDirectoryQuotaFixture' -as [type])) {
   Add-Type -Language CSharp -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 namespace OpenCoven.Tests
@@ -121,6 +125,40 @@ namespace OpenCoven.Tests
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture owner-only directory setup failed.");
         }
     }
+
+    public static class QuotaSnapshotReadFixture
+    {
+        public static string DirectoryPath;
+        public static Action BeforeReadableRepeat;
+
+        public static Func<List<FileSystemInfo>> Read
+        {
+            get { return ReadSnapshot; }
+        }
+
+        public static Func<List<FileSystemInfo>> RestoreAndRead
+        {
+            get { return RestoreAndReadSnapshot; }
+        }
+
+        private static List<FileSystemInfo> ReadSnapshot()
+        {
+            var snapshot = new List<FileSystemInfo>();
+            foreach (var entry in new DirectoryInfo(DirectoryPath).EnumerateFileSystemInfos(
+                "*",
+                SearchOption.TopDirectoryOnly))
+            {
+                snapshot.Add(entry);
+            }
+            return snapshot;
+        }
+
+        private static List<FileSystemInfo> RestoreAndReadSnapshot()
+        {
+            BeforeReadableRepeat();
+            return ReadSnapshot();
+        }
+    }
 }
 '@
 }
@@ -176,8 +214,42 @@ try {
     throw 'Quota fixture changed supervisor identity.'
   }
 
-  # Restore only this test fixture. Production private ACLs remain untouched.
-  $securityLease.Restore()
+  [OpenCoven.Tests.QuotaSnapshotReadFixture]::DirectoryPath = $directory
+  $persistentRead = $null
+  try {
+    $readBoundedSnapshot.Invoke($null, [object[]]@(
+      $directory,
+      '*',
+      $false,
+      10,
+      3,
+      $true
+    )) | Out-Null
+  } catch {
+    $persistentRead = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $persistentRead -or
+      $persistentRead.GetType().GetProperty('Category', $instanceFlags).GetValue($persistentRead) -cne 'access-denied' -or
+      $persistentRead.GetType().GetProperty('Operation', $instanceFlags).GetValue($persistentRead) -cne 'directory-enumeration-depth-3-plus' -or
+      $persistentRead.GetType().GetProperty('Repeat', $instanceFlags).GetValue($persistentRead) -cne 'persistent') {
+    throw 'Persistent native directory denial did not remain fail-closed.'
+  }
+  [OpenCoven.Tests.QuotaSnapshotReadFixture]::BeforeReadableRepeat = [Action]{
+    $securityLease.Restore()
+  }
+  $snapshot = $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaSnapshotReadFixture]::Read,
+    $true,
+    [OpenCoven.Tests.QuotaSnapshotReadFixture]::RestoreAndRead
+  ))
+  if ($snapshot.Count -ne 1 -or $snapshot[0].Name -cne 'payload.bin' -or $snapshot[0].Length -ne 1024) {
+    throw 'Readable native repeat did not return the complete fresh snapshot.'
+  }
+  if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne $supervisorSid) {
+    throw 'Readable native repeat changed supervisor identity.'
+  }
+
   $overflow = [OpenCoven.WindowsJobRunResult]::new()
   $terminal.Invoke($null, [object[]]@($overflow, [OpenCoven.WindowsDirectoryQuota[]]@(
     [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $directory, 512)
@@ -190,6 +262,8 @@ try {
 } catch {
   $failures.Add($_.Exception)
 } finally {
+  [OpenCoven.Tests.QuotaSnapshotReadFixture]::DirectoryPath = $null
+  [OpenCoven.Tests.QuotaSnapshotReadFixture]::BeforeReadableRepeat = $null
   try { if ($null -ne $cancellation) { $cancellation.Cancel() } }
   catch { $failures.Add($_.Exception) }
   try {
