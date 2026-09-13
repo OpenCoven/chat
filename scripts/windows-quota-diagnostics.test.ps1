@@ -12,6 +12,7 @@ $cases = @(
   @([IO.IOException]::new('secret-path'), 'io'),
   @([IO.IOException]::new('secret-path', -2147024894), 'io-file-not-found'),
   @([IO.IOException]::new('secret-path', -2147024893), 'io-path-not-found'),
+  @([IO.IOException]::new('secret-path', -2147024891), 'io'),
   @([IO.IOException]::new('secret-path', -2147024864), 'io-sharing-violation'),
   @([IO.IOException]::new('secret-path', -2147024863), 'io-lock-violation'),
   @([IO.IOException]::new('secret-path', -2147024690), 'io-name-too-long'),
