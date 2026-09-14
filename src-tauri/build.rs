@@ -1,6 +1,13 @@
 use std::{fs, path::Path};
 
 const NATIVE_COMMANDS: &[&str] = &[
+    "coven_runtime_status",
+    "coven_runtime_familiars",
+    "coven_runtime_sessions",
+    "coven_runtime_chat_lifecycle",
+    "coven_runtime_read",
+    "coven_runtime_send",
+    "coven_runtime_cancel",
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",

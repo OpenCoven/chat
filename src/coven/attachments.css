@@ -1,0 +1,90 @@
+.coven-attachment-note {
+  margin: 6px 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.coven-history-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.coven-history-attachments li {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.coven-chat .oc-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+
+.coven-chat .oc-attachment-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--accent-presence);
+}
+
+.coven-chat .oc-attachment-copy {
+  min-width: 0;
+}
+
+.coven-chat .coven-compact-composer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 24px;
+}
+
+.coven-compact-composer .oc-composer-bar {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 0;
+}
+
+.coven-compact-composer :is(.oc-composer-label, .oc-composer-spacer, .oc-composer-hint) {
+  display: none;
+}
+
+.coven-compact-composer .oc-composer-field {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  padding: 6px 4px;
+}
+
+.coven-compact-composer .oc-composer-footer {
+  grid-column: 3;
+  grid-row: 1;
+  padding: 0;
+}
+
+.coven-compact-composer .oc-composer-attachments {
+  grid-column: 1 / -1;
+  padding: 6px;
+}
+
+.coven-compact-composer button[aria-label="Attach file"] {
+  border-radius: 50%;
+  background: var(--bg-elevated);
+}
+.coven-chat .oc-composer-attachments {
+  flex-wrap: wrap;
+  max-height: 96px;
+  overflow-y: auto;
+}
