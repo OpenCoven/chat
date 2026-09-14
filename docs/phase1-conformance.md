@@ -421,8 +421,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `3621bf8c729549c620ed253fa63bbc7a53c65490`, tree
-  `59ef866d78f0ff4910d1926cba343cfe9a73c49b`, retained in the producer ancestry;
+- Chat conformance driver `d8d18fa991c03a28417fdd5b98e70c702d332a0f`, tree
+  `f9064ad8892e8a0b90eeac296110b63358f19d93`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1736,7 +1736,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 174,594 | `34f3427d1046d179d577237c387126b4be8d3b72e9e165e221f79cdc6ea4a577` |
+| `.github/workflows/client-v1-conformance.yml` | 174,594 | `3a777a392bda7a39fb110ff4570869e4776dc6544e2920d225219491670aebe6` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -2414,3 +2414,9 @@ Local validation passed all 173 Rust library tests, Clippy with warnings denied,
 and formatting. Independent review found no issues. Chat #275 carries `ci:full`
 to run the native PR lanes; those results and fresh protected validation are
 separate requirements and are not implied by the local checks.
+
+## Combined cleanup and diagnostics source
+
+Source `d8d18fa991c03a28417fdd5b98e70c702d332a0f`, tree `f9064ad8892e8a0b90eeac296110b63358f19d93`, combines reviewed Windows residual cleanup, bounded Cave startup-exit diagnostics, and native credential absence readback. Original PR source commits remain in its ancestry. The lock and expected-authority fixture bind the combined source.
+
+All 46 bounded Cave diagnostic tests passed locally. The integration also passed 129 portable tests; 13 timed out. Bounded controls reproduced local PowerShell Add-Type timeouts for trivial C# and the baseline supervisor, so full native CI remains required. No timeouts, resource limits, or dependency settings were relaxed. Fresh SDK rebinding and protected cross-platform validation remain outstanding.
