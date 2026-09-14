@@ -239,7 +239,7 @@ describe('compact viewports', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
       fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
       expect(inspector).not.toHaveAttribute('aria-hidden');
@@ -257,9 +257,9 @@ describe('compact viewports', () => {
     try {
       const { container } = render(<ChatLayout {...layoutProps()} ready />);
       expect(container.querySelector('.coven-chat')).toHaveAttribute('data-tier', 'medium');
-      expect(
-        screen.getByRole('complementary', { name: 'Familiars sidebar' }),
-      ).not.toHaveAttribute('aria-hidden');
+      expect(screen.getByRole('complementary', { name: 'Familiars sidebar' })).not.toHaveAttribute(
+        'aria-hidden',
+      );
       expect(container.querySelector('.fr-inspector')).toHaveAttribute('aria-hidden', 'true');
     } finally {
       restore();
@@ -272,5 +272,31 @@ describe('compact viewports', () => {
     expect(screen.getByRole('complementary', { name: 'Familiar inspector' })).not.toHaveAttribute(
       'aria-hidden',
     );
+  });
+});
+
+describe('inspector metadata rows', () => {
+  it('keeps a long workspace path recoverable through its tooltip instead of colliding with the label', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiarId="f"
+        familiars={[
+          {
+            id: 'f',
+            name: 'Astra',
+            workspace: '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
+          },
+        ]}
+      />,
+    );
+    const value = screen.getByText(
+      '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
+    );
+    expect(value).toHaveAttribute(
+      'title',
+      '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
+    );
+    expect(value).toHaveClass('coven-row-value--path');
   });
 });

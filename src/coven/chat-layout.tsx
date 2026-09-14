@@ -428,12 +428,16 @@ export function ChatLayout(props: ChatLayoutProps) {
         <div className="fr-composer-wrap">
           <div className="fr-composer-inner">
             {props.readOnly && (
-              <p>This familiar chat is archived. Restore it to continue the conversation.</p>
+              <p className="coven-composer-note">
+                This familiar chat is archived. Restore it to continue the conversation.
+              </p>
             )}
             {props.busy && composerDisabled && (
-              <FamButton onClick={props.onCancel} disabled={props.cancelling}>
-                Stop run
-              </FamButton>
+              <div className="coven-run-actions">
+                <FamButton size="sm" onClick={props.onCancel} disabled={props.cancelling}>
+                  Stop run
+                </FamButton>
+              </div>
             )}
             <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
               <Composer
@@ -477,8 +481,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                   />
                   <p className="coven-attachment-note">
                     {props.attaching
-                      ? 'Reading files...'
-                      : 'UTF-8 text/code only · 4 files, 64 KiB each. Unsent files stay in this window until removed or sent.'}
+                      ? 'Reading files…'
+                      : 'Text or code files · up to 4, 64 KiB each. Unsent files stay here until removed or sent.'}
                   </p>
                 </>
               ) : null}
@@ -534,11 +538,22 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <div className="fr-card fr-card--lift fr-rows">
                     <div className="fr-row">
                       <span className="fr-row-label">Identity</span>
-                      <code className="fr-row-value">{familiar.id}</code>
+                      <code className="fr-row-value coven-row-value--path" title={familiar.id}>
+                        {familiar.id}
+                      </code>
                     </div>
                     <div className="fr-row">
                       <span className="fr-row-label">Workspace</span>
-                      <span className="fr-row-value">{familiar.workspace || 'Not reported'}</span>
+                      {familiar.workspace ? (
+                        <span
+                          className="fr-row-value coven-row-value--path"
+                          title={familiar.workspace}
+                        >
+                          {familiar.workspace}
+                        </span>
+                      ) : (
+                        <span className="fr-row-value">Not reported</span>
+                      )}
                     </div>
                     <div className="fr-row">
                       <span className="fr-row-label">Conversations</span>

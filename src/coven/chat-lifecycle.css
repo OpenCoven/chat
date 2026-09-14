@@ -43,7 +43,8 @@
   line-height: 1.5;
 }
 .coven-delete-dialog::backdrop {
-  background: #0009;
+  background: rgba(6, 6, 8, 0.6);
+  backdrop-filter: blur(6px);
 }
 .coven-delete-dialog h2 {
   margin-top: 0;
@@ -54,11 +55,11 @@
   margin-top: 24px;
 }
 .coven-delete-confirm {
-  background: #a32222;
-  color: #fff;
+  background: var(--color-danger);
+  color: var(--text-primary);
 }
 .coven-lifecycle button:focus-visible,
 .coven-lifecycle-filter button:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 3px;
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: var(--ring-offset);
 }

@@ -81,14 +81,20 @@ test('lifts tool activity summaries out of prose into labelled rows', () => {
   expect(lists[0]).toContainElement(rows[1] as HTMLElement);
   expect(lists[1]).toContainElement(rows[2] as HTMLElement);
   expect(rows[0]).toHaveTextContent('Bash');
-  expect(rows[0]).toHaveTextContent('gh auth status 2>&1 | head -30; echo "---ORGS---"; gh api user/orgs ...');
+  expect(rows[0]).toHaveTextContent(
+    'gh auth status 2>&1 | head -30; echo "---ORGS---"; gh api user/orgs ...',
+  );
   expect(rows[1]).toHaveTextContent('find . -iname "*.html" 2>/dev/null ...');
   expect(rows[2]).toHaveTextContent('Read');
   expect(rows[2]).toHaveTextContent('src/index.html');
   const paragraphs = Array.from(document.querySelectorAll('.coven-formatted p')).map(
     (node) => node.textContent,
   );
-  expect(paragraphs).toEqual(['I will check access first.', 'Then I will build the site.', 'Done.']);
+  expect(paragraphs).toEqual([
+    'I will check access first.',
+    'Then I will build the site.',
+    'Done.',
+  ]);
   expect(document.body.textContent).not.toContain('✶');
 });
 

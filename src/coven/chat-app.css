@@ -75,20 +75,51 @@
   object-fit: cover;
 }
 
+/*
+ * Notices. The runtime line is a quiet mono caption, not a card: it is
+ * context, and the transcript should read as the first thing on the page.
+ * Alerts keep a hairline of colour on the leading edge so state is carried
+ * by a word and a mark rather than a filled box.
+ */
 .coven-status,
 .coven-error {
   display: block;
-  margin: 16px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border-hairline);
-  border-radius: 8px;
-  color: var(--text-secondary);
+  margin: 4px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+.coven-status {
+  align-self: center;
+  max-width: 64ch;
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  text-align: center;
+  text-wrap: balance;
+}
+
 .coven-error {
-  color: var(--color-danger);
+  position: relative;
+  padding: 8px 12px 8px 16px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--color-danger) 8%, transparent);
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.coven-error::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-danger);
 }
 
 .coven-details {
@@ -162,16 +193,154 @@
   outline: 1px solid oklch(1 0 0 / 0.1);
 }
 
-@media (max-width: 1100px) {
-  .coven-chat {
-    --fr-sidebar-w: min(220px, var(--coven-sidebar-w));
-    --fr-inspector-w: min(260px, var(--coven-inspector-w));
+/*
+ * Responsive tiers. The layout hook (viewport.ts) names the tier on the shell
+ * root; these rules only decide where each rail lives. `wide` keeps three
+ * columns. `medium` folds the inspector into a drawer. `compact` folds both
+ * rails away so the transcript and composer own the viewport.
+ */
+.coven-chat {
+  min-width: 0;
+  height: 100dvh;
+}
+
+.coven-chat[data-tier="medium"] {
+  --fr-sidebar-w: min(var(--coven-sidebar-w), 260px);
+}
+
+.coven-chat[data-tier="medium"] .fr-sidebar-inner {
+  width: 100%;
+}
+
+.coven-chat[data-tier="medium"] .fr-inspector,
+.coven-chat[data-tier="compact"] :is(.fr-sidebar, .fr-inspector) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  width: min(340px, 88vw);
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-panel);
+  box-shadow:
+    0 24px 64px -24px rgba(0, 0, 0, 0.9),
+    0 0 0 1px var(--border-hairline);
+  transition:
+    transform 200ms var(--ease-standard),
+    visibility 200ms;
+  will-change: transform;
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar {
+  left: 0;
+  transform: translateX(-100%);
+  visibility: hidden;
+}
+
+.coven-chat[data-tier="compact"][data-sidebar="open"] .fr-sidebar {
+  transform: none;
+  visibility: visible;
+}
+
+.coven-chat[data-tier="medium"] .fr-inspector,
+.coven-chat[data-tier="compact"] .fr-inspector {
+  right: 0;
+  transform: translateX(100%);
+  visibility: hidden;
+}
+
+.coven-chat[data-tier="medium"][data-inspector="open"] .fr-inspector,
+.coven-chat[data-tier="compact"][data-inspector="open"] .fr-inspector {
+  transform: none;
+  visibility: visible;
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar-inner,
+.coven-chat[data-tier="compact"] .fr-inspector-inner,
+.coven-chat[data-tier="medium"] .fr-inspector-inner {
+  width: 100%;
+  min-width: 0;
+}
+
+.coven-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(6, 6, 8, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+  animation: fr-fade 160ms var(--ease-standard);
+}
+
+.coven-scrim:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: -4px;
+}
+
+.coven-chat[data-tier="compact"] .fr-column {
+  padding: 14px 14px 18px;
+}
+
+.coven-chat[data-tier="compact"] :is(.fr-user-body, .fr-familiar) {
+  max-width: 92%;
+}
+
+.coven-chat[data-tier="compact"] .fr-composer-wrap {
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.coven-chat[data-tier="compact"] .fr-thread-header {
+  padding: 0 8px;
+}
+
+.coven-chat[data-tier="compact"] .fr-thread-familiar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-chat :is(.fr-sidebar, .fr-inspector, .coven-scrim) {
+    transition: none;
+    animation: none;
   }
 }
 
-@media (max-width: 680px) {
-  .coven-chat {
-    --fr-sidebar-w: min(30vw, var(--coven-sidebar-w));
-    --fr-inspector-w: min(30vw, var(--coven-inspector-w));
-  }
+/* ---------------------------------------------------------- inspector rows */
+
+.coven-chat .fr-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.coven-chat .fr-row-value {
+  justify-content: flex-end;
+  min-width: 0;
+  text-align: right;
+}
+
+.coven-row-value--path {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+
+/* ------------------------------------------------------------- composer */
+
+.coven-composer-note {
+  margin: 0 4px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.coven-run-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
 }
