@@ -179,17 +179,30 @@ namespace OpenCoven.Tests {
                 throw new ArgumentException("Fixture teardown stages are outside their bound.");
             var failures = new List<Exception>();
             var failedStages = new List<string>();
+            var categories = new List<string>();
             for (int index = 0; index < stages.Length; index++) {
                 try { stages[index](); }
                 catch (Exception error) {
                     failures.Add(error);
                     failedStages.Add(index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    categories.Add(FailureCategory(error));
                 }
             }
             if (failures.Count != 0)
                 throw new InvalidOperationException(
-                    "Native residual fixture teardown failed: stages=" + String.Join(",", failedStages) + ".",
+                    "Native residual fixture teardown failed: stages=" + String.Join(",", failedStages) +
+                        ". causes=" + String.Join(",", categories) + ".",
                     new AggregateException(failures.ToArray()));
+        }
+        public static string FailureCategory(Exception error) {
+            Exception root = error.GetBaseException();
+            var native = root as Win32Exception;
+            if (native != null) return "win32-" + native.NativeErrorCode;
+            return (root is EntryPointNotFoundException ? "entry-point" :
+                root is DllNotFoundException ? "dll" :
+                root is UnauthorizedAccessException ? "access-denied" :
+                root is InvalidOperationException ? "invalid-operation" : "managed") +
+                ":" + unchecked((uint)root.HResult).ToString("x8");
         }
         public static void TestTeardown() {
             string root = Path.Combine(Path.GetTempPath(), "opencoven-teardown-" + Guid.NewGuid().ToString("N"));
@@ -221,7 +234,8 @@ namespace OpenCoven.Tests {
                     throw new InvalidOperationException("A faulted polling task skipped remaining fixture teardown stages.");
                 var aggregate = failure == null ? null : failure.InnerException as AggregateException;
                 if (aggregate == null || aggregate.InnerExceptions.Count != 2 ||
-                    failure.Message.Contains("injected-private") || failure.Message.Contains(root))
+                    failure.Message.Contains("injected-private") || failure.Message.Contains(root) ||
+                    !failure.Message.Contains("causes=managed:80131505,invalid-operation:80131509."))
                     throw new InvalidOperationException("Fixture teardown did not retain both failures with a bounded outer diagnostic.");
             } finally {
                 held.Dispose();
@@ -387,6 +401,29 @@ if ($invalidSharing -isnot [InvalidOperationException] -or
 }
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
+
+$aclProbeRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-residual-acl-' + [Guid]::NewGuid().ToString('N'))
+$aclProbeFile = Join-Path $aclProbeRoot 'marker.bin'
+[IO.Directory]::CreateDirectory($aclProbeRoot) | Out-Null
+[IO.File]::WriteAllText($aclProbeFile, 'owned')
+try {
+  [OpenCoven.Tests.ProfileResidualNativeFixture]::SetReadDenial($aclProbeFile, $true)
+  if ([OpenCoven.Tests.ProfileResidualNativeFixture]::ReadAccess($aclProbeFile) -ne 5) {
+    throw 'The native fixture did not establish file-data denial.'
+  }
+  [OpenCoven.Tests.ProfileResidualNativeFixture]::SetReadDenial($aclProbeFile, $false)
+  if ([OpenCoven.Tests.ProfileResidualNativeFixture]::ReadAccess($aclProbeFile) -ne 0) {
+    throw 'The native fixture did not restore file-data access.'
+  }
+  Write-Host 'Native residual read-denial fixture preflight passed.'
+} catch {
+  Write-Host ('Native residual fixture preflight failed: cause=' +
+    [OpenCoven.Tests.ProfileResidualNativeFixture]::FailureCategory($_.Exception) + '.')
+  throw
+} finally {
+  [IO.File]::Delete($aclProbeFile)
+  [IO.Directory]::Delete($aclProbeRoot)
+}
 
 foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', 'hardlink',
     'readonly-hardlink', 'registration-mismatch', 'root-swap', 'root-junction', 'depth',
@@ -579,6 +616,10 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       throw 'Cleanup changed shared hard-link attributes.'
     }
     Write-Host "Native authorized residual case passed: $case."
+  } catch {
+    Write-Host ("Native residual case failed: case=$case;cause=" +
+      [OpenCoven.Tests.ProfileResidualNativeFixture]::FailureCategory($_.Exception) + '.')
+    throw
   } finally {
     # Each independently owned resource gets a teardown stage, including after polling faults.
     [OpenCoven.Tests.ProfileResidualNativeFixture]::RunTeardown([Action[]]@(
