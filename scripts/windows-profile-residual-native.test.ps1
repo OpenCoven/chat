@@ -128,8 +128,11 @@ namespace OpenCoven.Tests {
             if (query == null || tag == null || same == null || contents == null || relative == null)
                 throw new InvalidOperationException("Retained-directory confinement seams are missing.");
             string canary = Path.Combine(target, "keep.bin");
+            using (var parent = CreateFileW(Path.GetDirectoryName(directory), 0x00120081, 3,
+                IntPtr.Zero, 3, 0x02200000, IntPtr.Zero))
             using (var retained = CreateFileW(directory, 0x00130081, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
-                if (retained.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture directory retention failed.");
+                if (parent.IsInvalid || retained.IsInvalid)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture directory retention failed.");
                 object before = Invoke(query, retained.DangerousGetHandle(), "Fixture identity unavailable.");
                 object attributes = Invoke(tag, retained.DangerousGetHandle(), "Fixture attributes unavailable.");
                 uint value = (uint)attributes.GetType().GetField("FileAttributes", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(attributes);
@@ -150,7 +153,8 @@ namespace OpenCoven.Tests {
                     throw new InvalidOperationException("The conversion did not preserve the inspected directory identity.");
                 string enumeration = "completed", relativeOpen = "missing";
                 try {
-                    Invoke(contents, retained, volume, System.Diagnostics.Stopwatch.StartNew(), 2, 0);
+                    Invoke(contents, parent, Path.GetFileName(directory), retained, volume,
+                        System.Diagnostics.Stopwatch.StartNew(), 2, 0);
                 } catch (Win32Exception error) when (error.GetType().Name == "CleanupDeleteException") {
                     enumeration = "win32-" + error.NativeErrorCode;
                 } catch (InvalidOperationException error) when (
@@ -159,7 +163,7 @@ namespace OpenCoven.Tests {
                 }
                 SafeFileHandle escaped = null;
                 try {
-                    escaped = (SafeFileHandle)Invoke(relative, retained, "keep.bin", true, 3, "child");
+                    escaped = (SafeFileHandle)Invoke(relative, retained, "keep.bin", true, 3, "child", false);
                     if (escaped != null)
                         throw new InvalidOperationException("Relative child lookup escaped into the junction target.");
                 } catch (Win32Exception error) when (error.GetType().Name == "CleanupDeleteException") {
@@ -370,6 +374,16 @@ $invalidRole = $null
 try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canary', 2)) } catch { $invalidRole = $_.Exception }
 if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-canary')) {
   throw 'Residual open classifier accepted or exposed an arbitrary role.'
+}
+$relativeOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'OpenProfileResidualRelative', [Reflection.BindingFlags]'NonPublic,Static')
+$invalidSharing = $null
+try {
+  $relativeOpen.Invoke($null, [object[]]@($null, 'entry', $true, 0, 'child', $true))
+} catch { $invalidSharing = $_.Exception.GetBaseException() }
+if ($invalidSharing -isnot [InvalidOperationException] -or
+    $invalidSharing.Message -cne 'Residual deletion handles must deny delete sharing.') {
+  throw 'Residual deletion admitted delete sharing or reached native code before rejecting it.'
 }
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
