@@ -1,0 +1,276 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { ChatLayout, type ChatLayoutProps } from './chat-layout';
+
+function layoutProps(): ChatLayoutProps {
+  return {
+    familiars: [],
+    sessions: [],
+    messages: [],
+    familiarId: '',
+    sessionId: '',
+    draft: '',
+    status: 'Open the desktop app to use the Coven CLI.',
+    ready: false,
+    busy: false,
+    loading: false,
+    cancelling: false,
+    error: '',
+    onFamiliar: vi.fn(),
+    onDraft: vi.fn(),
+    onSend: vi.fn(),
+    onCancel: vi.fn(),
+    onRefresh: vi.fn(),
+  };
+}
+
+describe('production Familiars layout', () => {
+  it('keeps cancellation available while viewing an archived chat during a run', () => {
+    const props = { ...layoutProps(), ready: true, readOnly: true, busy: true };
+    render(<ChatLayout {...props} />);
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).toBeEnabled();
+    fireEvent.click(stop);
+    expect(props.onCancel).toHaveBeenCalledOnce();
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+
+  it('opens the familiar overview card from a reply avatar or name without navigating', () => {
+    const props = {
+      ...layoutProps(),
+      familiarId: 'f',
+      familiars: [{ id: 'f', name: 'Local familiar', description: 'Configured purpose' }],
+      messages: [{ id: 'a', role: 'assistant' as const, text: 'A real reply' }],
+    };
+    render(<ChatLayout {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    const links = screen.getAllByRole('button', { name: "Show Local familiar's familiar card" });
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      fireEvent.click(link);
+      expect(screen.getByRole('complementary', { name: 'Familiar inspector' })).toBeVisible();
+      expect(screen.getByRole('region', { name: 'Overview' })).toHaveTextContent(
+        'Configured purpose',
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    }
+    expect(props.onFamiliar).not.toHaveBeenCalled();
+  });
+
+  it('formats assistant Markdown while preserving user and system text literally', () => {
+    const { container } = render(
+      <ChatLayout
+        {...layoutProps()}
+        messages={[
+          { id: 'u', role: 'user', text: '**literal user**' },
+          { id: 'a', role: 'assistant', text: '## Answer\n\n**Formatted answer**' },
+          { id: 's', role: 'system', text: '**literal system**' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Answer', level: 2 })).toBeInTheDocument();
+    expect(screen.getByText('Formatted answer').tagName).toBe('STRONG');
+    expect(screen.getByText('**literal user**')).toBeInTheDocument();
+    expect(screen.getByText('**literal system**')).toBeInTheDocument();
+    expect(container.querySelectorAll('.coven-formatted')).toHaveLength(1);
+  });
+
+  it('keeps three design columns and honest browser setup without seeded content', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} />);
+    expect(container.querySelector('.fr-shell')).toBeInTheDocument();
+    expect(container.querySelector('.fr-sidebar')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Familiars sidebar' })).toBeInTheDocument();
+    expect(container.querySelector('.fr-thread')).toBeInTheDocument();
+    expect(container.querySelector('.fr-inspector')).toBeInTheDocument();
+    expect(screen.getByText('Open the desktop app to use the Coven CLI.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.queryByText(/Astra|Cave connected|held|pricing/i)).not.toBeInTheDocument();
+  });
+
+  it('shows real messages, filters conversations and renders honest access', () => {
+    const props = layoutProps();
+    render(
+      <ChatLayout
+        {...props}
+        ready
+        familiars={[
+          { id: 'f', name: 'Actual agent' },
+          { id: 'g', name: 'Other agent' },
+        ]}
+        familiarId="f"
+        sessions={[
+          { id: 's', title: 'Actual session', familiarId: 'f' },
+          { id: 't', title: 'Other session', familiarId: 'g' },
+        ]}
+        sessionId="s"
+        messages={[{ id: 'm', role: 'assistant', text: 'Real output' }]}
+      />,
+    );
+    expect(screen.getByText('Real output')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Other' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Other agent' }));
+    expect(props.onFamiliar).toHaveBeenCalledWith('g');
+    expect(screen.queryByRole('button', { name: 'Actual agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Switch familiar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    expect(screen.getByText(/Access rules and approvals are not exposed/)).toBeInTheDocument();
+  });
+
+  it('collapses rails and forwards sends without attachment or command affordances', () => {
+    const props = { ...layoutProps(), ready: true, draft: 'hello' };
+    render(<ChatLayout {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide familiars' }));
+    expect(screen.getByRole('button', { name: 'Show familiars' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commands' })).not.toBeInTheDocument();
+  });
+
+  it('uses the inspector cards for actual familiar metadata', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiarId="f"
+        familiars={[
+          {
+            id: 'f',
+            name: 'Local familiar',
+            description: 'My configured purpose',
+            workspace: '/actual/workspace',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('My configured purpose').closest('.fr-card')).toBeInTheDocument();
+    expect(screen.getByText('/actual/workspace')).toBeInTheDocument();
+    expect(screen.queryByText('SOUL.md')).not.toBeInTheDocument();
+  });
+
+  it('follows live messages only while the reader remains near the bottom', () => {
+    const props = layoutProps();
+    const view = render(<ChatLayout {...props} />);
+    const transcript = screen.getByRole('log');
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 300 },
+    });
+    transcript.scrollTop = 100;
+    fireEvent.scroll(transcript);
+    view.rerender(
+      <ChatLayout
+        {...props}
+        messages={[{ id: '1', role: 'assistant', text: 'First live message' }]}
+      />,
+    );
+    expect(transcript.scrollTop).toBe(100);
+    transcript.scrollTop = 690;
+    fireEvent.scroll(transcript);
+    view.rerender(
+      <ChatLayout
+        {...props}
+        messages={[
+          { id: '1', role: 'assistant', text: 'First live message' },
+          { id: '2', role: 'assistant', text: 'Second live message' },
+        ]}
+      />,
+    );
+    expect(transcript.scrollTop).toBe(1000);
+  });
+
+  it('uses the real avatar in the switcher, empty thread, messages and inspector', () => {
+    const avatarUrl = 'data:image/png;base64,YWJj';
+    const props = {
+      ...layoutProps(),
+      familiarId: 'f',
+      familiars: [{ id: 'f', name: 'Local familiar', avatarUrl }],
+    };
+    const view = render(<ChatLayout {...props} />);
+    expect(screen.getAllByRole('img', { name: 'Local familiar avatar' })).toHaveLength(4);
+    view.rerender(
+      <ChatLayout {...props} messages={[{ id: 'm', role: 'assistant', text: 'Real reply' }]} />,
+    );
+    const image = document.querySelector('.fr-familiar img');
+    expect(image).toHaveAttribute('src', avatarUrl);
+    expect(screen.getAllByRole('img', { name: 'Local familiar avatar' })).toHaveLength(4);
+  });
+});
+
+describe('compact viewports', () => {
+  function mockViewport(maxWidth: number) {
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => {
+        const limit = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Number.NaN);
+        return {
+          matches: Number.isFinite(limit) && maxWidth <= limit,
+          media: query,
+          addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+          removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+        } as unknown as MediaQueryList;
+      },
+    });
+    return () => {
+      Reflect.deleteProperty(window, 'matchMedia');
+    };
+  }
+
+  it('turns both rails into closed drawers that open one at a time and dismiss from the scrim or Escape', () => {
+    const restore = mockViewport(390);
+    try {
+      const { container } = render(<ChatLayout {...layoutProps()} ready />);
+      const shell = container.querySelector('.coven-chat');
+      expect(shell).toHaveAttribute('data-tier', 'compact');
+      const sidebar = container.querySelector('.fr-sidebar') as HTMLElement;
+      const inspector = container.querySelector('.fr-inspector') as HTMLElement;
+      expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+      expect(inspector).toHaveAttribute('aria-hidden', 'true');
+      expect(screen.queryByRole('button', { name: 'Close panels' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      expect(sidebar).not.toHaveAttribute('aria-hidden');
+      expect(shell).toHaveAttribute('data-sidebar', 'open');
+      fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
+      expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
+      expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+      expect(inspector).not.toHaveAttribute('aria-hidden');
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(inspector).toHaveAttribute('aria-hidden', 'true');
+      expect(screen.queryByRole('button', { name: 'Close panels' })).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps the conversation rail but folds the inspector away on medium screens', () => {
+    const restore = mockViewport(900);
+    try {
+      const { container } = render(<ChatLayout {...layoutProps()} ready />);
+      expect(container.querySelector('.coven-chat')).toHaveAttribute('data-tier', 'medium');
+      expect(
+        screen.getByRole('complementary', { name: 'Familiars sidebar' }),
+      ).not.toHaveAttribute('aria-hidden');
+      expect(container.querySelector('.fr-inspector')).toHaveAttribute('aria-hidden', 'true');
+    } finally {
+      restore();
+    }
+  });
+
+  it('opens every rail on wide screens and without matchMedia support', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    expect(container.querySelector('.coven-chat')).toHaveAttribute('data-tier', 'wide');
+    expect(screen.getByRole('complementary', { name: 'Familiar inspector' })).not.toHaveAttribute(
+      'aria-hidden',
+    );
+  });
+});

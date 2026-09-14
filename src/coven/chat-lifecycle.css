@@ -1,0 +1,64 @@
+.coven-lifecycle,
+.coven-delete-actions,
+.coven-lifecycle-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.coven-chat .fr-thread:has(.coven-lifecycle) {
+  grid-template-rows: minmax(44px, auto) minmax(0, 1fr) auto;
+}
+.coven-chat .fr-thread-header:has(.coven-lifecycle) {
+  flex-wrap: wrap;
+  padding-block: 4px;
+}
+.coven-lifecycle {
+  min-width: 0;
+}
+.coven-lifecycle-filter {
+  padding: 8px 16px;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.coven-lifecycle-filter button[aria-pressed="true"] {
+  border-color: currentColor;
+}
+.coven-lifecycle button,
+.coven-lifecycle-filter button {
+  min-height: 36px;
+}
+.coven-archived-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.coven-delete-dialog {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: min(460px, calc(100vw - 32px));
+  line-height: 1.5;
+}
+.coven-delete-dialog::backdrop {
+  background: #0009;
+}
+.coven-delete-dialog h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+.coven-delete-actions {
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+.coven-delete-confirm {
+  background: #a32222;
+  color: #fff;
+}
+.coven-lifecycle button:focus-visible,
+.coven-lifecycle-filter button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}

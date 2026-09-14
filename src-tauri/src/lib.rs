@@ -1,4 +1,6 @@
 mod cave;
+mod chat_lifecycle;
+mod chat_origin;
 #[cfg(feature = "phase1-conformance")]
 mod cleanup_grant;
 mod commands;
@@ -6,6 +8,8 @@ mod commands;
 pub mod conformance;
 mod connection;
 mod coven;
+mod coven_runtime;
+mod familiar_avatar;
 mod hpke_bound;
 mod keyring;
 mod metadata;
@@ -253,7 +257,16 @@ impl NativeConnectionState {
 fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .manage(NativeConnectionState::default())
+        .manage(coven_runtime::CovenRuntimeState::default())
         .invoke_handler(tauri::generate_handler![
+            coven_runtime::coven_runtime_status,
+            coven_runtime::coven_runtime_familiars,
+            coven_runtime::coven_runtime_sessions,
+            coven_runtime::coven_runtime_chat_lifecycle,
+            chat_origin::coven_runtime_import_cave,
+            coven_runtime::coven_runtime_read,
+            coven_runtime::coven_runtime_send,
+            coven_runtime::coven_runtime_cancel,
             app_identity,
             app_installation_id,
             cave_read_discovery,
@@ -280,8 +293,13 @@ fn builder() -> tauri::Builder<tauri::Wry> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     builder()
-        .run(tauri::generate_context!())
-        .expect("error while running OpenCoven Chat");
+        .build(tauri::generate_context!())
+        .expect("error while building OpenCoven Chat")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                coven_runtime::handle_exit_requested(app, &api, code.unwrap_or(0));
+            }
+        });
 }
 
 #[cfg(test)]

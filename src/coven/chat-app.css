@@ -1,0 +1,177 @@
+.coven-chat {
+  --fr-sidebar-w: var(--coven-sidebar-w);
+  --fr-inspector-w: var(--coven-inspector-w);
+  min-width: 0;
+  height: 100%;
+  overflow: clip;
+}
+
+.coven-chat :is(.fr-thread, .fr-sidebar, .fr-inspector) {
+  overflow: clip;
+}
+
+.coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
+  border-width: 0;
+}
+
+.coven-chat .fr-composer-wrap {
+  min-height: 0;
+  max-height: 50dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.coven-chat :is(.fr-transcript, .fr-conv-scroll, .fr-inspector-panel, .oc-textarea) {
+  overscroll-behavior: contain;
+}
+
+.coven-composer-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.coven-chat .fr-sidebar-inner {
+  width: 100%;
+}
+
+.coven-chat .fr-inspector-inner {
+  min-width: 0;
+}
+
+.coven-chat .oc-send-options {
+  display: none;
+}
+
+.coven-message {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-familiar-card-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.coven-familiar-card-trigger:hover {
+  background: var(--bg-hover);
+}
+
+.coven-avatar-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.coven-status,
+.coven-error {
+  display: block;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-error {
+  color: var(--color-danger);
+}
+
+.coven-details {
+  padding: 20px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.coven-details h2 {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.coven-search {
+  margin: 0 16px 12px;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+}
+
+.coven-chat .fr-conv {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.coven-agent-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.coven-agent-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.coven-chat .coven-agent-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px;
+}
+
+.coven-agent-row[aria-current="true"] {
+  background: var(--bg-elevated);
+}
+
+.coven-agent-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coven-agent-row .coven-avatar-image {
+  outline: 1px solid oklch(1 0 0 / 0.1);
+}
+
+@media (max-width: 1100px) {
+  .coven-chat {
+    --fr-sidebar-w: min(220px, var(--coven-sidebar-w));
+    --fr-inspector-w: min(260px, var(--coven-inspector-w));
+  }
+}
+
+@media (max-width: 680px) {
+  .coven-chat {
+    --fr-sidebar-w: min(30vw, var(--coven-sidebar-w));
+    --fr-inspector-w: min(30vw, var(--coven-inspector-w));
+  }
+}

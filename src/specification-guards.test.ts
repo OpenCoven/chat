@@ -52,6 +52,15 @@ type ContractCanaryLock = {
 };
 
 const projectRoot = process.cwd();
+const covenRuntimeCommands = [
+  'coven_runtime_status',
+  'coven_runtime_familiars',
+  'coven_runtime_sessions',
+  'coven_runtime_import_cave',
+  'coven_runtime_read',
+  'coven_runtime_send',
+  'coven_runtime_cancel',
+];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -219,6 +228,7 @@ describe('Phase 1 specification guards', () => {
 
     expect(capability.windows).toEqual(['main']);
     expect(capability.permissions).toEqual([
+      ...covenRuntimeCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
       'allow-app-identity',
       'allow-app-installation-id',
       'allow-cave-read-discovery',
@@ -702,6 +712,7 @@ describe('Phase 1 specification guards', () => {
   it('keeps the generated desktop schema aligned with the reviewed command table', () => {
     const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
     const expectedCommands = [
+      ...covenRuntimeCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -764,7 +775,14 @@ describe('Phase 1 specification guards', () => {
     ];
 
     expect(registeredCommandNames(commands)).toEqual(expected);
-    expect(invokeHandlerCommandNames(lib)).toEqual(expected);
+    expect(invokeHandlerCommandNames(lib)).toEqual([
+      ...covenRuntimeCommands.map((command) =>
+        command === 'coven_runtime_import_cave'
+          ? `chat_origin::${command}`
+          : `coven_runtime::${command}`,
+      ),
+      ...expected,
+    ]);
 
     for (const command of expected) {
       expect(lib).toContain(command);

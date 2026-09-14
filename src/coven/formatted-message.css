@@ -1,0 +1,200 @@
+.coven-formatted {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.coven-formatted > :first-child {
+  margin-top: 0;
+}
+
+.coven-formatted > :last-child {
+  margin-bottom: 0;
+}
+
+.coven-formatted p,
+.coven-formatted ul,
+.coven-formatted ol,
+.coven-formatted blockquote,
+.coven-formatted pre,
+.coven-markdown-table {
+  margin: 0.75em 0;
+}
+
+.coven-formatted :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.2em 0 0.5em;
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.coven-formatted h1 {
+  font-size: 1.4em;
+}
+
+.coven-formatted h2 {
+  font-size: 1.25em;
+}
+
+.coven-formatted :is(h3, h4, h5, h6) {
+  font-size: 1.1em;
+}
+
+.coven-formatted strong {
+  font-weight: 600;
+}
+
+.coven-formatted ul {
+  padding-left: 1.5em;
+  list-style: disc;
+}
+
+.coven-formatted ol {
+  padding-left: 1.5em;
+  list-style: decimal;
+}
+
+.coven-formatted li + li {
+  margin-top: 0.25em;
+}
+
+.coven-formatted blockquote {
+  padding: 0.15em 1em;
+  border-left: 3px solid var(--accent-presence);
+  color: var(--text-secondary);
+}
+
+.coven-formatted code {
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.coven-formatted pre {
+  max-width: 100%;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.coven-formatted pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.coven-formatted a {
+  color: var(--accent-presence);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.coven-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.coven-markdown-table table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.coven-markdown-table :is(th, td) {
+  max-width: 24rem;
+  padding: 7px 10px;
+  border: 1px solid var(--border-hairline);
+  text-align: left;
+}
+
+.coven-markdown-table th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+
+.coven-formatted .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.coven-formatted .task-list-item input {
+  margin-right: 0.5em;
+}
+
+.coven-formatted hr {
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.coven-markdown-image {
+  color: var(--text-secondary);
+}
+
+/*
+ * Tool activity. A quiet ledger rather than prose: one hairline row per call,
+ * mono name, arguments dimmed and clamped so a long shell line never
+ * dominates the reply it belongs to.
+ */
+.coven-tools {
+  display: grid;
+  gap: 2px;
+  margin: 0.6em 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coven-tool {
+  display: grid;
+  grid-template-columns: 6px auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-sunken) 70%, transparent);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.coven-tool + .coven-tool {
+  margin-top: 0;
+}
+
+.coven-tool-glyph {
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  border-radius: 50%;
+  background: var(--accent-presence);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 18%, transparent);
+}
+
+.coven-formatted .coven-tool-name {
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.coven-tool-args {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

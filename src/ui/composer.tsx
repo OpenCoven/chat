@@ -46,6 +46,7 @@ export type ComposerProps = Readonly<{
   attachments?: readonly ComposerAttachment[];
   onRemoveAttachment?: (id: string) => void;
   onSend?: () => void;
+  allowAttachmentOnly?: boolean;
   running?: boolean;
   onStop?: () => void;
   density?: Density;
@@ -57,6 +58,7 @@ export type ComposerProps = Readonly<{
   /** Runs before the composer's own key handling; call `preventDefault` to claim a key. */
   onKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onAttach?: () => void;
+  attachmentIcon?: 'paperclip' | 'plus';
   /** Opens the host's inline command menu (the same list the caret offers). */
   onOpenCommands?: () => void;
   commands?: readonly CompletionCommand[];
@@ -73,6 +75,7 @@ export function Composer({
   attachments = [],
   onRemoveAttachment,
   onSend,
+  allowAttachmentOnly = false,
   running = false,
   onStop,
   density = 'default',
@@ -82,6 +85,7 @@ export function Composer({
   textareaRef,
   onKeyDown,
   onAttach,
+  attachmentIcon = 'paperclip',
   onOpenCommands,
   commands,
   onSelectCommand,
@@ -92,7 +96,7 @@ export function Composer({
 }: ComposerProps) {
   const id = useId();
   const fieldId = `composer-${id}`;
-  const ready = value.trim().length > 0;
+  const ready = value.trim().length > 0 || (allowAttachmentOnly && attachments.length > 0);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     onKeyDown?.(event);
@@ -131,7 +135,7 @@ export function Composer({
             title="Attach"
             onClick={onAttach}
           >
-            <Icon name="paperclip" size={15} />
+            <Icon name={attachmentIcon} size={15} />
           </Button>
         ) : null}
         {onOpenCommands ? (
