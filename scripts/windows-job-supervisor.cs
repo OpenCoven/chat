@@ -1778,7 +1778,6 @@ namespace OpenCoven
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
-        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint STARTF_USESTDHANDLES = 0x00000100;
         private const uint HANDLE_FLAG_INHERIT = 0x00000001;
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -6902,7 +6901,7 @@ namespace OpenCoven
                     isolatedUser.UserName,
                     Environment.MachineName,
                     isolatedUser.Password,
-                    LOGON_WITH_PROFILE,
+                    0,
                     applicationName,
                     commandLine,
                     CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
@@ -7291,24 +7290,8 @@ namespace OpenCoven
                     }
                     else
                     {
-                        string readRoot = ReadQuotaOperation("pattern-attributes", () =>
-                            GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
-                        bool prefixExists = false;
-                        foreach (string prefix in ExpandQuotaPattern(readRoot))
-                        {
-                            prefixExists = true;
-                        }
-                        if (!prefixExists)
-                        {
-                            if (quota.IncludeOwnedProfileApplication)
-                                throw new IOException("Owned aggregate root is missing.");
-                            continue;
-                        }
-                        exceeded = isolatedUser.RunQuotaRead(() =>
-                            quota.IncludeOwnedProfileApplication
-                                ? isolatedUser.ReadOwnedProfileApplication(applicationPath =>
-                                    DirectoryQuotaExceeded(quota, readRoot, true, applicationPath))
-                                : DirectoryQuotaExceeded(quota, readRoot, true));
+                        exceeded = MeasureDirectoryQuotaWithRemovalRaceRecovery(() =>
+                            DirectoryQuotaExceededAsIsolatedUser(isolatedUser, quota));
                     }
                     if (exceeded)
                     {
@@ -7338,6 +7321,44 @@ namespace OpenCoven
                 }
             }
             return false;
+        }
+
+        private static bool MeasureDirectoryQuotaWithRemovalRaceRecovery(Func<bool> measure)
+        {
+            try
+            {
+                return measure();
+            }
+            catch (QuotaMonitorContextException error)
+            {
+                if (error.Category != "access-denied" || error.Repeat != "missing")
+                    throw;
+                return measure();
+            }
+        }
+
+        private static bool DirectoryQuotaExceededAsIsolatedUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota quota)
+        {
+            string readRoot = ReadQuotaOperation("pattern-attributes", () =>
+                GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
+            bool prefixExists = false;
+            foreach (string prefix in ExpandQuotaPattern(readRoot, true))
+            {
+                prefixExists = true;
+            }
+            if (!prefixExists)
+            {
+                if (quota.IncludeOwnedProfileApplication)
+                    throw new IOException("Owned aggregate root is missing.");
+                return false;
+            }
+            return isolatedUser.RunQuotaRead(() =>
+                quota.IncludeOwnedProfileApplication
+                    ? isolatedUser.ReadOwnedProfileApplication(applicationPath =>
+                        DirectoryQuotaExceeded(quota, readRoot, true, applicationPath))
+                    : DirectoryQuotaExceeded(quota, readRoot, true));
         }
 
         private static void ValidateOwnedProfileAggregateDefinition(
@@ -7405,9 +7426,11 @@ namespace OpenCoven
             return total > quota.MaxBytes;
         }
 
-        private static IEnumerable<string> ExpandQuotaPattern(string pattern)
+        private static IEnumerable<string> ExpandQuotaPattern(
+            string pattern, bool repeatDiagnostic = false)
         {
-            return ExpandQuotaPatternFromRoot(pattern, Path.GetPathRoot(pattern));
+            return ExpandQuotaPatternFromRoot(
+                pattern, Path.GetPathRoot(pattern), repeatDiagnostic);
         }
 
         private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root, bool repeatDiagnostic = false)

@@ -24,12 +24,12 @@ The schema-1 release manifest is 1,031 bytes with SHA-256
 `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`.
 Both locks record the four exact candidate archive sizes and digests.
 
-Cave authority is the actual Windows ownership repair merge
-`8a06421a705c2d7891c3f44cc580c569f6cbe2c1` (tree
-`aee0a949cfe058f6c50dc95135f1e6579e759a41`), version 0.4.3. It includes the
-0.0.1 minimum-client prerequisite, the bounded discovery diagnostics, and the
-read-only `OWNER RIGHTS` compatibility required by the protected Windows
-profile boundary.
+Cave authority is the actual bounded Windows discovery-probe merge
+`d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
+`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.3. It includes the
+0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
+`OWNER RIGHTS` compatibility, and the shared 24-second publication probe
+budget required by the protected Windows profile boundary.
 The packed SDK fixture retains its authenticated compatibility-source
 provenance at `e806655a`; the later diagnostic authority contains that
 ancestor and identical fixture bytes. The Chat fixture mirror uses the same
@@ -123,28 +123,37 @@ The launch failure means native readiness ended without discovery; it does
 not identify why publication was absent. The native conformance launcher
 inherits Cave stderr, but the RPC client previously drained it without
 observing Cave's existing bounded publication-refusal line. The client now
-observes at most 32 KiB per launch, accepts only complete anchored publisher
-lines with the ten existing finite codes, and retains the first accepted
-code. Fragmented LF/CRLF lines are supported. All stderr continues to drain;
-no raw output is forwarded or retained. Only the matching native
+observes at most 8 KiB per launch, retains at most 256 bytes from an incomplete
+line, accepts only complete anchored publisher lines with the ten existing
+finite codes, and retains the first accepted code. Fragmented LF/CRLF lines are
+supported. All stderr continues to drain; no raw output is forwarded or
+retained. Only the matching native
 discovery-not-found failure receives a `.publication.<category>` suffix.
 `not-observed` and `output-limit` are local observations, not publisher claims.
 Other failures and the first retained scenario failure keep precedence.
 
 Stdout response delivery does not prove that earlier stderr bytes have been
 dispatched to Node. Each launch therefore uses a fresh opaque request identity.
-Before writing a discovery-not-found response, the native RPC response writer
-writes and flushes a stderr checkpoint containing only the identity's SHA-256. The client
-holds that response until it observes the matching checkpoint, a complete
-stderr EOF, a first refusal, or the byte cap. It does not wait for a persistent
-RPC process to exit. The original RPC timer covers response and drain together;
-an absent checkpoint at that deadline yields `drain-timeout`, and incomplete
-pipe closure yields `drain-unavailable`, without replacing the native failure.
-Wrong checkpoints and duplicate responses cannot settle a different request.
-No new RPC command, readiness deadline, or shutdown operation is introduced.
+Before writing every launch response, the native RPC response writer writes and
+flushes a stderr checkpoint containing only the identity's SHA-256. The client
+keeps each launch observation in FIFO order until that checkpoint or a complete
+stderr EOF. Non-discovery responses can settle before their checkpoint, but
+their bounded observation remains as a tombstone so delayed stderr cannot move
+to a later request. Discovery-not-found responses remain pending until a
+terminal boundary; a refusal or byte cap alone is only a candidate result.
+Separate response and checkpoint timers preserve the original RPC deadline. A
+missing checkpoint poisons attribution for the RPC stream, clears the bounded
+queue, and fixes current and future discovery classifications at
+`drain-timeout`; incomplete pipe closure similarly yields `drain-unavailable`.
+Requests created after stderr completion or attribution poisoning are not
+enqueued. Wrong checkpoints, duplicate responses, and stale post-timeout bytes
+cannot settle or classify a different request. A synchronous or asynchronous
+stdin write failure clears pending requests and poisons launch attribution as
+`drain-unavailable`, so an unsent request cannot remain at the FIFO head. No new
+RPC command, readiness deadline, or shutdown operation is introduced.
 Checkpoint I/O failure still delivers the original response where possible and
-is propagated to the native RPC loop. This changes the conformance RPC
-native delta, not the frozen production consumer.
+is propagated to the native RPC loop. This changes the conformance RPC native
+delta, not the frozen production consumer.
 
 The profile failure already distinguishes native API errors from survival
 after deletion was accepted or the API reported a missing profile. It did not
@@ -348,13 +357,13 @@ diagnostic-only change.
   `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
   retaining the prior reviewed native production source;
 - SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
-- Cave authority `8a06421a705c2d7891c3f44cc580c569f6cbe2c1`, tree
-  `aee0a949cfe058f6c50dc95135f1e6579e759a41`, release `0.4.3`;
+- Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
+  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `6fb8ff2fb0356eff549b4e8ed80eca83da133c6d`, tree
-  `4017175c4a03e03e54b83f3c3d669a0664b52e94`, retained in the producer ancestry;
+- Chat conformance driver `d254d6c4a704df23ff90dcc822243d6a9df6c81c`, tree
+  `2c3184a67d4ea7e45619ed46265cced237e16d40`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -899,10 +908,11 @@ non-inherited ACE granting the ephemeral SID only
 `JOB_OBJECT_QUERY | SYNCHRONIZE`; the Job owner remains the trusted runner
 identity, which retains the original full-access handle. Set/assign/terminate
 reopens and silent-breakaway mutation are denied. The supervisor launches the
-bootstrap with `CreateProcessWithLogonW(LOGON_WITH_PROFILE)` and
+bootstrap with `CreateProcessWithLogonW` using zero logon flags and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
 membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-flags are not enabled. The outer process retains non-delete-sharing handles for
+and profile-hive flags are not enabled. The outer process retains
+non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
 reaps the complete Job on every exit path, and requires zero active Job
@@ -1583,6 +1593,29 @@ PR #254 requests `ci:full` to run packaged Phase 1 conformance before landing.
 The bounded RPC allowlist includes `pairing_pending`, as declared by the native
 transport; create, poll, and exchange each retain that fixed subtype.
 
+Windows Cave startup keeps the existing 30-second native readiness deadline.
+The standalone publisher gives all Windows ACL probes in one publication a
+single 24-second monotonic budget, caps each PowerShell attempt at 12 seconds,
+and retries only one recognized timeout. Chat drains the native RPC stderr
+stream but retains only an exact static publication-refusal category within
+fixed byte and line bounds. Only `cave_launch_discovery_not_found` may gain that
+allowlisted suffix; raw stderr, paths, account names, tokens, handles, and
+exception text remain private.
+
+The restricted Windows producer still runs as the generated local user with the
+same explicit environment and suspended Job assignment, but
+`CreateProcessWithLogonW` no longer loads that user's registry hive. The OS
+profile remains created, pinned, token-verified, and deleted by the existing
+lifecycle. This removes an unnecessary asynchronous hive-unload dependency from
+the bounded profile-disappearance proof.
+
+An isolated quota pass that observes only the exact
+`access-denied` followed by `repeat=missing` deletion race receives one complete
+remeasurement through the same isolated user object. A second unstable pass,
+every other failure category, aggregate-root absence, entry overflow, byte
+overflow, reparse point, or arithmetic overflow remains terminal. No quota,
+polling, traversal, identity, cleanup, or diagnostic bound is widened.
+
 
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
@@ -1644,7 +1677,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,046 | `079aad19cd4cb8eddf8eddb0475adf40b7394569e39423afb5be138b14adaa67` |
+| `.github/workflows/client-v1-conformance.yml` | 168,186 | `fcfa80ce47da84d32075e9db480cb2dfd012869e7f0452b6b5dfe966a33e09ec` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1657,7 +1690,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 221,198 | `181edca30978e3c94648ed58f935fa473faa707347652649a4129c72caeeb527` |
+| `scripts/phase1-schema-v2-producer.mjs` | 225,687 | `7760aa853e8d318f7d54714d155e230108dafe928d8e4af2e94d1abbc7c98483` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1669,9 +1702,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 356,589 | `b5f39b14d66a66ba2f86fac964fa2805ba728436b864039448d4eae4805c804b` |
+| `scripts/windows-job-supervisor.cs` | 357,149 | `1e1eff87c65e7968b18f42b81409315571cc4bfda1d8aff1123876854b5d5435` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 29,480 | `b2160b083f6db3c4e6a328b026350c9ae80a2d688482849705705396ded1a998` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 31,812 | `458a6673a182692ef588847f798f63fa3ec423bfa8436d65710a89a46548f23b` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 22,262 | `fb6365248bd8286fa03a950e387f0925ff2c818e72ffc1676e4fc327636b5f03` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |

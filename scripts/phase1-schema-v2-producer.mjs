@@ -4041,47 +4041,94 @@ function assertSuccessfulChildExit(code, signal) {
 }
 
 function createCavePublicationObservation(requestId) {
-  const limit = 32 * 1024;
+  const limit = 8 * 1024;
+  const maximumLineBytes = 256;
   let observedBytes = 0;
   let pending = Buffer.alloc(0);
+  let lineOverflow = false;
+  let lineWithinLimit = true;
   let accepted;
   let completed;
   const checkpoint = `[chat] native launch stderr checkpoint: ${createHash('sha256').update(requestId).digest('hex')}`;
-  const result = () =>
-    accepted ?? completed ?? (observedBytes > limit ? 'output-limit' : undefined);
+  const result = () => {
+    if (completed === undefined) return undefined;
+    if (completed === 'drain-timeout' || completed === 'drain-unavailable') return completed;
+    return accepted ?? (observedBytes > limit ? 'output-limit' : completed);
+  };
+  const appendPending = (bytes) => {
+    if (bytes.length === 0) return;
+    if (pending.length + bytes.length <= maximumLineBytes) {
+      pending = Buffer.concat([pending, bytes]);
+      return;
+    }
+    lineOverflow = true;
+    if (bytes.length >= maximumLineBytes) {
+      pending = bytes.subarray(bytes.length - maximumLineBytes);
+      return;
+    }
+    pending = Buffer.concat([
+      pending.subarray(pending.length - (maximumLineBytes - bytes.length)),
+      bytes,
+    ]);
+  };
   return {
     observe(chunk) {
-      if (result() !== undefined) return;
+      if (completed !== undefined) return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = limit - observedBytes;
-      observedBytes = Math.min(limit + 1, observedBytes + bytes.length);
-      pending = Buffer.concat([pending, bytes.subarray(0, remaining)]);
-      while (true) {
-        const newline = pending.indexOf(10);
-        if (newline === -1) break;
-        const line = pending.subarray(0, newline).toString('utf8').replace(/\r$/u, '');
-        pending = pending.subarray(newline + 1);
+      let remaining = Math.max(0, limit - observedBytes);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const newline = bytes.indexOf(10, offset);
+        if (newline === -1) {
+          const trailing = bytes.subarray(offset);
+          appendPending(trailing);
+          if (trailing.length > remaining) lineWithinLimit = false;
+          observedBytes = Math.min(limit + 1, observedBytes + trailing.length);
+          break;
+        }
+        const lineBytes = bytes.subarray(offset, newline);
+        appendPending(lineBytes);
+        if (lineBytes.length > remaining) lineWithinLimit = false;
+        observedBytes = Math.min(limit + 1, observedBytes + lineBytes.length);
+        remaining = Math.max(0, limit - observedBytes);
+        if (remaining === 0) {
+          lineWithinLimit = false;
+        } else {
+          observedBytes = Math.min(limit + 1, observedBytes + 1);
+          remaining -= 1;
+        }
+        const line = pending.toString('utf8').replace(/\r$/u, '');
+        pending = Buffer.alloc(0);
         // A checkpoint can follow an unterminated private line; it must not turn
         // that prefix into a complete publisher refusal.
         if (line.endsWith(checkpoint)) {
           completed = 'not-observed';
-          pending = Buffer.alloc(0);
-          break;
+          lineOverflow = false;
+          lineWithinLimit = true;
+          return bytes.subarray(newline + 1);
         }
-        const match = /^\[cave\] client-v1 discovery publication refused: ([a-z-]+)$/u.exec(line);
-        if (match !== null && cavePublisherCodes.has(match[1])) {
-          accepted = match[1];
-          pending = Buffer.alloc(0);
-          break;
+        if (!lineOverflow && lineWithinLimit && accepted === undefined) {
+          const match = /^\[cave\] client-v1 discovery publication refused: ([a-z-]+)$/u.exec(line);
+          if (match !== null && cavePublisherCodes.has(match[1])) {
+            accepted = match[1];
+          }
         }
+        lineOverflow = false;
+        lineWithinLimit = true;
+        offset = newline + 1;
       }
-      if (observedBytes > limit) pending = Buffer.alloc(0);
+      return Buffer.alloc(0);
     },
     finish(reason) {
-      if (result() === undefined) completed = reason;
+      if (completed === undefined) completed = reason;
       pending = Buffer.alloc(0);
+      lineOverflow = false;
+      lineWithinLimit = true;
     },
     result,
+    closed() {
+      return completed !== undefined;
+    },
   };
 }
 
@@ -4098,7 +4145,10 @@ export class NativeRpcClient {
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.requestTimeoutMs = requestTimeoutMs;
     this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
+    this.closed = child.exitCode != null || child.signalCode != null;
     this.pending = new Map();
+    this.launchPublications = [];
+    this.launchPublicationFailure = undefined;
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
     this.sequence = 0;
@@ -4112,13 +4162,24 @@ export class NativeRpcClient {
       : 'drain-unavailable';
     // Drain all stderr, retaining only bounded, complete publisher refusal categories.
     child.stderr?.on('data', (chunk) => {
-      for (const [id, pending] of this.pending) {
-        pending.publication?.observe(chunk);
-        this.resolveResponse(id, pending);
+      let remaining = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      while (remaining.length > 0 && this.launchPublications.length > 0) {
+        const current = this.launchPublications[0];
+        remaining = current.publication.observe(remaining);
+        const pending = this.pending.get(current.id);
+        if (pending !== undefined) this.resolveResponse(current.id, pending);
+        if (!current.publication.closed()) break;
+        this.launchPublications.shift();
+        clearTimeout(current.checkpointTimer);
       }
     });
     const finishStderr = (reason) => {
       this.stderrCompletion = reason;
+      for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
+        current.publication.finish(reason);
+      }
+      this.launchPublications = [];
       for (const [id, pending] of this.pending) {
         pending.publication?.finish(reason);
         this.resolveResponse(id, pending);
@@ -4128,6 +4189,7 @@ export class NativeRpcClient {
     child.stderr?.once('close', () => {
       if (this.stderrCompletion === undefined) finishStderr('drain-unavailable');
     });
+    child.stdin?.on?.('error', () => this.failInput());
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       this.buffer += chunk;
@@ -4155,6 +4217,7 @@ export class NativeRpcClient {
       }
     });
     child.once('close', () => {
+      this.closed = true;
       for (const [id, pending] of this.pending) {
         if (pending.response !== undefined) {
           pending.publication?.finish(this.stderrCompletion ?? 'drain-unavailable');
@@ -4165,19 +4228,49 @@ export class NativeRpcClient {
         pending.reject(new Error('native RPC closed before responding'));
       }
       this.pending.clear();
+      for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
+      }
+      this.launchPublications = [];
     });
+  }
+
+  failInput() {
+    if (this.closed) return;
+    this.closed = true;
+    this.poisonLaunchPublications('drain-unavailable');
+    for (const [id, pending] of [...this.pending]) {
+      if (!this.pending.has(id)) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(new Error('native RPC input failed'));
+    }
+  }
+
+  poisonLaunchPublications(reason) {
+    if (this.launchPublicationFailure !== undefined || this.stderrCompletion !== undefined) return;
+    this.launchPublicationFailure = reason;
+    const publications = this.launchPublications;
+    this.launchPublications = [];
+    for (const current of publications) {
+      clearTimeout(current.checkpointTimer);
+      current.publication.finish(reason);
+      const pending = this.pending.get(current.id);
+      if (pending !== undefined) this.resolveResponse(current.id, pending);
+    }
   }
 
   resolveResponse(id, pending) {
     if (pending.response === undefined) return;
-    if (
-      pending.publication !== undefined &&
-      pending.response.ok === false &&
-      pending.response.error?.code === 'cave_launch_discovery_not_found'
-    ) {
-      const category = pending.publication.result();
-      if (category === undefined) return;
-      nativeLaunchPublicationResponses.set(pending.response, category);
+    if (pending.publication !== undefined) {
+      if (
+        pending.response.ok === false &&
+        pending.response.error?.code === 'cave_launch_discovery_not_found'
+      ) {
+        const category = pending.publication.result();
+        if (category === undefined) return;
+        nativeLaunchPublicationResponses.set(pending.response, category);
+      }
     }
     this.pending.delete(id);
     clearTimeout(pending.timer);
@@ -4193,6 +4286,9 @@ export class NativeRpcClient {
   }
 
   request(command, args) {
+    if (this.closed) {
+      return Promise.reject(new Error('native RPC transport closed'));
+    }
     this.commandCounts.set(command, (this.commandCounts.get(command) ?? 0) + 1);
     this.sequence += 1;
     const id = `request-${this.sequence}${command === 'cave_launch' ? `-${randomBytes(16).toString('hex')}` : ''}`;
@@ -4201,19 +4297,38 @@ export class NativeRpcClient {
     return new Promise((resolveRequest, rejectRequest) => {
       const publication =
         command === 'cave_launch' ? createCavePublicationObservation(id) : undefined;
-      if (this.stderrCompletion !== undefined) publication?.finish(this.stderrCompletion);
+      const unavailableReason = this.launchPublicationFailure ?? this.stderrCompletion;
+      if (unavailableReason !== undefined) publication?.finish(unavailableReason);
+      if (publication !== undefined && unavailableReason === undefined) {
+        const entry = { id, publication, checkpointTimer: undefined };
+        entry.checkpointTimer = setTimeout(
+          () => this.poisonLaunchPublications('drain-timeout'),
+          timeoutMs,
+        );
+        this.launchPublications.push(entry);
+      }
       const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
         if (pending.response !== undefined) {
-          publication?.finish('drain-timeout');
+          this.poisonLaunchPublications('drain-timeout');
           this.resolveResponse(id, pending);
           return;
+        }
+        if (publication !== undefined && !publication.closed()) {
+          this.poisonLaunchPublications('drain-timeout');
         }
         this.pending.delete(id);
         rejectRequest(new Error(`native RPC timed out for ${command}`));
       }, timeoutMs);
       const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
       this.pending.set(id, pending);
-      this.child.stdin.write(`${JSON.stringify(request)}\n`);
+      try {
+        this.child.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+          if (error !== undefined && error !== null) this.failInput();
+        });
+      } catch {
+        this.failInput();
+      }
     });
   }
 
@@ -4251,9 +4366,12 @@ export class NativeRpcClient {
   }
 
   async close() {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+    if (this.child.exitCode != null || this.child.signalCode != null) {
       assertSuccessfulChildExit(this.child.exitCode, this.child.signalCode);
       return;
+    }
+    if (this.closed) {
+      throw new Error('native RPC transport closed');
     }
     await triggerAndWaitForChildClose(
       this.child,
