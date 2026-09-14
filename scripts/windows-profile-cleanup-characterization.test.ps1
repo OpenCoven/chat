@@ -129,6 +129,7 @@ foreach ($case in @('empty', 'ordinary-child', 'held-file', 'deny-delete')) {
   $marker = Join-Path $child 'marker.bin'
   $held = $null
   $originalAcl = $null
+  $originalMarkerAcl = $null
   $failure = $null
   try {
     if ($case -ne 'empty') {
@@ -143,6 +144,7 @@ foreach ($case in @('empty', 'ordinary-child', 'held-file', 'deny-delete')) {
       }
     } elseif ($case -eq 'deny-delete') {
       $originalAcl = Get-Acl -LiteralPath $child
+      $originalMarkerAcl = Get-Acl -LiteralPath $marker
       $blockedAcl = Get-Acl -LiteralPath $child
       $blockedAcl.SetAccessRuleProtection($true, $true)
       $blockedAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
@@ -152,8 +154,18 @@ foreach ($case in @('empty', 'ordinary-child', 'held-file', 'deny-delete')) {
         [Security.AccessControl.PropagationFlags]::None,
         [Security.AccessControl.AccessControlType]::Deny))
       Set-Acl -LiteralPath $child -AclObject $blockedAcl
-      if ([OpenCoven.Tests.ProfileCleanupCharacterization]::DeleteAccess($marker) -ne 5) {
-        throw 'ACL control did not deny DELETE access.'
+      # Deny the file directly as well as deletion through its parent; do not
+      # depend on propagation into a previously created descendant.
+      $blockedMarkerAcl = Get-Acl -LiteralPath $marker
+      $blockedMarkerAcl.SetAccessRuleProtection($true, $true)
+      $blockedMarkerAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.SecurityIdentifier]::new('S-1-1-0'),
+        [Security.AccessControl.FileSystemRights]::Delete,
+        [Security.AccessControl.AccessControlType]::Deny))
+      Set-Acl -LiteralPath $marker -AclObject $blockedMarkerAcl
+      $deleteStatus = [OpenCoven.Tests.ProfileCleanupCharacterization]::DeleteAccess($marker)
+      if ($deleteStatus -ne 5) {
+        throw "ACL control did not deny DELETE access: win32-$deleteStatus."
       }
     }
     try { $user.Dispose() } catch { $failure = $_.Exception }
@@ -164,6 +176,9 @@ foreach ($case in @('empty', 'ordinary-child', 'held-file', 'deny-delete')) {
       throw 'Unblocked production profile cleanup failed.'
     }
     if ($null -ne $held) { $held.Dispose(); $held = $null }
+    if ($null -ne $originalMarkerAcl -and [OpenCoven.Tests.ProfileCleanupCharacterization]::Exists($marker)) {
+      Set-Acl -LiteralPath $marker -AclObject $originalMarkerAcl
+    }
     if ($null -ne $originalAcl -and [OpenCoven.Tests.ProfileCleanupCharacterization]::Exists($child)) {
       Set-Acl -LiteralPath $child -AclObject $originalAcl
     }
@@ -186,6 +201,9 @@ foreach ($case in @('empty', 'ordinary-child', 'held-file', 'deny-delete')) {
     }
   } finally {
     if ($null -ne $held) { $held.Dispose() }
+    if ($null -ne $originalMarkerAcl -and [OpenCoven.Tests.ProfileCleanupCharacterization]::Exists($marker)) {
+      Set-Acl -LiteralPath $marker -AclObject $originalMarkerAcl
+    }
     if ($null -ne $originalAcl -and [OpenCoven.Tests.ProfileCleanupCharacterization]::Exists($child)) {
       Set-Acl -LiteralPath $child -AclObject $originalAcl
     }

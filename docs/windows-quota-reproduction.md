@@ -239,3 +239,18 @@ never-launched profile tree; production cleanup remains unchanged and mandatory.
 Windows APIs. Native results are still required to distinguish these controlled
 failure modes; they would not by themselves establish which one occurred in the
 protected run.
+
+Native [CI34844429202](https://github.com/OpenCoven/chat/actions/runs/34844429202)
+removed both unblocked profiles. Holding the marker file without delete sharing
+reproduced `profile-remained[delete=accepted;registry=0;expected=1;actual=1]`;
+the marker's DELETE-access probe reported sharing violation (32). Releasing the
+handle changed that probe to success, but the directory remained. The subsequent
+explicit-path `DeleteProfileW` returned not found (2), and the residual tree still
+existed after the bounded wait. This establishes that repeating profile deletion,
+even with an explicit path, did not remove that controlled residual tree. It does
+not prove that the protected producer had a held-file blocker.
+
+That run stopped because the inherited ACL control did not establish a DELETE
+denial. The corrected control denies deletion directly on the marker as well as
+through its parent, and requires native access denied (5) before disposal. Its
+native result remains pending.

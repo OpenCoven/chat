@@ -1724,7 +1724,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
-| `scripts/windows-profile-cleanup-characterization.test.ps1` | 10,443 | `a4f0aded40ca4d69d67ff060ee6a92a04bf5a365ffc21699ac9c99cdd1e410a4` |
+| `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
