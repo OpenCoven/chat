@@ -16,13 +16,23 @@ the final bytes.
 ## SDK 0.0.1 candidate and diagnostic authority adoption
 
 The current target uses the exact private SDK candidate from
-`77d825d17809cfec2fad4acb9b1526b3c4752f9d` (tree
-`697764ae382ca56d6fde39b9929405d86e739d67`), not repacked or relabelled 0.1.0
+`96804bc483a063e41e9a9738a4ace61970f6c0a4` (tree
+`aa9eb8e924735419a9afdbcc80a5b087504ccc9d`), not repacked or relabelled 0.1.0
 archives. Its runtime SHA-256 is
-`75373cee44e210b6f95491d1e1276506f217a275094835baba6170d919f68801`.
+`8c46276b5698d32d570ad4a89998b412cb0efde5641313b0c71ae41519e64ae7`.
 The schema-1 release manifest is 1,031 bytes with SHA-256
-`d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`.
+`2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a`.
 Both locks record the four exact candidate archive sizes and digests.
+
+This fresh private candidate includes the reviewed public Automations API
+from OpenCoven/sdk#251 and initial-release metadata from OpenCoven/sdk#253.
+Its 106-entry canonical publication-source manifest is 20,300 bytes with
+SHA-256 `c9e1c8c1538f5f14a170c3fa14a5d1a022d24937918e11caba1c7219232a624f`.
+Only the Coven archive differs from candidate `77d825d`: it is 45,724 bytes
+with SHA-256 `bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65`.
+The other three archives are byte-identical. Earlier SDK77 evidence remains
+historical and does not qualify the changed runtime. The primary assertion
+inventories remain 197 Darwin / 197 Linux / 196 Windows.
 
 Cave authority is the actual bounded Windows discovery-probe merge
 `d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
@@ -46,13 +56,17 @@ fixture. Those test-only changes advance the `connection.rs` native delta
 identity without changing the frozen production consumer or native behavior.
 
 `chat.revision` and `chatAuthority.tree` identify a separate production
-consumer prepared from the prior `0da8c474` source. All production native
+consumer `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, prepared from reviewed
+consumer `636f7da96fa178c2c14648f84137091b15a1cb8a`. All production native
 files remain unchanged; its consumer lock and SDK archives are rebound from
 their actual committed bytes. The production canary also receives the already
 reviewed non-publishing artifact entrypoint, so private candidate verification
 does not invoke the publication CLI. The executable harness retains all ten
-reviewed native production deltas, including current launch-worker recovery
-and exclusion. Its actual source commit is frozen separately in
+reviewed native production deltas, including the merged #267 lifecycle work,
+#268 retained-handle diagnostics, and #266 checkpointed stderr observation.
+The bounded quota-removal retry does not address earlier persistent-quota
+failures; this adoption makes no certified Windows repair claim.
+Its actual source commit is frozen separately in
 `harnessAuthority`, with matching Windows/Unix module tables.
 
 The production source ancestry and the subsequent source-bound harness commit
@@ -353,21 +367,21 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `636f7da96fa178c2c14648f84137091b15a1cb8a`, tree
-  `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
+- Chat production `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, tree
+  `ffd1963ef9539c7a679909200175fb11a9305c95`, the fresh SDK 0.0.1 consumer
   retaining the prior reviewed native production source;
-- SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
+- SDK package candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4`;
 - Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
   `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `d254d6c4a704df23ff90dcc822243d6a9df6c81c`, tree
-  `2c3184a67d4ea7e45619ed46265cced237e16d40`, retained in the producer ancestry;
+- Chat conformance driver `b1b38d3fc5beb679b3962cfcfee12cb668f5c39d`, tree
+  `f221b423ce232683b5f534ed8365eba4098021c9`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`;
+  `2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 SDK PR #189 froze the preceding candidate and Chat source contract.
