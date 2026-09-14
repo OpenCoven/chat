@@ -133,8 +133,10 @@ The accounting defect was that the monitor discarded that complete fresh
 snapshot and terminated the producer. The repaired enumeration path accepts a
 second result only when the first failure is `UnauthorizedAccessException` and
 the second invocation of the same bounded snapshot core completes. A missing
-or failing repeat remains terminal. Non-access-denied failures and non-directory
-metadata reads preserve the diagnostic-only repeat behavior.
+or failing repeat still throws at the snapshot boundary. The later whole-pass
+recovery described below can restart a qualifying isolated measurement.
+Non-access-denied failures and non-directory metadata reads preserve the
+diagnostic-only repeat behavior at the individual-read boundary.
 
 The native fixtures supply deterministic controls without changing production
 ACLs. The owner-directory fixture keeps a real owner-only denial in place for
@@ -146,3 +148,68 @@ identity before enumerating, and requires the fresh complete snapshot.
 Independent terminal checks below and above the byte limit exercise the
 production accounting path. It retains the existing path, entry, byte,
 reparse, process, output, and time bounds.
+
+## Denied enumeration followed by a missing path
+
+Attempt 2 of protected run
+[34796638173](https://github.com/OpenCoven/chat/actions/runs/34796638173/attempts/2),
+at producer `7ec15b20b5526ef809c8f237a4dab1f640cb8a4d`, reported
+`access-denied; root=cave-checkout; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=missing`.
+It also reported the separate cleanup failure
+`profile-delete:invalid-operation,profile-survived:invalid-operation`.
+This is not the original `io`/`persistent` result, nor the
+`discovery-not-found` failure recorded for attempt 1.
+
+The missing follow-up does not supply a complete readable snapshot. The
+snapshot reader therefore retains the original access denial and throws.
+It does not establish whether the directory was deleted, renamed, or became
+unreachable through a changed ancestor.
+
+The portable quota diagnostic fixture now follows an injected initial denial
+with a real enumeration of a removed fixture directory. It requires the
+`missing` label, exactly two reads, no private exception text, and preservation
+of the first failure in the monitor state. The native isolated-reader fixture
+also stages a real listing denial, then restores and deletes only its own
+fixture before the repeat. Both reads must run as the isolated identity, and
+the supervisor identity must be restored after the failure.
+
+The native fixture requires Windows execution before its outcome can be
+claimed. Even a matching result would establish only that this controlled
+transition can produce the signature, not the cause of the protected-run
+failure. These reproduction changes do not alter production traversal,
+missing-path acceptance, retries, ACLs, quota limits, frozen authority
+bindings, or cleanup policy.
+
+## Whole-pass recovery and the subsequent protected result
+
+PR #267, merged at `92c4c453b57b2f9365627f01ec883f98aa8b7ba3`,
+added `MeasureDirectoryQuotaWithRemovalRaceRecovery`. For an isolated
+measurement that fails with exactly `access-denied` and `repeat=missing`,
+it restarts the entire selected quota measurement once, including prefix
+validation, pattern expansion, and isolated-token accounting. It does not
+accept the failed snapshot or reuse its partial byte total. A fresh byte
+breach still fails production; any second-pass exception is terminal.
+Other failure categories and repeat classifications do not trigger this
+whole-pass retry.
+
+The portable reproduction passes its real missing-snapshot error through
+that recovery boundary. It checks both below-limit and over-limit replacement
+results, rejection of nonqualifying failures, and termination after a second
+removal race. This complements the snapshot-level and native-identity cases;
+it does not establish the cause of the historical checkout race.
+
+Protected run
+[34833377609](https://github.com/OpenCoven/chat/actions/runs/34833377609),
+using that merged producer, reached `phase1.cave-authority.startup.exit`
+instead of reporting a quota-monitor failure. This diagnostic means the Cave
+authority reported an exit before readiness; it does not identify the exit's
+underlying cause or establish a permanent quota repair.
+
+Its separate cleanup result was
+`profile-delete:profile-remained[delete=accepted;registry=0;expected=1;actual=1]`,
+followed by `profile-survived:invalid-operation`. The deletion API accepted
+the request and the profile registration was absent, but both directory
+existence observations remained true. Those flags need not refer to different
+directories. Startup failure and residual profile cleanup remain unresolved;
+neither is evidence of a directory-depth quota.
