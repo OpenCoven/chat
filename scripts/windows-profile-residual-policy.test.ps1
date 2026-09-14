@@ -96,6 +96,12 @@ namespace OpenCoven.Tests {
         }
         public static void Run(Type supervisor) {
             var flags = BindingFlags.NonPublic | BindingFlags.Static;
+            var access = supervisor.GetMethod("ProfileResidualOpenAccess", flags);
+            Require(access != null, "Residual deletion and ancestor enumeration access are not separated.");
+            Require((uint)Invoke(access, true) == 0x00130080u,
+                "Deleting a residual entry unnecessarily requires list-directory or file-data access.");
+            Require((uint)Invoke(access, false) == 0x00120081u,
+                "Retained ancestors lost directory enumeration or metadata access.");
             var complete = supervisor.GetMethod("CompleteProfileDeletion", flags);
             var registration = supervisor.GetMethod("ValidateProfileCleanupRegistration", flags);
             var exists = supervisor.GetMethod("ProfileCleanupPathExists", flags);

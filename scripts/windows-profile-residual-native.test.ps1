@@ -17,6 +17,8 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,6 +39,9 @@ namespace OpenCoven.Tests {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DeviceIoControl(SafeFileHandle handle, uint control, byte[] input,
             uint inputSize, IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
+        [DllImport("advapi32.dll", ExactSpelling = true)]
+        private static extern uint SetSecurityInfo(SafeFileHandle handle, uint type, uint information,
+            IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
         private static extern int NetUserDel(string server, string user);
         [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
@@ -62,6 +67,30 @@ namespace OpenCoven.Tests {
         public static int DeleteAccess(string path) {
             using (var handle = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero))
                 return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        }
+        public static int ReadAccess(string path) {
+            using (var handle = CreateFileW(path, 0x00120081, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero))
+                return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        }
+        public static void SetReadDenial(string path, bool denied) {
+            using (var user = WindowsIdentity.GetCurrent()) {
+                if (user.User == null) throw new InvalidOperationException("Fixture supervisor SID unavailable.");
+                var acl = new RawSecurityDescriptor("D:P" + (denied ? "(D;;0x1;;;WD)" : "") +
+                    "(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + user.User.Value + ")").DiscretionaryAcl;
+                byte[] bytes = new byte[acl.BinaryLength];
+                acl.GetBinaryForm(bytes, 0);
+                IntPtr native = Marshal.AllocHGlobal(bytes.Length);
+                try {
+                    Marshal.Copy(bytes, 0, native, bytes.Length);
+                    // Set only the retained entry's DACL, never the junction target's ACL.
+                    using (var handle = CreateFileW(path, 0x00040000, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
+                        if (handle.IsInvalid)
+                            throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture ACL handle unavailable.");
+                        uint status = SetSecurityInfo(handle, 1, 0x80000004, IntPtr.Zero, IntPtr.Zero, native, IntPtr.Zero);
+                        if (status != 0) throw new Win32Exception((int)status, "Fixture read denial could not be set.");
+                    }
+                } finally { Marshal.FreeHGlobal(native); }
+            }
         }
         private static object Invoke(MethodInfo method, params object[] args) {
             try { return method.Invoke(null, args); }
@@ -124,10 +153,13 @@ namespace OpenCoven.Tests {
                     Invoke(contents, retained, volume, System.Diagnostics.Stopwatch.StartNew(), 2, 0);
                 } catch (Win32Exception error) when (error.GetType().Name == "CleanupDeleteException") {
                     enumeration = "win32-" + error.NativeErrorCode;
+                } catch (InvalidOperationException error) when (
+                    error.Message == "Residual enumeration requires the same ordinary directory.") {
+                    enumeration = "changed-directory";
                 }
                 SafeFileHandle escaped = null;
                 try {
-                    escaped = (SafeFileHandle)Invoke(relative, retained, "keep.bin", true, 3);
+                    escaped = (SafeFileHandle)Invoke(relative, retained, "keep.bin", true, 3, "child");
                     if (escaped != null)
                         throw new InvalidOperationException("Relative child lookup escaped into the junction target.");
                 } catch (Win32Exception error) when (error.GetType().Name == "CleanupDeleteException") {
@@ -322,12 +354,30 @@ if ($null -eq $mismatch -or -not $mismatch.Message.Contains('residual=win32-5') 
     $mismatch.Message.Contains('injected-private-native-message')) {
   throw 'Residual failure classification accepted a wrong status or exposed private exception text.'
 }
+$openFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $openFailure) { throw 'Bounded residual open role classifier is absent.' }
+foreach ($role in @('ancestor', 'profile-root', 'child')) {
+  $failure = $openFailure.Invoke($null, [object[]]@(-1073741790, 5, $role, 2))
+  $category = [string]$classify.Invoke($null, [object[]]@($failure))
+  if (-not $category.Contains("op=relative-open") -or
+      -not $category.Contains("role=$role") -or
+      -not $category.Contains('ntstatus=c0000022')) {
+    throw "Residual open failure lost its bounded role: $role."
+  }
+}
+$invalidRole = $null
+try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canary', 2)) } catch { $invalidRole = $_.Exception }
+if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-canary')) {
+  throw 'Residual open classifier accepted or exposed an arbitrary role.'
+}
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
 
 foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', 'hardlink',
     'readonly-hardlink', 'registration-mismatch', 'root-swap', 'root-junction', 'depth',
-    'inplace-junction', 'unauthorized', 'disabled-unregistered', 'incomplete')) {
+    'inplace-junction', 'read-denied-file', 'read-denied-junction', 'list-denied-directory',
+    'unauthorized', 'disabled-unregistered', 'incomplete')) {
   $root = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-residual-native-' + [Guid]::NewGuid().ToString('N'))
   $external = $null
   $canary = $null
@@ -338,6 +388,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
   $delayed = $null
   $originalParentAcl = $null
   $originalFileAcl = $null
+  $readDeniedPath = $null
   $moved = $null
   try {
     $user = [OpenCoven.WindowsIsolatedUser]::Create($root)
@@ -383,7 +434,8 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
     $capture = $application.GetType().GetMethod('CaptureCleanupIdentity', $instance)
     $identity = $capture.Invoke($application, @())
     $useCore = $case -in @('denied', 'readonly', 'junction', 'hardlink', 'readonly-hardlink',
-      'depth', 'root-swap', 'root-junction', 'inplace-junction')
+      'depth', 'root-swap', 'root-junction', 'inplace-junction', 'read-denied-file',
+      'read-denied-junction', 'list-denied-directory')
     if ($case -eq 'registration-mismatch') {
       $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey(
         "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($user.Sid)", $true)
@@ -432,6 +484,18 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       if ($case -eq 'junction') {
         New-Item -ItemType Junction -Path (Join-Path $control 'outside-link') -Target $external | Out-Null
       }
+      if ($case -in @('read-denied-file', 'read-denied-junction', 'list-denied-directory')) {
+        $readDeniedPath = if ($case -eq 'read-denied-file') { $marker } else { $control }
+        if ($case -eq 'read-denied-junction') {
+          $readDeniedPath = Join-Path $control 'outside-link'
+          New-Item -ItemType Junction -Path $readDeniedPath -Target $external | Out-Null
+        }
+        [OpenCoven.Tests.ProfileResidualNativeFixture]::SetReadDenial($readDeniedPath, $true)
+        if ([OpenCoven.Tests.ProfileResidualNativeFixture]::ReadAccess($readDeniedPath) -ne 5 -or
+            [OpenCoven.Tests.ProfileResidualNativeFixture]::ReadAccess($external) -ne 0) {
+          throw 'The entry-only read-denial control did not preserve the external target.'
+        }
+      }
       if ($case -eq 'inplace-junction') {
         [IO.File]::Delete($marker)
         [OpenCoven.Tests.ProfileResidualNativeFixture]::RequireInPlaceConfinement(
@@ -479,6 +543,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
     switch ($case) {
       'persistent' { Assert-ResidualFailure $failure 'residual=win32-32' }
       'denied' { Assert-ResidualFailure $failure 'residual=win32-5' }
+      'list-denied-directory' { Assert-ResidualFailure $failure 'residual=win32-5' }
       'readonly' { Assert-ResidualFailure $failure 'read-only file' }
       'readonly-hardlink' { Assert-ResidualFailure $failure 'read-only file' }
       'registration-mismatch' { Assert-ResidualFailure $failure 'registration is not bound' }
@@ -528,6 +593,11 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       {
         if ($null -ne $originalFileAcl -and (Test-ResidualPath $marker)) {
           Set-Acl -LiteralPath $marker -AclObject $originalFileAcl
+        }
+      },
+      {
+        if ($null -ne $readDeniedPath -and (Test-ResidualPath $readDeniedPath)) {
+          [OpenCoven.Tests.ProfileResidualNativeFixture]::SetReadDenial($readDeniedPath, $false)
         }
       },
       {
