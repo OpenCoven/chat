@@ -131,6 +131,21 @@ discovery-not-found failure receives a `.publication.<category>` suffix.
 `not-observed` and `output-limit` are local observations, not publisher claims.
 Other failures and the first retained scenario failure keep precedence.
 
+Stdout response delivery does not prove that earlier stderr bytes have been
+dispatched to Node. Each launch therefore uses a fresh opaque request identity.
+Before writing a discovery-not-found response, the native RPC response writer
+writes and flushes a stderr checkpoint containing only the identity's SHA-256. The client
+holds that response until it observes the matching checkpoint, a complete
+stderr EOF, a first refusal, or the byte cap. It does not wait for a persistent
+RPC process to exit. The original RPC timer covers response and drain together;
+an absent checkpoint at that deadline yields `drain-timeout`, and incomplete
+pipe closure yields `drain-unavailable`, without replacing the native failure.
+Wrong checkpoints and duplicate responses cannot settle a different request.
+No new RPC command, readiness deadline, or shutdown operation is introduced.
+Checkpoint I/O failure still delivers the original response where possible and
+is propagated to the native RPC loop. This changes the conformance RPC
+native delta, not the frozen production consumer.
+
 The profile failure already distinguishes native API errors from survival
 after deletion was accepted or the API reported a missing profile. It did not
 identify which postcondition remained. That final failure now reports
@@ -1629,7 +1644,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 167,450 | `23cda23b20f74f5dbc541c00398b6f209857177953d0b9efc00197f27e9f0813` |
+| `.github/workflows/client-v1-conformance.yml` | 167,450 | `c6ed819f99d7005a461992c864d25c70dd81cd3a524ff4c117229a9f8325763f` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1642,7 +1657,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 218,686 | `6052d8c8d52141693b142122fe03c60a5d4ed003b180058ae600f73f46f177cd` |
+| `scripts/phase1-schema-v2-producer.mjs` | 221,198 | `181edca30978e3c94648ed58f935fa473faa707347652649a4129c72caeeb527` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

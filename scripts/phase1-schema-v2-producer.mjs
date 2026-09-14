@@ -104,11 +104,12 @@ const cavePublicationCategories = Object.freeze([
 ]);
 const cavePublisherCodes = new Set(cavePublicationCategories.slice(2));
 export const NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS = Object.freeze(
-  cavePublicationCategories.map(
+  [...cavePublicationCategories, 'drain-timeout', 'drain-unavailable'].map(
     (category) => `phase1.native-scenarios.launch.discovery-not-found.publication.${category}`,
   ),
 );
 const nativeLaunchPublicationFailures = new WeakMap();
+const nativeLaunchPublicationResponses = new WeakMap();
 export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
   [
     'not-found',
@@ -4039,14 +4040,18 @@ function assertSuccessfulChildExit(code, signal) {
   }
 }
 
-function createCavePublicationObservation() {
+function createCavePublicationObservation(requestId) {
   const limit = 32 * 1024;
   let observedBytes = 0;
   let pending = Buffer.alloc(0);
   let accepted;
+  let completed;
+  const checkpoint = `[chat] native launch stderr checkpoint: ${createHash('sha256').update(requestId).digest('hex')}`;
+  const result = () =>
+    accepted ?? completed ?? (observedBytes > limit ? 'output-limit' : undefined);
   return {
     observe(chunk) {
-      if (accepted !== undefined || observedBytes > limit) return;
+      if (result() !== undefined) return;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const remaining = limit - observedBytes;
       observedBytes = Math.min(limit + 1, observedBytes + bytes.length);
@@ -4056,6 +4061,13 @@ function createCavePublicationObservation() {
         if (newline === -1) break;
         const line = pending.subarray(0, newline).toString('utf8').replace(/\r$/u, '');
         pending = pending.subarray(newline + 1);
+        // A checkpoint can follow an unterminated private line; it must not turn
+        // that prefix into a complete publisher refusal.
+        if (line.endsWith(checkpoint)) {
+          completed = 'not-observed';
+          pending = Buffer.alloc(0);
+          break;
+        }
         const match = /^\[cave\] client-v1 discovery publication refused: ([a-z-]+)$/u.exec(line);
         if (match !== null && cavePublisherCodes.has(match[1])) {
           accepted = match[1];
@@ -4065,9 +4077,11 @@ function createCavePublicationObservation() {
       }
       if (observedBytes > limit) pending = Buffer.alloc(0);
     },
-    result() {
-      return accepted ?? (observedBytes > limit ? 'output-limit' : 'not-observed');
+    finish(reason) {
+      if (result() === undefined) completed = reason;
+      pending = Buffer.alloc(0);
     },
+    result,
   };
 }
 
@@ -4089,9 +4103,31 @@ export class NativeRpcClient {
     this.secretFreeResponses = true;
     this.sequence = 0;
     this.buffer = '';
-    this.cavePublication = createCavePublicationObservation();
+    this.stderrCompletion = child.stderr
+      ? child.stderr.readableEnded
+        ? 'not-observed'
+        : child.stderr.destroyed
+          ? 'drain-unavailable'
+          : undefined
+      : 'drain-unavailable';
     // Drain all stderr, retaining only bounded, complete publisher refusal categories.
-    child.stderr?.on('data', (chunk) => this.cavePublication.observe(chunk));
+    child.stderr?.on('data', (chunk) => {
+      for (const [id, pending] of this.pending) {
+        pending.publication?.observe(chunk);
+        this.resolveResponse(id, pending);
+      }
+    });
+    const finishStderr = (reason) => {
+      this.stderrCompletion = reason;
+      for (const [id, pending] of this.pending) {
+        pending.publication?.finish(reason);
+        this.resolveResponse(id, pending);
+      }
+    };
+    child.stderr?.once('end', () => finishStderr('not-observed'));
+    child.stderr?.once('close', () => {
+      if (this.stderrCompletion === undefined) finishStderr('drain-unavailable');
+    });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       this.buffer += chunk;
@@ -4112,20 +4148,40 @@ export class NativeRpcClient {
           this.secretFreeResponses = false;
         }
         const pending = this.pending.get(response.id);
-        if (pending !== undefined) {
-          this.pending.delete(response.id);
-          clearTimeout(pending.timer);
-          pending.resolve(response);
+        if (pending !== undefined && pending.response === undefined) {
+          pending.response = response;
+          this.resolveResponse(response.id, pending);
         }
       }
     });
     child.once('close', () => {
-      for (const pending of this.pending.values()) {
+      for (const [id, pending] of this.pending) {
+        if (pending.response !== undefined) {
+          pending.publication?.finish(this.stderrCompletion ?? 'drain-unavailable');
+          this.resolveResponse(id, pending);
+          continue;
+        }
         clearTimeout(pending.timer);
         pending.reject(new Error('native RPC closed before responding'));
       }
       this.pending.clear();
     });
+  }
+
+  resolveResponse(id, pending) {
+    if (pending.response === undefined) return;
+    if (
+      pending.publication !== undefined &&
+      pending.response.ok === false &&
+      pending.response.error?.code === 'cave_launch_discovery_not_found'
+    ) {
+      const category = pending.publication.result();
+      if (category === undefined) return;
+      nativeLaunchPublicationResponses.set(pending.response, category);
+    }
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    pending.resolve(pending.response);
   }
 
   operation() {
@@ -4137,18 +4193,26 @@ export class NativeRpcClient {
   }
 
   request(command, args) {
-    if (command === 'cave_launch') this.cavePublication = createCavePublicationObservation();
     this.commandCounts.set(command, (this.commandCounts.get(command) ?? 0) + 1);
     this.sequence += 1;
-    const id = `request-${this.sequence}`;
+    const id = `request-${this.sequence}${command === 'cave_launch' ? `-${randomBytes(16).toString('hex')}` : ''}`;
     const request = { id, command, ...(args === undefined ? {} : { args }) };
     const timeoutMs = command === 'cave_launch' ? this.caveLaunchTimeoutMs : this.requestTimeoutMs;
     return new Promise((resolveRequest, rejectRequest) => {
+      const publication =
+        command === 'cave_launch' ? createCavePublicationObservation(id) : undefined;
+      if (this.stderrCompletion !== undefined) publication?.finish(this.stderrCompletion);
       const timer = setTimeout(() => {
+        if (pending.response !== undefined) {
+          publication?.finish('drain-timeout');
+          this.resolveResponse(id, pending);
+          return;
+        }
         this.pending.delete(id);
         rejectRequest(new Error(`native RPC timed out for ${command}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
+      const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
+      this.pending.set(id, pending);
       this.child.stdin.write(`${JSON.stringify(request)}\n`);
     });
   }
@@ -4168,7 +4232,10 @@ export class NativeRpcClient {
         `native RPC ${command} failed with ${response.error?.code ?? 'unknown'}`,
       );
       if (command === 'cave_launch' && response.error?.code === 'cave_launch_discovery_not_found') {
-        nativeLaunchPublicationFailures.set(failure, this.cavePublication.result());
+        nativeLaunchPublicationFailures.set(
+          failure,
+          nativeLaunchPublicationResponses.get(response),
+        );
       }
       throw failure;
     }

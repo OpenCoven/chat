@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '72f4f1ab36246ee87e3a77082fc9ccff5c1908b6',
-      sha256: '6052d8c8d52141693b142122fe03c60a5d4ed003b180058ae600f73f46f177cd',
+      blob: '5c41276ae58a197519d7195a44d34aa768c2a5de',
+      sha256: '181edca30978e3c94648ed58f935fa473faa707347652649a4129c72caeeb527',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'b16f004f42b12ff217d3c103655519b847651671',
-      sha256: '23cda23b20f74f5dbc541c00398b6f209857177953d0b9efc00197f27e9f0813',
+      blob: '8f6e731964ef18abe6185283178d6b8c23851911',
+      sha256: 'c6ed819f99d7005a461992c864d25c70dd81cd3a524ff4c117229a9f8325763f',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',

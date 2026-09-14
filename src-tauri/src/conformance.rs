@@ -10,6 +10,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
@@ -2246,12 +2247,150 @@ fn write_prepared_response_for_test<W: Write>(
 }
 
 fn write_rpc_response<W: Write>(stdout: &Arc<Mutex<W>>, response: &Value) -> io::Result<()> {
+    write_launch_rpc_response(stdout, &mut io::stderr(), response)
+}
+
+fn write_rpc_response_bytes<W: Write>(stdout: &Arc<Mutex<W>>, response: &Value) -> io::Result<()> {
     let mut stdout = stdout
         .lock()
         .map_err(|_| io::Error::other("RPC stdout lock was poisoned"))?;
     serde_json::to_writer(&mut *stdout, response)?;
     stdout.write_all(b"\n")?;
     stdout.flush()
+}
+
+fn write_launch_rpc_response<W: Write, E: Write>(
+    stdout: &Arc<Mutex<W>>,
+    stderr: &mut E,
+    response: &Value,
+) -> io::Result<()> {
+    // The parent must observe this checkpoint on stderr, not infer its delivery
+    // from the independently buffered stdout response.
+    let checkpoint = if response.get("ok").and_then(Value::as_bool) == Some(false)
+        && response
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(Value::as_str)
+            == Some("cave_launch_discovery_not_found")
+    {
+        match response.get("id").and_then(Value::as_str) {
+            Some(id) if valid_request_id(id) => {
+                let line = format!(
+                    "[chat] native launch stderr checkpoint: {:x}\n",
+                    Sha256::digest(id.as_bytes())
+                );
+                stderr
+                    .write_all(line.as_bytes())
+                    .and_then(|_| stderr.flush())
+            }
+            _ => Err(io::Error::other(
+                "Native launch response identity was invalid",
+            )),
+        }
+    } else {
+        Ok(())
+    };
+    // Preserve delivery of the original native failure even if the diagnostic
+    // channel failed, while still surfacing that I/O failure to the RPC loop.
+    write_rpc_response_bytes(stdout, response)?;
+    checkpoint
+}
+
+#[cfg(test)]
+mod launch_stderr_checkpoint_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    struct CheckpointWriter {
+        writes: Arc<Mutex<Vec<&'static str>>>,
+        label: &'static str,
+        bytes: Vec<u8>,
+        fail_flush: bool,
+    }
+
+    impl Write for CheckpointWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.writes.lock().unwrap().push(self.label);
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.writes.lock().unwrap().push(self.label);
+            if self.fail_flush {
+                Err(io::Error::other("injected checkpoint flush failure"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_precedes_response_and_hashes_only_request_identity() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let stdout = Arc::new(Mutex::new(CheckpointWriter {
+            writes: writes.clone(),
+            label: "stdout",
+            bytes: Vec::new(),
+            fail_flush: false,
+        }));
+        let mut stderr = CheckpointWriter {
+            writes: writes.clone(),
+            label: "stderr",
+            bytes: Vec::new(),
+            fail_flush: false,
+        };
+        let response = failure_response("request-opaque", "cave_launch_discovery_not_found", true);
+        write_launch_rpc_response(&stdout, &mut stderr, &response).unwrap();
+        assert_eq!(
+            String::from_utf8(stderr.bytes.clone()).unwrap(),
+            format!(
+                "[chat] native launch stderr checkpoint: {:x}\n",
+                Sha256::digest(b"request-opaque")
+            )
+        );
+        let writes = writes.lock().unwrap();
+        let first_stdout = writes.iter().position(|label| *label == "stdout").unwrap();
+        assert!(first_stdout > 0);
+        assert!(writes[first_stdout..]
+            .iter()
+            .all(|label| *label == "stdout"));
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        assert_eq!(stdout.lock().unwrap().bytes, expected);
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_failure_preserves_response_and_surfaces_io_failure() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let stdout = Arc::new(Mutex::new(Vec::new()));
+        let mut stderr = CheckpointWriter {
+            writes,
+            label: "stderr",
+            bytes: Vec::new(),
+            fail_flush: true,
+        };
+        let response = failure_response("request-opaque", "cave_launch_discovery_not_found", true);
+        assert!(write_launch_rpc_response(&stdout, &mut stderr, &response).is_err());
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        assert_eq!(*stdout.lock().unwrap(), expected);
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_does_not_change_other_responses() {
+        for response in [
+            success_response("request-opaque".into(), json!({})),
+            failure_response("request-opaque", "cave_launch_in_progress", true),
+        ] {
+            let stdout = Arc::new(Mutex::new(Vec::new()));
+            let mut stderr = Vec::new();
+            write_launch_rpc_response(&stdout, &mut stderr, &response).unwrap();
+            assert!(stderr.is_empty());
+            let mut expected = serde_json::to_vec(&response).unwrap();
+            expected.push(b'\n');
+            assert_eq!(*stdout.lock().unwrap(), expected);
+        }
+    }
 }
 
 fn join_rpc_workers(workers: &mut Vec<std::thread::JoinHandle<io::Result<()>>>) -> io::Result<()> {
