@@ -218,7 +218,7 @@
   top: 0;
   bottom: 0;
   z-index: 50;
-  width: min(340px, 88vw);
+  width: min(340px, 84vw);
   border: 0;
   border-radius: 0;
   background: var(--bg-panel);
@@ -229,6 +229,11 @@
     transform 200ms var(--ease-standard),
     visibility 200ms;
   will-change: transform;
+}
+
+/* Overlaid rails leave the grid flow, so the thread must claim its own track. */
+.coven-chat[data-tier="compact"] .fr-thread {
+  grid-column: 2;
 }
 
 .coven-chat[data-tier="compact"] .fr-sidebar {

@@ -59,6 +59,8 @@ export type ChatLayoutProps = Readonly<{
   loading: boolean;
   cancelling: boolean;
   error: string;
+  onSession?: (id: string) => void;
+  onNew?: () => void;
   onFamiliar: (id: string) => void;
   onDraft: (value: string) => void;
   onSend: () => void;

@@ -6,6 +6,7 @@ async function shellMetrics(page: Page) {
     const sidebar = document.querySelector('.fr-sidebar');
     const inspector = document.querySelector('.fr-inspector');
     const composer = document.querySelector('.fr-composer-wrap');
+    const thread = document.querySelector('.fr-thread');
     const rect = (node: Element | null) => node?.getBoundingClientRect() ?? null;
     return {
       viewport: window.innerWidth,
@@ -15,6 +16,7 @@ async function shellMetrics(page: Page) {
       sidebar: rect(sidebar),
       inspector: rect(inspector),
       composer: rect(composer),
+      thread: rect(thread),
     };
   });
 }
@@ -37,6 +39,8 @@ test.describe('responsive shell', () => {
       expect(metrics.tier).toBe(tier);
       expect(metrics.pageWidth).toBeLessThanOrEqual(metrics.viewport);
       expect(metrics.shell?.width).toBe(width);
+      // The thread owns most of the viewport whether or not rails are overlaid.
+      expect(metrics.thread?.width ?? 0).toBeGreaterThanOrEqual(Math.min(width, 640) * 0.6);
       // The composer is always reachable inside the viewport.
       expect(metrics.composer).not.toBeNull();
       expect((metrics.composer?.bottom ?? Number.NaN) <= 780).toBe(true);
@@ -55,18 +59,20 @@ test.describe('responsive shell', () => {
 
     await page.getByRole('button', { name: 'Show familiars', exact: true }).click();
     await expect(sidebar).toBeVisible();
-    let metrics = await shellMetrics(page);
-    expect(metrics.sidebar?.left).toBe(0);
-    expect((metrics.sidebar?.width ?? 0) < 390).toBe(true);
+    // Wait for the slide-in to settle before measuring.
+    await expect.poll(async () => (await shellMetrics(page)).sidebar?.left).toBe(0);
+    expect(((await shellMetrics(page)).sidebar?.width ?? 0) < 390).toBe(true);
 
-    await page.getByRole('button', { name: 'Close panels' }).click();
+    // Tap the exposed strip of scrim beside the drawer, as a thumb would.
+    await page
+      .getByRole('button', { name: 'Close panels' })
+      .click({ position: { x: 380, y: 400 } });
     await expect(sidebar).toBeHidden();
 
     await page.getByRole('button', { name: 'Show inspector', exact: true }).click();
     await expect(inspector).toBeVisible();
     await expect(sidebar).toBeHidden();
-    metrics = await shellMetrics(page);
-    expect(metrics.inspector?.right).toBe(390);
+    await expect.poll(async () => (await shellMetrics(page)).inspector?.right).toBe(390);
 
     await page.keyboard.press('Escape');
     await expect(inspector).toBeHidden();
@@ -83,6 +89,7 @@ test.describe('responsive shell', () => {
     await expect(page.locator('.fr-inspector')).toBeHidden();
     await page.getByRole('button', { name: 'Show inspector', exact: true }).first().click();
     await expect(page.locator('.fr-inspector')).toBeVisible();
+    await expect.poll(async () => (await shellMetrics(page)).inspector?.right).toBe(900);
     const metrics = await shellMetrics(page);
     // The rail stays in place beneath the overlay rather than being pushed.
     expect(metrics.sidebar?.left).toBe(0);

@@ -8,7 +8,6 @@ import {
   createCovenRuntime,
 } from '../lib/coven-runtime';
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
-import { CaveImport } from './cave-import';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
 
@@ -435,36 +434,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       readOnly={sessions.some(
         (session) => session.id === navigation.sessionId && session.status === 'imported',
       )}
-      importControl={
-        <CaveImport
-          disabled={busy || attaching || changingLifecycle}
-          onImported={async (id) => {
-            if (lifecyclePending.current) {
-              throw new Error('Import saved. Refresh Chat after the chat change finishes.');
-            }
-            const life = lifetime.current;
-            const revision = sessionRevision.current;
-            const nextSessions = await runtime.listSessions();
-            if (lifetime.current !== life || sessionRevision.current !== revision) {
-              throw new Error('Import saved. Refresh Chat to open it after navigation finishes.');
-            }
-            setSessions(nextSessions);
-            if (
-              !nextSessions.some((session) => session.id === id && session.status === 'imported')
-            ) {
-              throw new Error(
-                'Import saved, but it is not in the refreshed list. Refresh Chat to retry.',
-              );
-            }
-            if (activeRun.current || lifecyclePending.current) {
-              throw new Error('Import saved. Select it after the current run finishes.');
-            }
-            setError('');
-            setArchived(Boolean(nextSessions.find((session) => session.id === id)?.archived));
-            navigate({ ...navigationRef.current, sessionId: id });
-          }}
-        />
-      }
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
       onAttach={(files) => void attach(files)}
