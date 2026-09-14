@@ -26,8 +26,8 @@
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "6e8af2f30c90e6cfc32010a40941449f36a20c31",
-        "sha256": "ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c"
+        "blob": "cb83a0aaa36305a429bcf27101e0b9d31888fddd",
+        "sha256": "4fec116b52831427acb6b84d68d7916c33d30e00e72e0eb0c04a1432f4ac49ce"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "588ae43464d12d2022b147df1b1710deca4d15ad",
-        "sha256": "7760aa853e8d318f7d54714d155e230108dafe928d8e4af2e94d1abbc7c98483"
+        "blob": "89f3faf5d5b70858a407ca77e08209477c105c1d",
+        "sha256": "958602a95f78774973c7a7ec3e0e3c6ca4accbdd221fff936c9bad3bafd4c591"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
