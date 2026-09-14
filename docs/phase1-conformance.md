@@ -353,8 +353,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `b8777827a83b50f122c0880415286e4ebca7026c`, tree
-  `bd312db6e2f76b93adea704f5be57a002db0a815`, retained in the producer ancestry;
+- Chat conformance driver `6fb8ff2fb0356eff549b4e8ed80eca83da133c6d`, tree
+  `4017175c4a03e03e54b83f3c3d669a0664b52e94`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1669,7 +1669,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 354,471 | `a74c3cece7bdf16e3ef020107c0684d3ab254fca5e8ae8508e884549bcfbf8f4` |
+| `scripts/windows-job-supervisor.cs` | 356,589 | `b5f39b14d66a66ba2f86fac964fa2805ba728436b864039448d4eae4805c804b` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 29,480 | `b2160b083f6db3c4e6a328b026350c9ae80a2d688482849705705396ded1a998` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
