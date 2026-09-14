@@ -228,7 +228,7 @@ packages:
     engines: {node: '>=24.18.0 <25'}
 
   '@opencoven/coven-client@file:vendor/opencoven-sdk/coven-client-0.0.1.tgz':
-    resolution: {integrity: sha512-+6rxWRHOmDZgE1Y5Ilq5NlcQHwZHNFh3/kVMRiHuUQ59HGqyFd8X8NkX+KjQ+f3/8RDS31KuVolPJ1mS/YAbYQ==, tarball: file:vendor/opencoven-sdk/coven-client-0.0.1.tgz}
+    resolution: {integrity: sha512-k5ft62Rh+QiGlZsFpiYHeQm/io/kotNEMDUFC0VdF6YgOK6fVtCRL4HSL3O1uY+O+Naye0AqN+95hX8ptCQgrA==, tarball: file:vendor/opencoven-sdk/coven-client-0.0.1.tgz}
     version: 0.0.1
     engines: {node: '>=24.18.0 <25'}
 
