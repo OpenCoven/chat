@@ -1,0 +1,21 @@
+{
+  "repository": "OpenCoven/sdk",
+  "revision": "88332efc34a74b1984743f06972d24c9e846c459",
+  "tree": "3a7df9f184d806fe614a6c883acb54626e7ef4ab",
+  "files": [
+    {
+      "path": "conformance/client-v1-cross-repository-lock.json",
+      "fixture": "client-v1-cross-repository-lock.json.fixture",
+      "blob": "41478ebf1f73aff8ef8b6a06c5c1f3bb0e1b49bd",
+      "size": 11338,
+      "sha256": "09b561479951ce7a5018defd2037df9faa06893d7d9d81c0f59fceed4fa89b40"
+    },
+    {
+      "path": "conformance/client-v1-cross-repository-assertions.json",
+      "fixture": "client-v1-cross-repository-assertions.json.fixture",
+      "blob": "e2fb9e4c2797ccfacd4aef42f87f3057b0dd704b",
+      "size": 10715,
+      "sha256": "fee0c8bb2c38afa9116e0b26fdf0266c3e4e4e833937cfd38200a3c26914583b"
+    }
+  ]
+}

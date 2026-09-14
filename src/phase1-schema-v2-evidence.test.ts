@@ -906,6 +906,61 @@ async function fixture() {
 }
 
 describe('Phase 1 SDK source contract authority', () => {
+  test('requires a new SDK binding without rewriting the complete pre-adoption registry', () => {
+    const root = resolve(projectRoot, 'src/test/fixtures/sdk-88332efc');
+    const provenance = JSON.parse(readFileSync(resolve(root, 'provenance.json'), 'utf8'));
+    expect(provenance).toMatchObject({
+      repository: 'OpenCoven/sdk',
+      revision: '88332efc34a74b1984743f06972d24c9e846c459',
+      tree: '3a7df9f184d806fe614a6c883acb54626e7ef4ab',
+    });
+    expect(provenance.files.map((file: { sha256: string }) => file.sha256)).toEqual([
+      '09b561479951ce7a5018defd2037df9faa06893d7d9d81c0f59fceed4fa89b40',
+      'fee0c8bb2c38afa9116e0b26fdf0266c3e4e4e833937cfd38200a3c26914583b',
+    ]);
+    for (const file of provenance.files) {
+      const bytes = readFileSync(resolve(root, file.fixture));
+      expect(bytes.byteLength).toBe(file.size);
+      expect(sha256(bytes)).toBe(file.sha256);
+      expect(
+        createHash('sha1')
+          .update(Buffer.from(`blob ${bytes.byteLength}\0`))
+          .update(bytes)
+          .digest('hex'),
+      ).toBe(file.blob);
+    }
+    const frozenLock = JSON.parse(
+      readFileSync(resolve(root, 'client-v1-cross-repository-lock.json.fixture'), 'utf8'),
+    );
+    const registry = JSON.parse(
+      readFileSync(resolve(root, 'client-v1-cross-repository-assertions.json.fixture'), 'utf8'),
+    );
+    const phase1Lock = readPhase1ConformanceLock();
+    expect(frozenLock.candidate.commit).toBe(phase1Lock.sdk.revision);
+    expect(frozenLock.sources.chat.commit).toBe(phase1Lock.chat.revision);
+    expect(frozenLock.sources.coven.commit).toBe(phase1Lock.coven.revision);
+    expect(frozenLock.sources.cave.releaseVersion).toBe('0.4.4');
+    expect(registry.assertions.cave).toHaveLength(110);
+    expect(new Set(registry.assertions.cave).size).toBe(110);
+    expect(registry.assertions.cave).toContain('harness.assertion-coverage');
+    expect(registry.provenance).toEqual({
+      repository: frozenLock.sources.cave.repository,
+      commit: frozenLock.sources.cave.commit,
+      tree: frozenLock.sources.cave.tree,
+      engine: frozenLock.sources.cave.files[0],
+      includeTtl: true,
+      includeAuthorityTakeover: true,
+    });
+    expect(frozenLock.candidate.cavePackageFiles).toContainEqual({
+      path: 'packages/cave/fixtures/contract-fixture.provenance.json',
+      size: 333,
+      sha256: 'a2600544f609137df465c0350ee38e7ff56c2eb649556440714c2e0ba3b96010',
+    });
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).toThrow(
+      'Phase 1 cave pin does not match the SDK frozen contract.',
+    );
+  });
+
   test.each(['unstaged', 'staged', 'untracked', 'hidden'] as const)(
     'loads committed schema, registry, and lock bytes despite a %s checkout substitute',
     (substitution) => {
@@ -1597,31 +1652,44 @@ describe('Phase 1 SDK source contract authority', () => {
 });
 
 describe('bounded Cave record diagnostics', () => {
-  test('binds the Cave5391 engine release to the current lock without accepting the old version', () => {
-    const lock = readPhase1ConformanceLock();
-    expect(lock.cave.revision).toBe('d655b2c3b6ecabf3a5eaea9e314b180028321d81');
-    const record = {
-      platform: 'linux-x64',
-      commit: lock.cave.revision,
-      caveVersion: '0.4.4',
-      nodeVersion: 'v24.18.1',
-      ranAt: '2026-09-14T11:00:00.000Z',
-      assertions: [{ id: 'one', result: 'pass', detail: '' }],
-    };
-    const expected = {
-      platform: record.platform,
-      commit: lock.cave.revision,
-      releaseVersion: lock.release.caveVersion,
-      nodeVersion: record.nodeVersion,
-      startedAt: record.ranAt,
-      completedAt: '2026-09-14T11:00:01.000Z',
-    };
-    const registry = { assertions: { cave: ['one'] } };
-    expect(() => validateCaveRecord(record, registry, expected)).not.toThrow();
-    expect(() =>
-      validateCaveRecord({ ...record, caveVersion: '0.4.3' }, registry, expected),
-    ).toThrow('phase1.stage.evidence-authority.build.cave-record.identity.cave-version');
-  });
+  test.each(['0.4.3', '0.4.4'])(
+    'binds the Cave5409 engine release without accepting %s',
+    (oldVersion) => {
+      const lock = readPhase1ConformanceLock();
+      expect(lock.cave.revision).toBe('5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d');
+      const record = {
+        platform: 'linux-x64',
+        commit: lock.cave.revision,
+        caveVersion: '0.4.2',
+        nodeVersion: 'v24.18.1',
+        ranAt: '2026-09-14T11:00:00.000Z',
+        assertions: [{ id: 'one', result: 'pass', detail: '' }],
+      };
+      const expected = {
+        platform: record.platform,
+        commit: lock.cave.revision,
+        releaseVersion: lock.release.caveVersion,
+        nodeVersion: record.nodeVersion,
+        startedAt: record.ranAt,
+        completedAt: '2026-09-14T11:00:01.000Z',
+      };
+      const registry = { assertions: { cave: ['one'] } };
+      expect(() => validateCaveRecord(record, registry, expected)).not.toThrow();
+      expect(() =>
+        validateCaveRecord({ ...record, caveVersion: oldVersion }, registry, expected),
+      ).toThrow('phase1.stage.evidence-authority.build.cave-record.identity.cave-version');
+      expect(() =>
+        validateCaveRecord(
+          {
+            ...record,
+            commit: '5217470786d72e05d2d0d8820c3c7d30c03eafb2',
+          },
+          registry,
+          expected,
+        ),
+      ).toThrow('phase1.stage.evidence-authority.build.cave-record.identity.commit');
+    },
+  );
 
   test.each([
     'identity.platform',
