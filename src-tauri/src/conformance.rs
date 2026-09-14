@@ -2884,16 +2884,19 @@ mod tests {
 
     #[test]
     fn dispatches_coven_health_through_the_bounded_rpc_operation() {
-        let _environment = ENVIRONMENT_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original = env::var_os("COVEN_HOME");
-        env::set_var(
-            "COVEN_HOME",
-            env::current_dir().unwrap().join("missing-coven-health"),
-        );
+        struct UnavailableCoven;
+        impl crate::coven::CovenHealth for UnavailableCoven {
+            fn health(&self) -> crate::cave::NativeResult<crate::coven::CovenHealthResult> {
+                Err(crate::cave::NativeDiagnostic::new(
+                    "service_unavailable",
+                    true,
+                ))
+            }
+        }
+        // Exercise RPC dispatch without launching libtest as the packaged app.
         let mut runtime = RpcRuntime::new();
+        runtime.state =
+            crate::NativeConnectionState::with_test_coven_health(Arc::new(UnavailableCoven));
 
         let response = runtime.process_line(
             format!(
@@ -2913,10 +2916,6 @@ mod tests {
                 }
             })
         );
-        match original {
-            Some(value) => env::set_var("COVEN_HOME", value),
-            None => env::remove_var("COVEN_HOME"),
-        }
     }
 
     #[test]
