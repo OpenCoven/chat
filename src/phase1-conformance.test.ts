@@ -6479,6 +6479,130 @@ describe('Phase 1 real-authority conformance harness', () => {
   });
 });
 
+describe('schema-v2 bounded Cave startup exit details', () => {
+  const prefix = 'client-v1-conformance: Cave exited before readiness.';
+  const exits = ['zero', 'nonzero', 'signal', 'windows-crash', 'unknown'];
+  const errors = [
+    'not-observed',
+    'output-limit',
+    'address-in-use',
+    'access-denied',
+    'out-of-memory',
+    'module-not-found',
+    'other',
+  ];
+
+  test.each(exits.flatMap((exit) => errors.map((stderr) => [exit, stderr])))(
+    'retains finite exit %s and stderr %s through every public gate',
+    async (exit, stderr) => {
+      // @ts-expect-error Executable module intentionally has no declaration file.
+      const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+      const expected = `phase1.cave-authority.startup.exit.status.${exit}.stderr.${stderr}`;
+      const error = new producer.CommandExecutionError('private command label', {
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: `${prefix} [exit=${exit}; stderr=${stderr}]`,
+      });
+      const actual = producer.schemaV2FailureDiagnostic(
+        error,
+        'phase1.stage.cave-authority.failed',
+      );
+      expect(actual).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(actual))).toBe(expected);
+      expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${actual}`)).toBe(expected);
+      expect(producer.wrapInfrastructureFailure(new Error(actual), {}).message).toBe(expected);
+      expect(publicPhase1FailureDiagnostic(new Error(`${actual}: private secret`))).toBeUndefined();
+    },
+  );
+
+  test.each([
+    '',
+    ' [exit=private-secret; stderr=access-denied]',
+    ' [exit=nonzero; stderr=private-secret]',
+    ' [exit=nonzero; stderr=access-denied] private-secret',
+    ' [stderr=access-denied; exit=nonzero]',
+    ' [exit=nonzero;stderr=access-denied]',
+  ])('keeps absent or malformed details private: %s', async (suffix) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(producer.classifyCavePreAssertionFailure(`${prefix}${suffix}`)).toBe(
+      'phase1.cave-authority.startup.exit',
+    );
+  });
+
+  test('preserves the first startup failure instead of promoting later exit detail', async () => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    expect(
+      producer.classifyCavePreAssertionFailure(
+        'client-v1-conformance: Cave health is not ready.\n' +
+          `${prefix} [exit=nonzero; stderr=access-denied]`,
+      ),
+    ).toBe('phase1.cave-authority.startup.health');
+  });
+
+  test('captures bounded Cave exit details through actual Node pipes', async () => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const owner = createProcessOwnedArtifactRoot({ prefix: 'p1exit' });
+    try {
+      const error = await producer
+        .runSchemaV2CommandForTest(
+          owner,
+          process.execPath,
+          [
+            '-e',
+            `
+          process.stderr.write('private fixture output\\nclient-v1-conformance: Cave exited');
+          setImmediate(() => {
+            process.stderr.write(' before readiness. [exit=nonzero; stderr=access-denied]\\n');
+            process.exitCode = 1;
+          });
+        `,
+          ],
+          { cwd: owner.rootPath },
+        )
+        .then(
+          () => {
+            throw new Error('The failing fixture unexpectedly succeeded.');
+          },
+          (failure: unknown) => failure,
+        );
+      const diagnostic = producer.schemaV2FailureDiagnostic(
+        error,
+        'phase1.stage.cave-authority.failed',
+      );
+      expect(diagnostic).toBe(
+        'phase1.cave-authority.startup.exit.status.nonzero.stderr.access-denied',
+      );
+      expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
+      expect(diagnostic).not.toContain('private fixture');
+    } finally {
+      await owner.cleanup();
+    }
+  });
+
+  test.each([
+    ['timeout', 'timeout'],
+    ['stderr-limit', 'output-limit'],
+    ['supervisor-termination', 'supervisor'],
+  ])('does not replace command failure %s with child startup detail', async (reason, expected) => {
+    // @ts-expect-error Executable module intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const error = new producer.CommandExecutionError('private command label', {
+      code: 1,
+      signal: null,
+      reason,
+      stdout: '',
+      stderr: `${prefix} [exit=nonzero; stderr=access-denied]`,
+    });
+    expect(producer.schemaV2FailureDiagnostic(error, 'phase1.stage.cave-authority.failed')).toBe(
+      `phase1.cave-authority.${expected}`,
+    );
+  });
+});
+
 describe('schema-v2 bounded Cave discovery details', () => {
   const reads = [
     'not-found',

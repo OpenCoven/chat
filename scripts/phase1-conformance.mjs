@@ -49,6 +49,7 @@ import {
 } from './phase1-schema-v2-evidence.mjs';
 import {
   CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
+  CAVE_STARTUP_EXIT_DIAGNOSTICS,
   caveLaunchRpcTimeoutForPlatform,
   classifyCavePluginEvaluationFailure,
   NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
@@ -816,6 +817,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.cave-authority.startup',
   'phase1.cave-authority.startup.timeout',
   'phase1.cave-authority.startup.exit',
+  ...CAVE_STARTUP_EXIT_DIAGNOSTICS,
   'phase1.cave-authority.startup.health',
   'phase1.cave-authority.startup.discovery.missing',
   ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,

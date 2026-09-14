@@ -92,6 +92,36 @@ The subsequent SDK validator must bind the same Cave release version. The
 private SDK968 candidate, its archives, and production consumer remain frozen;
 later SDK public API changes are not included by this correction.
 
+### Bounded pre-readiness exit observations
+
+[Protected run 34833377609](https://github.com/OpenCoven/chat/actions/runs/34833377609)
+used Chat `92c4c453` and Cave `d655b2c3`. Its Windows job reported
+`phase1.cave-authority.startup.exit`, with no Windows platform record. At that
+Cave revision, `startCave()` discards stdout, observes stderr only for discovery
+publication refusal, and reduces the server exit to a boolean. Neither the
+child's exit status nor another startup error survives into the retained
+diagnostic. The later Cave `0.4.4` metadata correction does not recover that
+missing observation.
+
+Chat accepts the exact finite counterpart message
+`Cave exited before readiness. [exit=<category>; stderr=<category>]`.
+Exit categories are `zero`, `nonzero`, `signal`, `windows-crash`, and `unknown`.
+Stderr categories are `not-observed`, `output-limit`, `address-in-use`,
+`access-denied`, `out-of-memory`, `module-not-found`, and `other`. The public
+diagnostic is `phase1.cave-authority.startup.exit.status.<exit>.stderr.<stderr>`.
+Unknown or malformed details retain the original generic exit diagnostic;
+command resource failures and the first startup failure keep precedence.
+Paths, error text, environment values, and arbitrary exit values are not
+accepted as diagnostic fields.
+
+The existing ordinary Windows job runs the finite parser and actual Node-pipe
+transport cases without a protected approval. That is transport coverage, not
+a reproduction of the protected Cave server failure: the native supervisor
+suite does not build and launch that server. Pinned Cave `d655b2c3` still emits
+the generic exit message; observing the additional categories requires the
+separately reviewed Cave counterpart and an explicit authority rebind. No
+startup repair or residual-profile cleanup is claimed by this instrumentation.
+
 ## Windows OWNER RIGHTS discovery repair
 
 [Protected run 34782181876](https://github.com/OpenCoven/chat/actions/runs/34782181876)
@@ -1706,20 +1736,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,186 | `91eea46f41ff704c7f4ccd552fc63e0291760c4b55712275d6056756773e9b7d` |
+| `.github/workflows/client-v1-conformance.yml` | 168,186 | `6ec14b6a025b51f836a3feff70029ead98ef4f1ac51b2aa338f12ee6875f4ab7` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325` |
-| `scripts/phase1-conformance.mjs` | 218,063 | `ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c` |
+| `scripts/phase1-conformance.mjs` | 218,132 | `4fec116b52831427acb6b84d68d7916c33d30e00e72e0eb0c04a1432f4ac49ce` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 225,687 | `7760aa853e8d318f7d54714d155e230108dafe928d8e4af2e94d1abbc7c98483` |
+| `scripts/phase1-schema-v2-producer.mjs` | 226,590 | `958602a95f78774973c7a7ec3e0e3c6ca4accbdd221fff936c9bad3bafd4c591` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

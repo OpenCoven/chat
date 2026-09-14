@@ -110,6 +110,20 @@ export const NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS = Object.freeze(
 );
 const nativeLaunchPublicationFailures = new WeakMap();
 const nativeLaunchPublicationResponses = new WeakMap();
+export const CAVE_STARTUP_EXIT_DIAGNOSTICS = Object.freeze(
+  ['zero', 'nonzero', 'signal', 'windows-crash', 'unknown'].flatMap((exit) =>
+    [
+      'not-observed',
+      'output-limit',
+      'address-in-use',
+      'access-denied',
+      'out-of-memory',
+      'module-not-found',
+      'other',
+    ].map((stderr) => `phase1.cave-authority.startup.exit.status.${exit}.stderr.${stderr}`),
+  ),
+);
+const caveStartupExitDiagnosticSet = new Set(CAVE_STARTUP_EXIT_DIAGNOSTICS);
 export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
   [
     'not-found',
@@ -571,6 +585,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.startup',
   'phase1.cave-authority.startup.timeout',
   'phase1.cave-authority.startup.exit',
+  ...CAVE_STARTUP_EXIT_DIAGNOSTICS,
   'phase1.cave-authority.startup.health',
   'phase1.cave-authority.startup.discovery.missing',
   ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
@@ -1462,6 +1477,14 @@ export function classifyCavePreAssertionFailure(output) {
   for (const message of messages) {
     const startup = startupDiagnostics.find(([prefix]) => message.startsWith(prefix));
     if (startup !== undefined) {
+      if (startup[1] === 'startup.exit') {
+        const detail =
+          /^Cave exited before readiness\. \[exit=([a-z-]+); stderr=([a-z-]+)\]$/u.exec(message);
+        if (detail) {
+          const diagnostic = `phase1.cave-authority.startup.exit.status.${detail[1]}.stderr.${detail[2]}`;
+          if (caveStartupExitDiagnosticSet.has(diagnostic)) return diagnostic;
+        }
+      }
       if (startup[1] === 'startup.discovery.missing') {
         const detail =
           /^Client v1 discovery record is not published\. \[read=([a-z-]+); publication=([a-z-]+)\]$/u.exec(

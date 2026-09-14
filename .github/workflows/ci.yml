@@ -732,4 +732,9 @@ jobs:
         env:
           OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: C:\OpenCoven\conformance\phase1-process-supervisor.exe
         run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run --config vitest.heavy.config.ts src/phase1-windows-supervisor.test.ts
+      - name: Verify bounded Cave startup diagnostic transport
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance.test.ts
+          -t "schema-v2 bounded Cave startup exit details"
       - run: corepack pnpm test:native-e2e
