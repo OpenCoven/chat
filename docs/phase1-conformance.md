@@ -2370,3 +2370,9 @@ This closes the gap where a successful delete call alone could produce an
 E2E failure in Chat #274, or prove that another process cannot create an entry
 after verification. Fresh native CI, reviewed source binding, and protected
 validation remain required before accepting this producer.
+
+The cleanup readback source is pinned at
+`62f56a17a9722f29b8f74f6bcbff59c560673c48`, tree
+`3974a8a05eafb2d5c38c87047d4e7396f44a3c91`. Preserve that commit in producer
+ancestry when landing; the following lock update binds its harness and native
+production deltas without changing the SDK candidate or counterpart revisions.
