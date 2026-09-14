@@ -432,6 +432,110 @@ try {
 }
 Write-Host 'Readable directory-snapshot repeat supplies the accepted bounded measurement.'
 
+$missingRepeatError = $null
+try {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $snapshotRoot
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls = 0
+  $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientSnapshotRead,
+    $true,
+    [Type]::Missing
+  )) | Out-Null
+} catch {
+  $missingRepeatError = $_.Exception.GetBaseException()
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $null
+}
+if ($null -eq $missingRepeatError -or $missingRepeatError.GetType() -ne $contextType -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls -ne 2 -or
+    $contextType.GetProperty('Category', $instanceFlags).GetValue($missingRepeatError) -cne 'access-denied' -or
+    $contextType.GetProperty('Operation', $instanceFlags).GetValue($missingRepeatError) -cne 'directory-enumeration-depth-3-plus' -or
+    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($missingRepeatError) -cne 'missing' -or
+    $missingRepeatError.ToString().Contains($snapshotRoot) -or
+    $missingRepeatError.ToString().Contains('private-')) {
+  throw 'Missing directory-snapshot repeat was accepted or lost its bounded first failure.'
+}
+$missingRepeatState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $missingContext = $boundedConstructor.Invoke([object[]]@(
+    'Cave checkout', 'directory-enumeration-depth-3-plus', 'none', 'missing', $missingRepeatError
+  ))
+  $record.Invoke($missingRepeatState, [object[]]@($missingContext))
+  $record.Invoke($missingRepeatState, [object[]]@([IO.IOException]::new('later-private-failure')))
+  foreach ($pair in @(
+    @('MonitorErrorCategory', 'access-denied'),
+    @('MonitorErrorRoot', 'cave-checkout'),
+    @('MonitorErrorOperation', 'directory-enumeration-depth-3-plus'),
+    @('MonitorErrorRepeat', 'missing'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($missingRepeatState) -cne $pair[1]) {
+      throw 'Later failure replaced the missing directory-snapshot diagnostic.'
+    }
+  }
+  if (-not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($missingRepeatState) -or
+      -not $stateType.GetProperty('MonitorError', $instanceFlags).GetValue($missingRepeatState)) {
+    throw 'Missing directory-snapshot repeat did not signal monitor failure.'
+  }
+} finally { $missingRepeatState.Dispose() }
+Write-Host 'Denied directory followed by a real missing snapshot remains fail-closed and preserves the first failure.'
+
+foreach ($overLimit in @($false, $true)) {
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $missingRepeatError
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassResult = $overLimit
+  $recoveredResult = $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  )
+  if ($recoveredResult -ne $overLimit -or
+      [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+    throw 'Whole-pass recovery discarded the replacement measurement or its byte breach.'
+  }
+}
+foreach ($nonRecoverable in @(
+    @([IO.IOException]::new('private-io'), 'missing'),
+    @([UnauthorizedAccessException]::new('private-denial'), 'persistent'),
+    @([UnauthorizedAccessException]::new('private-denial'), 'readable'))) {
+  $failure = $boundedConstructor.Invoke([object[]]@(
+    $null, 'directory-enumeration-depth-3-plus', $null, $nonRecoverable[1], $nonRecoverable[0]
+  ))
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $failure
+  $caughtFailure = $null
+  try {
+    $wholePass.Invoke(
+      $null,
+      [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+    ) | Out-Null
+  } catch {
+    $caughtFailure = $_.Exception.GetBaseException()
+  }
+  if ($caughtFailure -ne $failure -or [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 1) {
+    throw 'Whole-pass recovery retried a nonqualifying failure.'
+  }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $missingRepeatError
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $missingRepeatError
+$repeatedRemovalFailure = $null
+try {
+  $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  ) | Out-Null
+} catch {
+  $repeatedRemovalFailure = $_.Exception.GetBaseException()
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $null
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+}
+if ($repeatedRemovalFailure -ne $missingRepeatError -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+  throw 'A second removal race escaped the single whole-pass retry bound.'
+}
+Write-Host 'Whole-pass recovery preserves byte breaches, excludes other failures, and never retries a second removal race.'
+
 $snapshotCore = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'ReadBoundedDirectorySnapshotCore',
   $flags,

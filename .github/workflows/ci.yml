@@ -633,6 +633,30 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
       - run: corepack pnpm test:native-e2e
 
+  windows-profile-residual:
+    name: Windows profile residual cleanup
+    runs-on: windows-2025
+    needs: changes
+    if: >-
+      needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+    # Keep the additional identity lifecycles out of the nearly full
+    # twenty-minute supervisor job; production deadlines are unchanged.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Test residual cleanup policy
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-policy.test.ps1
+      - name: Test authorized native profile cleanup
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-native.test.ps1
+
   unix-supervisor:
     name: Unix producer supervisor (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
@@ -732,4 +756,9 @@ jobs:
         env:
           OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: C:\OpenCoven\conformance\phase1-process-supervisor.exe
         run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run --config vitest.heavy.config.ts src/phase1-windows-supervisor.test.ts
+      - name: Verify bounded Cave startup diagnostic transport
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance.test.ts
+          -t "schema-v2 bounded Cave startup exit details"
       - run: corepack pnpm test:native-e2e
