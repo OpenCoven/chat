@@ -4145,6 +4145,7 @@ export class NativeRpcClient {
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.requestTimeoutMs = requestTimeoutMs;
     this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
+    this.closed = child.exitCode != null || child.signalCode != null;
     this.pending = new Map();
     this.launchPublications = [];
     this.launchPublicationFailure = undefined;
@@ -4216,6 +4217,7 @@ export class NativeRpcClient {
       }
     });
     child.once('close', () => {
+      this.closed = true;
       for (const [id, pending] of this.pending) {
         if (pending.response !== undefined) {
           pending.publication?.finish(this.stderrCompletion ?? 'drain-unavailable');
@@ -4234,6 +4236,8 @@ export class NativeRpcClient {
   }
 
   failInput() {
+    if (this.closed) return;
+    this.closed = true;
     this.poisonLaunchPublications('drain-unavailable');
     for (const [id, pending] of [...this.pending]) {
       if (!this.pending.has(id)) continue;
@@ -4282,6 +4286,9 @@ export class NativeRpcClient {
   }
 
   request(command, args) {
+    if (this.closed) {
+      return Promise.reject(new Error('native RPC transport closed'));
+    }
     this.commandCounts.set(command, (this.commandCounts.get(command) ?? 0) + 1);
     this.sequence += 1;
     const id = `request-${this.sequence}${command === 'cave_launch' ? `-${randomBytes(16).toString('hex')}` : ''}`;
@@ -4359,9 +4366,12 @@ export class NativeRpcClient {
   }
 
   async close() {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+    if (this.child.exitCode != null || this.child.signalCode != null) {
       assertSuccessfulChildExit(this.child.exitCode, this.child.signalCode);
       return;
+    }
+    if (this.closed) {
+      throw new Error('native RPC transport closed');
     }
     await triggerAndWaitForChildClose(
       this.child,

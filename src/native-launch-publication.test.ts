@@ -598,20 +598,11 @@ describe('native launch publication observation', () => {
         'phase1.native-scenarios.launch.launch-rpc-unknown',
       );
       expect(client.launchPublications).toHaveLength(0);
-
-      const second = launchFailure(client);
-      const secondId = requests[1]?.id;
-      if (secondId === undefined) throw new Error('Second launch request was not sent');
-      child.stderr.write(`${prefix}authority-init\n`);
-      child.stderr.write(
-        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+      await expect(client.request('app_installation_id')).rejects.toThrow(
+        'native RPC transport closed',
       );
-      child.stdout.write(
-        `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
-      );
-      expect((await second).message).toBe(
-        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-unavailable',
-      );
+      await expect(client.close()).rejects.toThrow('native RPC transport closed');
+      expect(requests).toHaveLength(1);
     },
   );
 });
