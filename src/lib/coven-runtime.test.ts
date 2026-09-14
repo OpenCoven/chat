@@ -10,6 +10,26 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 describe('Coven runtime', () => {
+  it('requires unique familiar-owned canonical heads and rejects standalone/import metadata', async () => {
+    const head = {
+      id: 'one',
+      familiarId: 'f',
+      title: 'One',
+      harness: 'coven-code',
+      status: 'completed',
+      updatedAt: '',
+      projectRoot: '',
+    };
+    const invoke = vi.fn().mockResolvedValue([head]);
+    const runtime = createCovenRuntime({ available: () => true, invoke });
+    expect(await runtime.listSessions()).toEqual([head]);
+    invoke.mockResolvedValue([head, { ...head, id: 'other' }]);
+    await expect(runtime.listSessions()).rejects.toThrow('invalid');
+    invoke.mockResolvedValue([{ ...head, familiarId: undefined }]);
+    await expect(runtime.listSessions()).rejects.toThrow('invalid');
+    invoke.mockResolvedValue({ session: { ...head, id: 'wrong' }, events: [] });
+    await expect(runtime.readSession('one')).rejects.toThrow('invalid');
+  });
   it.each(['active', 'archived', 'deleted'] as const)(
     'uses the narrow %s lifecycle boundary',
     async (lifecycle) => {

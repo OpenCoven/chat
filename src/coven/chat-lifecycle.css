@@ -6,6 +6,12 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.coven-lifecycle-conversations {
+  padding: 12px 8px;
+}
+.coven-lifecycle-conversations > .fr-btn {
+  margin-bottom: 8px;
+}
 .coven-chat .fr-thread:has(.coven-lifecycle) {
   grid-template-rows: minmax(44px, auto) minmax(0, 1fr) auto;
 }

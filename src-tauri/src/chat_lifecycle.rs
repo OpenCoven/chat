@@ -82,7 +82,7 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
         if next != Lifecycle::Deleted {
             return Err("Deleted chats cannot be restored.".into());
         }
-    } else if crate::chat_origin::read_import(data, id)?.is_none() {
+    } else {
         crate::chat_origin::require_chat_origin(data, id)?;
     }
     if next == Lifecycle::Active {
@@ -97,6 +97,23 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
     if bytes.len() > LIMIT {
         return Err("Chat lifecycle storage is full (2 MiB); no change was saved.".into());
     }
+    persist(data, "chat-lifecycle-v1.json", &bytes)?;
+    if next == Lifecycle::Deleted {
+        // Commit the tombstone before cleanup; imported files are never touched.
+        let path = data.join("coven-transcripts").join(format!("{id}.jsonl"));
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("Chat is hidden permanently, but its local copy could not be removed. Retry Delete to finish cleanup.".into()),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn persist(data: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > LIMIT {
+        return Err("Chat state exceeds 2 MiB; no change was saved.".into());
+    }
     fs::create_dir_all(data).map_err(|_| "Cannot create Chat lifecycle storage.")?;
     let temporary = data.join(format!("chat-lifecycle-{}.tmp", uuid::Uuid::new_v4()));
     let write = (|| {
@@ -110,12 +127,11 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
         let mut file = options
             .open(&temporary)
             .map_err(|_| "Cannot create Chat lifecycle.")?;
-        file.write_all(&bytes)
+        file.write_all(bytes)
             .map_err(|_| "Cannot save Chat lifecycle.")?;
         file.sync_all()
             .map_err(|_| "Cannot persist Chat lifecycle.")?;
-        fs::rename(&temporary, data.join("chat-lifecycle-v1.json"))
-            .map_err(|_| "Cannot register Chat lifecycle.")?;
+        fs::rename(&temporary, data.join(name)).map_err(|_| "Cannot register Chat lifecycle.")?;
         #[cfg(unix)]
         File::open(data)
             .and_then(|directory| directory.sync_all())
@@ -127,21 +143,7 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
             eprintln!("Cannot clean incomplete Chat lifecycle: {error}");
         }
     }
-    write?;
-    if next == Lifecycle::Deleted {
-        // Persist the tombstone first: even interrupted cleanup must never resurrect history.
-        let path = if id.starts_with("cave-import-") {
-            data.join("cave-imports").join(format!("{id}.json"))
-        } else {
-            data.join("coven-transcripts").join(format!("{id}.jsonl"))
-        };
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Chat is hidden permanently, but its local copy could not be removed. Retry Delete to finish cleanup.".into()),
-        }
-    }
-    Ok(())
+    write
 }
 
 #[cfg(test)]

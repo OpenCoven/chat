@@ -25,6 +25,68 @@ function layoutProps(): ChatLayoutProps {
 }
 
 describe('production Familiars layout', () => {
+  it('keeps the archive filter inside collapsed user settings', () => {
+    const onArchivedFilter = vi.fn();
+    render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
+    const settings = screen.getByText('User settings').closest('details');
+    expect(settings).not.toHaveAttribute('open');
+    expect(screen.queryByRole('checkbox', { name: 'Show archived chats' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Archived chats' })).not.toBeInTheDocument();
+    if (!settings) throw new Error('User settings are missing.');
+    settings.open = true;
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show archived chats' }));
+    expect(onArchivedFilter).toHaveBeenCalledWith(true);
+  });
+
+  it('shows one row per familiar rather than one row per ledger session', () => {
+    const props = layoutProps();
+    render(
+      <ChatLayout
+        {...props}
+        familiars={[
+          { id: 'f', name: 'Echo' },
+          { id: 'g', name: 'Salem' },
+        ]}
+        familiarId="f"
+        sessions={[
+          { id: 'head', familiarId: 'f', title: 'Current ledger', preview: 'Latest reply' },
+          { id: 'old', familiarId: 'f', title: 'Previous ledger' },
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: 'Echo' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Echo' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: 'Echo' })).toHaveTextContent('Latest reply');
+    expect(screen.getByRole('button', { name: 'Salem' })).toHaveTextContent('Start a conversation');
+    expect(screen.queryByRole('button', { name: 'Previous ledger' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Salem' }));
+    expect(props.onFamiliar).toHaveBeenCalledWith('g');
+  });
+
+  it('uses file cards and a compact plus attachment affordance', () => {
+    const onAttach = vi.fn();
+    const { container } = render(
+      <ChatLayout
+        {...layoutProps()}
+        ready
+        onAttach={onAttach}
+        attachments={[{ id: 'file', name: 'notes.md', bytes: [65] }]}
+        messages={[
+          { id: 'u', role: 'user', text: '', attachments: [{ name: 'sent.md', size: 12 }] },
+        ]}
+      />,
+    );
+    expect(container.querySelector('.coven-compact-composer')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveAttribute('rows', '1');
+    expect(screen.getByRole('button', { name: 'Attach file' })).toBeEnabled();
+    expect(
+      screen.getByText('sent.md').closest('[data-slot="attachment-chip"]'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('notes.md').closest('[data-slot="attachment-chip"]'),
+    ).toBeInTheDocument();
+  });
+
   it('keeps cancellation available while viewing an archived chat during a run', () => {
     const props = { ...layoutProps(), ready: true, readOnly: true, busy: true };
     render(<ChatLayout {...props} />);
@@ -239,7 +301,7 @@ describe('compact viewports', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
       fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
       expect(inspector).not.toHaveAttribute('aria-hidden');
@@ -257,9 +319,9 @@ describe('compact viewports', () => {
     try {
       const { container } = render(<ChatLayout {...layoutProps()} ready />);
       expect(container.querySelector('.coven-chat')).toHaveAttribute('data-tier', 'medium');
-      expect(
-        screen.getByRole('complementary', { name: 'Familiars sidebar' }),
-      ).not.toHaveAttribute('aria-hidden');
+      expect(screen.getByRole('complementary', { name: 'Familiars sidebar' })).not.toHaveAttribute(
+        'aria-hidden',
+      );
       expect(container.querySelector('.fr-inspector')).toHaveAttribute('aria-hidden', 'true');
     } finally {
       restore();

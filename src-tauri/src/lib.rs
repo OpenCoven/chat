@@ -1,4 +1,5 @@
 mod cave;
+mod chat_canonical;
 mod chat_lifecycle;
 mod chat_origin;
 #[cfg(feature = "phase1-conformance")]
@@ -263,7 +264,6 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_familiars,
             coven_runtime::coven_runtime_sessions,
             coven_runtime::coven_runtime_chat_lifecycle,
-            chat_origin::coven_runtime_import_cave,
             coven_runtime::coven_runtime_read,
             coven_runtime::coven_runtime_send,
             coven_runtime::coven_runtime_cancel,

@@ -24,34 +24,27 @@ async function installRuntimeFixture(
       const avatarUrl = portrait.toDataURL('image/png');
       const callbacks = new Map<number, (data: unknown) => void>();
       let callbackId = 0;
-      let completed = false;
       let rejectRun: ((error: Error) => void) | undefined;
-      const session = {
-        id: 'fixture-session',
-        title: 'A real runtime boundary fixture',
-        harness: 'coven-code',
-        status: 'completed',
-        familiarId: 'fixture-familiar',
-        updatedAt: '2026-09-15T00:00:00Z',
-        projectRoot: '/fixture/workspace',
+      type FixtureHead = {
+        session: {
+          id: string;
+          title: string;
+          harness: string;
+          status: string;
+          familiarId: string;
+          updatedAt: string;
+          projectRoot: string;
+        };
+        events: Record<string, unknown>[];
       };
-      const crowdedSessions = Array.from({ length: population }, (_, index) => ({
-        ...session,
-        id: `fixture-session-${index}`,
-        title: `Conversation ${index}`,
-      }));
-      let events: Record<string, unknown>[] = [];
-      const importedId = `cave-import-${'a'.repeat(64)}`;
-      const importedSession = {
-        ...session,
-        id: importedId,
-        title: 'Imported Cave discussion',
-        harness: 'cave-import',
-        status: 'imported',
-        projectRoot: '',
-      };
-      let imported = false;
-      window.__covenFixture = { calls: [], inputs: [] };
+      const saved = localStorage.getItem('coven-browser-fixture');
+      const state: {
+        heads: Record<string, FixtureHead>;
+        calls: string[];
+        inputs: unknown[];
+      } = saved ? JSON.parse(saved) : { heads: {}, calls: [], inputs: [] };
+      const persist = () => localStorage.setItem('coven-browser-fixture', JSON.stringify(state));
+      window.__covenFixture = { calls: state.calls, inputs: state.inputs };
       Object.defineProperty(window, '__TAURI_INTERNALS__', {
         value: {
           transformCallback(callback: (data: unknown) => void) {
@@ -63,6 +56,7 @@ async function installRuntimeFixture(
           },
           async invoke(command: string, args: Record<string, unknown> = {}) {
             window.__covenFixture.calls.push(command);
+            persist();
             switch (command) {
               case 'coven_runtime_status':
                 return ready
@@ -79,7 +73,7 @@ async function installRuntimeFixture(
               case 'coven_runtime_familiars':
                 return Array.from({ length: population }, (_, index) => ({
                   id: index ? `fixture-familiar-${index}` : 'fixture-familiar',
-                  name: 'fixture',
+                  name: index ? `Familiar ${index}` : 'Local familiar',
                   displayName: index ? `Familiar ${index}` : 'Local familiar',
                   description:
                     population > 1
@@ -88,35 +82,13 @@ async function installRuntimeFixture(
                   avatarUrl,
                 }));
               case 'coven_runtime_sessions':
-                return [
-                  ...(completed ? [session] : population > 1 ? crowdedSessions : []),
-                  ...(imported ? [importedSession] : []),
-                ];
-              case 'coven_runtime_import_cave':
-                if (typeof args.source !== 'string') throw new Error('Missing Cave source.');
-                imported = true;
-                return { session: importedSession };
+                return Object.values(state.heads).map((head) => head.session);
               case 'coven_runtime_read': {
-                if (args.id === importedId && imported)
-                  return {
-                    session: importedSession,
-                    events: [
-                      {
-                        type: 'assistant',
-                        message: {
-                          content: [
-                            { type: 'text', text: '## Imported history\n\nRetained Cave reply.' },
-                          ],
-                        },
-                      },
-                    ],
-                  };
-                const selected =
-                  args.id === session.id
-                    ? session
-                    : crowdedSessions.find((item) => item.id === args.id);
+                const selected = Object.values(state.heads).find(
+                  (head) => head.session.id === args.id,
+                );
                 if (!selected) throw new Error('Unexpected session read.');
-                return { session: selected, events };
+                return selected;
               }
               case 'coven_runtime_send': {
                 const input = args.input;
@@ -127,6 +99,8 @@ async function installRuntimeFixture(
                   !input ||
                   !('prompt' in input) ||
                   !('runId' in input) ||
+                  !('familiarId' in input) ||
+                  typeof input.familiarId !== 'string' ||
                   typeof input.prompt !== 'string' ||
                   typeof channel !== 'object' ||
                   !channel ||
@@ -136,7 +110,24 @@ async function installRuntimeFixture(
                   throw new Error('Invalid send boundary.');
                 const callback = callbacks.get(channel.id);
                 if (!callback) throw new Error('Stream callback not registered.');
-                events = [
+                const familiarId = input.familiarId;
+                const current = state.heads[familiarId];
+                if (
+                  (current &&
+                    (!('sessionId' in input) || input.sessionId !== current.session.id)) ||
+                  (!current && 'sessionId' in input && input.sessionId)
+                )
+                  throw new Error('Send must resume this familiar canonical head.');
+                const session = current?.session ?? {
+                  id: `head-${input.familiarId}`,
+                  title: 'A real runtime boundary fixture',
+                  harness: 'coven-code',
+                  status: 'completed',
+                  familiarId: input.familiarId,
+                  updatedAt: '2026-09-15T00:00:00Z',
+                  projectRoot: '/fixture/workspace',
+                };
+                const events: Record<string, unknown>[] = [
                   { type: 'system', subtype: 'init', session_id: session.id },
                   {
                     type: 'user',
@@ -164,8 +155,12 @@ async function installRuntimeFixture(
                 return new Promise((resolve, reject) => {
                   rejectRun = reject;
                   window.__covenFixture.finish = () => {
-                    completed = true;
                     events.push({ type: 'result', session_id: session.id, is_error: false });
+                    state.heads[familiarId] = {
+                      session,
+                      events: [...(current?.events ?? []), ...events],
+                    };
+                    persist();
                     callback({ index: events.length - 1, message: events[events.length - 1] });
                     callback({ index: events.length, end: true });
                     resolve({ runId: input.runId, events });
@@ -186,32 +181,34 @@ async function installRuntimeFixture(
   );
 }
 
-test('keeps crowded rails and the familiar menu scrollable inside a short window', async ({
-  page,
-}) => {
+test('keeps the familiar list and inspector scrollable inside a short window', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 390 });
   await installRuntimeFixture(page, true, undefined, 40);
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
-  for (const selector of ['.fr-conv-scroll', '.fr-inspector-panel']) {
-    expect(
-      await page.locator(selector).evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-        return element.clientHeight > 0 && element.scrollTop > 0;
-      }),
-    ).toBe(true);
-  }
-  await expect(page.getByRole('button', { name: 'Conversation 39', exact: true })).toBeInViewport();
-  await page.getByRole('button', { name: 'Switch familiar' }).click();
-  const lastFamiliar = page.getByRole('button', {
-    name: 'Familiar 39 avatar Familiar 39',
-    exact: true,
-  });
-  await lastFamiliar.scrollIntoViewIfNeeded();
+  expect(
+    await page.locator('.fr-conv-scroll').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.clientHeight > 0 && element.scrollTop > 0;
+    }),
+  ).toBe(true);
+  const lastFamiliar = page.getByRole('button', { name: 'Familiar 39', exact: true });
   await expect(lastFamiliar).toBeInViewport();
-  const menu = await page.locator('.fr-switcher-menu').boundingBox();
-  if (!menu) throw new Error('The familiar menu is missing.');
-  expect(menu.y + menu.height).toBeLessThanOrEqual(390);
+  await lastFamiliar.click();
+  await page.getByRole('button', { name: "Open Familiar 39's familiar card" }).click();
+  expect(
+    await page.locator('.fr-inspector-panel').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.clientHeight > 0 && element.scrollTop > 0;
+    }),
+  ).toBe(true);
+  const inspector = await page.locator('.fr-inspector').boundingBox();
+  if (!inspector) throw new Error('The familiar inspector is missing.');
+  expect(inspector.y + inspector.height).toBeLessThanOrEqual(390);
+  await page.getByRole('button', { name: 'Close inspector' }).click();
+  await page.getByRole('searchbox', { name: 'Search familiars' }).fill('Familiar 39');
+  await expect(page.locator('.coven-agent-row')).toHaveCount(1);
+  await expect(lastFamiliar).toBeVisible();
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
 });
 
@@ -221,7 +218,9 @@ test('sends actual attachment bytes and retains them after cancellation', async 
   await page.goto('/');
   const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
   await expect(composer).toBeEnabled();
-  await page.getByLabel('Select text attachments').setInputFiles({
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Attach file', exact: true }).click();
+  await (await chooser).setFiles({
     name: 'context.md',
     mimeType: 'text/markdown',
     buffer: Buffer.from('Actual context bytes.'),
@@ -234,55 +233,11 @@ test('sends actual attachment bytes and retains them after cancellation', async 
   });
   await page.getByRole('button', { name: 'Stop run', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('cancelled');
+  await expect(page.getByRole('region', { name: 'Message composer' })).toContainText('context.md');
+  await expect(page.getByRole('region', { name: 'Message composer' })).toContainText('21 bytes');
   await page.getByRole('button', { name: 'Remove context.md' }).click();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(600);
-});
-
-test('imports a Cave snapshot only on explicit confirmation and keeps it read-only', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 820, height: 390 });
-  await installRuntimeFixture(page);
-  await page.goto('/');
-  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Import from Cave', exact: true }).click();
-  await page.getByLabel('Cave conversation JSON').setInputFiles({
-    name: 'cave-conversation.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from('{}'),
-  });
-  expect(await page.evaluate(() => window.__covenFixture.calls)).not.toContain(
-    'coven_runtime_import_cave',
-  );
-  await page.getByRole('button', { name: 'Import selected conversation' }).click();
-  await expect(page.getByRole('heading', { name: 'Imported history' })).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Imported Cave discussion', exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'New chat', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
-  await page
-    .getByRole('textbox', { name: 'Message Local familiar' })
-    .fill('Keep cancellation available');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await page.getByRole('button', { name: 'Imported Cave discussion', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Stop run', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
-  expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
-  const frame = await page.evaluate(() => ({
-    height: document.documentElement.scrollHeight,
-    y: window.scrollY,
-  }));
-  expect(frame).toEqual({ height: 390, y: 0 });
-  expect(
-    (await page.evaluate(() => window.__covenFixture.calls)).every((command) =>
-      command.startsWith('coven_runtime_'),
-    ),
-  ).toBe(true);
 });
 
 test('streams and reloads CLI chat without any Cave or pairing invocation', async ({ page }) => {
@@ -291,20 +246,133 @@ test('streams and reloads CLI chat without any Cave or pairing invocation', asyn
   const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
   await expect(composer).toBeEnabled();
   await composer.fill('A bounded chat request');
+  await page.getByLabel('Select text attachments').setInputFiles({
+    name: 'retained.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('Durable attachment bytes.'),
+  });
   await page.getByRole('button', { name: 'Send', exact: true }).click();
+  expect(await page.evaluate(() => window.__covenFixture.inputs?.[0])).toMatchObject({
+    attachments: [
+      {
+        name: 'retained.md',
+        bytes: Array.from(Buffer.from('Durable attachment bytes.')),
+      },
+    ],
+  });
   await expect(
     page.getByText('Streamed through the Coven boundary.', { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
   await page.evaluate(() => window.__covenFixture.finish?.());
-  await expect(page.getByRole('button', { name: 'A real runtime boundary fixture' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Local familiar', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
   await expect(composer).toHaveValue('');
+  await page.reload();
+  await expect(composer).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Local familiar', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+  await expect(page.getByText('A bounded chat request', { exact: true })).toBeVisible();
+  const files = page.getByRole('list', { name: 'Message attachments' });
+  await expect(files).toContainText('retained.md');
+  await expect(files).toContainText('25 bytes');
   await expect(page.getByText('Streamed through the Coven boundary.', { exact: true })).toHaveCount(
     1,
   );
   const commands = await page.evaluate(() => window.__covenFixture.calls);
   expect(commands).toContain('coven_runtime_read');
   expect(commands.every((command) => command.startsWith('coven_runtime_'))).toBe(true);
+  expect(commands.some((command) => /cave|import|pair/.test(command))).toBe(false);
+});
+
+test('resumes one durable head per familiar and isolates drafts when switching', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installRuntimeFixture(page, true, undefined, 2);
+  await page.goto('/');
+  const first = page.getByRole('textbox', { name: 'Message Local familiar' });
+  const second = page.getByRole('textbox', { name: 'Message Familiar 1' });
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  for (const prompt of ['First request', 'Second request']) {
+    await first.fill(prompt);
+    await send.click();
+    await expect(page.getByRole('button', { name: 'Stop run' })).toBeVisible();
+    await page.evaluate(() => window.__covenFixture.finish?.());
+    await expect(first).toHaveValue('');
+  }
+  await first.fill('Unsent first familiar draft');
+  await page.getByRole('button', { name: 'Familiar 1', exact: true }).click();
+  await expect(second).toHaveValue('');
+  await expect(page.getByText('First request', { exact: true })).toHaveCount(0);
+  await second.fill('Other familiar request');
+  await send.click();
+  await expect(page.getByRole('button', { name: 'Stop run' })).toBeVisible();
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(second).toHaveValue('');
+  await second.fill('Unsent second familiar draft');
+  await page.getByRole('button', { name: 'Local familiar', exact: true }).click();
+  await expect(first).toHaveValue('Unsent first familiar draft');
+  await expect(page.getByText('First request', { exact: true })).toBeVisible();
+  await expect(page.getByText('Second request', { exact: true })).toBeVisible();
+  await expect(page.getByText('Other familiar request', { exact: true })).toHaveCount(0);
+  await first.fill('Third request on original head');
+  await send.click();
+  await expect(page.getByRole('button', { name: 'Stop run' })).toBeVisible();
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(first).toHaveValue('');
+  await page.getByRole('button', { name: 'Familiar 1', exact: true }).click();
+  await expect(second).toHaveValue('Unsent second familiar draft');
+  await page.reload();
+  await expect(second).toBeEnabled();
+  await expect(second).toHaveValue('Unsent second familiar draft');
+  await expect(page.getByText('Other familiar request', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Local familiar', exact: true }).click();
+  await expect(page.getByText('Third request on original head', { exact: true })).toBeVisible();
+  const inputs = await page.evaluate(() => window.__covenFixture.inputs);
+  expect(inputs).toHaveLength(4);
+  expect(inputs?.[0]).toMatchObject({ familiarId: 'fixture-familiar', prompt: 'First request' });
+  expect(inputs?.[0]).not.toHaveProperty('sessionId');
+  expect(inputs?.[1]).toMatchObject({
+    familiarId: 'fixture-familiar',
+    sessionId: 'head-fixture-familiar',
+  });
+  expect(inputs?.[2]).toMatchObject({
+    familiarId: 'fixture-familiar-1',
+    prompt: 'Other familiar request',
+  });
+  expect(inputs?.[2]).not.toHaveProperty('sessionId');
+  expect(inputs?.[3]).toMatchObject({
+    familiarId: 'fixture-familiar',
+    sessionId: 'head-fixture-familiar',
+  });
+  expect(
+    await page.evaluate(() =>
+      Object.keys(JSON.parse(localStorage.getItem('coven-browser-fixture') ?? '{}').heads),
+    ),
+  ).toHaveLength(2);
+  await expect(page.locator('.coven-agent-row')).toHaveCount(2);
+  await expect(
+    page.getByRole('button', { name: /import.*cave|switch familiar|new chat/i }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('combobox')).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => window.__covenFixture.calls)).some((command) =>
+      /cave|import|pair/.test(command),
+    ),
+  ).toBe(false);
+  await page.getByLabel('Select text attachments').setInputFiles({
+    name: 'project-context.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('Project context for the next familiar message.'),
+  });
+  await expect(page.getByRole('button', { name: 'Remove project-context.md' })).toBeVisible();
+  await expect(send).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath('canonical-familiar-ui.png') });
 });
 
 test('cancellation retains the submitted draft instead of pretending success', async ({ page }) => {
@@ -320,6 +388,31 @@ test('cancellation retains the submitted draft instead of pretending success', a
   expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
 });
 
+test('keeps cancellation available after switching to another familiar', async ({ page }) => {
+  await page.setViewportSize({ width: 820, height: 390 });
+  await installRuntimeFixture(page, true, undefined, 2);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await composer.fill('Keep the running familiar draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Familiar 1', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message Familiar 1' })).toHaveValue('');
+  await page.getByRole('button', { name: 'Stop run', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Local familiar', exact: true }).click();
+  await expect(composer).toHaveValue('Keep the running familiar draft');
+  await expect(page.getByRole('alert')).toContainText('cancelled');
+  expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
+  expect(
+    await page.evaluate(() => ({
+      height: document.documentElement.scrollHeight,
+      x: window.scrollX,
+      y: window.scrollY,
+    })),
+  ).toEqual({ height: 390, x: 0, y: 0 });
+});
+
 test('missing CLI shows actionable setup in the same interface', async ({ page }) => {
   await installRuntimeFixture(page, false);
   await page.goto('/');
@@ -329,12 +422,12 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
   expect(await page.evaluate(() => window.__covenFixture.calls)).toEqual(['coven_runtime_status']);
 });
 
-test('renders native PNG avatars in the switcher, conversation, and inspector', async ({
+test('renders native PNG avatars in the familiar list, conversation, and inspector', async ({
   page,
 }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
-  for (const selector of ['.fr-switcher img', '.fr-thread-empty img', '.fr-inspector img']) {
+  for (const selector of ['.coven-agent-row img', '.fr-thread-empty img', '.fr-inspector img']) {
     const avatar = page.locator(selector);
     await expect(avatar).toBeVisible();
     await expect
@@ -343,8 +436,6 @@ test('renders native PNG avatars in the switcher, conversation, and inspector', 
       )
       .toBe(true);
   }
-  await page.getByRole('button', { name: 'Switch familiar' }).click();
-  await expect(page.locator('.fr-switcher-option img')).toBeVisible();
 });
 
 test('opens the familiar card from a reply with keyboard and pointer controls', async ({
@@ -357,6 +448,7 @@ test('opens the familiar card from a reply with keyboard and pointer controls', 
   await expect(composer).toBeEnabled();
   await composer.fill('Show a reply');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: "Open Local familiar's familiar card" }).click();
   await page.getByRole('button', { name: 'Access', exact: true }).click();
   await page.getByRole('button', { name: 'Close inspector' }).click();
   const triggers = page.getByRole('button', { name: "Show Local familiar's familiar card" });
@@ -450,8 +542,15 @@ for (const viewport of [
         })),
       )
       .toEqual(viewport);
-    await page.getByRole('button', { name: 'Hide conversations', exact: true }).click();
-    await page.getByRole('button', { name: 'Close inspector', exact: true }).click();
+    await expect(page.locator('.fr-shell')).toHaveAttribute('data-inspector', 'closed');
+    if (viewport.width > 760) {
+      await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
+    } else {
+      await expect(page.locator('.fr-shell')).toHaveAttribute('data-sidebar', 'closed');
+      await page.getByRole('button', { name: 'Show familiars rail', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Local familiar', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
+    }
     await composer.fill('A long draft line.\n'.repeat(80));
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(

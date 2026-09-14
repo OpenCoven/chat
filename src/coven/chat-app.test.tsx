@@ -2,11 +2,105 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CovenRunEvent,
+  CovenRunResult,
   CovenRuntime,
   CovenSession,
   CovenSessionRead,
 } from '../lib/coven-runtime';
 import { ChatApp } from './chat-app';
+import type { ChatLayoutProps } from './chat-layout';
+
+// Exercise the controller contract independently of the parent's evolving visual layout.
+vi.mock('./chat-layout', () => ({
+  ChatLayout: (props: ChatLayoutProps) => (
+    <div>
+      {props.familiars
+        .filter(
+          (familiar) =>
+            Boolean(
+              props.sessions.find((session) => session.familiarId === familiar.id)?.archived,
+            ) === Boolean(props.archivedFilter),
+        )
+        .map((familiar) => (
+          <button type="button" key={familiar.id} onClick={() => props.onFamiliar(familiar.id)}>
+            {familiar.name}
+          </button>
+        ))}
+      <output data-testid="head">{props.sessionId}</output>
+      <output data-testid="familiar">{props.familiarId}</output>
+      <output>{props.status}</output>
+      <textarea
+        aria-label="Draft"
+        value={props.draft}
+        disabled={!props.ready || props.loading}
+        onChange={(event) => props.onDraft(event.target.value)}
+      />
+      <button
+        type="button"
+        onClick={props.onSend}
+        disabled={!props.ready || props.busy || props.loading}
+      >
+        Send
+      </button>
+      {props.busy && (
+        <button type="button" onClick={props.onCancel} disabled={props.cancelling}>
+          Stop
+        </button>
+      )}
+      <button type="button" onClick={props.onRefresh} disabled={props.busy || props.lifecycleBusy}>
+        Refresh
+      </button>
+      <button type="button" onClick={() => props.onArchivedFilter?.(false)}>
+        Active
+      </button>
+      <button type="button" onClick={() => props.onArchivedFilter?.(true)}>
+        Archived
+      </button>
+      <button
+        type="button"
+        disabled={props.busy || props.loading || props.lifecycleBusy || !props.sessionId}
+        onClick={() => props.onLifecycle?.(props.selectedArchived ? 'active' : 'archived')}
+      >
+        {props.selectedArchived ? 'Restore' : 'Archive'}
+      </button>
+      <button
+        type="button"
+        disabled={props.busy || props.loading || props.lifecycleBusy || !props.sessionId}
+        onClick={() => props.onLifecycle?.('deleted')}
+      >
+        Confirmed delete
+      </button>
+      <input
+        type="file"
+        aria-label="Attach"
+        onChange={(event) => props.onAttach?.(Array.from(event.target.files ?? []))}
+      />
+      {props.attachments?.map((file) => (
+        <button type="button" key={file.id} onClick={() => props.onRemoveAttachment?.(file.id)}>
+          {file.name}
+        </button>
+      ))}
+      <div role="log">
+        {props.messages.map((message) => (
+          <p key={message.id}>{message.text}</p>
+        ))}
+      </div>
+      {props.error && <div role="alert">{props.error}</div>}
+    </div>
+  ),
+}));
+
+const STORAGE = 'opencoven.chat.navigation.v1';
+const first: CovenSession = {
+  id: 'one',
+  title: 'First head',
+  harness: 'coven-code',
+  status: 'completed',
+  familiarId: 'f',
+  updatedAt: '2026-09-14',
+  projectRoot: '/work',
+};
+const second: CovenSession = { ...first, id: 'two', familiarId: 'g', title: 'Other head' };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -18,25 +112,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const first: CovenSession = {
-  id: 'one',
-  title: 'First conversation',
-  harness: 'codex',
-  status: 'completed',
-  updatedAt: '2026-09-14',
-  projectRoot: '/workspace',
-  familiarId: 'f',
-};
-const second: CovenSession = { ...first, id: 'two', title: 'Second conversation' };
 function runtime(): CovenRuntime {
   return {
-    status: vi.fn().mockResolvedValue({ available: true, version: '0.4.2' }),
-    listFamiliars: vi
-      .fn()
-      .mockResolvedValue([{ id: 'f', name: 'local', displayName: 'Local familiar' }]),
+    status: vi.fn().mockResolvedValue({ available: true, version: 'fixture' }),
+    listFamiliars: vi.fn().mockResolvedValue([
+      { id: 'f', name: 'first', displayName: 'First familiar' },
+      { id: 'g', name: 'other', displayName: 'Other familiar' },
+    ]),
     listSessions: vi.fn().mockResolvedValue([first, second]),
     readSession: vi.fn().mockImplementation(async (id: string) => ({
-      session: id === 'one' ? first : second,
+      session: id === 'two' ? second : { ...first, id },
       events: [],
     })),
     send: vi.fn().mockResolvedValue({ runId: 'run', events: [] }),
@@ -46,592 +131,329 @@ function runtime(): CovenRuntime {
 }
 
 async function ready(api: CovenRuntime) {
-  await act(async () => render(<ChatApp runtime={api} />));
-  await screen.findByRole('button', { name: 'First conversation' });
+  const view = render(<ChatApp runtime={api} />);
   await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+  return view;
 }
 
-describe('Coven ChatApp lifecycle', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-      configurable: true,
-      value: function (this: HTMLDialogElement) {
-        this.setAttribute('open', '');
-      },
-    });
-    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
-      configurable: true,
-      value: function (this: HTMLDialogElement) {
-        this.removeAttribute('open');
-      },
+function draft(value: string) {
+  fireEvent.change(screen.getByRole('textbox'), { target: { value } });
+}
+
+function click(name: string) {
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
+describe('canonical familiar controller', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('opens only the canonical head, replacing stale navigation without reading the older thread', async () => {
+    localStorage.setItem(
+      STORAGE,
+      JSON.stringify({
+        familiarId: 'f',
+        sessionId: 'older',
+        drafts: { '["f","older"]': 'Preserve old draft' },
+      }),
+    );
+    const api = runtime();
+    await ready(api);
+    expect(api.readSession).toHaveBeenCalledExactlyOnceWith('one');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(localStorage.getItem(STORAGE)).toContain('Preserve old draft');
+    click('Other familiar');
+    await waitFor(() => expect(api.readSession).toHaveBeenLastCalledWith('two'));
+    expect(screen.getByTestId('familiar')).toHaveTextContent('g');
+  });
+
+  it('opens the persisted head even when old navigation explicitly selected an empty chat', async () => {
+    localStorage.setItem(
+      STORAGE,
+      JSON.stringify({ familiarId: 'f', sessionId: '', drafts: { '["f",""]': 'Unsent' } }),
+    );
+    const api = runtime();
+    await ready(api);
+    expect(api.readSession).toHaveBeenCalledWith('one');
+    expect(screen.getByRole('textbox')).toHaveValue('Unsent');
+  });
+
+  it('carries only the currently selected legacy head draft into the familiar draft', async () => {
+    localStorage.setItem(
+      STORAGE,
+      JSON.stringify({
+        familiarId: 'f',
+        sessionId: 'one',
+        drafts: { '["f","one"]': 'Continue me', '["f","old"]': 'Unrelated' },
+      }),
+    );
+    await ready(runtime());
+    expect(screen.getByRole('textbox')).toHaveValue('Continue me');
+    expect(localStorage.getItem(STORAGE)).toContain('Unrelated');
+  });
+
+  it('continues the durable sibling head and preserves a newer familiar draft', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    const next = { ...first, id: 'one-next' };
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValue([next, second]);
+    await ready(api);
+    draft('submitted');
+    click('Send');
+    draft('newer unsent');
+    await act(async () =>
+      run.resolve({
+        runId: 'run',
+        events: [{ type: 'system', subtype: 'init', session_id: next.id }],
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('one-next'));
+    expect(screen.getByRole('textbox')).toHaveValue('newer unsent');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({
+      familiarId: 'f',
+      sessionId: 'one-next',
+      prompt: 'newer unsent',
     });
   });
 
-  it('archives durably, filters archived chats, blocks sends, and restores', async () => {
+  it('creates a fresh thread for an empty familiar with no standalone or session override', async () => {
+    const api = runtime();
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    await ready(api);
+    expect(api.readSession).not.toHaveBeenCalled();
+    draft('hello');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).toMatchObject({
+      familiarId: 'f',
+      prompt: 'hello',
+    });
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
+  });
+
+  it('reconciles initialized heads on failure and never duplicates captured history', async () => {
+    const api = runtime();
+    const next = { ...first, id: 'failed-sibling' };
+    const events: CovenRunEvent[] = [
+      { type: 'system', subtype: 'init', session_id: next.id },
+      { type: 'text_delta', session_id: next.id, text: 'Partial response' },
+    ];
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValue([next, second]);
+    vi.mocked(api.send).mockImplementation(async (_input, onEvent) => {
+      for (const event of events) onEvent?.(event);
+      throw new Error('Provider failed');
+    });
+    vi.mocked(api.readSession).mockImplementation(async (id) => ({
+      session: id === next.id ? next : first,
+      events: id === next.id ? events : [],
+    }));
+    await ready(api);
+    draft('keep this');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent(next.id));
+    await waitFor(() => expect(screen.getAllByText('Partial response')).toHaveLength(1));
+    expect(screen.getByRole('textbox')).toHaveValue('keep this');
+    expect(screen.getByRole('alert')).toHaveTextContent('Provider failed');
+  });
+
+  it('blocks lifecycle changes until cancelled native work and head refresh both settle', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    const refreshed = deferred<CovenSession[]>();
+    vi.mocked(api.send).mockReturnValue(run.promise);
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockReturnValue(refreshed.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Stop');
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Confirmed delete' })).toBeDisabled();
+    await act(async () => run.reject(new Error('Cancelled')));
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    await act(async () => refreshed.resolve([{ ...first, id: 'cancelled-sibling' }, second]));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive' })).toBeEnabled());
+    expect(screen.getByTestId('head')).toHaveTextContent('cancelled-sibling');
+    expect(screen.getByRole('textbox')).toHaveValue('work');
+    expect(api.changeChatLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('does not pull selection back when another familiar is selected during a run', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValue(run.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Other familiar');
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    expect(screen.getByTestId('familiar')).toHaveTextContent('g');
+    expect(screen.getByTestId('head')).toHaveTextContent('two');
+    expect(screen.getByRole('textbox')).toHaveValue('');
+  });
+
+  it('archives a familiar, restores it from the archive view, and preserves the draft', async () => {
     const api = runtime();
     let stored = [first, second];
     vi.mocked(api.listSessions).mockImplementation(async () => stored);
     vi.mocked(api.changeChatLifecycle).mockImplementation(async (id, state) => {
-      stored = stored.map((item) =>
-        item.id === id ? { ...item, archived: state === 'archived' } : item,
+      stored = stored.map((session) =>
+        session.id === id ? { ...session, archived: state === 'archived' } : session,
       );
     });
     await ready(api);
-    fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    draft('archived draft');
+    click('Archive');
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: first.title })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('button', { name: 'First familiar' })).not.toBeInTheDocument(),
     );
-    expect(api.changeChatLifecycle).toHaveBeenCalledWith('one', 'archived');
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh Coven' }));
+    click('Refresh');
     await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
-    fireEvent.click(await screen.findByRole('button', { name: first.title }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore chat' })).toBeEnabled());
+    click('Archived');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore' })).toBeEnabled());
     expect(screen.getByRole('textbox')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore chat' }));
+    expect(screen.getByRole('textbox')).toHaveValue('archived draft');
+    click('Restore');
     await waitFor(() => expect(api.changeChatLifecycle).toHaveBeenLastCalledWith('one', 'active'));
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: first.title })).not.toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Active chats' }));
-    expect(screen.getByRole('button', { name: first.title })).toBeInTheDocument();
-    expect(api.send).not.toHaveBeenCalled();
-  });
-
-  it('requires explicit confirmation, clears the deleted draft, and preserves other drafts', async () => {
-    const api = runtime();
-    localStorage.setItem(
-      'opencoven.chat.navigation.v1',
-      JSON.stringify({
-        familiarId: 'f',
-        sessionId: 'one',
-        drafts: { [JSON.stringify(['removed-familiar', 'one'])]: 'orphan draft' },
-      }),
-    );
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'private draft' } });
-    fireEvent.click(screen.getByRole('button', { name: second.title }));
+    click('Active');
     await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'retain this draft' } });
-    fireEvent.click(screen.getByRole('button', { name: first.title }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete chat' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Delete chat' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Original CLI/Cave history is untouched');
-    expect(api.changeChatLifecycle).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep chat' }));
-    expect(api.changeChatLifecycle).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete chat' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete from Chat' }));
+    expect(screen.getByRole('textbox')).toHaveValue('archived draft');
+  });
+
+  it('deletes the app thread but retains the familiar and starts fresh after reload', async () => {
+    const api = runtime();
+    let stored = [first, second];
+    vi.mocked(api.listSessions).mockImplementation(async () => stored);
+    vi.mocked(api.changeChatLifecycle).mockImplementation(async (id) => {
+      stored = stored.filter((session) => session.id !== id);
+    });
+    const view = await ready(api);
+    draft('delete this draft');
+    click('Confirmed delete');
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent(''));
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: first.title })).not.toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: 'Confirmed delete' })).toBeDisabled(),
     );
-    expect(api.changeChatLifecycle).toHaveBeenCalledExactlyOnceWith('one', 'deleted');
-    const saved = localStorage.getItem('opencoven.chat.navigation.v1');
-    expect(saved).not.toContain('private draft');
-    expect(saved).not.toContain('orphan draft');
-    expect(saved).toContain('retain this draft');
+    expect(screen.getByRole('button', { name: 'First familiar' })).toBeInTheDocument();
+    expect(localStorage.getItem(STORAGE)).not.toContain('delete this draft');
     expect(api.cancel).not.toHaveBeenCalled();
+    view.unmount();
+    await ready(api);
+    draft('fresh message');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).toMatchObject({ familiarId: 'f' });
   });
 
-  it.each(['Archive chat', 'Delete chat'])(
-    'does not replay a new-chat run from its old blank key after %s',
-    async (action) => {
-      const api = runtime();
-      const events: CovenRunEvent[] = [
-        { type: 'system', subtype: 'init', session_id: 'one' },
-        { type: 'text_delta', text: 'Newly captured response.', session_id: 'one' },
-      ];
-      vi.mocked(api.listSessions).mockResolvedValueOnce([]).mockResolvedValue([first]);
-      vi.mocked(api.send).mockResolvedValue({ runId: 'run', events });
-      vi.mocked(api.readSession).mockResolvedValue({ session: first, events });
-      await act(async () => render(<ChatApp runtime={api} />));
-      await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'new message' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-      await screen.findByText('Newly captured response.');
-      await waitFor(() => expect(screen.getByRole('button', { name: action })).toBeEnabled());
-      fireEvent.click(screen.getByRole('button', { name: action }));
-      if (action === 'Delete chat')
-        fireEvent.click(screen.getByRole('button', { name: 'Delete from Chat' }));
-      await waitFor(() =>
-        expect(screen.queryByRole('button', { name: first.title })).not.toBeInTheDocument(),
-      );
-      expect(screen.queryByText('Newly captured response.')).not.toBeInTheDocument();
-    },
-  );
-
-  it('retains the selected chat and draft on persistence failure and prevents duplicate changes', async () => {
+  it('retains state on lifecycle failure and prevents duplicate or competing mutations', async () => {
     const api = runtime();
     const pending = deferred<void>();
     vi.mocked(api.changeChatLifecycle).mockReturnValue(pending.promise);
     await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'retain' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
-    fireEvent.click(screen.getByRole('button', { name: second.title }));
-    expect(screen.getByRole('button', { name: first.title })).toHaveAttribute(
-      'aria-current',
-      'true',
-    );
+    draft('retained');
+    click('Archive');
+    click('Archive');
+    click('Other familiar');
+    expect(screen.getByTestId('familiar')).toHaveTextContent('f');
     expect(screen.getByRole('textbox')).toBeDisabled();
-    await act(async () => pending.reject(new Error('Cannot persist Chat lifecycle.')));
-    expect(api.changeChatLifecycle).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('textbox')).toHaveValue('retain');
-    expect(screen.getByRole('alert')).toHaveTextContent('Cannot persist Chat lifecycle.');
+    await act(async () => pending.reject(new Error('Storage full')));
+    expect(api.changeChatLifecycle).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox')).toHaveValue('retained');
+    expect(screen.getByRole('alert')).toHaveTextContent('Storage full');
   });
 
-  it('ignores an old lifecycle completion after switching runtime and unlocks the new controller', async () => {
+  it('fails closed when canonical refresh fails instead of resuming a stale head', async () => {
     const api = runtime();
-    const pending = deferred<void>();
-    vi.mocked(api.changeChatLifecycle).mockReturnValue(pending.promise);
-    const view = render(<ChatApp runtime={api} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive chat' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
-    const replacement = runtime();
-    view.rerender(<ChatApp runtime={replacement} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive chat' })).toBeEnabled());
-    await act(async () => pending.resolve());
-    expect(screen.getByRole('button', { name: first.title })).toHaveAttribute(
-      'aria-current',
-      'true',
-    );
-    expect(screen.getByRole('textbox')).toBeEnabled();
-    expect(replacement.changeChatLifecycle).not.toHaveBeenCalled();
-  });
-
-  it('disables archive and delete until a cancelled run has actually settled', async () => {
-    const api = runtime();
-    const pending = deferred<{ runId: string; events: CovenRunEvent[] }>();
-    vi.mocked(api.send).mockReturnValue(pending.promise);
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockRejectedValue(new Error('Missing canonical metadata'));
     await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'work' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(screen.getByRole('button', { name: 'Archive chat' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Delete chat' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /Stop/ }));
-    await waitFor(() => expect(api.cancel).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole('button', { name: 'Delete chat' })).toBeDisabled();
-    await act(async () => pending.resolve({ runId: 'run', events: [] }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete chat' })).toBeEnabled());
-    expect(api.changeChatLifecycle).not.toHaveBeenCalled();
-  });
-
-  it('provides archive, restore and confirmed deletion for read-only imports', async () => {
-    const api = runtime();
-    vi.mocked(api.listSessions).mockResolvedValue([
-      { ...first, status: 'imported', harness: 'cave-import', archived: true },
-    ]);
-    await act(async () => render(<ChatApp runtime={api} />));
+    draft('work');
+    click('Send');
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Refresh Coven' })).toBeEnabled(),
+      expect(screen.getByRole('alert')).toHaveTextContent('Refresh before sending again'),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
-    fireEvent.click(await screen.findByRole('button', { name: first.title }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore chat' })).toBeEnabled());
     expect(screen.getByRole('textbox')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete chat' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete from Chat' }));
-    await waitFor(() => expect(api.changeChatLifecycle).toHaveBeenCalledWith('one', 'deleted'));
-    expect(api.send).not.toHaveBeenCalled();
+    expect(api.send).toHaveBeenCalledOnce();
   });
 
-  it('sends attachment-only bytes, retains on failure, and allows removal', async () => {
+  it('ignores stale reads after switching familiars', async () => {
     const api = runtime();
-    vi.mocked(api.send).mockRejectedValue(new Error('provider unavailable'));
+    const pending = deferred<CovenSessionRead>();
+    vi.mocked(api.readSession)
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ session: second, events: [] });
+    render(<ChatApp runtime={api} />);
+    await screen.findByRole('button', { name: 'Other familiar' });
+    click('Other familiar');
+    await act(async () =>
+      pending.resolve({ session: first, events: [{ type: 'text_delta', text: 'Stale response' }] }),
+    );
+    expect(screen.queryByText('Stale response')).not.toBeInTheDocument();
+  });
+
+  it('retains file bytes after a failed send and clears them only after success', async () => {
+    const api = runtime();
+    vi.mocked(api.send)
+      .mockRejectedValueOnce(new Error('Failed'))
+      .mockResolvedValue({ runId: 'run', events: [] });
     await ready(api);
-    const file = new File([], 'actual.txt');
+    const file = new File([], 'note.txt');
     Object.defineProperties(file, {
       size: { value: 3 },
       arrayBuffer: { value: async () => new Uint8Array([97, 98, 99]).buffer },
     });
-    await act(async () =>
-      fireEvent.change(screen.getByLabelText('Select text attachments'), {
-        target: { files: [file] },
-      }),
+    fireEvent.change(screen.getByLabelText('Attach'), { target: { files: [file] } });
+    await screen.findByRole('button', { name: 'note.txt' });
+    click('Send');
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Failed'));
+    expect(screen.getByRole('button', { name: 'note.txt' })).toBeInTheDocument();
+    expect(vi.mocked(api.send).mock.calls[0]?.[0].attachments).toEqual([
+      { name: 'note.txt', bytes: [97, 98, 99] },
+    ]);
+    click('Send');
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'note.txt' })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
-    expect(api.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: '',
-        attachments: [{ name: 'actual.txt', bytes: [97, 98, 99] }],
-      }),
-      expect.any(Function),
-    );
-    expect(screen.getByText('actual.txt')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('provider unavailable');
-    fireEvent.click(screen.getByRole('button', { name: 'Remove actual.txt' }));
-    expect(screen.queryByText('actual.txt')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
-  it('clears attachments only on success and restores sent metadata from native history', async () => {
+  it('disables sending without a familiar and never requests CLI history in browser mode', async () => {
     const api = runtime();
-    await ready(api);
-    const file = new File([], 'history.md');
-    Object.defineProperties(file, {
-      size: { value: 1 },
-      arrayBuffer: { value: async () => new Uint8Array([120]).buffer },
-    });
-    vi.mocked(api.send).mockResolvedValue({
-      runId: 'r',
-      events: [
-        {
-          type: 'user',
-          source: 'chat-input',
-          message: { content: [{ type: 'text', text: '' }] },
-          attachments: [{ name: 'history.md', size: 1 }],
-        },
-        { type: 'result', is_error: false },
-      ],
-    });
-    await act(async () =>
-      fireEvent.change(screen.getByLabelText('Select text attachments'), {
-        target: { files: [file] },
-      }),
-    );
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
-    expect(screen.queryByRole('button', { name: 'Remove history.md' })).not.toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Message attachments' })).toHaveTextContent(
-      'history.md',
-    );
-  });
-
-  it('retains attachments after cancellation and isolates them by conversation', async () => {
-    const api = runtime();
-    const send = deferred<{ runId: string; events: CovenRunEvent[] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    await ready(api);
-    const file = new File([], 'retained.txt');
-    Object.defineProperties(file, {
-      size: { value: 1 },
-      arrayBuffer: { value: async () => new Uint8Array([120]).buffer },
-    });
-    await act(async () =>
-      fireEvent.change(screen.getByLabelText('Select text attachments'), {
-        target: { files: [file] },
-      }),
-    );
-    await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'Second conversation' })),
-    );
-    expect(screen.queryByText('retained.txt')).not.toBeInTheDocument();
-    await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'First conversation' })),
-    );
-    expect(screen.getByText('retained.txt')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Stop run' })));
-    await act(async () => send.reject(new Error('Coven run cancelled.')));
-    expect(screen.getByText('retained.txt')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
-  });
-
-  it('renders actual coven-code deltas live and does not duplicate the terminal transcript', async () => {
-    const api = runtime();
-    let emit: ((event: CovenRunEvent) => void) | undefined;
-    const send = deferred<{ runId: string; events: CovenRunEvent[] }>();
-    vi.mocked(api.send).mockImplementation((_input, callback) => {
-      emit = callback;
-      return send.promise;
-    });
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hello' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    const firstDelta = { type: 'text_delta', text: 'Actual ' };
-    const secondDelta = { type: 'text_delta', text: 'engine output' };
-    await act(async () => emit?.(firstDelta));
-    expect(screen.getByText('Actual')).toBeInTheDocument();
-    await act(async () => emit?.(secondDelta));
-    expect(screen.getByText('Actual engine output')).toBeInTheDocument();
-    await act(async () =>
-      send.resolve({
-        runId: 'r',
-        events: [firstDelta, secondDelta, { type: 'result', is_error: false }],
-      }),
-    );
-    expect(screen.getAllByText('Actual engine output')).toHaveLength(1);
-  });
-
-  it('allows a CLI-only installation to send without a familiar or session', async () => {
-    const api = runtime();
-    vi.mocked(api.listFamiliars).mockResolvedValue([]);
-    vi.mocked(api.listSessions).mockResolvedValue([]);
-    await act(async () => render(<ChatApp runtime={api} />));
-    expect(screen.getByRole('textbox', { name: 'Message Coven' })).toBeEnabled();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hello CLI' } });
-    await act(async () => fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' }));
-    expect(api.send).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: 'Hello CLI' }),
-      expect.any(Function),
-    );
-    expect(vi.mocked(api.send).mock.calls[0]?.[0]).not.toHaveProperty('familiarId');
-    expect(screen.queryByText(/Create a familiar/)).not.toBeInTheDocument();
-  });
-
-  it('streams genuine output alongside prior history and retains failed partial output without duplicates', async () => {
-    const api = runtime();
-    const prior = {
-      type: 'assistant',
-      message: { content: [{ type: 'text', text: 'Prior answer' }] },
-    };
-    const partial = {
-      type: 'assistant',
-      message: { content: [{ type: 'text', text: 'Partial answer' }] },
-    };
-    vi.mocked(api.readSession).mockResolvedValue({ session: first, events: [prior] });
-    let emit: ((event: CovenRunEvent) => void) | undefined;
-    const send = deferred<{ runId: string; events: CovenRunEvent[] }>();
-    vi.mocked(api.send).mockImplementation((_input, callback) => {
-      emit = callback;
-      return send.promise;
-    });
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Continue' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await act(async () => emit?.(partial));
-    expect(screen.getByText('Prior answer')).toBeInTheDocument();
-    expect(screen.getByText('Partial answer')).toBeInTheDocument();
-    await act(async () =>
-      send.resolve({
-        runId: 'r',
-        events: [partial, { type: 'result', is_error: true, error: 'Provider disconnected' }],
-      }),
-    );
-    expect(screen.getAllByText('Partial answer')).toHaveLength(1);
-    expect(screen.getByRole('alert')).toHaveTextContent('Provider disconnected');
-    expect(screen.getByRole('textbox')).toHaveValue('Continue');
-  });
-
-  it('isolates live output by session and ignores callbacks after unmount', async () => {
-    const api = runtime();
-    let emit: ((event: CovenRunEvent) => void) | undefined;
-    const send = deferred<{ runId: string; events: CovenRunEvent[] }>();
-    vi.mocked(api.send).mockImplementation((_input, callback) => {
-      emit = callback;
-      return send.promise;
-    });
-    const view = await act(async () => render(<ChatApp runtime={api} />));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Run' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'Second conversation' })),
-    );
-    const event = {
-      type: 'assistant',
-      message: { content: [{ type: 'text', text: 'Origin only' }] },
-    };
-    await act(async () => emit?.(event));
-    expect(screen.queryByText('Origin only')).not.toBeInTheDocument();
-    await act(async () => send.reject(new Error('Origin failed')));
-    expect(screen.queryByText('Origin failed')).not.toBeInTheDocument();
-    await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'First conversation' })),
-    );
-    expect(screen.getByText('Origin only')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Origin failed');
-    view.unmount();
-    await act(async () => emit?.(event));
-    expect(screen.queryByText('Origin only')).not.toBeInTheDocument();
-  });
-
-  it('preserves invalid saved navigation and discloses memory-only drafts', async () => {
-    localStorage.setItem('opencoven.chat.navigation.v1', '{broken');
-    await ready(runtime());
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Memory only' } });
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(localStorage.getItem('opencoven.chat.navigation.v1')).toBe('{broken');
-    expect(screen.getByText(/memory-only/i)).toBeInTheDocument();
-  });
-
-  it('shows actionable browser state without requesting CLI data', async () => {
-    const api = runtime();
-    vi.mocked(api.status).mockResolvedValue({
-      available: false,
-      error: 'Open the desktop app to use the Coven CLI.',
-    });
-    await act(async () => render(<ChatApp runtime={api} />));
-    expect(await screen.findByText(/Open the desktop app/)).toBeInTheDocument();
-    expect(api.listSessions).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-  });
-
-  it('prevents duplicate sends and keeps failed drafts recoverable', async () => {
-    const api = runtime();
-    const send = deferred<{ runId: string; events: [] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this draft' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    expect(api.send).toHaveBeenCalledOnce();
-    await act(async () => send.reject(new Error('CLI failed')));
-    expect(await screen.findByRole('alert')).toHaveTextContent('CLI failed');
-    expect(screen.getByRole('textbox')).toHaveValue('Keep this draft');
-  });
-
-  it('ignores stale session reads after navigation', async () => {
-    const api = runtime();
-    const read = deferred<CovenSessionRead>();
-    vi.mocked(api.readSession).mockImplementation((id) =>
-      id === 'one' ? read.promise : Promise.resolve({ session: second, events: [] }),
-    );
-    await act(async () => render(<ChatApp runtime={api} />));
-    fireEvent.click(await screen.findByRole('button', { name: 'Second conversation' }));
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    await act(async () => read.reject(new Error('Stale failure')));
-    expect(screen.queryByText('Stale failure')).not.toBeInTheDocument();
-    expect(document.querySelector('.fr-thread-title')).toHaveTextContent('Second conversation');
-  });
-
-  it('does not clear a newer draft or change session when a send settles', async () => {
-    const api = runtime();
-    const send = deferred<{ runId: string; events: [] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Submitted' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: 'Second conversation' }));
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Other session draft' } });
-    await act(async () => send.resolve({ runId: 'run', events: [] }));
-    expect(screen.getByRole('textbox')).toHaveValue('Other session draft');
-    expect(document.querySelector('.fr-thread-title')).toHaveTextContent('Second conversation');
-  });
-
-  it('waits for the run to settle after cancellation and surfaces cancellation errors', async () => {
-    const api = runtime();
-    const send = deferred<{ runId: string; events: [] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    vi.mocked(api.cancel).mockRejectedValueOnce(new Error('Stop failed'));
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Run me' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: 'Stop run' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Stop failed');
-    fireEvent.click(screen.getByRole('button', { name: 'Stop run' }));
-    await waitFor(() => expect(screen.getByText(/Cancellation requested/)).toBeInTheDocument());
+    vi.mocked(api.status).mockResolvedValue({ available: false, error: 'Open desktop app' });
+    render(<ChatApp runtime={api} />);
+    await screen.findByText('Open desktop app');
     expect(screen.getByRole('textbox')).toBeDisabled();
-    await act(async () => send.reject(new Error('Run cancelled')));
-    expect(screen.getByRole('textbox')).toHaveValue('Run me');
+    expect(api.listSessions).not.toHaveBeenCalled();
+    expect(api.send).not.toHaveBeenCalled();
   });
 
-  it('requests cancellation on unmount and ignores late completion', async () => {
+  it('preserves corrupt saved state rather than overwriting it', async () => {
+    localStorage.setItem(STORAGE, '{broken');
+    await ready(runtime());
+    draft('memory draft');
+    expect(localStorage.getItem(STORAGE)).toBe('{broken');
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot restore drafts');
+  });
+
+  it('cancels once on unmount and ignores the old run completion', async () => {
     const api = runtime();
-    const send = deferred<{ runId: string; events: [] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    const view = await act(async () => render(<ChatApp runtime={api} />));
-    await screen.findByRole('button', { name: 'First conversation' });
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Persist this' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValue(run.promise);
+    const view = await ready(api);
+    draft('work');
+    click('Send');
     view.unmount();
-    expect(api.cancel).toHaveBeenCalledOnce();
-    await act(async () => send.resolve({ runId: 'run', events: [] }));
-    expect(localStorage.getItem('opencoven.chat.navigation.v1')).toContain('Persist this');
-  });
-
-  it('starts a fresh lifecycle when the injected runtime changes', async () => {
-    const api = runtime();
-    const next = runtime();
-    const send = deferred<{ runId: string; events: [] }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    const view = await act(async () => render(<ChatApp runtime={api} />));
-    await screen.findByRole('button', { name: 'First conversation' });
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Recoverable' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await act(async () => view.rerender(<ChatApp runtime={next} />));
-    await waitFor(() => expect(next.listSessions).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Stop run' })).not.toBeInTheDocument(),
-    );
-    await act(async () => send.reject(new Error('Old runtime error')));
-    expect(screen.queryByText('Old runtime error')).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toHaveValue('Recoverable');
-  });
-
-  it('continues the new sibling session returned by Coven rather than the old session', async () => {
-    const api = runtime();
-    const sibling = { ...first, id: 'sibling', title: 'Continued conversation' };
-    vi.mocked(api.send).mockResolvedValue({
-      runId: 'run',
-      events: [
-        { type: 'system', subtype: 'init', session_id: sibling.id },
-        { type: 'assistant', message: { content: [{ type: 'text', text: 'Actual answer' }] } },
-      ],
-    });
-    await ready(api);
-    vi.mocked(api.listSessions).mockResolvedValue([sibling, first, second]);
-    vi.mocked(api.readSession).mockResolvedValue({
-      session: sibling,
-      events: [
-        { type: 'assistant', message: { content: [{ type: 'text', text: 'Actual answer' }] } },
-      ],
-    });
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First request' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await screen.findByText('Actual answer');
-    await waitFor(() =>
-      expect(document.querySelector('.fr-thread-title')).toHaveTextContent(
-        'Continued conversation',
-      ),
-    );
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Follow up' } });
-    await act(async () => fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' }));
-    expect(api.send).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sessionId: 'sibling', prompt: 'Follow up' }),
-      expect.any(Function),
-    );
-  });
-
-  it('keeps an explicitly selected new chat on refresh and reload', async () => {
-    const api = runtime();
-    const view = await act(async () => render(<ChatApp runtime={api} />));
-    await screen.findByRole('button', { name: 'First conversation' });
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'New chat draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh Coven' }));
-    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
-    expect(document.querySelector('.fr-thread-title')).toHaveTextContent('New chat');
-    view.unmount();
-    await act(async () => render(<ChatApp runtime={api} />));
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    expect(screen.getByRole('textbox')).toHaveValue('New chat draft');
-  });
-
-  it('preserves drafts when a result event reports an error', async () => {
-    const api = runtime();
-    vi.mocked(api.send).mockResolvedValue({
-      runId: 'r',
-      events: [{ type: 'result', is_error: true, error: 'Authentication required' }],
-    });
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Retry this' } });
-    await act(async () => fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Authentication required');
-    expect(screen.getByRole('textbox')).toHaveValue('Retry this');
-  });
-
-  it('carries a newer unsent draft into the returned sibling session', async () => {
-    const api = runtime();
-    const send = deferred<{
-      runId: string;
-      events: { type: string; subtype: string; session_id: string }[];
-    }>();
-    vi.mocked(api.send).mockReturnValue(send.promise);
-    await ready(api);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Submitted' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Still composing' } });
-    await act(async () =>
-      send.resolve({
-        runId: 'r',
-        events: [{ type: 'system', subtype: 'init', session_id: 'sibling' }],
-      }),
-    );
-    expect(screen.getByRole('textbox')).toHaveValue('Still composing');
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledOnce());
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    expect(api.listSessions).toHaveBeenCalledOnce();
   });
 });
