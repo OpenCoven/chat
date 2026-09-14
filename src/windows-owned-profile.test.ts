@@ -6,6 +6,44 @@ const source = readFileSync('scripts/windows-job-supervisor.cs', 'utf8');
 const pwshAvailable =
   spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
 
+test('native suite characterizes profile deletion before running producer supervision', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  expect(workflow).toContain(
+    'run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-job-supervisor.test.ps1',
+  );
+  const suite = readFileSync('scripts/windows-job-supervisor.test.ps1', 'utf8');
+  const characterization = suite.indexOf(
+    "& (Join-Path $PSScriptRoot 'windows-profile-cleanup-characterization.test.ps1')",
+  );
+  expect(characterization).toBeGreaterThan(-1);
+  expect(characterization).toBeLessThan(suite.indexOf('$createProcessWithLogon ='));
+});
+
+test.skipIf(!pwshAvailable)(
+  'profile cleanup characterization compiles without native operations',
+  () => {
+    const result = spawnSync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        'scripts/windows-profile-cleanup-characterization.test.ps1',
+        '-CompileOnly',
+      ],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      'Profile cleanup characterization compiled; no native operations executed.',
+    );
+    expect(result.stdout).not.toContain('profile-cleanup-characterization:');
+  },
+  30_000,
+);
+
 test.skipIf(!pwshAvailable)(
   'profile failure fixture reaches its callback through reflection',
   () => {

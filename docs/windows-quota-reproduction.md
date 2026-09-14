@@ -213,3 +213,29 @@ the request and the profile registration was absent, but both directory
 existence observations remained true. Those flags need not refer to different
 directories. Startup failure and residual profile cleanup remain unresolved;
 neither is evidence of a directory-depth quota.
+
+## Native profile cleanup controls
+
+`scripts/windows-profile-cleanup-characterization.test.ps1` runs in the existing
+Windows supervisor CI job before producer supervision. It creates separate
+fixture-owned identities for an empty application directory, an ordinary child
+file, a file held without delete sharing, and a descendant ACL denying deletion.
+Each case calls the current production `Dispose`; no producer is launched.
+
+The fixture records bounded cleanup categories, profile registration and hive
+presence, fixed-location existence flags, and native DELETE-access results.
+The access probes do not delete anything and do not follow the final reparse
+point. Logs contain no profile paths, filenames, SID values, or raw exception
+messages. After releasing only its own blocker, the fixture observes the same
+locations and characterizes an explicit-path `DeleteProfileW` request if the
+profile remains. A null-path retry would instead depend on the registration
+that the first request may already have removed.
+
+This is a characterization, not a production fallback. The unblocked controls
+must clean up successfully, and every case must leave its account, registration,
+profile, and bootstrap root absent. Fixture-only teardown may remove the known,
+never-launched profile tree; production cleanup remains unchanged and mandatory.
+`-CompileOnly` checks compilation without provisioning identities or invoking
+Windows APIs. Native results are still required to distinguish these controlled
+failure modes; they would not by themselves establish which one occurred in the
+protected run.

@@ -2432,6 +2432,7 @@ ${source.slice(start, end)}
       'scripts/windows-quota-isolated-reader.test.ps1',
       'scripts/windows-identity-cleanup-diagnostics.test.ps1',
       'scripts/windows-cleanup-delete-diagnostics.test.ps1',
+      'scripts/windows-profile-cleanup-characterization.test.ps1',
       'scripts/windows-staging-binding.test.ps1',
       'scripts/windows-status-acl-probe.test.ps1',
       'scripts/windows-status-acl-probe.cs',

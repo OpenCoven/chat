@@ -105,6 +105,7 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
 & (Join-Path $PSScriptRoot 'windows-quota-isolated-reader.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-identity-cleanup-diagnostics.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-cleanup-delete-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-profile-cleanup-characterization.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-staging-binding.test.ps1')
 & (Join-Path $PSScriptRoot 'windows-status-acl-probe.test.ps1')
 

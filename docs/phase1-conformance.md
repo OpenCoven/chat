@@ -1717,13 +1717,14 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 357,149 | `1e1eff87c65e7968b18f42b81409315571cc4bfda1d8aff1123876854b5d5435` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 31,812 | `458a6673a182692ef588847f798f63fa3ec423bfa8436d65710a89a46548f23b` |
+| `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 22,262 | `fb6365248bd8286fa03a950e387f0925ff2c818e72ffc1676e4fc327636b5f03` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
+| `scripts/windows-profile-cleanup-characterization.test.ps1` | 10,443 | `a4f0aded40ca4d69d67ff060ee6a92a04bf5a365ffc21699ac9c99cdd1e410a4` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
