@@ -746,6 +746,13 @@ mod marker_io {
         path: PathBuf,
         file: File,
         identity: crate::cave::WindowsPrivatePathMetadata,
+        owner: WindowsDirectoryOwner,
+    }
+
+    #[derive(Clone, Copy)]
+    enum WindowsDirectoryOwner {
+        Trusted,
+        CurrentUser,
     }
 
     struct MarkerDirectory {
@@ -810,7 +817,7 @@ mod marker_io {
             {
                 return Err(());
             }
-            let mut chain = vec![pin_directory(home.clone())?];
+            let mut chain = vec![pin_directory(home.clone(), WindowsDirectoryOwner::Trusted)?];
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
@@ -819,7 +826,10 @@ mod marker_io {
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err(()),
                 }
-                chain.push(pin_directory(current.clone())?);
+                chain.push(pin_directory(
+                    current.clone(),
+                    WindowsDirectoryOwner::CurrentUser,
+                )?);
             }
             let identity = chain_identity(&chain);
             let directory = Self {
@@ -837,12 +847,12 @@ mod marker_io {
 
         fn revalidate(&self) -> Result<(), ()> {
             for pinned in &self.chain {
-                let held = validate_directory_handle(&pinned.file)?;
+                let held = validate_directory_handle(&pinned.file, pinned.owner)?;
                 if held != pinned.identity {
                     return Err(());
                 }
                 let reopened = open_directory(&pinned.path)?;
-                let reopened_identity = validate_directory_handle(&reopened)?;
+                let reopened_identity = validate_directory_handle(&reopened, pinned.owner)?;
                 if reopened_identity != pinned.identity {
                     return Err(());
                 }
@@ -1074,13 +1084,14 @@ mod marker_io {
             .map_err(|_| ())
     }
 
-    fn pin_directory(path: PathBuf) -> Result<PinnedDirectory, ()> {
+    fn pin_directory(path: PathBuf, owner: WindowsDirectoryOwner) -> Result<PinnedDirectory, ()> {
         let file = open_directory(&path)?;
-        let identity = validate_directory_handle(&file)?;
+        let identity = validate_directory_handle(&file, owner)?;
         Ok(PinnedDirectory {
             path,
             file,
             identity,
+            owner,
         })
     }
 
@@ -1097,8 +1108,16 @@ mod marker_io {
 
     fn validate_directory_handle(
         file: &File,
+        owner: WindowsDirectoryOwner,
     ) -> Result<crate::cave::WindowsPrivatePathMetadata, ()> {
-        crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+        match owner {
+            WindowsDirectoryOwner::Trusted => {
+                crate::cave::validate_windows_trusted_directory_handle(file.as_raw_handle() as _)
+            }
+            WindowsDirectoryOwner::CurrentUser => {
+                crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+            }
+        }
     }
 
     fn validate_handle(
