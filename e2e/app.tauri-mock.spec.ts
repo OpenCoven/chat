@@ -334,7 +334,13 @@ test('resumes one durable head per familiar and isolates drafts when switching',
   await expect(second).toHaveValue('Unsent second familiar draft');
   await page.reload();
   await expect(second).toBeEnabled();
-  await expect(second).toHaveValue('Unsent second familiar draft');
+  // Drafts are conversation content: they live in memory only and never reach
+  // browser storage, so a reload keeps the selected familiar but not the text.
+  await expect(second).toHaveValue('');
+  const stored = await page.evaluate(
+    () => localStorage.getItem('opencoven.chat.navigation.v1') ?? '',
+  );
+  expect(stored).not.toContain('Unsent');
   await expect(page.getByText('Other familiar request', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Local familiar', exact: true }).click();
   await expect(page.getByText('Third request on original head', { exact: true })).toBeVisible();

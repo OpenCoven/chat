@@ -17,6 +17,14 @@ applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
 The application frame stays within the window and does not scroll globally.
 Conversation history, rails, and long drafts scroll inside their own regions,
 so a long reply or a short window does not push the composer off the page.
+The window can shrink to 480×520: above 1100px every rail stays in the grid,
+below it the inspector folds into a drawer, and at 760px or less both rails
+become drawers that open one at a time.
+
+Unsent drafts are kept per familiar in memory only. They survive switching
+familiars but not closing the window: conversation content never reaches
+browser storage (see `SECURITY.md`), and only the selected familiar is
+remembered across restarts.
 
 ## Local runtime
 

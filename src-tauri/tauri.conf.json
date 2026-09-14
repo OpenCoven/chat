@@ -17,8 +17,8 @@
         "title": "OpenCoven Chat",
         "width": 1180,
         "height": 780,
-        "minWidth": 820,
-        "minHeight": 600,
+        "minWidth": 480,
+        "minHeight": 520,
         "resizable": true,
         "fullscreen": false
       }

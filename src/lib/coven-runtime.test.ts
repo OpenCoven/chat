@@ -99,6 +99,43 @@ describe('Coven runtime', () => {
     },
   );
 
+  it.each([
+    { description: {} },
+    { emoji: ['🔮'] },
+    { workspace: 42 },
+    { description: 'x'.repeat(4097) },
+  ])('rejects non-string or oversized optional familiar metadata', async (extra) => {
+    const runtime = createCovenRuntime({
+      available: () => true,
+      invoke: vi
+        .fn()
+        .mockResolvedValue([{ id: 'sage', name: 'sage', displayName: 'Sage', ...extra }]),
+    });
+    await expect(runtime.listFamiliars()).rejects.toThrow('invalid');
+  });
+
+  it.each([
+    { available: false, error: {} },
+    { available: true, version: 3 },
+    { available: true, sdkHealth: 'fine' },
+    { available: true, transport: 'ipc' },
+  ])('rejects malformed native status fields: %j', async (status) => {
+    const runtime = createCovenRuntime({
+      available: () => true,
+      invoke: vi.fn().mockResolvedValue(status),
+    });
+    await expect(runtime.status()).rejects.toThrow('invalid');
+  });
+
+  it('accepts a fully populated native status', async () => {
+    const status = { available: true, version: '1.2.3', sdkHealth: 'ok', transport: 'cli' };
+    const runtime = createCovenRuntime({
+      available: () => true,
+      invoke: vi.fn().mockResolvedValue(status),
+    });
+    expect(await runtime.status()).toEqual(status);
+  });
+
   it('preserves optional native PNG thumbnails', async () => {
     const familiars = [
       {

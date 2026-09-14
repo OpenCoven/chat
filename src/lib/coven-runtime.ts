@@ -71,12 +71,32 @@ function session(value: unknown): value is CovenSession {
 function event(value: unknown): value is CovenRunEvent {
   return record(value) && typeof value.type === 'string';
 }
+/** Optional native text is either absent or a bounded string; nothing else may reach React. */
+function optionalText(value: unknown, limit = 4096): boolean {
+  return value === undefined || (typeof value === 'string' && value.length <= limit);
+}
+function oneOf<const T extends readonly string[]>(value: unknown, allowed: T): boolean {
+  return value === undefined || (typeof value === 'string' && allowed.includes(value));
+}
+function status(value: unknown): value is CovenStatus {
+  return (
+    record(value) &&
+    typeof value.available === 'boolean' &&
+    optionalText(value.version, 256) &&
+    optionalText(value.error, 2048) &&
+    oneOf(value.sdkHealth, ['ok', 'unavailable']) &&
+    oneOf(value.transport, ['cli'])
+  );
+}
 function familiar(value: unknown): value is CovenFamiliar {
   return (
     record(value) &&
     typeof value.id === 'string' &&
     typeof value.name === 'string' &&
     typeof value.displayName === 'string' &&
+    optionalText(value.description) &&
+    optionalText(value.emoji, 32) &&
+    optionalText(value.workspace) &&
     (value.avatarUrl === undefined ||
       (typeof value.avatarUrl === 'string' &&
         value.avatarUrl.length <= 256 * 1024 &&
@@ -109,10 +129,7 @@ export function createCovenRuntime(
   return {
     async status() {
       if (!available()) return { available: false, error: UNAVAILABLE };
-      return checked(
-        await call('coven_runtime_status'),
-        (v): v is CovenStatus => record(v) && typeof v.available === 'boolean',
-      );
+      return checked(await call('coven_runtime_status'), status);
     },
     async listFamiliars() {
       return checked(

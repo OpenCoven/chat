@@ -53,6 +53,8 @@ export type ChatLayoutProps = Readonly<{
   archivedFilter?: boolean;
   selectedArchived?: boolean;
   lifecycleBusy?: boolean;
+  /** Runtime unavailable: archive/restore/delete must not mutate stale state. */
+  lifecycleLocked?: boolean;
   onArchivedFilter?: (archived: boolean) => void;
   onLifecycle?: (next: ChatLifecycle) => void;
   busy: boolean;
@@ -342,7 +344,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                 props.busy ||
                 props.loading ||
                 Boolean(props.attaching) ||
-                Boolean(props.lifecycleBusy)
+                Boolean(props.lifecycleBusy) ||
+                Boolean(props.lifecycleLocked)
               }
               pending={Boolean(props.lifecycleBusy)}
               error={props.error}
@@ -456,7 +459,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <span className="fr-thread-empty-title">{`Chat with ${name}`}</span>
                 <span className="fr-empty-text">
                   {props.ready
-                    ? 'Start a conversation with Coven. A familiar is optional.'
+                    ? 'Select a familiar to start a conversation with Coven.'
                     : 'Connect to your local Coven CLI to see real conversations here.'}
                 </span>
               </div>
@@ -579,7 +582,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     {familiar?.description ||
                       (familiar
                         ? 'No description provided by Coven.'
-                        : 'Chat directly with your local Coven CLI. Selecting a familiar is optional.')}
+                        : 'Select a familiar to chat with your local Coven CLI. Every message is sent on its behalf.')}
                   </span>
                 </div>
                 {familiar ? (

@@ -100,7 +100,7 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
     persist(data, "chat-lifecycle-v1.json", &bytes)?;
     if next == Lifecycle::Deleted {
         // Commit the tombstone before cleanup; imported files are never touched.
-        let path = data.join("coven-transcripts").join(format!("{id}.jsonl"));
+        let path = crate::coven_runtime::transcripts_dir(data, false)?.join(format!("{id}.jsonl"));
         match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -178,6 +178,34 @@ mod tests {
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_never_follows_a_symlinked_transcript_directory() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let data = root.join("data");
+        let outside = root.join("outside");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let victim = outside.join("owned.jsonl");
+        fs::write(
+            &victim,
+            json!({"type":"user","source":"chat-input","session_id":"owned"}).to_string(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, data.join("coven-transcripts")).unwrap();
+        let error = change(&data, "owned", Lifecycle::Deleted).unwrap_err();
+        assert!(error.contains("transcript"), "{error}");
+        assert!(
+            victim.exists(),
+            "delete must not reach through the symlinked directory"
+        );
+        assert!(
+            load(&data).unwrap().is_empty(),
+            "no tombstone without a real directory"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

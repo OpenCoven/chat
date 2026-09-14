@@ -22,7 +22,7 @@ use crate::coven::{CovenHealth, NativeCovenHealth};
 mod attachments;
 
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
-const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
+pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
 const ERROR_LIMIT: usize = 8192;
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
@@ -982,9 +982,30 @@ fn is_cli_input_echo(event: &Value, prompt: &str) -> bool {
             })
 }
 
+/// The app-owned transcript directory. It must be a real directory (never a
+/// symlink) so that reads, writes and deletes cannot be redirected outside
+/// app storage; `create` makes it when it does not exist yet.
+pub(crate) fn transcripts_dir(data: &Path, create: bool) -> Result<PathBuf, String> {
+    let directory = data.join("coven-transcripts");
+    match fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.file_type().is_dir() => Ok(directory),
+        Ok(_) => {
+            Err("Local transcript storage is not a real directory; refusing to use it.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if create {
+                fs::create_dir_all(&directory)
+                    .map_err(|_| "Cannot create local transcript storage.")?;
+            }
+            Ok(directory)
+        }
+        Err(_) => Err("Cannot inspect local transcript storage.".into()),
+    }
+}
+
 pub(crate) fn read_local_events(data: &Path, id: &str) -> Result<Option<Vec<Value>>, String> {
     validate_id(id)?;
-    let transcript = data.join("coven-transcripts").join(format!("{id}.jsonl"));
+    let transcript = transcripts_dir(data, false)?.join(format!("{id}.jsonl"));
     if transcript
         .try_exists()
         .map_err(|_| "Cannot inspect saved Coven transcript.")?
@@ -1231,8 +1252,7 @@ fn send_local(
     let echo_prompt = staged
         .as_ref()
         .map_or(input.prompt.as_str(), |(_, _, echo)| echo.as_str());
-    let transcripts = data.join("coven-transcripts");
-    fs::create_dir_all(&transcripts).map_err(|_| "Cannot create local transcript storage.")?;
+    let transcripts = transcripts_dir(data, true)?;
     let mut transcript: Option<File> = None;
     let mut events = Vec::new();
     let mut input_session: Option<String> = None;
@@ -1361,6 +1381,21 @@ pub(crate) fn coven_runtime_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn local_transcripts_are_never_read_through_a_symlinked_directory() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let data = root.join("data");
+        let outside = root.join("outside");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("one.jsonl"), "{\"type\":\"system\"}").unwrap();
+        std::os::unix::fs::symlink(&outside, data.join("coven-transcripts")).unwrap();
+        let error = read_local_events(&data, "one").unwrap_err();
+        assert!(error.contains("transcript"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn deduplicates_only_exact_cli_echoes_of_the_submitted_prompt() {

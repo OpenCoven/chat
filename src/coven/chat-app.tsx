@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type ChatLifecycle,
   type CovenFamiliar,
@@ -13,6 +13,8 @@ import { projectEvents } from './events';
 
 const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
+/** One transcript update per frame keeps long streams smooth. */
+const STREAM_FLUSH_MS = 16;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -34,37 +36,29 @@ function readNavigation(): {
       !('familiarId' in value) ||
       typeof value.familiarId !== 'string' ||
       !('sessionId' in value) ||
-      typeof value.sessionId !== 'string' ||
-      !('drafts' in value) ||
-      typeof value.drafts !== 'object' ||
-      !value.drafts ||
-      Array.isArray(value.drafts) ||
-      !Object.values(value.drafts).every((draft) => typeof draft === 'string')
+      typeof value.sessionId !== 'string'
     ) {
       throw new Error('Saved chat navigation is invalid. The saved value has not been deleted.');
     }
-    return {
-      navigation: {
-        familiarId: value.familiarId,
-        sessionId: value.sessionId,
-        drafts: Object.fromEntries(
-          Object.entries(value.drafts).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string',
-          ),
-        ),
-      },
-      error: '',
-      restored: true,
-      writable: true,
-    };
+    const navigation = { familiarId: value.familiarId, sessionId: value.sessionId, drafts: {} };
+    // Drafts are conversation content and never belong in browser storage
+    // (SECURITY.md); overwrite any plaintext left behind by earlier builds.
+    if ('drafts' in value) writeNavigation(navigation);
+    return { navigation, error: '', restored: true, writable: true };
   } catch (error) {
     return {
       navigation: empty,
-      error: `Cannot restore drafts: ${errorText(error)}`,
+      error: `Cannot restore saved navigation: ${errorText(error)}`,
       restored: false,
       writable: false,
     };
   }
+}
+function writeNavigation(navigation: Navigation) {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ familiarId: navigation.familiarId, sessionId: navigation.sessionId }),
+  );
 }
 function draftKey(navigation: Navigation) {
   return JSON.stringify([navigation.familiarId, '']);
@@ -133,9 +127,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     setNavigation(next);
     if (!saved.writable) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      writeNavigation(next);
     } catch (failure) {
-      setError(`Drafts are only available until this window closes: ${errorText(failure)}`);
+      setError(`Navigation is only remembered until this window closes: ${errorText(failure)}`);
     }
   }
 
@@ -268,14 +262,20 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     setError('');
     const previousOutput = runOutputs[key]?.events ?? [];
     let streamed: CovenRunEvent[] = [];
-    function publish(nextEvents: CovenRunEvent[], runError = '') {
+    let streamedSession = '';
+    let flush: ReturnType<typeof setTimeout> | null = null;
+    function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
+      if (flush) {
+        clearTimeout(flush);
+        flush = null;
+      }
       if (lifetime.current !== life || activeRun.current !== run) return;
       setRunOutputs((previous) => ({
         ...previous,
         [key]: {
           events: [...previousOutput, ...nextEvents],
           error: runError,
-          sessionId: projectEvents(nextEvents).sessionId || current.sessionId,
+          sessionId: sessionId || current.sessionId,
         },
       }));
     }
@@ -293,14 +293,27 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         },
         (event) => {
           if (lifetime.current !== life || activeRun.current !== run) return;
-          streamed = [...streamed, event];
-          publish(streamed);
+          // Append in place and publish a snapshot at most once per frame, so
+          // a long stream costs O(n) copying per frame rather than per event.
+          streamed.push(event);
+          if (
+            ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') &&
+            typeof event.session_id === 'string'
+          )
+            streamedSession = event.session_id;
+          flush ??= setTimeout(() => {
+            flush = null;
+            publish(streamed.slice());
+          }, STREAM_FLUSH_MS);
         },
       );
       if (lifetime.current !== life) return;
       const projected = projectEvents(result.events);
-      streamed = result.events.length ? result.events : streamed;
-      publish(streamed, projected.error);
+      if (result.events.length) {
+        streamed = result.events;
+        streamedSession = projected.sessionId;
+      }
+      publish(streamed.slice(), projected.error);
       if (projected.error) throw new Error(projected.error);
       if (!run.cancelRequested) {
         const sent = new Set(selectedFiles.map((file) => file.id));
@@ -314,7 +327,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           navigate({ ...latest, drafts: { ...latest.drafts, [key]: '' } });
       }
     } catch (failure) {
-      publish(streamed, errorText(failure));
+      publish(streamed.slice(), errorText(failure));
     } finally {
       if (lifetime.current === life) {
         try {
@@ -385,6 +398,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
   async function changeLifecycle(next: ChatLifecycle) {
     const current = navigationRef.current;
     if (
+      !available ||
       !current.sessionId ||
       lifecyclePending.current ||
       activeRun.current ||
@@ -447,6 +461,12 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     }
   }
 
+  const liveEvents = runOutputs[draftKey(navigation)]?.events;
+  const messages = useMemo(
+    () => projectEvents(liveEvents ? [...events, ...liveEvents] : events).messages,
+    [events, liveEvents],
+  );
+
   return (
     <ChatLayout
       archivedFilter={archived}
@@ -459,6 +479,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
       readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
       lifecycleBusy={changingLifecycle}
+      // A failed refresh leaves the last known lists visible for context but
+      // never mutable: lifecycle stays locked until the runtime is available.
+      lifecycleLocked={!available}
       onLifecycle={(next) => void changeLifecycle(next)}
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
@@ -481,9 +504,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
       }))}
       sessions={sessions}
-      messages={
-        projectEvents([...events, ...(runOutputs[draftKey(navigation)]?.events ?? [])]).messages
-      }
+      messages={messages}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
       draft={navigation.drafts[draftKey(navigation)] ?? ''}

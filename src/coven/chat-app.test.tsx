@@ -10,9 +10,18 @@ import type {
 import { ChatApp } from './chat-app';
 import type { ChatLayoutProps } from './chat-layout';
 
+const counters = vi.hoisted(() => ({ layoutRenders: 0 }));
+
 // Exercise the controller contract independently of the parent's evolving visual layout.
 vi.mock('./chat-layout', () => ({
-  ChatLayout: (props: ChatLayoutProps) => (
+  ChatLayout: (props: ChatLayoutProps) => {
+    counters.layoutRenders += 1;
+    return <MockLayout {...props} />;
+  },
+}));
+
+function MockLayout(props: ChatLayoutProps) {
+  return (
     <div>
       {props.familiars
         .filter(
@@ -58,14 +67,26 @@ vi.mock('./chat-layout', () => ({
       </button>
       <button
         type="button"
-        disabled={props.busy || props.loading || props.lifecycleBusy || !props.sessionId}
+        disabled={
+          props.busy ||
+          props.loading ||
+          props.lifecycleBusy ||
+          props.lifecycleLocked ||
+          !props.sessionId
+        }
         onClick={() => props.onLifecycle?.(props.selectedArchived ? 'active' : 'archived')}
       >
         {props.selectedArchived ? 'Restore' : 'Archive'}
       </button>
       <button
         type="button"
-        disabled={props.busy || props.loading || props.lifecycleBusy || !props.sessionId}
+        disabled={
+          props.busy ||
+          props.loading ||
+          props.lifecycleBusy ||
+          props.lifecycleLocked ||
+          !props.sessionId
+        }
         onClick={() => props.onLifecycle?.('deleted')}
       >
         Confirmed delete
@@ -87,8 +108,8 @@ vi.mock('./chat-layout', () => ({
       </div>
       {props.error && <div role="alert">{props.error}</div>}
     </div>
-  ),
-}));
+  );
+}
 
 const STORAGE = 'opencoven.chat.navigation.v1';
 const first: CovenSession = {
@@ -148,48 +169,58 @@ describe('canonical familiar controller', () => {
   beforeEach(() => localStorage.clear());
 
   it('opens only the canonical head, replacing stale navigation without reading the older thread', async () => {
-    localStorage.setItem(
-      STORAGE,
-      JSON.stringify({
-        familiarId: 'f',
-        sessionId: 'older',
-        drafts: { '["f","older"]': 'Preserve old draft' },
-      }),
-    );
+    localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: 'older' }));
     const api = runtime();
     await ready(api);
     expect(api.readSession).toHaveBeenCalledExactlyOnceWith('one');
     expect(screen.getByTestId('head')).toHaveTextContent('one');
     expect(screen.getByRole('textbox')).toHaveValue('');
-    expect(localStorage.getItem(STORAGE)).toContain('Preserve old draft');
     click('Other familiar');
     await waitFor(() => expect(api.readSession).toHaveBeenLastCalledWith('two'));
     expect(screen.getByTestId('familiar')).toHaveTextContent('g');
   });
 
   it('opens the persisted head even when old navigation explicitly selected an empty chat', async () => {
-    localStorage.setItem(
-      STORAGE,
-      JSON.stringify({ familiarId: 'f', sessionId: '', drafts: { '["f",""]': 'Unsent' } }),
-    );
+    localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: '' }));
     const api = runtime();
     await ready(api);
     expect(api.readSession).toHaveBeenCalledWith('one');
-    expect(screen.getByRole('textbox')).toHaveValue('Unsent');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
   });
 
-  it('carries only the currently selected legacy head draft into the familiar draft', async () => {
+  it('keeps unsent drafts out of browser storage', async () => {
+    await ready(runtime());
+    draft('never persisted');
+    const stored = localStorage.getItem(STORAGE) ?? '';
+    expect(stored).not.toContain('never persisted');
+    expect(JSON.parse(stored)).toEqual({ familiarId: 'f', sessionId: 'one' });
+  });
+
+  it('purges legacy plaintext drafts from browser storage without restoring them', async () => {
     localStorage.setItem(
       STORAGE,
       JSON.stringify({
         familiarId: 'f',
         sessionId: 'one',
-        drafts: { '["f","one"]': 'Continue me', '["f","old"]': 'Unrelated' },
+        drafts: { '["f",""]': 'Old secret draft', '["f","one"]': 'Older secret' },
       }),
     );
     await ready(runtime());
-    expect(screen.getByRole('textbox')).toHaveValue('Continue me');
-    expect(localStorage.getItem(STORAGE)).toContain('Unrelated');
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(localStorage.getItem(STORAGE)).not.toContain('secret');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps a draft per familiar in memory while switching', async () => {
+    const api = runtime();
+    await ready(api);
+    draft('first familiar draft');
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('g'));
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    click('First familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
+    expect(screen.getByRole('textbox')).toHaveValue('first familiar draft');
   });
 
   it('continues the durable sibling head and preserves a newer familiar draft', async () => {
@@ -384,6 +415,26 @@ describe('canonical familiar controller', () => {
     );
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(api.send).toHaveBeenCalledOnce();
+    // The stale thread must not stay mutable while the runtime is unavailable.
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Confirmed delete' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    await act(async () => {});
+    expect(api.changeChatLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('disables lifecycle controls when a manual refresh fails after a successful load', async () => {
+    const api = runtime();
+    vi.mocked(api.listFamiliars)
+      .mockResolvedValueOnce([{ id: 'f', name: 'first', displayName: 'First familiar' }])
+      .mockRejectedValue(new Error('Discovery failed'));
+    await ready(api);
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeEnabled();
+    click('Refresh');
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Discovery failed'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Confirmed delete' })).toBeDisabled();
   });
 
   it('ignores stale reads after switching familiars', async () => {
@@ -441,7 +492,32 @@ describe('canonical familiar controller', () => {
     await ready(runtime());
     draft('memory draft');
     expect(localStorage.getItem(STORAGE)).toBe('{broken');
-    expect(screen.getByRole('alert')).toHaveTextContent('Cannot restore drafts');
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot restore saved navigation');
+  });
+
+  it('coalesces streamed events arriving on separate ticks into bounded renders without dropping any', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    let deliver: ((event: CovenRunEvent) => void) | undefined;
+    vi.mocked(api.send).mockImplementation((_input, onEvent) => {
+      deliver = onEvent;
+      return run.promise;
+    });
+    await ready(api);
+    draft('stream');
+    click('Send');
+    await waitFor(() => expect(deliver).toBeDefined());
+    const before = counters.layoutRenders;
+    // Native IPC hands over one event per task; render work must not scale with count.
+    for (let index = 0; index < 200; index += 1) {
+      deliver?.({ type: 'text_delta', text: `chunk-${index} ` });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await waitFor(() => expect(screen.getByRole('log')).toHaveTextContent('chunk-199'));
+    expect(screen.getByRole('log').textContent).toContain('chunk-0 chunk-1 chunk-2 ');
+    expect(counters.layoutRenders - before).toBeLessThan(60);
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    expect(screen.getByRole('log')).toHaveTextContent('chunk-199');
   });
 
   it('cancels once on unmount and ignores the old run completion', async () => {

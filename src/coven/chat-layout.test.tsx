@@ -168,6 +168,13 @@ describe('production Familiars layout', () => {
     expect(screen.queryByText(/Astra|Cave connected|held|pricing/i)).not.toBeInTheDocument();
   });
 
+  it('tells a ready user without a familiar that one must be selected, matching the disabled composer', () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/select a familiar/i).length).toBeGreaterThan(0);
+  });
+
   it('shows real messages, filters conversations and renders honest access', () => {
     const props = layoutProps();
     render(

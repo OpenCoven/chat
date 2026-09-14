@@ -11,21 +11,46 @@ export type MessageSegment =
 const MARKER = /[✶✳]\s*([A-Za-z][\w.-]*)\(/gu;
 const FENCE = /```[\s\S]*?(?:```|$)/gu;
 
-/** Finds the `)` matching `openIndex`, or -1 when the summary was truncated. */
+/**
+ * Finds the `)` matching `openIndex`, or -1 when the summary was truncated.
+ * Parentheses inside `"…"` or `'…'` are argument text (shell quoting), and a
+ * backslash escapes the next character inside double quotes. A quote that
+ * never closes on its line is a plain apostrophe, so the scan retries without
+ * quoting rather than swallowing the rest of the line.
+ */
 function closingParen(text: string, openIndex: number): number {
+  const quoted = scanClosingParen(text, openIndex, true);
+  if (quoted !== 'unterminated-quote') return quoted;
+  const plain = scanClosingParen(text, openIndex, false);
+  return plain === 'unterminated-quote' ? -1 : plain;
+}
+
+function scanClosingParen(
+  text: string,
+  openIndex: number,
+  quoting: boolean,
+): number | 'unterminated-quote' {
   let depth = 0;
+  let quote: '"' | "'" | null = null;
   for (let index = openIndex; index < text.length; index += 1) {
     const char = text[index];
-    if (char === '(') depth += 1;
+    if (char === '\n' && (quote || text[index + 1] === '\n')) {
+      // A summary never spans a paragraph break, so any later `)` is prose.
+      return quote ? 'unterminated-quote' : -1;
+    }
+    if (quote) {
+      if (char === '\\' && quote === '"') index += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (quoting && (char === '"' || char === "'")) quote = char;
+    else if (char === '(') depth += 1;
     else if (char === ')') {
       depth -= 1;
       if (depth === 0) return index;
-    } else if (char === '\n' && text[index + 1] === '\n') {
-      // A summary never spans a paragraph break; any later `)` is prose.
-      return -1;
     }
   }
-  return -1;
+  return quote ? 'unterminated-quote' : -1;
 }
 
 function segmentProse(text: string, into: MessageSegment[]): void {

@@ -28,4 +28,32 @@ describe('segmentToolCalls', () => {
       { kind: 'text', text: '\n\nDone (finally).' },
     ]);
   });
+
+  it('ignores parentheses inside quoted arguments', () => {
+    expect(segmentToolCalls('✶ Bash(echo ")" && printf \'(\') ok')).toEqual([
+      { kind: 'tool', name: 'Bash', args: 'echo ")" && printf \'(\'' },
+      { kind: 'text', text: ' ok' },
+    ]);
+  });
+
+  it('treats a backslash-escaped quote as part of the quoted argument', () => {
+    expect(segmentToolCalls('✶ Bash(echo "a\\")b") done')).toEqual([
+      { kind: 'tool', name: 'Bash', args: 'echo "a\\")b"' },
+      { kind: 'text', text: ' done' },
+    ]);
+  });
+
+  it('still ends an unterminated quote at the line boundary', () => {
+    expect(segmentToolCalls('✶ Bash(echo "oops\nNext line (prose).')).toEqual([
+      { kind: 'tool', name: 'Bash', args: 'echo "oops' },
+      { kind: 'text', text: '\nNext line (prose).' },
+    ]);
+  });
+
+  it('does not let a lone apostrophe swallow the closing paren', () => {
+    expect(segmentToolCalls("✶ Read(notes/Sam's plan.md) done")).toEqual([
+      { kind: 'tool', name: 'Read', args: "notes/Sam's plan.md" },
+      { kind: 'text', text: ' done' },
+    ]);
+  });
 });

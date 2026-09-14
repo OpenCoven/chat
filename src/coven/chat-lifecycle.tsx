@@ -78,9 +78,8 @@ export function ChatLifecycleControls({
         <h2 id="coven-delete-title">Delete chat from this app?</h2>
         <p>{title}</p>
         <p id="coven-delete-description">
-          This permanently removes this chat and its saved local transcript or import snapshot from
-          Chat. It cannot be restored or re-imported from the same file. Original CLI/Cave history
-          is untouched. This does not cancel a running agent.
+          This permanently removes this chat and its saved local transcript from Chat. It cannot be
+          restored. Original CLI/Cave history is untouched. This does not cancel a running agent.
         </p>
         {confirming && error && <p role="alert">{error}</p>}
         <div className="coven-delete-actions">
