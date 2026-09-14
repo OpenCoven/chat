@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type RefObject, useEffect, useRef, useState } from 'react';
 import {
   cx,
   FamButton,
@@ -66,6 +66,39 @@ export type ChatLayoutProps = Readonly<{
   onRefresh: () => void;
 }>;
 
+type Rail = 'sidebar' | 'inspector';
+
+/**
+ * Closing a rail makes it inert (or unmounts the scrim that was clicked), which
+ * throws keyboard focus to the body. Hand it back to whatever opened the rail,
+ * or to a surviving control that opens it when the opener itself unmounted.
+ */
+function useFocusReturn(
+  rail: Rail,
+  open: boolean,
+  opener: RefObject<HTMLElement | null>,
+  shell: RefObject<HTMLElement | null>,
+  panel: RefObject<HTMLElement | null>,
+) {
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    const closed = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!closed) return;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || Boolean(panel.current?.contains(active));
+    if (!lost) return;
+    const target = opener.current?.isConnected
+      ? opener.current
+      : shell.current?.querySelector<HTMLElement>(`[data-opens="${rail}"]`);
+    target?.focus();
+  }, [rail, open, opener, shell, panel]);
+}
+
+function activeControl(): HTMLElement | null {
+  return document.activeElement instanceof HTMLElement ? document.activeElement : null;
+}
+
 export function ChatLayout(props: ChatLayoutProps) {
   const tier = useViewportTier();
   const [sidebar, setSidebar] = useState(() => tier !== 'compact');
@@ -74,6 +107,13 @@ export function ChatLayout(props: ChatLayoutProps) {
   const [tab, setTab] = useState<InspectorTab>('overview');
   const drawers = tier === 'compact';
   const inspectorOverlay = tier !== 'wide';
+  const shellRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const sidebarOpener = useRef<HTMLElement | null>(null);
+  const inspectorOpener = useRef<HTMLElement | null>(null);
+  useFocusReturn('sidebar', sidebar, sidebarOpener, shellRef, sidebarRef);
+  useFocusReturn('inspector', inspector, inspectorOpener, shellRef, inspectorRef);
   const scrim = (drawers && (sidebar || inspector)) || (inspectorOverlay && inspector);
   // Narrowing folds rails away; widening never forces them back open.
   const previousTier = useRef(tier);
@@ -94,10 +134,12 @@ export function ChatLayout(props: ChatLayoutProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [scrim, drawers]);
   function openSidebar() {
+    sidebarOpener.current = activeControl();
     setSidebar(true);
     if (drawers) setInspector(false);
   }
   function openInspector() {
+    inspectorOpener.current = activeControl();
     setInspector(true);
     if (drawers) setSidebar(false);
   }
@@ -135,6 +177,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   );
   return (
     <div
+      ref={shellRef}
       className="fr-shell coven-chat"
       data-tier={tier}
       data-sidebar={sidebar ? 'open' : 'closed'}
@@ -156,6 +199,7 @@ export function ChatLayout(props: ChatLayoutProps) {
         />
       ) : null}
       <aside
+        ref={sidebarRef}
         className="fr-sidebar"
         aria-label="Familiars sidebar"
         aria-hidden={!sidebar || undefined}
@@ -252,6 +296,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 !sidebar && 'fr-rail-handle--closed',
               )}
               aria-label={sidebar ? 'Hide familiars rail' : 'Show familiars rail'}
+              data-opens="sidebar"
               onClick={() => (sidebar ? setSidebar(false) : openSidebar())}
             />
             <button
@@ -261,6 +306,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 !inspector && 'fr-rail-handle--closed',
               )}
               aria-label={inspector ? 'Hide inspector' : 'Show inspector'}
+              data-opens="inspector"
               onClick={() => (inspector ? setInspector(false) : openInspector())}
             />
           </>
@@ -268,7 +314,12 @@ export function ChatLayout(props: ChatLayoutProps) {
         <header className="fr-thread-header">
           <div className="fr-thread-header-lead">
             {!sidebar ? (
-              <FamIconButton icon="sidebar-simple" label="Show familiars" onClick={openSidebar} />
+              <FamIconButton
+                icon="sidebar-simple"
+                label="Show familiars"
+                data-opens="sidebar"
+                onClick={openSidebar}
+              />
             ) : null}
             <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={24} />
             <button
@@ -311,6 +362,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 flip
                 label="Show inspector"
                 aria-controls="coven-familiar-inspector"
+                data-opens="inspector"
                 onClick={openInspector}
               />
             ) : null}
@@ -486,6 +538,7 @@ export function ChatLayout(props: ChatLayoutProps) {
         </div>
       </main>
       <aside
+        ref={inspectorRef}
         id="coven-familiar-inspector"
         className="fr-inspector"
         aria-label="Familiar inspector"

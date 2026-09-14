@@ -11,6 +11,7 @@ export type MessageSegment =
 const MARKER = /[✶✳]\s*([A-Za-z][\w.-]*)\(/gu;
 const FENCE = /```[\s\S]*?(?:```|$)/gu;
 
+/** Finds the `)` matching `openIndex`, or -1 when the summary was truncated. */
 function closingParen(text: string, openIndex: number): number {
   let depth = 0;
   for (let index = openIndex; index < text.length; index += 1) {
@@ -19,6 +20,9 @@ function closingParen(text: string, openIndex: number): number {
     else if (char === ')') {
       depth -= 1;
       if (depth === 0) return index;
+    } else if (char === '\n' && text[index + 1] === '\n') {
+      // A summary never spans a paragraph break; any later `)` is prose.
+      return -1;
     }
   }
   return -1;
@@ -29,20 +33,26 @@ function segmentProse(text: string, into: MessageSegment[]): void {
   MARKER.lastIndex = 0;
   for (let match = MARKER.exec(text); match; match = MARKER.exec(text)) {
     const open = match.index + match[0].length - 1;
-    let close = closingParen(text, open);
+    const close = closingParen(text, open);
+    let argsEnd: number;
+    let resume: number;
     if (close === -1) {
-      // A truncated summary never closes; end it at the next marker or line.
-      const rest = text.slice(open + 1);
-      const stop = rest.search(/[✶✳]|\n/u);
-      close = stop === -1 ? text.length : open + stop;
+      // A truncated summary never closes; end it at the next marker or line
+      // and leave that terminator in place for the next pass.
+      const stop = text.slice(open + 1).search(/[✶✳]|\n/u);
+      argsEnd = stop === -1 ? text.length : open + 1 + stop;
+      resume = argsEnd;
+    } else {
+      argsEnd = close;
+      resume = close + 1;
     }
     if (match.index > cursor) into.push({ kind: 'text', text: text.slice(cursor, match.index) });
     into.push({
       kind: 'tool',
       name: match[1] ?? '',
-      args: text.slice(open + 1, close).trim(),
+      args: text.slice(open + 1, argsEnd).trim(),
     });
-    cursor = Math.min(close + 1, text.length);
+    cursor = resume;
     MARKER.lastIndex = cursor;
   }
   if (cursor < text.length) into.push({ kind: 'text', text: text.slice(cursor) });

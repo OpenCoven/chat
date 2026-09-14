@@ -331,6 +331,36 @@ describe('compact viewports', () => {
     }
   });
 
+  it('returns keyboard focus to the opener when a drawer closes', () => {
+    const restore = mockViewport(390);
+    try {
+      render(<ChatLayout {...layoutProps()} ready />);
+      const openFamiliars = screen.getByRole('button', { name: 'Show familiars' });
+      openFamiliars.focus();
+      fireEvent.click(openFamiliars);
+      const hide = screen.getByRole('button', { name: 'Hide familiars' });
+      hide.focus();
+      fireEvent.click(hide);
+      // The header opener remounts, so a surviving equivalent takes focus.
+      expect(screen.getByRole('button', { name: 'Show familiars' })).toHaveFocus();
+
+      const openInspector = screen.getByRole('button', { name: 'Show inspector' });
+      openInspector.focus();
+      fireEvent.click(openInspector);
+      const scrim = screen.getByRole('button', { name: 'Close panels' });
+      scrim.focus();
+      fireEvent.click(scrim);
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toHaveFocus();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
+      screen.getByRole('button', { name: 'Close inspector' }).focus();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toHaveFocus();
+    } finally {
+      restore();
+    }
+  });
+
   it('keeps the conversation rail but folds the inspector away on medium screens', () => {
     const restore = mockViewport(900);
     try {
