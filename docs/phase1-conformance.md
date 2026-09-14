@@ -2355,3 +2355,29 @@ the returned fresh snapshot. Native Windows coverage keeps a real owner-only
 denial across both reads to prove persistent denial remains terminal, then
 restores only the test fixture between reads and verifies complete snapshot
 accounting plus a real byte-limit breach.
+
+## Native cleanup absence verification
+
+Native cleanup checks every account in the authenticated cleanup scope after
+all delete calls finish and before consuming the grant or returning the empty
+custody digest. The mutation lock remains held across deletion and readback.
+macOS readback searches the same isolated keychain used for deletion; Windows
+and Linux use the same native service/account entries. A retained entry or a
+readback error rejects cleanup and preserves the grant for retry.
+
+This closes the gap where a successful delete call alone could produce an
+`empty: true` response. It does not establish the cause of the Windows native
+E2E failure in Chat #274, or prove that another process cannot create an entry
+after verification. Fresh native CI, reviewed source binding, and protected
+validation remain required before accepting this producer.
+
+The cleanup readback source is pinned at
+`62f56a17a9722f29b8f74f6bcbff59c560673c48`, tree
+`3974a8a05eafb2d5c38c87047d4e7396f44a3c91`. Preserve that commit in producer
+ancestry when landing; the following lock update binds its harness and native
+production deltas without changing the SDK candidate or counterpart revisions.
+
+Local validation passed all 173 Rust library tests, Clippy with warnings denied,
+and formatting. Independent review found no issues. Chat #275 carries `ci:full`
+to run the native PR lanes; those results and fresh protected validation are
+separate requirements and are not implied by the local checks.

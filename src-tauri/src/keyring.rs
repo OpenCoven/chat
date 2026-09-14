@@ -835,6 +835,7 @@ impl CleanupGrantRedemption for crate::cleanup_grant::PreparedCleanupGrant {
 
 #[cfg(feature = "phase1-conformance")]
 trait CleanupBackend {
+    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError>;
     fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError>;
 }
 
@@ -950,6 +951,28 @@ fn delete_conformance_macos_entry(
 
 #[cfg(feature = "phase1-conformance")]
 impl CleanupBackend for NativeCleanupBackend {
+    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        #[cfg(target_os = "macos")]
+        {
+            let mut options = item::ItemSearchOptions::new();
+            options
+                .keychains(std::slice::from_ref(&self.keychain))
+                .class(item::ItemClass::generic_password())
+                .service(service)
+                .account(account);
+            // A successful search proves presence even when no data is requested.
+            match options.search() {
+                Ok(_) => Ok(true),
+                Err(error) if error.code() == -25300 => Ok(false),
+                Err(_) => Err(KeyringError::Unavailable),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
+        }
+    }
+
     fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
         #[cfg(target_os = "macos")]
         {
@@ -999,6 +1022,21 @@ where
                 KeyringError::CleanupCredentialDeleteUnavailable
             }
         })?;
+    }
+
+    // Verify the entire scope after all deletes, while retaining the mutation lock.
+    // Failed or inconclusive cleanup must leave the grant available for retry.
+    for account in &scope.accounts {
+        let present = backend
+            .present(&scope.service, account)
+            .map_err(|_| KeyringError::CleanupBackendUnavailable)?;
+        if present {
+            return Err(if account == INSTALLATION_ID_ACCOUNT {
+                KeyringError::CleanupInstallationDeleteUnavailable
+            } else {
+                KeyringError::CleanupCredentialDeleteUnavailable
+            });
+        }
     }
 
     let digest = Sha256::digest(b"phase1-native-custody-empty-v1");
@@ -2372,6 +2410,15 @@ mod tests {
 
     #[cfg(feature = "phase1-conformance")]
     impl CleanupBackend for FakeCleanupBackend {
+        fn present(&mut self, _service: &str, account: &str) -> Result<bool, KeyringError> {
+            Ok(*self
+                .entries
+                .lock()
+                .expect("fake entries")
+                .get(account)
+                .unwrap_or(&false))
+        }
+
         fn delete(&mut self, _service: &str, account: &str) -> Result<(), KeyringError> {
             let call = self.delete_calls.fetch_add(1, Ordering::SeqCst) + 1;
             let mut failure = self.fail_delete_call.lock().expect("fake failure");
@@ -2675,6 +2722,98 @@ mod tests {
         assert!(backend.all_absent());
         assert_eq!(consumed.load(Ordering::SeqCst), 1);
         assert!(!issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_does_not_claim_empty_when_successful_delete_leaves_entries_present() {
+        struct RetainingBackend;
+        impl CleanupBackend for RetainingBackend {
+            fn present(&mut self, _service: &str, _account: &str) -> Result<bool, KeyringError> {
+                Ok(true)
+            }
+            fn delete(&mut self, _service: &str, _account: &str) -> Result<(), KeyringError> {
+                Ok(())
+            }
+        }
+        let identity = "retained-grant".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = RetainingBackend;
+        let result = run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || {
+                Ok(FakeCleanupRedemption {
+                    scope: cleanup_test_scope(),
+                    consumed: Arc::clone(&consumed),
+                })
+            },
+            &mut backend,
+        );
+        assert!(
+            result.is_err(),
+            "retained credentials must not be reported empty"
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 0);
+        assert!(issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_readback_failure_preserves_grant_for_retry() {
+        struct ReadFailureBackend {
+            inner: FakeCleanupBackend,
+            fail_read: bool,
+        }
+        impl CleanupBackend for ReadFailureBackend {
+            fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
+                self.inner.delete(service, account)
+            }
+            fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+                if self.fail_read {
+                    self.fail_read = false;
+                    Err(KeyringError::Unavailable)
+                } else {
+                    self.inner.present(service, account)
+                }
+            }
+        }
+        let scope = cleanup_test_scope();
+        let identity = "readback-retry-grant".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = ReadFailureBackend {
+            inner: FakeCleanupBackend::new(&scope.accounts, None),
+            fail_read: true,
+        };
+        for attempt in 0..2 {
+            let result = run_cleanup_transaction(
+                &issued,
+                &identity,
+                || Ok(()),
+                || {
+                    Ok(FakeCleanupRedemption {
+                        scope: cleanup_test_scope(),
+                        consumed: Arc::clone(&consumed),
+                    })
+                },
+                &mut backend,
+            );
+            if attempt == 0 {
+                assert!(matches!(
+                    result,
+                    Err(KeyringError::CleanupBackendUnavailable)
+                ));
+                assert_eq!(consumed.load(Ordering::SeqCst), 0);
+                assert!(issued.lock().unwrap().contains(&identity));
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(consumed.load(Ordering::SeqCst), 1);
+                assert!(!issued.lock().unwrap().contains(&identity));
+            }
+        }
     }
 
     #[cfg(feature = "phase1-conformance")]
