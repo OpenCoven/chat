@@ -36,7 +36,7 @@ inventories remain 197 Darwin / 197 Linux / 196 Windows.
 
 Cave authority is the actual bounded Windows discovery-probe merge
 `d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
-`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.3. It includes the
+`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.4. It includes the
 0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
 `OWNER RIGHTS` compatibility, and the shared 24-second publication probe
 budget required by the protected Windows profile boundary.
@@ -76,6 +76,21 @@ After reviewed Chat landing, SDK coordination must bind the actual merged
 producer and these actual consumer, candidate, and authority identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
+
+### Cave5391 release-version binding
+
+At pinned Cave `d655b2c3`, `package.json` declares `0.4.4`. The health route
+uses that version through `APP_VERSION`, and the conformance engine emits it
+from the same package manifest. The generic fixture's `0.0.0` example does
+not define the running release. The earlier `0.4.3` binding was stale; it is
+corrected without weakening either strict lock normalization or record-version
+equality. Regression coverage reproduces the stale binding's bounded
+`phase1.stage.evidence-authority.build.cave-record.identity.cave-version`
+rejection. This is not a claim that this failure occurred in a protected run.
+
+The subsequent SDK validator must bind the same Cave release version. The
+private SDK968 candidate, its archives, and production consumer remain frozen;
+later SDK public API changes are not included by this correction.
 
 ## Windows OWNER RIGHTS discovery repair
 
@@ -372,12 +387,12 @@ diagnostic-only change.
   retaining the prior reviewed native production source;
 - SDK package candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4`;
 - Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
-  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.3`;
+  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.4`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `e2520e89e11035d853b9c52e2428af3cb47e4650`, tree
-  `c3f248742ab3d38a14c5953f6fe50b1ba9344c04`, retained in the producer ancestry;
+- Chat conformance driver `a9c44b643523f4a4adeb6a03bebf71a449cfa7b5`, tree
+  `d850bf84e299840c565e19449d0601b7a225b824`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1691,12 +1706,12 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,186 | `fcfa80ce47da84d32075e9db480cb2dfd012869e7f0452b6b5dfe966a33e09ec` |
+| `.github/workflows/client-v1-conformance.yml` | 168,186 | `91eea46f41ff704c7f4ccd552fc63e0291760c4b55712275d6056756773e9b7d` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,960 | `f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325` |
 | `scripts/phase1-conformance.mjs` | 218,063 | `ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
