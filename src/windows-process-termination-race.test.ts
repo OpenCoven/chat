@@ -22,5 +22,6 @@ test.skipIf(!pwshAvailable)(
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('Retained-handle termination classification passed.');
+    expect(result.stdout).toContain('Retained-handle failure diagnostic matrix passed.');
   },
 );

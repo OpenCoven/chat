@@ -1871,6 +1871,24 @@ from the adopted GLib harness and is retained in the diagnostic branch ancestry.
 
 ## Windows identity cleanup diagnostics
 
+Retained-handle termination failures include a bounded suffix
+`[termination-error=<original native error>;wait=signaled|timeout|failed;exit=failed|active|nonactive]`.
+The error is captured immediately after `TerminateProcess` fails. A zero-time
+wait and exit query use only the same SID-verified retained handle, without
+reopening the PID. Each observation is made at most once; a confirmation wait
+or reap exit query already performed is reused. Unexpected wait results map
+to `failed`, and exit codes are reduced to active/nonactive rather than emitted.
+These observations do not establish the process state at the earlier failure.
+
+This is prospective failure diagnostics for Chat #246, not a restoration of
+its original diagnostic-only acceptance proposal. Chat #256 intentionally
+accepts error 5 followed by signaled confirmation and successful reap; that
+behavior remains unchanged. All other failure kinds and native errors remain
+failures, including later reap failures after confirmation. SID validation,
+handle cleanup, final zero-process verification, and existing waits and limits
+are unchanged. The original #246 historical cause remains unproven, and this
+change does not close or silently supersede its unconditional failure criterion.
+
 The same run `34580621067` reported `Trusted Windows identity cleanup failed`
 wrapping `Ephemeral Windows identity cleanup failed.` with no visible cause.
 `WindowsIsolatedUser.Dispose` collects independent failures from up to eight
