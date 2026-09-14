@@ -67,13 +67,41 @@ function readNavigation(): {
   }
 }
 function draftKey(navigation: Navigation) {
-  return JSON.stringify([navigation.familiarId, navigation.sessionId]);
+  return JSON.stringify([navigation.familiarId, '']);
+}
+
+function selectCanonical(
+  previous: Navigation,
+  familiars: readonly CovenFamiliar[],
+  sessions: readonly CovenSession[],
+  archived: boolean,
+): Navigation {
+  const eligible = familiars.filter(
+    (familiar) =>
+      Boolean(sessions.find((session) => session.familiarId === familiar.id)?.archived) ===
+      archived,
+  );
+  const familiarId = eligible.some((item) => item.id === previous.familiarId)
+    ? previous.familiarId
+    : (eligible[0]?.id ?? '');
+  const head = sessions.find((session) => session.familiarId === familiarId);
+  const next = { ...previous, familiarId, sessionId: head?.id ?? '' };
+  const key = draftKey(next);
+  const oldKey = JSON.stringify([familiarId, next.sessionId]);
+  if (
+    next.sessionId &&
+    previous.sessionId === next.sessionId &&
+    next.drafts[key] === undefined &&
+    next.drafts[oldKey] !== undefined
+  ) {
+    next.drafts = { ...next.drafts, [key]: next.drafts[oldKey] ?? '' };
+  }
+  return next;
 }
 
 export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }) {
   const [saved] = useState(readNavigation);
   const [navigation, setNavigation] = useState(saved.navigation);
-  const initialized = useRef(saved.restored);
   const navigationRef = useRef(navigation);
   const [familiars, setFamiliars] = useState<CovenFamiliar[]>([]);
   const [sessions, setSessions] = useState<CovenSession[]>([]);
@@ -88,9 +116,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
+  const archivedRef = useRef(false);
   const [changingLifecycle, setChangingLifecycle] = useState(false);
   const lifecyclePending = useRef<symbol | null>(null);
-  const sessionRevision = useRef(0);
   const [attachments, setAttachments] = useState<Record<string, ChatAttachment[]>>({});
   const attachmentRef = useRef(attachments);
   const [attaching, setAttaching] = useState(false);
@@ -117,7 +145,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     activeRun.current = null;
     lifecyclePending.current = null;
     setChangingLifecycle(false);
-    ++sessionRevision.current;
     setBusy(false);
     setCancelling(false);
     setLoading(true);
@@ -145,29 +172,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         setSessions(nextSessions);
         setAvailable(true);
         setStatus(`Coven ${health.version ?? 'CLI'} · local sessions`);
-        const previous = navigationRef.current;
-        const selected = nextSessions.find(
-          (item) => item.id === previous.sessionId && !item.archived,
+        navigate(
+          selectCanonical(navigationRef.current, nextFamiliars, nextSessions, archivedRef.current),
         );
-        const familiarId =
-          selected?.familiarId ??
-          (nextFamiliars.some((item) => item.id === previous.familiarId)
-            ? previous.familiarId
-            : (nextFamiliars[0]?.id ?? ''));
-        const initial = previous.sessionId
-          ? selected
-          : initialized.current
-            ? undefined
-            : nextSessions.find(
-                (item) => !item.archived && (!item.familiarId || item.familiarId === familiarId),
-              );
-        initialized.current = true;
-        const next = {
-          ...previous,
-          familiarId: initial?.familiarId ?? familiarId,
-          sessionId: initial?.id ?? '',
-        };
-        navigate(next);
       } catch (failure) {
         if (lifetime.current === life) {
           setError(errorText(failure));
@@ -208,6 +215,14 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       .then((result) => {
         if (readId.current !== request) return;
         setEvents(result.events);
+        setRunOutputs((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([key, output]) => [
+              key,
+              output.sessionId === result.session.id ? { ...output, events: [] } : output,
+            ]),
+          ),
+        );
         if (result.hasMore)
           setError(
             'Only part of this session is available. Use the Coven CLI to inspect the full history.',
@@ -231,10 +246,8 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       setError('Restore this archived chat before sending a message.');
       return;
     }
-    if (
-      sessions.some((session) => session.id === current.sessionId && session.status === 'imported')
-    ) {
-      setError('Imported Cave conversations are read-only. Start a new chat to send a message.');
+    if (!current.familiarId) {
+      setError('Select a familiar before sending a message.');
       return;
     }
     const key = draftKey(current);
@@ -300,20 +313,28 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         if (latest.drafts[key] === prompt)
           navigate({ ...latest, drafts: { ...latest.drafts, [key]: '' } });
       }
-      const nextSessions = await runtime.listSessions();
-      if (lifetime.current !== life) return;
-      setSessions(nextSessions);
-      if (draftKey(navigationRef.current) === key && projected.sessionId && !run.cancelRequested) {
-        const latest = navigationRef.current;
-        const next = { ...latest, sessionId: projected.sessionId };
-        navigate({
-          ...next,
-          drafts: { ...latest.drafts, [draftKey(next)]: latest.drafts[key] ?? '' },
-        });
-      }
     } catch (failure) {
       publish(streamed, errorText(failure));
     } finally {
+      if (lifetime.current === life) {
+        try {
+          // Initialization persists the canonical sibling even if the run fails or is cancelled.
+          const nextSessions = await runtime.listSessions();
+          if (lifetime.current === life) {
+            setSessions(nextSessions);
+            navigate(
+              selectCanonical(navigationRef.current, familiars, nextSessions, archivedRef.current),
+            );
+          }
+        } catch (failure) {
+          if (lifetime.current === life) {
+            setError(
+              `Cannot refresh the familiar's canonical thread: ${errorText(failure)}. Refresh before sending again.`,
+            );
+            setAvailable(false);
+          }
+        }
+      }
       if (activeRun.current === run) activeRun.current = null;
       if (lifetime.current === life) {
         setBusy(false);
@@ -373,7 +394,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       return;
     const operation = Symbol('chat-lifecycle');
     lifecyclePending.current = operation;
-    ++sessionRevision.current;
     setChangingLifecycle(true);
     const life = lifetime.current;
     ++readId.current;
@@ -381,17 +401,19 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     try {
       await runtime.changeChatLifecycle(current.sessionId, next);
       if (lifetime.current !== life) return;
-      setSessions((previous) =>
+      const nextSessions =
         next === 'deleted'
-          ? previous.filter((item) => item.id !== current.sessionId)
-          : previous.map((item) =>
+          ? sessions.filter((item) => item.id !== current.sessionId)
+          : sessions.map((item) =>
               item.id === current.sessionId ? { ...item, archived: next === 'archived' } : item,
-            ),
-      );
+            );
+      setSessions(nextSessions);
       const latest = navigationRef.current;
       const drafts = { ...latest.drafts };
       const suffix = `,${JSON.stringify(current.sessionId)}]`;
       if (next === 'deleted') {
+        delete drafts[draftKey(current)];
+        delete attachmentRef.current[draftKey(current)];
         // Canonical draft keys are [familiarId, sessionId] JSON tuples.
         for (const key of Object.keys(drafts)) {
           if (key.endsWith(suffix)) delete drafts[key];
@@ -406,12 +428,17 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       setRunOutputs((previous) =>
         Object.fromEntries(
           Object.entries(previous).filter(
-            ([key, output]) => output.sessionId !== current.sessionId && !key.endsWith(suffix),
+            ([key, output]) =>
+              key !== draftKey(current) &&
+              output.sessionId !== current.sessionId &&
+              !key.endsWith(suffix),
           ),
         ),
       );
       setEvents([]);
-      navigate({ ...latest, drafts, sessionId: '' });
+      navigate(
+        selectCanonical({ ...latest, drafts }, familiars, nextSessions, archivedRef.current),
+      );
     } catch (failure) {
       if (lifetime.current === life) setError(errorText(failure));
     } finally {
@@ -425,20 +452,19 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       archivedFilter={archived}
       onArchivedFilter={(value) => {
         if (lifecyclePending.current) return;
+        archivedRef.current = value;
         setArchived(value);
-        navigate({ ...navigationRef.current, sessionId: '' });
+        navigate(selectCanonical(navigationRef.current, familiars, sessions, value));
       }}
       selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
+      readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
       lifecycleBusy={changingLifecycle}
       onLifecycle={(next) => void changeLifecycle(next)}
-      readOnly={sessions.some(
-        (session) => session.id === navigation.sessionId && session.status === 'imported',
-      )}
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
       onAttach={(files) => void attach(files)}
       onRemoveAttachment={(id) => {
-        if (activeRun.current || selecting.current) return;
+        if (activeRun.current || selecting.current || lifecyclePending.current) return;
         const key = draftKey(navigationRef.current);
         attachmentRef.current = {
           ...attachmentRef.current,
@@ -446,19 +472,21 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         };
         setAttachments(attachmentRef.current);
       }}
-      familiars={familiars.map((item) => ({
-        id: item.id,
-        name: item.displayName || item.name,
-        description: item.description,
-        workspace: item.workspace,
-        avatarUrl:
-          'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
-      }))}
-      sessions={sessions.filter(
-        (item) =>
-          Boolean(item.archived) === archived &&
-          (!item.familiarId || item.familiarId === navigation.familiarId),
-      )}
+      familiars={familiars
+        .filter(
+          (item) =>
+            Boolean(sessions.find((session) => session.familiarId === item.id)?.archived) ===
+            archived,
+        )
+        .map((item) => ({
+          id: item.id,
+          name: item.displayName || item.name,
+          description: item.description,
+          workspace: item.workspace,
+          avatarUrl:
+            'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
+        }))}
+      sessions={sessions}
       messages={
         projectEvents([...events, ...(runOutputs[draftKey(navigation)]?.events ?? [])]).messages
       }
@@ -472,6 +500,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       }
       ready={
         available &&
+        Boolean(navigation.familiarId) &&
         !changingLifecycle &&
         !sessions.some((item) => item.id === navigation.sessionId && item.archived)
       }
@@ -482,23 +511,14 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');
-        navigate({ ...navigationRef.current, familiarId: id, sessionId: '' });
-      }}
-      onSession={(id) => {
-        if (lifecyclePending.current) return;
-        setError('');
-        navigate({
-          ...navigationRef.current,
-          sessionId: id,
-          familiarId:
-            sessions.find((item) => item.id === id)?.familiarId ?? navigationRef.current.familiarId,
-        });
-      }}
-      onNew={() => {
-        if (lifecyclePending.current) return;
-        setArchived(false);
-        setError('');
-        navigate({ ...navigationRef.current, sessionId: '' });
+        navigate(
+          selectCanonical(
+            { ...navigationRef.current, familiarId: id },
+            familiars,
+            sessions,
+            archivedRef.current,
+          ),
+        );
       }}
       onDraft={(value) => {
         if (lifecyclePending.current) return;

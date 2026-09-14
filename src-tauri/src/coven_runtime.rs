@@ -676,20 +676,13 @@ fn visible_sessions(data: &Path, value: &Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .ok_or("Coven returned invalid sessions.")?
     {
-        if lifecycle.get(string(session, "id")?) != Some(&crate::chat_lifecycle::Lifecycle::Deleted)
-            && crate::chat_origin::has_chat_origin(data, string(session, "id")?)?
+        if lifecycle.get(string(session, "id")?) == Some(&crate::chat_lifecycle::Lifecycle::Deleted)
+            || crate::chat_origin::has_chat_origin(data, string(session, "id")?)?
         {
             sessions.push(normalize_session(session)?);
         }
     }
-    sessions.extend(crate::chat_origin::list_imports(data)?);
-    for session in &mut sessions {
-        session["archived"] = json!(
-            lifecycle.get(string(session, "id")?)
-                == Some(&crate::chat_lifecycle::Lifecycle::Archived)
-        );
-    }
-    Ok(Value::Array(sessions))
+    crate::chat_canonical::project(data, &sessions).map(Value::Array)
 }
 
 #[tauri::command]
@@ -726,7 +719,12 @@ fn change_chat_lifecycle(
     let _storage = crate::chat_lifecycle::STORAGE_LOCK
         .lock()
         .map_err(|_| "Chat lifecycle storage is unavailable.")?;
-    crate::chat_lifecycle::change(data, id, lifecycle)
+    crate::chat_canonical::require_current(data, id)?;
+    crate::chat_lifecycle::change(data, id, lifecycle)?;
+    if lifecycle == crate::chat_lifecycle::Lifecycle::Deleted {
+        crate::chat_canonical::clear(data, id)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -746,12 +744,13 @@ pub(crate) async fn coven_runtime_read(app: AppHandle, id: String) -> Result<Val
 
 fn read_session(data: &Path, id: &str) -> Result<Value, String> {
     crate::chat_lifecycle::require_visible(data, id)?;
-    if let Some(import) = crate::chat_origin::read_import(data, id)? {
-        return Ok(import);
-    }
     crate::chat_origin::require_chat_origin(data, id)?;
+    let familiar = crate::chat_canonical::require_current(data, id)?;
     let deadline = Instant::now() + Duration::from_secs(60);
     let selected = get_session(id)?;
+    if selected.get("familiar_id").and_then(Value::as_str) != Some(familiar.as_str()) {
+        return Err("The canonical Chat session no longer belongs to its mapped familiar.".into());
+    }
     if let Some((events, has_more)) = read_captured_history(data, &selected, get_session)? {
         return Ok(
             json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}),
@@ -1130,6 +1129,24 @@ fn send_local(
 ) -> Result<Value, String> {
     validate_input(&input)?;
     let mut input = input;
+    let selected_familiar = input
+        .familiar_id
+        .clone()
+        .ok_or("Select a familiar before sending a message.")?;
+    {
+        let _storage = crate::chat_lifecycle::STORAGE_LOCK
+            .lock()
+            .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+        if !crate::chat_canonical::load(data)?.contains_key(&selected_familiar) {
+            visible_sessions(data, &cli_json(&["sessions", "--all", "--json"])?)?;
+            crate::chat_canonical::ensure_empty(data, &selected_familiar)?;
+        }
+        if crate::chat_canonical::head(data, &selected_familiar)? != input.session_id {
+            return Err(
+                "The familiar's canonical Chat thread changed. Refresh before sending.".into(),
+            );
+        }
+    }
     let (harness, workspace) = if let Some(id) = &input.session_id {
         crate::chat_lifecycle::require_active(data, id)?;
         crate::chat_origin::require_chat_origin(data, id)?;
@@ -1165,12 +1182,7 @@ fn send_local(
             PathBuf::from(string(familiar, "workspace")?),
         )
     } else {
-        let workspace = data.join("coven-workspace");
-        fs::create_dir_all(&workspace).map_err(|_| "Cannot create the isolated chat workspace.")?;
-        (
-            input.harness.clone().unwrap_or_else(|| "coven-code".into()),
-            workspace,
-        )
+        return Err("Select a familiar before sending a message.".into());
     };
     if !workspace.is_absolute() {
         return Err("Coven workspace must be an absolute local directory.".into());
@@ -1264,14 +1276,38 @@ fn send_local(
         let file = transcript
             .as_mut()
             .ok_or("Coven stream did not begin with session identity.")?;
+        let initialized = captured_input.is_some();
+        let mut published = Vec::new();
         for event in std::iter::once(event).chain(captured_input) {
             serde_json::to_writer(&mut *file, &event)
                 .map_err(|_| "Cannot save Coven transcript.")?;
             file.write_all(b"\n")
                 .map_err(|_| "Cannot save Coven transcript.")?;
             file.flush().map_err(|_| "Cannot save Coven transcript.")?;
-            on_event(event.clone())?;
-            events.push(event);
+            published.push(event);
+        }
+        if initialized {
+            file.sync_all()
+                .map_err(|_| "Cannot persist the new Chat thread.")?;
+            #[cfg(unix)]
+            File::open(&transcripts)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|_| "Cannot persist the new Chat transcript directory.")?;
+            let _storage = crate::chat_lifecycle::STORAGE_LOCK
+                .lock()
+                .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+            crate::chat_canonical::advance(
+                data,
+                &selected_familiar,
+                input.session_id.as_deref(),
+                input_session
+                    .as_deref()
+                    .ok_or("Coven omitted the new session identity.")?,
+            )?;
+        }
+        for event in published {
+            events.push(event.clone());
+            on_event(event)?;
         }
         Ok(())
     };
@@ -1419,7 +1455,7 @@ mod tests {
         let data = std::env::temp_dir().join(format!("opencoven-origin-{}", uuid::Uuid::new_v4()));
         let transcripts = data.join("coven-transcripts");
         fs::create_dir_all(&transcripts).unwrap();
-        let owned = json!({"id":"owned","harness":"coven-code","status":"completed","updated_at":"2026-09-14","project_root":"/work"});
+        let owned = json!({"id":"owned","familiar_id":"f","harness":"coven-code","status":"completed","updated_at":"2026-09-14","project_root":"/work"});
         let external = json!({"id":"external"});
         let listing = json!({"sessions":[owned.clone(), external]});
         assert_eq!(visible_sessions(&data, &listing).unwrap(), json!([]));
@@ -1437,6 +1473,7 @@ mod tests {
             );
         }
         fs::remove_file(transcripts.join("owned.jsonl")).unwrap();
+        fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
     }
@@ -1612,6 +1649,7 @@ mod tests {
         .is_err());
         assert!(!data.join("chat-lifecycle-v1.json").exists());
         drop(registration);
+        crate::chat_canonical::advance(&data, "f", None, "owned").unwrap();
         change_chat_lifecycle(
             &data,
             &state.runs,
@@ -1622,6 +1660,64 @@ mod tests {
         .unwrap();
         assert!(!transcripts.join("owned.jsonl").exists());
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
+        fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
+        fs::remove_dir(transcripts).unwrap();
+        fs::remove_dir(data).unwrap();
+    }
+
+    #[test]
+    fn canonical_send_guards_reject_stale_archived_and_standalone_inputs_before_cli_access() {
+        use crate::chat_lifecycle::Lifecycle;
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        fs::write(
+            transcripts.join("owned.jsonl"),
+            json!({"type":"user","source":"chat-input","session_id":"owned"}).to_string(),
+        )
+        .unwrap();
+        crate::chat_canonical::advance(&data, "f", None, "owned").unwrap();
+        let input = |session: Option<&str>, familiar: Option<&str>| SendInput {
+            run_id: "guard-test".into(),
+            prompt: "Do not run a model".into(),
+            session_id: session.map(str::to_owned),
+            familiar_id: familiar.map(str::to_owned),
+            harness: None,
+            attachments: vec![],
+        };
+        let cancel = AtomicBool::new(false);
+        let mut no_events = |_| panic!("Rejected inputs must never execute a model");
+        assert!(
+            send_local(&data, input(None, None), &cancel, &mut no_events)
+                .unwrap_err()
+                .contains("Select a familiar")
+        );
+        assert!(
+            send_local(&data, input(None, Some("f")), &cancel, &mut no_events)
+                .unwrap_err()
+                .contains("canonical Chat thread changed")
+        );
+        crate::chat_lifecycle::change(&data, "owned", Lifecycle::Archived).unwrap();
+        assert!(send_local(
+            &data,
+            input(Some("owned"), Some("f")),
+            &cancel,
+            &mut no_events
+        )
+        .unwrap_err()
+        .contains("Restore"));
+        crate::chat_lifecycle::change(&data, "owned", Lifecycle::Deleted).unwrap();
+        crate::chat_canonical::clear(&data, "owned").unwrap();
+        assert!(send_local(
+            &data,
+            input(Some("owned"), Some("f")),
+            &cancel,
+            &mut no_events
+        )
+        .unwrap_err()
+        .contains("canonical Chat thread changed"));
+        fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
+        fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
     }
@@ -1819,13 +1915,15 @@ mod tests {
             "read",
             "send",
             "cancel",
-            "import-cave",
             "chat-lifecycle",
         ] {
             assert!(permissions.contains(&json!(format!("allow-coven-runtime-{suffix}"))));
         }
         assert_eq!(capability["windows"], json!(["main"]));
         assert!(capability.get("remote").is_none());
+        assert!(!permissions.contains(&json!("allow-coven-runtime-import-cave")));
+        assert!(!include_str!("lib.rs").contains("coven_runtime_import_cave"));
+        assert!(!include_str!("../build.rs").contains("coven_runtime_import_cave"));
     }
 
     #[test]

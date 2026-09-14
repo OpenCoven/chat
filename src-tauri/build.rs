@@ -5,7 +5,6 @@ const NATIVE_COMMANDS: &[&str] = &[
     "coven_runtime_familiars",
     "coven_runtime_sessions",
     "coven_runtime_chat_lifecycle",
-    "coven_runtime_import_cave",
     "coven_runtime_read",
     "coven_runtime_send",
     "coven_runtime_cancel",

@@ -123,13 +123,20 @@ export function createCovenRuntime(
     async listSessions() {
       return checked(
         await call('coven_runtime_sessions'),
-        (v): v is CovenSession[] => Array.isArray(v) && v.every(session),
+        (v): v is CovenSession[] =>
+          Array.isArray(v) &&
+          v.every(
+            (item) =>
+              session(item) && typeof item.familiarId === 'string' && item.familiarId.length > 0,
+          ) &&
+          new Set(v.map((item) => item.familiarId)).size === v.length,
       );
     },
     async readSession(id) {
       return checked(
         await call('coven_runtime_read', { id }),
-        (v): v is CovenSessionRead => record(v) && session(v.session) && events(v.events),
+        (v): v is CovenSessionRead =>
+          record(v) && session(v.session) && v.session.id === id && events(v.events),
       );
     },
     async send(input, onEvent) {

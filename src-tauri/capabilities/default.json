@@ -8,7 +8,6 @@
     "allow-coven-runtime-familiars",
     "allow-coven-runtime-sessions",
     "allow-coven-runtime-chat-lifecycle",
-    "allow-coven-runtime-import-cave",
     "allow-coven-runtime-read",
     "allow-coven-runtime-send",
     "allow-coven-runtime-cancel",

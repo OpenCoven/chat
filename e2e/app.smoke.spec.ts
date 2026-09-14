@@ -5,7 +5,7 @@ for (const mode of ['chat', 'messages', 'minimal', 'familiars-reads']) {
     await page.goto(`/?demo=${mode}`);
 
     await expect(page.locator('.fr-shell')).toBeVisible();
-    await expect(page.getByRole('complementary', { name: 'Conversations sidebar' })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: 'Familiars sidebar' })).toBeVisible();
     await expect(page.getByText(/desktop app/i).first()).toBeVisible();
     await expect(page.getByRole('region', { name: 'Held action' })).toHaveCount(0);
     await expect(page.locator('.mm-desktop')).toHaveCount(0);
@@ -30,12 +30,12 @@ for (const width of [820, 1024, 1440]) {
   });
 }
 
-test('keeps the conversation rail collapsible in the standalone layout', async ({ page }) => {
+test('keeps the familiar rail collapsible in the standalone layout', async ({ page }) => {
   await page.goto('/');
-  const sidebar = page.getByRole('complementary', { name: 'Conversations sidebar' });
+  const sidebar = page.getByRole('complementary', { name: 'Familiars sidebar' });
   await expect(sidebar).toBeVisible();
-  await page.getByRole('button', { name: 'Hide conversations', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
   await expect(sidebar).toBeHidden();
-  await page.getByRole('button', { name: 'Show conversations', exact: true }).click();
+  await page.getByRole('button', { name: 'Show familiars rail', exact: true }).click();
   await expect(sidebar).toBeVisible();
 });

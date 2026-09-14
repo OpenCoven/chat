@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   cx,
   FamButton,
@@ -55,12 +55,13 @@ export type ChatLayoutProps = Readonly<{
   lifecycleBusy?: boolean;
   onArchivedFilter?: (archived: boolean) => void;
   onLifecycle?: (next: ChatLifecycle) => void;
+  importControl?: ReactNode;
+  onSession?: (id: string) => void;
+  onNew?: () => void;
   busy: boolean;
   loading: boolean;
   cancelling: boolean;
   error: string;
-  onSession?: (id: string) => void;
-  onNew?: () => void;
   onFamiliar: (id: string) => void;
   onDraft: (value: string) => void;
   onSend: () => void;
@@ -132,8 +133,13 @@ export function ChatLayout(props: ChatLayoutProps) {
   const agents = props.familiars.filter(
     (item) =>
       item.name.toLowerCase().includes(query.toLowerCase()) &&
-      Boolean(props.sessions.find((session) => session.familiarId === item.id)?.archived) ===
-        Boolean(props.archivedFilter),
+      (!props.archivedFilter ||
+        props.sessions.some((session) => session.familiarId === item.id && session.archived)),
+  );
+  const conversations = props.sessions.filter(
+    (item) =>
+      (!item.familiarId || item.familiarId === props.familiarId) &&
+      Boolean(item.archived) === Boolean(props.archivedFilter),
   );
   return (
     <div
@@ -192,7 +198,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 disabled={props.lifecycleBusy}
                 onClick={() => props.onArchivedFilter?.(false)}
               >
-                Active
+                Active chats
               </button>
               <button
                 type="button"
@@ -201,7 +207,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 disabled={props.lifecycleBusy}
                 onClick={() => props.onArchivedFilter?.(true)}
               >
-                Archived
+                Archived chats
               </button>
             </fieldset>
           )}
@@ -245,6 +251,49 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </span>
               </div>
             ) : null}
+            {props.onSession && (
+              <section className="coven-lifecycle-conversations" aria-label="Conversations">
+                <div className="fr-section-label">
+                  {props.archivedFilter ? 'Archived conversations' : 'Conversations'}
+                </div>
+                {props.onNew && (
+                  <FamButton
+                    leadingIcon="plus"
+                    fullWidth
+                    disabled={
+                      (!props.ready && !props.selectedArchived) || props.busy || props.lifecycleBusy
+                    }
+                    onClick={props.onNew}
+                  >
+                    New chat
+                  </FamButton>
+                )}
+                {props.importControl}
+                <div className="fr-conv-list">
+                  {conversations.map((item) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className="fr-conv"
+                      aria-label={item.title}
+                      aria-current={item.id === props.sessionId || undefined}
+                      disabled={props.lifecycleBusy}
+                      onClick={() => {
+                        props.onSession?.(item.id);
+                        if (drawers) setSidebar(false);
+                      }}
+                    >
+                      <span className="fr-conv-title">{item.title}</span>
+                    </button>
+                  ))}
+                </div>
+                {!conversations.length && (
+                  <p className="fr-empty-text">
+                    {props.archivedFilter ? 'No archived chats.' : 'No conversations yet.'}
+                  </p>
+                )}
+              </section>
+            )}
           </div>
           <div className="fr-sidebar-foot">Coven CLI</div>
         </div>

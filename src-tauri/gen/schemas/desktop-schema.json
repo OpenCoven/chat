@@ -315,12 +315,6 @@
           "markdownDescription": "Enables the coven_runtime_familiars command without any pre-configured scope."
         },
         {
-          "description": "Enables the coven_runtime_import_cave command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-coven-runtime-import-cave",
-          "markdownDescription": "Enables the coven_runtime_import_cave command without any pre-configured scope."
-        },
-        {
           "description": "Enables the coven_runtime_read command without any pre-configured scope.",
           "type": "string",
           "const": "allow-coven-runtime-read",
@@ -481,12 +475,6 @@
           "type": "string",
           "const": "deny-coven-runtime-familiars",
           "markdownDescription": "Denies the coven_runtime_familiars command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the coven_runtime_import_cave command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-coven-runtime-import-cave",
-          "markdownDescription": "Denies the coven_runtime_import_cave command without any pre-configured scope."
         },
         {
           "description": "Denies the coven_runtime_read command without any pre-configured scope.",
