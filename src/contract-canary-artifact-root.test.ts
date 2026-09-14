@@ -443,11 +443,11 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('77d825d17809cfec2fad4acb9b1526b3c4752f9d');
+    expect(lock.sdk.revision).toBe('96804bc483a063e41e9a9738a4ace61970f6c0a4');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.0.1',
-      sha256: 'd641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca',
+      sha256: '2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({

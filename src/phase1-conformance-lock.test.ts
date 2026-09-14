@@ -139,11 +139,11 @@ const expectedBehaviorAuthority = {
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: '636f7da96fa178c2c14648f84137091b15a1cb8a',
+    revision: 'ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
-    revision: '77d825d17809cfec2fad4acb9b1526b3c4752f9d',
+    revision: '96804bc483a063e41e9a9738a4ace61970f6c0a4',
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
@@ -159,7 +159,7 @@ const expectedEntries = {
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
-    tree: '8e20adb1d55f17fb5b5a833bad6c9535d41c98ce',
+    tree: 'ffd1963ef9539c7a679909200175fb11a9305c95',
     files: [
       {
         path: 'src-tauri/Cargo.toml',
@@ -230,7 +230,7 @@ const expectedEntries = {
   release: {
     sdkManifest: {
       version: '0.0.1',
-      sha256: 'd641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca',
+      sha256: '2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a',
     },
     sdkArtifacts: [
       {
@@ -251,8 +251,8 @@ const expectedEntries = {
         packageName: '@opencoven/coven-client',
         releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
         vendorFile: 'coven-client-0.0.1.tgz',
-        size: 42960,
-        sha256: 'e2d4d27c05b51eb1eb5d34d15134b73d4e2c416d72c32de18ace9a908d51c14a',
+        size: 45724,
+        sha256: 'bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65',
       },
       {
         packageName: '@opencoven/sdk',
@@ -267,7 +267,7 @@ const expectedEntries = {
     consumerLock: {
       path: 'pnpm-lock.yaml',
       size: 56222,
-      sha256: '5c9d0bd1d9438006970d9d7dc86186beb578c0eaff597f59a8277b94187d191d',
+      sha256: '62d871edd67d26cd4883814fc6146232ee0a5361675137cea257804344d0f555',
     },
     caveArtifacts: {
       assertionEngine: {
