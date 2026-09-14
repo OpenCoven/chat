@@ -30,7 +30,7 @@ the final bytes.
 - SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`;
+  `b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source

@@ -152,7 +152,7 @@ describe('Phase 1 specification guards', () => {
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.1.0',
-      sha256: 'b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c',
+      sha256: 'b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec',
     });
     expect(lock.sdk.artifacts).toEqual({
       core: {
@@ -160,16 +160,16 @@ describe('Phase 1 specification guards', () => {
         version: '0.1.0',
         releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
         vendorFile: 'sdk-core-0.1.0.tgz',
-        size: 33284,
-        sha256: '9a574e8bd5178ce2aa20db97e8a741c7c9569515546a2d3089406f41a9d040fe',
+        size: 33332,
+        sha256: 'dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4',
       },
       cave: {
         packageName: '@opencoven/cave-client',
         version: '0.1.0',
         releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
         vendorFile: 'cave-client-0.1.0.tgz',
-        size: 81543,
-        sha256: 'c44544adf8e712d6be1e8686788e63aa0133eb318274d1fb1926138a7da148c0',
+        size: 85426,
+        sha256: 'de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a',
       },
       coven: {
         packageName: '@opencoven/coven-client',

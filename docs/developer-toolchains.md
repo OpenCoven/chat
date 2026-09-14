@@ -87,7 +87,7 @@
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
   checked-out HEADs before the canary runs. The SDK lock targets canonical
   `main` commit `acc38488f00860d246c3c553375634d64806eabb` and manifest digest
-  `b8bfb62236fc8add4a9baad9f00e5401db15074a2d21fe2847a9158104cefb3c`.
+  `b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec`.
   The lock also pins the Cave
   producer's Client v1 contract fixture and `hpke-bound-v1` vector digests;
   the canary proves packed vector byte identity and the ancestry of the SDK's
