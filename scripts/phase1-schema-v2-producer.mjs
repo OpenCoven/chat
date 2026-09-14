@@ -4175,33 +4175,41 @@ export function createCaveDiscoveryPublicationObserver({
   maximumBytes = 8 * 1024,
   maximumLineCharacters = 256,
   drainTimeoutMs = 50,
+  maximumDrainWaitMs = 250,
+  waitForCompletion = false,
 } = {}) {
   const prefix = '[cave] client-v1 discovery publication refused: ';
   let inspectedBytes = 0;
   let line = '';
   let lineOverflow = false;
   let failure;
+  let completed = false;
+  let activityVersion = 0;
   const waiters = new Set();
+  const notifyWaiters = () => {
+    for (const waiter of [...waiters]) waiter();
+  };
+  const observeBufferedLine = () => {
+    if (lineOverflow) return false;
+    const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (!normalized.startsWith(prefix)) return false;
+    const category = normalized.slice(prefix.length);
+    if (!caveDiscoveryPublicationFailureCategorySet.has(category)) return false;
+    failure = category;
+    notifyWaiters();
+    return true;
+  };
   return {
     write(chunk) {
-      if (failure !== undefined || inspectedBytes >= maximumBytes) return;
+      if (completed || failure !== undefined || inspectedBytes >= maximumBytes) return;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const inspected = bytes.subarray(0, maximumBytes - inspectedBytes);
+      if (inspected.length === 0) return;
       inspectedBytes += inspected.length;
+      activityVersion += 1;
       for (const character of inspected.toString('utf8')) {
         if (character === '\n') {
-          if (!lineOverflow) {
-            const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
-            if (normalized.startsWith(prefix)) {
-              const category = normalized.slice(prefix.length);
-              if (caveDiscoveryPublicationFailureCategorySet.has(category)) {
-                failure = category;
-                for (const waiter of waiters) waiter();
-                waiters.clear();
-                return;
-              }
-            }
-          }
+          if (observeBufferedLine()) return;
           line = '';
           lineOverflow = false;
         } else if (!lineOverflow) {
@@ -4213,20 +4221,56 @@ export function createCaveDiscoveryPublicationObserver({
           }
         }
       }
+      notifyWaiters();
+    },
+    complete() {
+      if (completed) return;
+      if (failure === undefined) observeBufferedLine();
+      completed = true;
+      notifyWaiters();
     },
     failure() {
       return failure;
     },
     async failureAfterDrain() {
-      if (failure !== undefined) return failure;
+      if (failure !== undefined || completed) return failure;
       return new Promise((resolveFailure) => {
+        const startedAt = Date.now();
+        let observedActivityVersion = activityVersion;
+        let observedPostDrainActivity = false;
         const finish = () => {
           clearTimeout(timer);
-          waiters.delete(finish);
+          waiters.delete(check);
           resolveFailure(failure);
         };
-        const timer = setTimeout(finish, drainTimeoutMs);
-        waiters.add(finish);
+        const schedule = (delayMs) => {
+          clearTimeout(timer);
+          timer = setTimeout(check, delayMs);
+        };
+        const check = () => {
+          if (failure !== undefined || completed) {
+            finish();
+            return;
+          }
+          if (observedActivityVersion !== activityVersion) {
+            observedActivityVersion = activityVersion;
+            observedPostDrainActivity = true;
+            schedule(drainTimeoutMs);
+            return;
+          }
+          if (observedPostDrainActivity || !waitForCompletion) {
+            finish();
+            return;
+          }
+          const elapsed = Date.now() - startedAt;
+          if (elapsed >= maximumDrainWaitMs) {
+            finish();
+            return;
+          }
+          schedule(Math.max(1, maximumDrainWaitMs - elapsed));
+        };
+        let timer = setTimeout(check, drainTimeoutMs);
+        waiters.add(check);
       });
     },
   };
@@ -4282,8 +4326,13 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   });
   await once(child, 'spawn');
   artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
-  const caveDiscoveryPublicationObserver = createCaveDiscoveryPublicationObserver();
+  const caveDiscoveryPublicationObserver = createCaveDiscoveryPublicationObserver({
+    waitForCompletion: true,
+  });
   child.stderr.on('data', (chunk) => caveDiscoveryPublicationObserver.write(chunk));
+  child.stderr.once('end', () => caveDiscoveryPublicationObserver.complete());
+  child.stderr.once('close', () => caveDiscoveryPublicationObserver.complete());
+  child.stderr.once('error', () => caveDiscoveryPublicationObserver.complete());
   return new NativeRpcClient(child, {
     caveDiscoveryPublicationFailure: () => caveDiscoveryPublicationObserver.failureAfterDrain(),
   });

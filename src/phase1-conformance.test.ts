@@ -3997,6 +3997,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
     const observer = producer.createCaveDiscoveryPublicationObserver({
       drainTimeoutMs: 50,
+      waitForCompletion: true,
     });
     const failure = observer.failureAfterDrain();
 
@@ -4007,6 +4008,58 @@ describe('Phase 1 real-authority conformance harness', () => {
     });
 
     await expect(failure).resolves.toBe('target-owner-shared');
+  });
+
+  test('retains a late Cave publication stderr chunk before bounded drain fallback', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const observer = producer.createCaveDiscoveryPublicationObserver({
+      drainTimeoutMs: 50,
+      maximumDrainWaitMs: 250,
+      waitForCompletion: true,
+    });
+    const failure = observer.failureAfterDrain();
+
+    setTimeout(() => {
+      observer.write(
+        Buffer.from('[cave] client-v1 discovery publication refused: authority-init\n'),
+      );
+    }, 60);
+
+    await expect(failure).resolves.toBe('authority-init');
+  });
+
+  test('stops waiting for Cave publication stderr once the observer completes', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const observer = producer.createCaveDiscoveryPublicationObserver({
+      drainTimeoutMs: 50,
+      maximumDrainWaitMs: 250,
+      waitForCompletion: true,
+    });
+    const startedAt = Date.now();
+    const failure = observer.failureAfterDrain();
+
+    setTimeout(() => observer.complete(), 10);
+
+    await expect(failure).resolves.toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(200);
+  });
+
+  test('flushes an unterminated allowlisted Cave publication line on completion', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const observer = producer.createCaveDiscoveryPublicationObserver({
+      drainTimeoutMs: 50,
+      maximumDrainWaitMs: 250,
+      waitForCompletion: true,
+    });
+    const failure = observer.failureAfterDrain();
+
+    observer.write(Buffer.from('[cave] client-v1 discovery publication refused: authority-init'));
+    observer.complete();
+
+    await expect(failure).resolves.toBe('authority-init');
   });
 
   test('rejects a native RPC child that exits unsuccessfully during shutdown', async () => {
