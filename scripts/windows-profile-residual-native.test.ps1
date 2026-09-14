@@ -68,6 +68,33 @@ namespace OpenCoven.Tests {
             using (var handle = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero))
                 return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
         }
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern SafeFileHandle ReOpenFile(SafeFileHandle original, uint access, uint sharing, uint flags);
+        private static int ReopenControl(SafeFileHandle original) {
+            using (var reopened = ReOpenFile(original, 0x00100081, 7, 0x02200000))
+                return reopened.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        }
+        public static void RequireReopenControl(Type supervisor, string root) {
+            string child = Path.Combine(root, "ordinary");
+            Directory.CreateDirectory(child);
+            int win32, native;
+            using (var handle = CreateFileW(child, 0x00130080, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
+                if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Reopen control initial Win32 open failed.");
+                win32 = ReopenControl(handle);
+            }
+            using (var parent = CreateFileW(root, 0x00120081, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
+                if (parent.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Reopen control parent open failed.");
+                var relative = supervisor.GetMethod("OpenProfileResidualRelative", BindingFlags.NonPublic | BindingFlags.Static);
+                if (relative == null) throw new InvalidOperationException("Reopen control relative method absent.");
+                using (var handle = (SafeFileHandle)Invoke(relative, parent, "ordinary", true, 1, "child")) {
+                    if (handle == null) throw new InvalidOperationException("Reopen control child disappeared.");
+                    native = ReopenControl(handle);
+                }
+            }
+            Console.WriteLine("Native ordinary-directory reopen control: createfile=" + win32 + ";ntcreatefile=" + native);
+            if (win32 != 0 || native != 0)
+                throw new InvalidOperationException("Ordinary-directory reopen interoperability failed.");
+        }
         public static int ReadAccess(string path) {
             using (var handle = CreateFileW(path, 0x00120081, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero))
                 return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
@@ -373,11 +400,20 @@ if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-ca
 }
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
+# This controlled ordinary directory tests API interoperability under the ambient
+# test token; profile traversal below still tests production privilege handling.
+$reopenRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-reopen-control-' + [Guid]::NewGuid().ToString('N'))
+try {
+  [OpenCoven.Tests.ProfileResidualNativeFixture]::RequireReopenControl([OpenCoven.WindowsJobSupervisor], $reopenRoot)
+} finally {
+  if ([IO.Directory]::Exists($reopenRoot)) { [IO.Directory]::Delete($reopenRoot, $true) }
+}
 
 foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', 'hardlink',
     'readonly-hardlink', 'registration-mismatch', 'root-swap', 'root-junction', 'depth',
     'inplace-junction', 'read-denied-file', 'read-denied-junction', 'list-denied-directory',
     'unauthorized', 'disabled-unregistered', 'incomplete')) {
+  Write-Host "Native authorized residual case starting: $case."
   $root = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-residual-native-' + [Guid]::NewGuid().ToString('N'))
   $external = $null
   $canary = $null
