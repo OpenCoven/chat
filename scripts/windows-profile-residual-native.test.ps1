@@ -264,7 +264,6 @@ if (-not $teardownRejected -or ($teardownCalls -join ',') -cne '0,1,2') {
   throw 'PowerShell teardown delegates did not continue after a failed stage.'
 }
 Write-Host 'Portable residual fixture teardown regression passed.'
-if ($PortableOnly) { return }
 
 $static = [Reflection.BindingFlags]'NonPublic,Static'
 $instance = [Reflection.BindingFlags]'NonPublic,Instance'
@@ -274,7 +273,8 @@ $quotaField = [OpenCoven.WindowsIsolatedUser].GetField('quotaToken', $instance)
 $deleteTree = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteDirectoryTree', $static)
 $residual = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOwnedProfileResidual', $static)
 $deleteCore = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOperatingSystemProfileCore', $static)
-foreach ($seam in @($register, $applicationField, $quotaField, $deleteTree, $residual, $deleteCore)) {
+$classify = [OpenCoven.WindowsIsolatedUser].GetMethod('ClassifyCleanupError', $static)
+foreach ($seam in @($register, $applicationField, $quotaField, $deleteTree, $residual, $deleteCore, $classify)) {
   if ($null -eq $seam) { throw 'Native residual cleanup regression seam is missing.' }
 }
 function Test-ResidualPath([string]$Path) {
@@ -290,15 +290,40 @@ function Assert-ResidualFailure([Exception]$Failure, [string]$Expected) {
   $queue = [Collections.Generic.Queue[Exception]]::new()
   $queue.Enqueue($Failure)
   $found = $false
+  $categories = [Collections.Generic.List[string]]::new()
   while ($queue.Count -gt 0) {
+    if ($categories.Count -ge 32) { throw 'Native residual exception graph exceeded its bound.' }
     $item = $queue.Dequeue()
-    if ($item.Message.Contains($Expected)) { $found = $true }
+    $category = [string]$classify.Invoke($null, [object[]]@($item))
+    $categories.Add($category)
+    if ($category.Contains($Expected) -or $item.Message.Contains($Expected)) { $found = $true }
     if ($item -is [AggregateException]) {
       foreach ($inner in $item.InnerExceptions) { $queue.Enqueue($inner) }
     } elseif ($null -ne $item.InnerException) { $queue.Enqueue($item.InnerException) }
   }
-  if (-not $found) { throw "Native residual failure had the wrong bounded category: $Expected." }
+  if (-not $found) {
+    throw ("Native residual failure had the wrong bounded category: expected=$Expected;observed=" +
+      [string]::Join(',', $categories) + '.')
+  }
 }
+
+$profileFailureType = [OpenCoven.WindowsJobSupervisor].GetNestedType(
+  'ProfileCleanupException', [Reflection.BindingFlags]::NonPublic)
+$profileFailureConstructor = $profileFailureType.GetConstructor(
+  [Reflection.BindingFlags]'Public,NonPublic,Instance', $null,
+  [type[]]@([string], [bool], [bool], [bool], [Exception]), $null)
+$categorizedFailure = $profileFailureConstructor.Invoke([object[]]@(
+  'not-found', $false, $true, $false,
+  [ComponentModel.Win32Exception]::new(5, 'injected-private-native-message')))
+Assert-ResidualFailure $categorizedFailure 'residual=win32-5'
+$mismatch = $null
+try { Assert-ResidualFailure $categorizedFailure 'residual=win32-32' } catch { $mismatch = $_.Exception }
+if ($null -eq $mismatch -or -not $mismatch.Message.Contains('residual=win32-5') -or
+    $mismatch.Message.Contains('injected-private-native-message')) {
+  throw 'Residual failure classification accepted a wrong status or exposed private exception text.'
+}
+Write-Host 'Portable residual failure classification passed.'
+if ($PortableOnly) { return }
 
 foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', 'hardlink',
     'readonly-hardlink', 'registration-mismatch', 'root-swap', 'root-junction', 'depth',

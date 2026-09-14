@@ -52,6 +52,11 @@ test.skipIf(!pwshAvailable).each([
     args: ['scripts/windows-profile-residual-native.test.ps1', '-CompileOnly'],
     output: 'Native residual fixture compiled; Windows behavior was not executed.',
   },
+  {
+    name: 'executes native fixture portable guards',
+    args: ['scripts/windows-profile-residual-native.test.ps1', '-PortableOnly'],
+    output: 'Portable residual failure classification passed.',
+  },
 ])(
   '$name',
   ({ args, output }) => {
