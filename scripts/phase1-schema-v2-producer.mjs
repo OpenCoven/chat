@@ -4050,7 +4050,11 @@ function createCavePublicationObservation(requestId) {
   let accepted;
   let completed;
   const checkpoint = `[chat] native launch stderr checkpoint: ${createHash('sha256').update(requestId).digest('hex')}`;
-  const result = () => accepted ?? (observedBytes > limit ? 'output-limit' : completed);
+  const result = () => {
+    if (completed === undefined) return undefined;
+    if (completed === 'drain-timeout' || completed === 'drain-unavailable') return completed;
+    return accepted ?? (observedBytes > limit ? 'output-limit' : completed);
+  };
   const appendPending = (bytes) => {
     if (bytes.length === 0) return;
     if (pending.length + bytes.length <= maximumLineBytes) {
@@ -4143,6 +4147,7 @@ export class NativeRpcClient {
     this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
     this.pending = new Map();
     this.launchPublications = [];
+    this.launchPublicationFailure = undefined;
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
     this.sequence = 0;
@@ -4164,11 +4169,13 @@ export class NativeRpcClient {
         if (pending !== undefined) this.resolveResponse(current.id, pending);
         if (!current.publication.closed()) break;
         this.launchPublications.shift();
+        clearTimeout(current.checkpointTimer);
       }
     });
     const finishStderr = (reason) => {
       this.stderrCompletion = reason;
       for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
         current.publication.finish(reason);
       }
       this.launchPublications = [];
@@ -4218,8 +4225,24 @@ export class NativeRpcClient {
         pending.reject(new Error('native RPC closed before responding'));
       }
       this.pending.clear();
+      for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
+      }
       this.launchPublications = [];
     });
+  }
+
+  poisonLaunchPublications(reason) {
+    if (this.launchPublicationFailure !== undefined || this.stderrCompletion !== undefined) return;
+    this.launchPublicationFailure = reason;
+    const publications = this.launchPublications;
+    this.launchPublications = [];
+    for (const current of publications) {
+      clearTimeout(current.checkpointTimer);
+      current.publication.finish(reason);
+      const pending = this.pending.get(current.id);
+      if (pending !== undefined) this.resolveResponse(current.id, pending);
+    }
   }
 
   resolveResponse(id, pending) {
@@ -4232,10 +4255,6 @@ export class NativeRpcClient {
         const category = pending.publication.result();
         if (category === undefined) return;
         nativeLaunchPublicationResponses.set(pending.response, category);
-      } else {
-        this.launchPublications = this.launchPublications.filter(
-          (entry) => entry.publication !== pending.publication,
-        );
       }
     }
     this.pending.delete(id);
@@ -4260,21 +4279,27 @@ export class NativeRpcClient {
     return new Promise((resolveRequest, rejectRequest) => {
       const publication =
         command === 'cave_launch' ? createCavePublicationObservation(id) : undefined;
-      if (this.stderrCompletion !== undefined) publication?.finish(this.stderrCompletion);
-      if (publication !== undefined) this.launchPublications.push({ id, publication });
+      const unavailableReason = this.launchPublicationFailure ?? this.stderrCompletion;
+      if (unavailableReason !== undefined) publication?.finish(unavailableReason);
+      if (publication !== undefined && unavailableReason === undefined) {
+        const entry = { id, publication, checkpointTimer: undefined };
+        entry.checkpointTimer = setTimeout(
+          () => this.poisonLaunchPublications('drain-timeout'),
+          timeoutMs,
+        );
+        this.launchPublications.push(entry);
+      }
       const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
         if (pending.response !== undefined) {
-          publication?.finish('drain-timeout');
-          this.launchPublications = this.launchPublications.filter(
-            (entry) => entry.publication !== publication,
-          );
+          this.poisonLaunchPublications('drain-timeout');
           this.resolveResponse(id, pending);
           return;
         }
+        if (publication !== undefined && !publication.closed()) {
+          this.poisonLaunchPublications('drain-timeout');
+        }
         this.pending.delete(id);
-        this.launchPublications = this.launchPublications.filter(
-          (entry) => entry.publication !== publication,
-        );
         rejectRequest(new Error(`native RPC timed out for ${command}`));
       }, timeoutMs);
       const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };

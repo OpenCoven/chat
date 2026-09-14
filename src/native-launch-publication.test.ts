@@ -341,7 +341,14 @@ describe('native launch publication observation', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     child.stderr.write(`${prefix}authority-init\n`);
+    child.stderr.write(
+      `[chat] native launch stderr checkpoint: ${createHash('sha256').update(firstId).digest('hex')}\n`,
+    );
     expect((await first).message).toContain('.publication.authority-init');
+    child.stderr.write(
+      `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+    );
+    expect(client.launchPublications).toHaveLength(0);
   });
 
   test('does not attribute one launch refusal to a later overlapping request', async () => {
@@ -380,7 +387,7 @@ describe('native launch publication observation', () => {
     );
   });
 
-  test('drops a completed non-discovery launch before observing the next launch refusal', async () => {
+  test('keeps a completed non-discovery launch until its stderr checkpoint', async () => {
     const child = new LaunchChild();
     const requests: { id: string }[] = [];
     child.stdin.write = (line) => {
@@ -404,6 +411,9 @@ describe('native launch publication observation', () => {
     expect((await first).message).toBe(
       'phase1.native-scenarios.launch.rpc-cave-launch-in-progress',
     );
+    child.stderr.write(
+      `[chat] native launch stderr checkpoint: ${createHash('sha256').update(firstId).digest('hex')}\n`,
+    );
     child.stdout.write(
       `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
     );
@@ -415,5 +425,157 @@ describe('native launch publication observation', () => {
     expect((await second).message).toBe(
       'phase1.native-scenarios.launch.discovery-not-found.publication.authority-init',
     );
+  });
+
+  test('fails later launch attribution closed when an earlier checkpoint never arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new LaunchChild();
+      const requests: { id: string }[] = [];
+      child.stdin.write = (line) => {
+        requests.push(JSON.parse(line));
+        return true;
+      };
+      const client = new NativeRpcClient(child, { caveLaunchTimeoutMs: 100 });
+      const first = launchFailure(client);
+      const firstId = requests[0]?.id;
+      if (firstId === undefined) throw new Error('First launch request was not sent');
+      child.stdout.write(
+        `${JSON.stringify({
+          id: firstId,
+          ok: false,
+          error: { code: 'cave_launch_in_progress' },
+        })}\n`,
+      );
+      expect((await first).message).toBe(
+        'phase1.native-scenarios.launch.rpc-cave-launch-in-progress',
+      );
+
+      await vi.advanceTimersByTimeAsync(100);
+      const second = launchFailure(client);
+      const secondId = requests[1]?.id;
+      if (secondId === undefined) throw new Error('Second launch request was not sent');
+      child.stderr.write(`${prefix}authority-init\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(firstId).digest('hex')}\n`,
+      );
+      child.stdout.write(
+        `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
+      );
+      child.stderr.write(`${prefix}root-owner-shared\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+      );
+
+      expect((await second).message).toBe(
+        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-timeout',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('does not reuse stale stderr after a launch request times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new LaunchChild();
+      const requests: { id: string }[] = [];
+      child.stdin.write = (line) => {
+        requests.push(JSON.parse(line));
+        return true;
+      };
+      const client = new NativeRpcClient(child, { caveLaunchTimeoutMs: 100 });
+      const first = launchFailure(client);
+      const firstId = requests[0]?.id;
+      if (firstId === undefined) throw new Error('First launch request was not sent');
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await first).message).toBe('phase1.native-scenarios.launch.timeout');
+
+      const second = launchFailure(client);
+      const secondId = requests[1]?.id;
+      if (secondId === undefined) throw new Error('Second launch request was not sent');
+      child.stderr.write(`${prefix}authority-init\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(firstId).digest('hex')}\n`,
+      );
+      child.stderr.write(`${prefix}root-owner-shared\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+      );
+      child.stdout.write(
+        `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
+      );
+
+      expect((await second).message).toBe(
+        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-timeout',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test.each([
+    { label: 'accepted', bytes: `${prefix}authority-init\n` },
+    { label: 'output-limited', bytes: Buffer.alloc(8193, 120) },
+  ])('bounds a completed $label observation when its checkpoint is missing', async ({ bytes }) => {
+    vi.useFakeTimers();
+    try {
+      const child = new LaunchChild();
+      const requests: { id: string }[] = [];
+      child.stdin.write = (line) => {
+        requests.push(JSON.parse(line));
+        return true;
+      };
+      const client = new NativeRpcClient(child, { caveLaunchTimeoutMs: 100 });
+      const first = launchFailure(client);
+      const firstId = requests[0]?.id;
+      if (firstId === undefined) throw new Error('First launch request was not sent');
+      child.stderr.write(bytes);
+      child.stdout.write(
+        `${JSON.stringify({ id: firstId, ok: false, error: { code: child.code } })}\n`,
+      );
+      let settled = false;
+      first.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await first).message).toBe(
+        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-timeout',
+      );
+      expect(client.launchPublications).toHaveLength(0);
+
+      const second = launchFailure(client);
+      const secondId = requests[1]?.id;
+      if (secondId === undefined) throw new Error('Second launch request was not sent');
+      child.stderr.write(`${prefix}root-owner-shared\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+      );
+      child.stdout.write(
+        `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
+      );
+      expect((await second).message).toBe(
+        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-timeout',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('does not enqueue launch observations after stderr completion', async () => {
+    const child = new LaunchChild();
+    child.checkpoint = false;
+    const client = new NativeRpcClient(child);
+    child.stderr.end();
+    await once(child.stderr, 'end');
+
+    expect((await launchFailure(client)).message).toBe(
+      'phase1.native-scenarios.launch.discovery-not-found.publication.not-observed',
+    );
+    expect(client.launchPublications).toHaveLength(0);
   });
 });
