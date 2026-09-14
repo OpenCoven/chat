@@ -2423,6 +2423,10 @@ All 46 bounded Cave diagnostic tests passed locally. The integration also passed
 
 ## Residual deletion without directory-read access
 
+The harness lock binds source `1d5dc89b0f4fb1aedefe6203459184befbed8a20`
+and tree `03d85a77d79f9f7c44cdcb9c19bb846941954102`. This source binding
+does not change the SDK candidate, Cave authority, or protected approval gates.
+
 Residual cleanup opens entries for deletion and metadata inspection without
 requesting `FILE_LIST_DIRECTORY` (also `FILE_READ_DATA` for files).
 [Windows profile compatibility junctions](https://learn.microsoft.com/en-us/windows/win32/vss/junction-points)
