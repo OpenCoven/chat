@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "1d5dc89b0f4fb1aedefe6203459184befbed8a20"
+    "revision": "3fb86bdac464b1b6e20a929db327808d49a2ab95"
   },
   "harnessAuthority": {
-    "revision": "1d5dc89b0f4fb1aedefe6203459184befbed8a20",
-    "tree": "03d85a77d79f9f7c44cdcb9c19bb846941954102",
+    "revision": "3fb86bdac464b1b6e20a929db327808d49a2ab95",
+    "tree": "6fc0690bf253fd817fc2938830eef2da7c223777",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -146,20 +146,20 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "9e6e1e9e455f603c9ce4365faa171cc6e1444f1b",
-        "sha256": "1a4ca5d2bcff4337883c1e0ed473626ddc7cf220d0b0d88f8452311ce59c2bb7"
+        "blob": "876aa2d7978ddd9440ebbdbdf709e5ab3f27922a",
+        "sha256": "8da55cf4657733792e38dcc499b0faca422614f1ff4b9d28bd1ff7b09946cee6"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "5204ef50c5530e085b594470255b7b74b766e764",
-        "sha256": "c6bb5e6d4c570126e22b6b5db2981b7bc3a372b591842900bbfacf52eab8e507"
+        "blob": "cfec1ed6006c9bad8dd929f1abcc0d8cec315381",
+        "sha256": "f3032d54b1ef4f1556faa8cf17fde271d38d1e7d54e42d9550800f4a8c837433"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "76ae14bde61639edbffe5a2e519a3c1078183eff",
-        "sha256": "cc8b647d8f1099a71cd44726eedfc7e730b9dbc5cffe4c483e6808ac49699221"
+        "blob": "a60251859246794cd62d37b60b97fb6b6a3bfcae",
+        "sha256": "e3a40166cffeda91dd6dbd0116a2642c71ce8f9c8eef2c48ddef9321fcd89ea2"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -198,8 +198,8 @@
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "a0fbe1740af89e9c65f4de5d6a92eecf032945dc",
-        "sha256": "344b275750ae7ea44078beb1e7b78eb888212cf3ca1e74a36d1a98f3bfd99f42"
+        "blob": "b3294577336ff0ca5a681860b8bd00daac6ea25c",
+        "sha256": "379e5c15dc65e1ea66b0e8de6ecb69539e726d95342b2aeda30313a80800f07f"
       }
     ]
   },
