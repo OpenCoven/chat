@@ -24,12 +24,12 @@ The schema-1 release manifest is 1,031 bytes with SHA-256
 `d641097ebafd36b41292c70e1db332a270ffb1dc151f495b12218941fe1488ca`.
 Both locks record the four exact candidate archive sizes and digests.
 
-Cave authority is the actual Windows ownership repair merge
-`8a06421a705c2d7891c3f44cc580c569f6cbe2c1` (tree
-`aee0a949cfe058f6c50dc95135f1e6579e759a41`), version 0.4.3. It includes the
-0.0.1 minimum-client prerequisite, the bounded discovery diagnostics, and the
-read-only `OWNER RIGHTS` compatibility required by the protected Windows
-profile boundary.
+Cave authority is the actual bounded Windows discovery-probe merge
+`d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
+`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.3. It includes the
+0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
+`OWNER RIGHTS` compatibility, and the shared 24-second publication probe
+budget required by the protected Windows profile boundary.
 The packed SDK fixture retains its authenticated compatibility-source
 provenance at `e806655a`; the later diagnostic authority contains that
 ancestor and identical fixture bytes. The Chat fixture mirror uses the same
@@ -296,13 +296,13 @@ diagnostic-only change.
   `8e20adb1d55f17fb5b5a833bad6c9535d41c98ce`, the SDK 0.0.1 consumer
   retaining the prior reviewed native production source;
 - SDK package candidate `77d825d17809cfec2fad4acb9b1526b3c4752f9d`;
-- Cave authority `8a06421a705c2d7891c3f44cc580c569f6cbe2c1`, tree
-  `aee0a949cfe058f6c50dc95135f1e6579e759a41`, release `0.4.3`;
+- Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
+  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.3`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `110b98b3ade90a10372efd433acdd9b5662369b4`, tree
-  `92c0d415993a7005bf68f145e9ccabecbabdc150`, retained in the producer ancestry;
+- Chat conformance driver `55dbd056bc28c255112ede6fe194c58b81f6e0ba`, tree
+  `96de97188b47d88c26be83539ba8ae24f75d42fb`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
