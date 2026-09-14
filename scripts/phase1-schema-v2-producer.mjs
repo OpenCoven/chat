@@ -4174,12 +4174,14 @@ export class NativeRpcClient {
 export function createCaveDiscoveryPublicationObserver({
   maximumBytes = 8 * 1024,
   maximumLineCharacters = 256,
+  drainTimeoutMs = 50,
 } = {}) {
   const prefix = '[cave] client-v1 discovery publication refused: ';
   let inspectedBytes = 0;
   let line = '';
   let lineOverflow = false;
   let failure;
+  const waiters = new Set();
   return {
     write(chunk) {
       if (failure !== undefined || inspectedBytes >= maximumBytes) return;
@@ -4194,6 +4196,8 @@ export function createCaveDiscoveryPublicationObserver({
               const category = normalized.slice(prefix.length);
               if (caveDiscoveryPublicationFailureCategorySet.has(category)) {
                 failure = category;
+                for (const waiter of waiters) waiter();
+                waiters.clear();
                 return;
               }
             }
@@ -4212,6 +4216,18 @@ export function createCaveDiscoveryPublicationObserver({
     },
     failure() {
       return failure;
+    },
+    async failureAfterDrain() {
+      if (failure !== undefined) return failure;
+      return new Promise((resolveFailure) => {
+        const finish = () => {
+          clearTimeout(timer);
+          waiters.delete(finish);
+          resolveFailure(failure);
+        };
+        const timer = setTimeout(finish, drainTimeoutMs);
+        waiters.add(finish);
+      });
     },
   };
 }
@@ -4269,7 +4285,8 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   const caveDiscoveryPublicationObserver = createCaveDiscoveryPublicationObserver();
   child.stderr.on('data', (chunk) => caveDiscoveryPublicationObserver.write(chunk));
   return new NativeRpcClient(child, {
-    caveDiscoveryPublicationFailure: () => caveDiscoveryPublicationObserver.failure(),
+    caveDiscoveryPublicationFailure: () =>
+      caveDiscoveryPublicationObserver.failureAfterDrain(),
   });
 }
 
@@ -4718,7 +4735,7 @@ async function runNativeScenarios({
         activeNativeStage,
         error,
         activeLaunchBoundary,
-        rpc.caveDiscoveryPublicationFailure(),
+        await rpc.caveDiscoveryPublicationFailure(),
       );
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,

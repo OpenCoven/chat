@@ -3155,6 +3155,9 @@ ${pathAssignment}
       expect(source).toMatch(
         /private static bool MeasureDirectoryQuotaWithRemovalRaceRecovery\(Func<bool> measure\)\s*\{\s*try\s*\{\s*return measure\(\);\s*\}\s*catch \(QuotaMonitorContextException error\)\s*\{\s*if \(error\.Category != "access-denied" \|\| error\.Repeat != "missing"\)\s*throw;\s*return measure\(\);\s*\}\s*\}/u,
       );
+      expect(source).toContain(
+        'foreach (string prefix in ExpandQuotaPattern(readRoot, true))',
+      );
     }
   });
 

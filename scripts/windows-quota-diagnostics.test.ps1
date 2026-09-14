@@ -239,10 +239,15 @@ namespace OpenCoven.Tests
         public static int MissingDirectoryCalls;
         public static int ChangedErrorCalls;
         public static int SnapshotCalls;
+        public static int WholePassCalls;
         public static string SnapshotDirectory;
+        public static Exception WholePassFirstFailure;
+        public static Exception WholePassSecondFailure;
+        public static bool WholePassResult;
         public static Func<string> MissingFileRead { get { return MissingFile; } }
         public static Func<string> MissingDirectoryRead { get { return MissingDirectory; } }
         public static Func<string> ChangedErrorRead { get { return ChangedError; } }
+        public static Func<bool> WholePassMeasure { get { return MeasureWholePass; } }
 
         public static string MissingFile()
         {
@@ -299,10 +304,62 @@ namespace OpenCoven.Tests
             }
             return snapshot;
         }
+
+        public static bool MeasureWholePass()
+        {
+            WholePassCalls++;
+            if (WholePassCalls == 1 && WholePassFirstFailure != null)
+                throw WholePassFirstFailure;
+            if (WholePassCalls == 2 && WholePassSecondFailure != null)
+                throw WholePassSecondFailure;
+            return WholePassResult;
+        }
     }
 }
 '@
 }
+$wholePass = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'MeasureDirectoryQuotaWithRemovalRaceRecovery',
+  $flags
+)
+if ($null -eq $wholePass) { throw 'Missing whole-pass quota race recovery.' }
+$removalRaceContext = $boundedConstructor.Invoke([object[]]@(
+  $null,
+  'pattern-attributes',
+  $null,
+  'missing',
+  [UnauthorizedAccessException]::new('private-first-pass')
+))
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $removalRaceContext
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassResult = $false
+$wholePassResult = $wholePass.Invoke(
+  $null,
+  [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+)
+if ($wholePassResult -or [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+  throw 'Qualifying removal race did not restart exactly one complete quota pass.'
+}
+$secondPassFailure = [IO.IOException]::new('private-second-pass')
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $removalRaceContext
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $secondPassFailure
+$caughtSecondPass = $null
+try {
+  $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  ) | Out-Null
+} catch {
+  $caughtSecondPass = $_.Exception.GetBaseException()
+}
+if ([OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2 -or
+    $caughtSecondPass -ne $secondPassFailure) {
+  throw 'Second complete quota-pass failure was not terminal.'
+}
+Write-Host 'Whole-pass quota removal-race recovery is single-use and fail-closed.'
+
 $readQuota = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadQuotaOperation', $flags).MakeGenericMethod([string])
 [OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
 try {

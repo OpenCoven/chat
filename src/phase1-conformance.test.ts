@@ -3992,6 +3992,25 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(bounded.failure()).toBeUndefined();
   });
 
+  test('waits for a queued Cave publication stderr chunk before classification', async () => {
+    // @ts-expect-error The executable script intentionally has no declaration file.
+    const producer = await import('../scripts/phase1-schema-v2-producer.mjs');
+    const observer = producer.createCaveDiscoveryPublicationObserver({
+      drainTimeoutMs: 50,
+    });
+    const failure = observer.failureAfterDrain();
+
+    setImmediate(() => {
+      observer.write(
+        Buffer.from(
+          '[cave] client-v1 discovery publication refused: target-owner-shared\n',
+        ),
+      );
+    });
+
+    await expect(failure).resolves.toBe('target-owner-shared');
+  });
+
   test('rejects a native RPC child that exits unsuccessfully during shutdown', async () => {
     const client = new NativeRpcClient(new SynchronousNonZeroCloseChild());
 

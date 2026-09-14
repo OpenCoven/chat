@@ -7265,7 +7265,7 @@ namespace OpenCoven
             string readRoot = ReadQuotaOperation("pattern-attributes", () =>
                 GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
             bool prefixExists = false;
-            foreach (string prefix in ExpandQuotaPattern(readRoot))
+            foreach (string prefix in ExpandQuotaPattern(readRoot, true))
             {
                 prefixExists = true;
             }
@@ -7347,9 +7347,11 @@ namespace OpenCoven
             return total > quota.MaxBytes;
         }
 
-        private static IEnumerable<string> ExpandQuotaPattern(string pattern)
+        private static IEnumerable<string> ExpandQuotaPattern(
+            string pattern, bool repeatDiagnostic = false)
         {
-            return ExpandQuotaPatternFromRoot(pattern, Path.GetPathRoot(pattern));
+            return ExpandQuotaPatternFromRoot(
+                pattern, Path.GetPathRoot(pattern), repeatDiagnostic);
         }
 
         private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root, bool repeatDiagnostic = false)
