@@ -73,7 +73,7 @@ namespace OpenCoven.Tests {
                 return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
         }
         public static void SetReadDenial(string path, bool denied) {
-            SetReadDenialWithAccess(path, denied, 0x00040000, 0x80000004);
+            SetReadDenialWithAccess(path, denied, 0x00060000, 0x80000004);
         }
         private static void SetReadDenialWithAccess(string path, bool denied, uint access, uint information) {
             using (var user = WindowsIdentity.GetCurrent()) {
