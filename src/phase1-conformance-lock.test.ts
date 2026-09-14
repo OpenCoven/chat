@@ -90,8 +90,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
-      blob: '4191787c4a31a49f0b29c5ecd59b9964be156af5',
-      sha256: 'f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d',
+      blob: '254802f9a59dc0600b696884666e8f592d7a88c8',
+      sha256: 'fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325',
     },
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -124,9 +124,14 @@ const expectedBehaviorAuthority = {
       sha256: 'a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958',
     },
     {
+      path: '.github/workflows/ci.yml',
+      blob: '50fc256732ad8abda6e9f7d74ffd0b6946edf7aa',
+      sha256: 'd2e3a59877c1f93fb9bede10b70e9d7cbe0bdefa37da0c298acf8fb43a4ae1b5',
+    },
+    {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'dd441d15c4290320dc8a0390e6d44719caa8f6c3',
-      sha256: 'fcfa80ce47da84d32075e9db480cb2dfd012869e7f0452b6b5dfe966a33e09ec',
+      blob: '15c1138447534af2e5e0770c86aac65a588b01f0',
+      sha256: '91eea46f41ff704c7f4ccd552fc63e0291760c4b55712275d6056756773e9b7d',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -262,7 +267,7 @@ const expectedEntries = {
         sha256: '5318c4c6d511f0bcda42e4fd88168f549fc3ea74a516d7a4b2004e1c5023c4b4',
       },
     ],
-    caveVersion: '0.4.3',
+    caveVersion: '0.4.4',
     covenVersion: '0.1.0',
     consumerLock: {
       path: 'pnpm-lock.yaml',
@@ -520,6 +525,22 @@ function createCheckoutFixture() {
 }
 
 describe('Phase 1 conformance lock', () => {
+  test('requires the Cave5391 release and rejects the historical release version', () => {
+    expect(expectedEntries.cave.revision).toBe('d655b2c3b6ecabf3a5eaea9e314b180028321d81');
+    expect(() =>
+      readPhase1ConformanceLock(writeLock({ version: 5, ...expectedEntries })),
+    ).not.toThrow();
+    expect(() =>
+      readPhase1ConformanceLock(
+        writeLock({
+          version: 5,
+          ...expectedEntries,
+          release: { ...expectedEntries.release, caveVersion: '0.4.3' },
+        }),
+      ),
+    ).toThrow('release authority versions are invalid.');
+  });
+
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     const lock = readPhase1ConformanceLock();
     expect(lock).toEqual({

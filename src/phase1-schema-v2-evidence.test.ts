@@ -1597,6 +1597,32 @@ describe('Phase 1 SDK source contract authority', () => {
 });
 
 describe('bounded Cave record diagnostics', () => {
+  test('binds the Cave5391 engine release to the current lock without accepting the old version', () => {
+    const lock = readPhase1ConformanceLock();
+    expect(lock.cave.revision).toBe('d655b2c3b6ecabf3a5eaea9e314b180028321d81');
+    const record = {
+      platform: 'linux-x64',
+      commit: lock.cave.revision,
+      caveVersion: '0.4.4',
+      nodeVersion: 'v24.18.1',
+      ranAt: '2026-09-14T11:00:00.000Z',
+      assertions: [{ id: 'one', result: 'pass', detail: '' }],
+    };
+    const expected = {
+      platform: record.platform,
+      commit: lock.cave.revision,
+      releaseVersion: lock.release.caveVersion,
+      nodeVersion: record.nodeVersion,
+      startedAt: record.ranAt,
+      completedAt: '2026-09-14T11:00:01.000Z',
+    };
+    const registry = { assertions: { cave: ['one'] } };
+    expect(() => validateCaveRecord(record, registry, expected)).not.toThrow();
+    expect(() =>
+      validateCaveRecord({ ...record, caveVersion: '0.4.3' }, registry, expected),
+    ).toThrow('phase1.stage.evidence-authority.build.cave-record.identity.cave-version');
+  });
+
   test.each([
     'identity.platform',
     'identity.commit',
