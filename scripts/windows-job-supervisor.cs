@@ -4668,39 +4668,87 @@ namespace OpenCoven
 
         private static void TerminateAndReapMatchingProcess(IntPtr process)
         {
+            int? terminationError = null;
             if (!TerminateProcess(process, 1))
             {
-                int terminationError = Marshal.GetLastWin32Error();
+                terminationError = Marshal.GetLastWin32Error();
+            }
+            ReapMatchingProcessCore(
+                process,
+                terminationError,
+                WaitForSingleObject,
+                retainedHandle =>
+                {
+                    uint exitCode;
+                    return GetExitCodeProcess(retainedHandle, out exitCode)
+                        ? (uint?)exitCode
+                        : null;
+                },
+                Marshal.GetLastWin32Error);
+        }
+
+        private static void ReapMatchingProcessCore(
+            IntPtr process,
+            int? terminationError,
+            Func<IntPtr, uint, uint> waitForProcess,
+            Func<IntPtr, uint?> queryExitCode,
+            Func<int> lastError)
+        {
+            uint? observedWait = null;
+            uint? exitCode = null;
+            bool exitQueried = false;
+            Func<string, string> describeFailure = message =>
+            {
+                if (!terminationError.HasValue) return message;
+                // Observations describe the retained handle now, not the state
+                // at TerminateProcess failure. They never change acceptance.
+                if (!observedWait.HasValue) observedWait = waitForProcess(process, 0);
+                if (!exitQueried)
+                {
+                    exitCode = queryExitCode(process);
+                    exitQueried = true;
+                }
+                string waitCategory = observedWait == WAIT_OBJECT_0 ? "signaled"
+                    : observedWait == WAIT_TIMEOUT ? "timeout" : "failed";
+                string exitCategory = !exitCode.HasValue ? "failed"
+                    : exitCode == STILL_ACTIVE ? "active" : "nonactive";
+                return message + " [termination-error=" +
+                    terminationError.Value.ToString(CultureInfo.InvariantCulture) +
+                    ";wait=" + waitCategory + ";exit=" + exitCategory + "]";
+            };
+            if (terminationError.HasValue)
+            {
                 // A retained handle can outlive the process. Confirm exit on that
                 // same SID-verified handle before accepting access denied.
-                uint observedWait = terminationError == ERROR_ACCESS_DENIED
-                    ? WaitForSingleObject(process, 0)
-                    : UInt32.MaxValue;
-                if (!CanConfirmTerminatedProcess(terminationError, observedWait))
+                if (terminationError == ERROR_ACCESS_DENIED)
+                    observedWait = waitForProcess(process, 0);
+                if (!CanConfirmTerminatedProcess(
+                        terminationError.Value, observedWait ?? UInt32.MaxValue))
                 {
                     throw new Win32Exception(
-                        terminationError,
-                        "Matching isolated-SID process termination failed.");
+                        terminationError.Value,
+                        describeFailure("Matching isolated-SID process termination failed."));
                 }
             }
-            uint wait = WaitForSingleObject(process, 30000);
+            uint wait = waitForProcess(process, 30000);
             if (wait != WAIT_OBJECT_0)
             {
                 if (wait == WAIT_TIMEOUT)
                 {
                     throw new TimeoutException(
-                        "Matching isolated-SID process did not terminate.");
+                        describeFailure("Matching isolated-SID process did not terminate."));
                 }
+                int waitError = lastError();
                 throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "Matching isolated-SID process wait failed.");
+                    waitError,
+                    describeFailure("Matching isolated-SID process wait failed."));
             }
-            uint exitCode;
-            if (!GetExitCodeProcess(process, out exitCode) ||
-                exitCode == STILL_ACTIVE)
+            exitCode = queryExitCode(process);
+            exitQueried = true;
+            if (!exitCode.HasValue || exitCode == STILL_ACTIVE)
             {
                 throw new InvalidOperationException(
-                    "Matching isolated-SID process could not be reaped.");
+                    describeFailure("Matching isolated-SID process could not be reaped."));
             }
         }
 

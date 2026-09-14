@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '0f72955affc36a305f27e3520d6b2ffb2a3cec5c',
-  tree: '51464a6fda67f3686e619ce0ae004fceb6c8eb52',
+  revision: '6fb8ff2fb0356eff549b4e8ed80eca83da133c6d',
+  tree: '4017175c4a03e03e54b83f3c3d669a0664b52e94',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '93fb936a87f892312f63c7e46e0b389a1f88f612',
-      sha256: '6e406b38641c70759a6833284ba060f0827c753043bb870cf4834365188b64ee',
+      blob: '5c41276ae58a197519d7195a44d34aa768c2a5de',
+      sha256: '181edca30978e3c94648ed58f935fa473faa707347652649a4129c72caeeb527',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '95e5105dfe8eabb5aa0a2142450dac1eda26d3f0',
-      sha256: '6562d227c9b2347f1b298a956f56309956bab2e98831ee7c5e4768e28fb3fcb6',
+      blob: '5b14dd82a2c4c2b607f4be9fac11b99bd70150bd',
+      sha256: 'b5f39b14d66a66ba2f86fac964fa2805ba728436b864039448d4eae4805c804b',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '074dbf35f55be6fdb161522dab3a87deb6be4a46',
-      sha256: '04688f01a12e3d7505091f48877c73c386f97541b9b20fd05be721ae72a58a00',
+      blob: 'f5b8f55584ff33fb5dfed224411458a06839e40b',
+      sha256: '079aad19cd4cb8eddf8eddb0475adf40b7394569e39423afb5be138b14adaa67',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -147,7 +147,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: 'd655b2c3b6ecabf3a5eaea9e314b180028321d81',
+    revision: '8a06421a705c2d7891c3f44cc580c569f6cbe2c1',
   },
   coven: {
     repository: 'OpenCoven/coven',
