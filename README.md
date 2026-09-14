@@ -50,8 +50,9 @@ runtime import command, and Cave history does not appear in Chat. Previously
 saved import files are not automatically deleted or submitted to a model.
 Only app-owned history can become a familiar's canonical Chat thread.
 
-**Archive chat** keeps the saved history and moves the familiar to **Archived**.
-Open it there and choose **Restore chat** to return it to the active rail. Archived
+**Archive chat** keeps the saved history and hides the familiar from the active list.
+Open **User settings** at the bottom of the sidebar and enable **Show archived chats**,
+then choose **Restore chat** to return it to the active list. Archived
 chats cannot send until restored.
 Archive state survives refreshes and app restarts.
 

@@ -25,12 +25,29 @@ function layoutProps(): ChatLayoutProps {
 }
 
 describe('production Familiars layout', () => {
+  it('hides archived familiar rows until the settings filter is enabled', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: [
+        { id: 'a', name: 'Active familiar' },
+        { id: 'b', name: 'Archived familiar' },
+      ],
+      sessions: [{ id: 'old', title: 'Old', familiarId: 'b', archived: true }],
+    };
+    const view = render(<ChatLayout {...props} />);
+    expect(screen.getByRole('button', { name: 'Active familiar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Archived familiar' })).not.toBeInTheDocument();
+    view.rerender(<ChatLayout {...props} archivedFilter />);
+    expect(screen.getByRole('button', { name: 'Archived familiar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Active familiar' })).not.toBeInTheDocument();
+  });
+
   it('keeps the archive filter inside collapsed user settings', () => {
     const onArchivedFilter = vi.fn();
     render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
     const settings = screen.getByText('User settings').closest('details');
     expect(settings).not.toHaveAttribute('open');
-    expect(screen.queryByRole('checkbox', { name: 'Show archived chats' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Show archived chats' })).not.toBeVisible();
     expect(screen.queryByRole('button', { name: 'Archived chats' })).not.toBeInTheDocument();
     if (!settings) throw new Error('User settings are missing.');
     settings.open = true;

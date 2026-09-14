@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import {
   cx,
   FamButton,
@@ -55,9 +55,6 @@ export type ChatLayoutProps = Readonly<{
   lifecycleBusy?: boolean;
   onArchivedFilter?: (archived: boolean) => void;
   onLifecycle?: (next: ChatLifecycle) => void;
-  importControl?: ReactNode;
-  onSession?: (id: string) => void;
-  onNew?: () => void;
   busy: boolean;
   loading: boolean;
   cancelling: boolean;
@@ -133,13 +130,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   const agents = props.familiars.filter(
     (item) =>
       item.name.toLowerCase().includes(query.toLowerCase()) &&
-      (!props.archivedFilter ||
-        props.sessions.some((session) => session.familiarId === item.id && session.archived)),
-  );
-  const conversations = props.sessions.filter(
-    (item) =>
-      (!item.familiarId || item.familiarId === props.familiarId) &&
-      Boolean(item.archived) === Boolean(props.archivedFilter),
+      props.sessions.some((session) => session.familiarId === item.id && session.archived) ===
+        Boolean(props.archivedFilter),
   );
   return (
     <div
@@ -189,28 +181,6 @@ export function ChatLayout(props: ChatLayoutProps) {
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          {props.onArchivedFilter && (
-            <fieldset className="coven-lifecycle-filter" aria-label="Conversation filter">
-              <button
-                type="button"
-                className="fr-btn fr-btn--secondary"
-                aria-pressed={!props.archivedFilter}
-                disabled={props.lifecycleBusy}
-                onClick={() => props.onArchivedFilter?.(false)}
-              >
-                Active chats
-              </button>
-              <button
-                type="button"
-                className="fr-btn fr-btn--secondary"
-                aria-pressed={Boolean(props.archivedFilter)}
-                disabled={props.lifecycleBusy}
-                onClick={() => props.onArchivedFilter?.(true)}
-              >
-                Archived chats
-              </button>
-            </fieldset>
-          )}
           <div className="fr-conv-scroll">
             <div className="fr-conv-list">
               {agents.map((item) => {
@@ -251,51 +221,25 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </span>
               </div>
             ) : null}
-            {props.onSession && (
-              <section className="coven-lifecycle-conversations" aria-label="Conversations">
-                <div className="fr-section-label">
-                  {props.archivedFilter ? 'Archived conversations' : 'Conversations'}
-                </div>
-                {props.onNew && (
-                  <FamButton
-                    leadingIcon="plus"
-                    fullWidth
-                    disabled={
-                      (!props.ready && !props.selectedArchived) || props.busy || props.lifecycleBusy
-                    }
-                    onClick={props.onNew}
-                  >
-                    New chat
-                  </FamButton>
-                )}
-                {props.importControl}
-                <div className="fr-conv-list">
-                  {conversations.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      className="fr-conv"
-                      aria-label={item.title}
-                      aria-current={item.id === props.sessionId || undefined}
-                      disabled={props.lifecycleBusy}
-                      onClick={() => {
-                        props.onSession?.(item.id);
-                        if (drawers) setSidebar(false);
-                      }}
-                    >
-                      <span className="fr-conv-title">{item.title}</span>
-                    </button>
-                  ))}
-                </div>
-                {!conversations.length && (
-                  <p className="fr-empty-text">
-                    {props.archivedFilter ? 'No archived chats.' : 'No conversations yet.'}
-                  </p>
-                )}
-              </section>
+          </div>
+          <div className="fr-sidebar-foot coven-user-settings">
+            {props.onArchivedFilter ? (
+              <details>
+                <summary>User settings</summary>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(props.archivedFilter)}
+                    disabled={props.lifecycleBusy}
+                    onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
+                  />
+                  Show archived chats
+                </label>
+              </details>
+            ) : (
+              'Coven CLI'
             )}
           </div>
-          <div className="fr-sidebar-foot">Coven CLI</div>
         </div>
       </aside>
       <main className="fr-thread">

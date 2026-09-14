@@ -10,6 +10,12 @@
   overflow: clip;
 }
 
+/* Overlaid rails leave the grid flow, so the thread must always claim its own track. */
+.coven-chat .fr-thread {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
   border-width: 0;
 }
@@ -189,6 +195,26 @@
   min-width: 0;
 }
 
+.coven-chat .coven-user-settings {
+  display: block;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 14px;
+}
+
+.coven-user-settings summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.coven-user-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+}
+
 .coven-agent-row .coven-avatar-image {
   outline: 1px solid oklch(1 0 0 / 0.1);
 }
@@ -229,11 +255,6 @@
     transform 200ms var(--ease-standard),
     visibility 200ms;
   will-change: transform;
-}
-
-/* Overlaid rails leave the grid flow, so the thread must claim its own track. */
-.coven-chat[data-tier="compact"] .fr-thread {
-  grid-column: 2;
 }
 
 .coven-chat[data-tier="compact"] .fr-sidebar {

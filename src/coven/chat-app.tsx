@@ -472,20 +472,14 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         };
         setAttachments(attachmentRef.current);
       }}
-      familiars={familiars
-        .filter(
-          (item) =>
-            Boolean(sessions.find((session) => session.familiarId === item.id)?.archived) ===
-            archived,
-        )
-        .map((item) => ({
-          id: item.id,
-          name: item.displayName || item.name,
-          description: item.description,
-          workspace: item.workspace,
-          avatarUrl:
-            'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
-        }))}
+      familiars={familiars.map((item) => ({
+        id: item.id,
+        name: item.displayName || item.name,
+        description: item.description,
+        workspace: item.workspace,
+        avatarUrl:
+          'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
+      }))}
       sessions={sessions}
       messages={
         projectEvents([...events, ...(runOutputs[draftKey(navigation)]?.events ?? [])]).messages
