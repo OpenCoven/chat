@@ -10,6 +10,11 @@
   overflow: clip;
 }
 
+.coven-chat .fr-thread {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
   border-width: 0;
 }
@@ -158,8 +163,61 @@
   min-width: 0;
 }
 
+.coven-chat .coven-user-settings {
+  display: block;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 14px;
+}
+
+.coven-user-settings summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.coven-user-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+}
+
 .coven-agent-row .coven-avatar-image {
   outline: 1px solid oklch(1 0 0 / 0.1);
+}
+
+.coven-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  border: 0;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar,
+.coven-chat:not([data-tier="wide"]) .fr-inspector {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 80;
+  width: min(360px, calc(100% - 24px));
+  height: 100%;
+  visibility: hidden;
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar {
+  left: 0;
+  width: min(300px, calc(100% - 24px));
+}
+
+.coven-chat:not([data-tier="wide"]) .fr-inspector {
+  right: 0;
+}
+
+.coven-chat[data-tier="compact"][data-sidebar="open"] .fr-sidebar,
+.coven-chat:not([data-tier="wide"])[data-inspector="open"] .fr-inspector {
+  visibility: visible;
 }
 
 @media (max-width: 1100px) {

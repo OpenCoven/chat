@@ -149,6 +149,11 @@ async function installRuntimeFixture(
                     },
                   },
                 ];
+                state.heads[familiarId] = {
+                  session,
+                  events: [...(current?.events ?? []), ...events],
+                };
+                persist();
                 events.forEach((message, index) => {
                   callback({ index, message });
                 });
@@ -547,7 +552,7 @@ for (const viewport of [
       await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
     } else {
       await expect(page.locator('.fr-shell')).toHaveAttribute('data-sidebar', 'closed');
-      await page.getByRole('button', { name: 'Show familiars rail', exact: true }).click();
+      await page.getByRole('button', { name: 'Show familiars', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Local familiar', exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
     }
