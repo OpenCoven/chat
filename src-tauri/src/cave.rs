@@ -653,6 +653,19 @@ fn validate_windows_profile_root(metadata: WindowsFileMetadata) -> NativeResult<
 }
 
 #[cfg(any(windows, test))]
+fn validate_windows_profile_root_identity(
+    candidate: WindowsFileMetadata,
+    expected: WindowsFileMetadata,
+) -> NativeResult<()> {
+    validate_windows_profile_root(candidate)?;
+    validate_windows_profile_root(expected)?;
+    if !same_windows_file(candidate, expected) {
+        return Err(NativeDiagnostic::new("unsafe_discovery_record", false));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
 fn validate_windows_file(metadata: WindowsFileMetadata) -> NativeResult<()> {
     if !metadata.is_regular
         || metadata.is_directory
@@ -896,6 +909,22 @@ mod windows_discovery {
     ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
         let discovery = NativeWindowsDiscovery::new()?;
         private_metadata(&discovery, handle, directory)
+    }
+
+    pub(super) fn trusted_directory_handle_metadata(
+        handle: HANDLE,
+    ) -> Result<super::WindowsPrivatePathMetadata, WindowsDiscoveryIoError> {
+        let discovery = NativeWindowsDiscovery::new()?;
+        let metadata = discovery.metadata(handle)?;
+        let profile = discovery.open(&discovery.root, true)?;
+        let profile_metadata = discovery.metadata(profile.0)?;
+        super::validate_windows_profile_root_identity(metadata, profile_metadata)
+            .map_err(|_| WindowsDiscoveryIoError::Unavailable)?;
+        Ok(super::WindowsPrivatePathMetadata {
+            links: metadata.links,
+            volume_serial: metadata.volume_serial,
+            file_index: metadata.file_index,
+        })
     }
 
     fn private_metadata(
@@ -1204,6 +1233,13 @@ pub(crate) fn validate_windows_private_handle(
     directory: bool,
 ) -> Result<WindowsPrivatePathMetadata, ()> {
     windows_discovery::private_handle_metadata(handle, directory).map_err(|_| ())
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_trusted_directory_handle(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<WindowsPrivatePathMetadata, ()> {
+    windows_discovery::trusted_directory_handle_metadata(handle).map_err(|_| ())
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -1936,6 +1972,41 @@ mod tests {
                 trusted_writer_dacl: Some(false),
                 ..system_owned_profile
             })
+            .unwrap_err()
+            .code,
+            "unsafe_discovery_record"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_trusted_directory_must_match_the_token_profile_identity() {
+        let system_owned_profile = WindowsFileMetadata {
+            is_directory: true,
+            is_regular: false,
+            owner_matches_current_user: false,
+            owner_is_trusted: true,
+            trusted_writer_dacl: Some(true),
+            ..safe_windows_metadata(1, 2)
+        };
+
+        assert!(super::validate_windows_profile_root_identity(
+            system_owned_profile,
+            system_owned_profile,
+        )
+        .is_ok());
+        assert_eq!(
+            super::validate_windows_profile_root_identity(
+                WindowsFileMetadata {
+                    owner_matches_current_user: true,
+                    owner_is_trusted: true,
+                    ..system_owned_profile
+                },
+                WindowsFileMetadata {
+                    file_index: 3,
+                    ..system_owned_profile
+                },
+            )
             .unwrap_err()
             .code,
             "unsafe_discovery_record"

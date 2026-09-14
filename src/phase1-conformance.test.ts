@@ -1154,7 +1154,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
-  test('routes Windows native fixtures through the validated token profile', () => {
+  test('routes Windows native fixtures and cleanup grants through the validated token profile', () => {
     expect(schemaV2Producer.nativeScenarioHomes).toBeTypeOf('function');
     expect(
       schemaV2Producer.nativeScenarioHomes(
@@ -1163,7 +1163,7 @@ describe('Phase 1 real-authority conformance harness', () => {
         'win32',
       ),
     ).toEqual({
-      isolatedHome: 'C:\\OpenCoven\\bootstrap\\workspace\\.artifacts\\run\\native-authority-home',
+      isolatedHome: 'C:\\Users\\opencoven-conformance',
       covenHome: 'C:\\Users\\opencoven-conformance\\.coven',
       caveHome: 'C:\\Users\\opencoven-conformance\\.coven\\cave',
     });
@@ -1174,6 +1174,17 @@ describe('Phase 1 real-authority conformance harness', () => {
     });
     expect(() => schemaV2Producer.nativeScenarioHomes('C:\\artifacts\\run', {}, 'win32')).toThrow(
       'phase1.native-scenarios.profile-home',
+    );
+    const cleanupGrantSource = readFileSync(
+      resolve(projectRoot, 'src-tauri', 'src', 'cleanup_grant.rs'),
+      'utf8',
+    );
+    expect(cleanupGrantSource).toMatch(
+      /marker_home_uses_profile_identity\(&cleanup_home\)[\s\S]*WindowsDirectoryOwner::Trusted[\s\S]*WindowsDirectoryOwner::CurrentUser/,
+    );
+    expect(cleanupGrantSource).toMatch(/pin_directory\(home\.clone\(\),\s*home_owner\)\?/);
+    expect(cleanupGrantSource).toMatch(
+      /pin_directory\(\s*current\.clone\(\),\s*WindowsDirectoryOwner::CurrentUser,\s*\)\?/,
     );
   });
 

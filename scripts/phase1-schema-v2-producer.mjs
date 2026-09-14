@@ -2350,8 +2350,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
 
 export function nativeScenarioHomes(artifactRootPath, environment, platform = process.platform) {
   const pathApi = platform === 'win32' ? windowsPath : { resolve };
-  const isolatedHome = pathApi.resolve(artifactRootPath, 'native-authority-home');
   if (platform !== 'win32') {
+    const isolatedHome = pathApi.resolve(artifactRootPath, 'native-authority-home');
     const covenHome = pathApi.resolve(isolatedHome, 'coven');
     return {
       isolatedHome,
@@ -2371,7 +2371,7 @@ export function nativeScenarioHomes(artifactRootPath, environment, platform = pr
   }
   const covenHome = windowsPath.join(profileRoot, '.coven');
   return {
-    isolatedHome,
+    isolatedHome: profileRoot,
     covenHome,
     caveHome: windowsPath.join(covenHome, 'cave'),
   };

@@ -38,6 +38,11 @@ fn marker_home_from(
     cleanup_home.or(ambient_home)
 }
 
+#[cfg(any(windows, test))]
+fn marker_home_uses_profile_identity(cleanup_home: &Option<OsString>) -> bool {
+    cleanup_home.is_some()
+}
+
 fn marker_home() -> Option<OsString> {
     marker_home_from(std::env::var_os(CLEANUP_HOME_ENV), std::env::var_os("HOME"))
 }
@@ -746,6 +751,13 @@ mod marker_io {
         path: PathBuf,
         file: File,
         identity: crate::cave::WindowsPrivatePathMetadata,
+        owner: WindowsDirectoryOwner,
+    }
+
+    #[derive(Clone, Copy)]
+    enum WindowsDirectoryOwner {
+        Trusted,
+        CurrentUser,
     }
 
     struct MarkerDirectory {
@@ -801,7 +813,13 @@ mod marker_io {
 
     impl MarkerDirectory {
         fn open() -> Result<Self, ()> {
-            let home = super::marker_home().ok_or(())?;
+            let cleanup_home = std::env::var_os(super::CLEANUP_HOME_ENV);
+            let home_owner = if super::marker_home_uses_profile_identity(&cleanup_home) {
+                WindowsDirectoryOwner::Trusted
+            } else {
+                WindowsDirectoryOwner::CurrentUser
+            };
+            let home = super::marker_home_from(cleanup_home, std::env::var_os("HOME")).ok_or(())?;
             let home = PathBuf::from(home);
             if !home.is_absolute()
                 || home
@@ -810,7 +828,7 @@ mod marker_io {
             {
                 return Err(());
             }
-            let mut chain = vec![pin_directory(home.clone())?];
+            let mut chain = vec![pin_directory(home.clone(), home_owner)?];
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
@@ -819,7 +837,10 @@ mod marker_io {
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err(()),
                 }
-                chain.push(pin_directory(current.clone())?);
+                chain.push(pin_directory(
+                    current.clone(),
+                    WindowsDirectoryOwner::CurrentUser,
+                )?);
             }
             let identity = chain_identity(&chain);
             let directory = Self {
@@ -837,12 +858,12 @@ mod marker_io {
 
         fn revalidate(&self) -> Result<(), ()> {
             for pinned in &self.chain {
-                let held = validate_directory_handle(&pinned.file)?;
+                let held = validate_directory_handle(&pinned.file, pinned.owner)?;
                 if held != pinned.identity {
                     return Err(());
                 }
                 let reopened = open_directory(&pinned.path)?;
-                let reopened_identity = validate_directory_handle(&reopened)?;
+                let reopened_identity = validate_directory_handle(&reopened, pinned.owner)?;
                 if reopened_identity != pinned.identity {
                     return Err(());
                 }
@@ -1074,13 +1095,14 @@ mod marker_io {
             .map_err(|_| ())
     }
 
-    fn pin_directory(path: PathBuf) -> Result<PinnedDirectory, ()> {
+    fn pin_directory(path: PathBuf, owner: WindowsDirectoryOwner) -> Result<PinnedDirectory, ()> {
         let file = open_directory(&path)?;
-        let identity = validate_directory_handle(&file)?;
+        let identity = validate_directory_handle(&file, owner)?;
         Ok(PinnedDirectory {
             path,
             file,
             identity,
+            owner,
         })
     }
 
@@ -1097,8 +1119,16 @@ mod marker_io {
 
     fn validate_directory_handle(
         file: &File,
+        owner: WindowsDirectoryOwner,
     ) -> Result<crate::cave::WindowsPrivatePathMetadata, ()> {
-        crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+        match owner {
+            WindowsDirectoryOwner::Trusted => {
+                crate::cave::validate_windows_trusted_directory_handle(file.as_raw_handle() as _)
+            }
+            WindowsDirectoryOwner::CurrentUser => {
+                crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+            }
+        }
     }
 
     fn validate_handle(
@@ -1222,7 +1252,9 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{marker_home_from, marker_io, MarkerIdentityError};
+    use super::{
+        marker_home_from, marker_home_uses_profile_identity, marker_io, MarkerIdentityError,
+    };
 
     struct TestHome(PathBuf);
 
@@ -1260,6 +1292,14 @@ mod tests {
             marker_home_from(Some(isolated.clone()), Some(ambient)),
             Some(isolated)
         );
+    }
+
+    #[test]
+    fn only_an_explicit_cleanup_home_uses_the_windows_profile_identity() {
+        assert!(marker_home_uses_profile_identity(&Some(
+            std::ffi::OsString::from(r"C:\Users\Coven"),
+        )));
+        assert!(!marker_home_uses_profile_identity(&None));
     }
 
     #[test]

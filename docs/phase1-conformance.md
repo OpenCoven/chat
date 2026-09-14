@@ -85,6 +85,30 @@ entries, inherited DACLs, malformed reports, and unreadable DACLs remain
 refused. The supervisor ACL, quotas, process isolation, waiver policy, discovery
 read validation, and readiness deadlines are unchanged.
 
+## Windows cleanup-grant profile binding
+
+[Protected run 34789638633](https://github.com/OpenCoven/chat/actions/runs/34789638633)
+used merged Chat `68c49d8a1a1ebedc06bdc8793a64c972945a265c` and SDK validator
+`dee5563020d02559d53d61c2651f35c3e4fdfcc5`. Linux and Darwin passed. Windows
+passed Cave launch and discovery, then failed at
+`phase1.native-scenarios.cleanup-grant.marker-identity-unavailable`.
+
+The Windows fixture repair moved Cave authority into the restricted token's
+validated operating-system profile but left cleanup-grant storage rooted at
+the artifact-local `native-authority-home`. Unlike Unix, no Windows fixture
+creation populated that path, and the artifact hierarchy also permits the
+supervisor to write for quota collection. It is therefore not a valid private
+cleanup-marker authority.
+
+Windows cleanup grants now use the same validated token profile as Cave. The
+profile root is accepted only under the existing trusted-owner and
+trusted-writer validation used by Windows discovery. The existing `.coven`
+directory and every newly created `chat/phase1-cleanup-grants-v1` descendant
+must still be current-user-owned, non-reparse, and writable only by the current
+user, SYSTEM, or Administrators. Handle pinning, path revalidation, storage
+identity, link-count checks, write-through publication, collision handling,
+single-use consumption, and fail-closed cleanup behavior are unchanged.
+
 ## Bounded discovery decoder prerequisite (historical)
 
 The decoder accepts the finite read/publication diagnostics emitted by
@@ -277,8 +301,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `ad8d5f3e5e937c398c5d6d8f7bbbb190b4ed499a`, tree
-  `dd4ffa0af4c39aefee9fc675ba5c804d7fe0e678`, retained in the producer ancestry;
+- Chat conformance driver `110b98b3ade90a10372efd433acdd9b5662369b4`, tree
+  `92c0d415993a7005bf68f145e9ccabecbabdc150`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1568,7 +1592,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 167,054 | `e0d848fc82bd97d968b661a442420174d0690dd108d9a2c926c292f6505fb342` |
+| `.github/workflows/client-v1-conformance.yml` | 167,062 | `8fe64874da01038a5d4b1069974ae1d20afed61bffea40abe59065fd7aa2f939` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1581,7 +1605,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 216,232 | `f770e12475c5c4614bcc2f08c18bf947ad457800272ac8a0ed30cfa3333da2ed` |
+| `scripts/phase1-schema-v2-producer.mjs` | 216,247 | `bbbd79589b50d0d8a932dc004d7fbc9a63282e9a25071d432b6de47353d212e5` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
