@@ -88,6 +88,21 @@ const caveConformanceTimeoutMs = 15 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
 const caveBuildReportedCpuTotal = '2';
 const ownedProcessGroupsSupported = process.platform !== 'win32';
+const caveDiscoveryPublicationFailureCategories = Object.freeze([
+  'disabled-other',
+  'root-owner-unverified',
+  'root-owner-shared',
+  'target-owner-unverified',
+  'target-owner-shared',
+  'root-not-directory',
+  'root-symlink',
+  'target-not-file',
+  'endpoint-invalid',
+  'authority-init',
+]);
+const caveDiscoveryPublicationFailureCategorySet = new Set(
+  caveDiscoveryPublicationFailureCategories,
+);
 export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
   [
     'not-found',
@@ -98,20 +113,7 @@ export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
     'invalid-json',
     'invalid-shape',
   ].flatMap((read) =>
-    [
-      'not-observed',
-      'output-limit',
-      'disabled-other',
-      'root-owner-unverified',
-      'root-owner-shared',
-      'target-owner-unverified',
-      'target-owner-shared',
-      'root-not-directory',
-      'root-symlink',
-      'target-not-file',
-      'endpoint-invalid',
-      'authority-init',
-    ].map(
+    ['not-observed', 'output-limit', ...caveDiscoveryPublicationFailureCategories].map(
       (publication) =>
         `phase1.cave-authority.startup.discovery.missing.read.${read}.publication.${publication}`,
     ),
@@ -323,6 +325,9 @@ const launchFailureCategories = [
   'initial-service',
   'initial-unknown',
   'discovery-timeout',
+  ...caveDiscoveryPublicationFailureCategories.map(
+    (category) => `discovery-not-found.publication.${category}`,
+  ),
   'health',
   'health-envelope',
   'unknown',
@@ -1792,7 +1797,12 @@ export function classifyInitialDiscoveryOutcome(response) {
   }
 }
 
-export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
+export function schemaV2NativeFailureDiagnostic(
+  stage,
+  error,
+  launchBoundary,
+  caveDiscoveryPublicationFailure,
+) {
   if (stage === 'pairing') {
     if (error === undefined) return 'phase1.native-scenarios.pairing';
     const message =
@@ -1846,9 +1856,14 @@ export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
     }
     const nativeLaunchFailure = /^native RPC cave_launch failed with ([a-z_]+)$/u.exec(message);
     if (nativeLaunchFailure !== null && launchStageFailureCodes.has(nativeLaunchFailure[1])) {
-      return `phase1.native-scenarios.launch.${nativeLaunchFailure[1]
-        .replace(/^cave_launch_/u, '')
-        .replaceAll('_', '-')}`;
+      const category = nativeLaunchFailure[1].replace(/^cave_launch_/u, '').replaceAll('_', '-');
+      if (
+        category === 'discovery-not-found' &&
+        caveDiscoveryPublicationFailureCategorySet.has(caveDiscoveryPublicationFailure)
+      ) {
+        return `phase1.native-scenarios.launch.${category}.publication.${caveDiscoveryPublicationFailure}`;
+      }
+      return `phase1.native-scenarios.launch.${category}`;
     }
     if (nativeLaunchFailure !== null && launchRpcFailureCodes.has(nativeLaunchFailure[1])) {
       return `phase1.native-scenarios.launch.rpc-${nativeLaunchFailure[1].replaceAll('_', '-')}`;
@@ -1979,12 +1994,24 @@ export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
     : 'phase1.stage.native-scenarios.failed';
 }
 
-export function retainSchemaV2NativeFailure(existingFailure, stage, error, launchBoundary) {
+export function retainSchemaV2NativeFailure(
+  existingFailure,
+  stage,
+  error,
+  launchBoundary,
+  caveDiscoveryPublicationFailure,
+) {
   return (
     existingFailure ??
-    new Error(schemaV2NativeFailureDiagnostic(stage, error, launchBoundary), {
-      cause: error,
-    })
+    new Error(
+      schemaV2NativeFailureDiagnostic(
+        stage,
+        error,
+        launchBoundary,
+        caveDiscoveryPublicationFailure,
+      ),
+      { cause: error },
+    )
   );
 }
 
@@ -4030,12 +4057,14 @@ export class NativeRpcClient {
       shutdownTimeoutMs = rpcTimeoutMs,
       requestTimeoutMs = rpcTimeoutMs,
       caveLaunchTimeoutMs = caveLaunchRpcTimeoutMs,
+      caveDiscoveryPublicationFailure = () => undefined,
     } = {},
   ) {
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.requestTimeoutMs = requestTimeoutMs;
     this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
+    this.readCaveDiscoveryPublicationFailure = caveDiscoveryPublicationFailure;
     this.pending = new Map();
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
@@ -4109,6 +4138,10 @@ export class NativeRpcClient {
     return this.secretFreeResponses;
   }
 
+  caveDiscoveryPublicationFailure() {
+    return this.readCaveDiscoveryPublicationFailure();
+  }
+
   async ok(command, args) {
     const response = await this.request(command, args);
     if (response.ok !== true) {
@@ -4136,6 +4169,51 @@ export class NativeRpcClient {
       this.shutdownTimeoutMs,
     );
   }
+}
+
+export function createCaveDiscoveryPublicationObserver({
+  maximumBytes = 8 * 1024,
+  maximumLineCharacters = 256,
+} = {}) {
+  const prefix = '[cave] client-v1 discovery publication refused: ';
+  let inspectedBytes = 0;
+  let line = '';
+  let lineOverflow = false;
+  let failure;
+  return {
+    write(chunk) {
+      if (failure !== undefined || inspectedBytes >= maximumBytes) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const inspected = bytes.subarray(0, maximumBytes - inspectedBytes);
+      inspectedBytes += inspected.length;
+      for (const character of inspected.toString('utf8')) {
+        if (character === '\n') {
+          if (!lineOverflow) {
+            const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+            if (normalized.startsWith(prefix)) {
+              const category = normalized.slice(prefix.length);
+              if (caveDiscoveryPublicationFailureCategorySet.has(category)) {
+                failure = category;
+                return;
+              }
+            }
+          }
+          line = '';
+          lineOverflow = false;
+        } else if (!lineOverflow) {
+          if (line.length >= maximumLineCharacters) {
+            line = '';
+            lineOverflow = true;
+          } else {
+            line += character;
+          }
+        }
+      }
+    },
+    failure() {
+      return failure;
+    },
+  };
 }
 
 export async function withFixtureDaemon(fixtureDaemon, action) {
@@ -4188,8 +4266,11 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   });
   await once(child, 'spawn');
   artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
-  child.stderr.resume();
-  return new NativeRpcClient(child);
+  const caveDiscoveryPublicationObserver = createCaveDiscoveryPublicationObserver();
+  child.stderr.on('data', (chunk) => caveDiscoveryPublicationObserver.write(chunk));
+  return new NativeRpcClient(child, {
+    caveDiscoveryPublicationFailure: () => caveDiscoveryPublicationObserver.failure(),
+  });
 }
 
 async function runNativeMissingKeychainTrustScenario(
@@ -4637,6 +4718,7 @@ async function runNativeScenarios({
         activeNativeStage,
         error,
         activeLaunchBoundary,
+        rpc.caveDiscoveryPublicationFailure(),
       );
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,

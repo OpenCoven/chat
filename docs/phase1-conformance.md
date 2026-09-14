@@ -1531,6 +1531,29 @@ PR #254 requests `ci:full` to run packaged Phase 1 conformance before landing.
 The bounded RPC allowlist includes `pairing_pending`, as declared by the native
 transport; create, poll, and exchange each retain that fixed subtype.
 
+Windows Cave startup keeps the existing 30-second native readiness deadline.
+The standalone publisher gives all Windows ACL probes in one publication a
+single 24-second monotonic budget, caps each PowerShell attempt at 12 seconds,
+and retries only one recognized timeout. Chat drains the native RPC stderr
+stream but retains only an exact static publication-refusal category within
+fixed byte and line bounds. Only `cave_launch_discovery_not_found` may gain that
+allowlisted suffix; raw stderr, paths, account names, tokens, handles, and
+exception text remain private.
+
+The restricted Windows producer still runs as the generated local user with the
+same explicit environment and suspended Job assignment, but
+`CreateProcessWithLogonW` no longer loads that user's registry hive. The OS
+profile remains created, pinned, token-verified, and deleted by the existing
+lifecycle. This removes an unnecessary asynchronous hive-unload dependency from
+the bounded profile-disappearance proof.
+
+An isolated quota pass that observes only the exact
+`access-denied` followed by `repeat=missing` deletion race receives one complete
+remeasurement through the same isolated user object. A second unstable pass,
+every other failure category, aggregate-root absence, entry overflow, byte
+overflow, reparse point, or arithmetic overflow remains terminal. No quota,
+polling, traversal, identity, cleanup, or diagnostic bound is widened.
+
 
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
@@ -1592,20 +1615,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 167,062 | `8fe64874da01038a5d4b1069974ae1d20afed61bffea40abe59065fd7aa2f939` |
+| `.github/workflows/client-v1-conformance.yml` | 167,170 | `4de54f1a4b835d51368ccae80c9068d38834a3ffe7eed31015754cf5313a9156` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d` |
-| `scripts/phase1-conformance.mjs` | 217,978 | `2d21af2960b0ac27f5af7c9cb70a84f7518593a1e3b7ec2f45e61bd0817ad100` |
+| `scripts/phase1-conformance.mjs` | 218,837 | `b7899921e8eb30a92bd4db1fcd79cb864cb1ed8d134a006c3acdec9a944b87ac` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 216,247 | `bbbd79589b50d0d8a932dc004d7fbc9a63282e9a25071d432b6de47353d212e5` |
+| `scripts/phase1-schema-v2-producer.mjs` | 218,923 | `004bd39869d86691e7aaae1d925d07ef89af883a8b8483dd370d3661412e27a3` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1617,7 +1640,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 352,878 | `d08748d1a7ce3cc3964ce4520cc501f514d5777ed102ac5f57ebc20b75e7bb65` |
+| `scripts/windows-job-supervisor.cs` | 353,353 | `66c81df9031bee3a7a8b721f3624aa2a74d8e53adde28cd3c2b2254966828c18` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 29,480 | `b2160b083f6db3c4e6a328b026350c9ae80a2d688482849705705396ded1a998` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |

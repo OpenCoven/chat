@@ -1166,7 +1166,6 @@ ${source.slice(start, end)}
         'LogonUserW',
         'CheckTokenMembership',
         'CreateProcessWithLogonW',
-        'LOGON_WITH_PROFILE',
         'ProtectCurrentProcess',
         'PROCESS_DUP_HANDLE',
         'WRITE_DAC',
@@ -1276,6 +1275,7 @@ ${source.slice(start, end)}
       expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
       expect(quotaScanner).not.toContain('Directory.GetDirectories');
       expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
+      expect(quotaScanner).toContain('MeasureDirectoryQuotaWithRemovalRaceRecovery(');
       expect(quotaScanner).toContain('directoryInfo.EnumerateDirectories(');
       expect(quotaScanner).toContain('directoryInfo.EnumerateFileSystemInfos(');
       expect(quotaScanner).not.toContain('File.GetAttributes(entry)');
@@ -1763,6 +1763,7 @@ ${source.slice(start, end)}
           'out PROCESS_INFORMATION processInformation',
         ].join(' '),
       );
+      expect(source).not.toContain('LOGON_WITH_PROFILE');
 
       const invocation = source.match(/bool created = CreateProcessWithLogonW\(([\s\S]*?)\);/u);
       expect(invocation).not.toBeNull();
@@ -1771,7 +1772,7 @@ ${source.slice(start, end)}
           'isolatedUser.UserName,',
           'Environment.MachineName,',
           'isolatedUser.Password,',
-          'LOGON_WITH_PROFILE,',
+          '0,',
           'applicationName,',
           'commandLine,',
           'CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,',
@@ -3150,6 +3151,9 @@ ${pathAssignment}
       );
       expect(source).toMatch(
         /return ReadDirectorySnapshotOperation\(\s*operation,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries\),\s*repeatDiagnostic,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries,\s*true\)\);/u,
+      );
+      expect(source).toMatch(
+        /private static bool MeasureDirectoryQuotaWithRemovalRaceRecovery\(Func<bool> measure\)\s*\{\s*try\s*\{\s*return measure\(\);\s*\}\s*catch \(QuotaMonitorContextException error\)\s*\{\s*if \(error\.Category != "access-denied" \|\| error\.Repeat != "missing"\)\s*throw;\s*return measure\(\);\s*\}\s*\}/u,
       );
     }
   });
