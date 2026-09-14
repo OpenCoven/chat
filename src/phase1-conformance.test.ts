@@ -1180,7 +1180,10 @@ describe('Phase 1 real-authority conformance harness', () => {
       'utf8',
     );
     expect(cleanupGrantSource).toMatch(
-      /pin_directory\(home\.clone\(\),\s*WindowsDirectoryOwner::Trusted\)\?/,
+      /marker_home_uses_profile_identity\(&cleanup_home\)[\s\S]*WindowsDirectoryOwner::Trusted[\s\S]*WindowsDirectoryOwner::CurrentUser/,
+    );
+    expect(cleanupGrantSource).toMatch(
+      /pin_directory\(home\.clone\(\),\s*home_owner\)\?/,
     );
     expect(cleanupGrantSource).toMatch(
       /pin_directory\(\s*current\.clone\(\),\s*WindowsDirectoryOwner::CurrentUser,\s*\)\?/,
