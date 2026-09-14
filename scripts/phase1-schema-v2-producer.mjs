@@ -4224,14 +4224,19 @@ export class NativeRpcClient {
 
   resolveResponse(id, pending) {
     if (pending.response === undefined) return;
-    if (
-      pending.publication !== undefined &&
-      pending.response.ok === false &&
-      pending.response.error?.code === 'cave_launch_discovery_not_found'
-    ) {
-      const category = pending.publication.result();
-      if (category === undefined) return;
-      nativeLaunchPublicationResponses.set(pending.response, category);
+    if (pending.publication !== undefined) {
+      if (
+        pending.response.ok === false &&
+        pending.response.error?.code === 'cave_launch_discovery_not_found'
+      ) {
+        const category = pending.publication.result();
+        if (category === undefined) return;
+        nativeLaunchPublicationResponses.set(pending.response, category);
+      } else {
+        this.launchPublications = this.launchPublications.filter(
+          (entry) => entry.publication !== pending.publication,
+        );
+      }
     }
     this.pending.delete(id);
     clearTimeout(pending.timer);
