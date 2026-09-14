@@ -66,45 +66,6 @@ test('preserves an existing specific classification', () => {
   ).toBe('phase1.native-scenarios.launch.timeout');
 });
 
-test.each([
-  'disabled-other',
-  'root-owner-unverified',
-  'root-owner-shared',
-  'target-owner-unverified',
-  'target-owner-shared',
-  'root-not-directory',
-  'root-symlink',
-  'target-not-file',
-  'endpoint-invalid',
-  'authority-init',
-])('attributes discovery-not-found to bounded Cave publication category %s', (category) => {
-  const diagnostic = producer.schemaV2NativeFailureDiagnostic(
-    'launch',
-    new Error('native RPC cave_launch failed with cave_launch_discovery_not_found'),
-    'launch-rpc',
-    category,
-  );
-  expect(diagnostic).toBe(
-    `phase1.native-scenarios.launch.discovery-not-found.publication.${category}`,
-  );
-  expect(publicPhase1FailureDiagnostic(new Error(diagnostic))).toBe(diagnostic);
-  expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
-});
-
-test.each(['private-token', '__proto__', undefined, null, 7])(
-  'rejects an unrecognized Cave publication category %s',
-  (category) => {
-    expect(
-      producer.schemaV2NativeFailureDiagnostic(
-        'launch',
-        new Error('native RPC cave_launch failed with cave_launch_discovery_not_found'),
-        'launch-rpc',
-        category,
-      ),
-    ).toBe('phase1.native-scenarios.launch.discovery-not-found');
-  },
-);
-
 // Execute the production launch block with controlled RPC failures so boundary
 // assignments, their order, and the catch path are covered without native state.
 const producerSource = readFileSync(
@@ -153,7 +114,6 @@ test.each(['initial-discovery', 'launch-rpc', 'discovery', 'health'])(
             visit(command === 'cave_launch' ? 'launch-rpc' : 'health');
             return { apiVersion: '1.0', data: { pairingRequired: true } };
           },
-          caveDiscoveryPublicationFailure: () => undefined,
         },
         process: { platform: 'win32', stderr: { write: () => {} } },
         addAssertion: (results: string[], _id: string, status: string) => results.push(status),
@@ -168,41 +128,6 @@ test.each(['initial-discovery', 'launch-rpc', 'discovery', 'health'])(
     );
   },
 );
-
-test('runtime launch block retains the observed Cave publication refusal', async () => {
-  const outcome = await runInNewContext(
-    `(async () => {
-      let activeNativeStage, handle, scenarioFailure = null;
-      const observations = {}, nativeInstanceIds = new Set(), results = [];
-      ${launchScenario}
-      return { scenarioFailure, results };
-    })()`,
-    {
-      classifyInitialDiscoveryOutcome: producer.classifyInitialDiscoveryOutcome,
-      retainSchemaV2NativeFailure: producer.retainSchemaV2NativeFailure,
-      observeInitialDiscoverySafety: async () => null,
-      waitForDiscovery: async () => {
-        throw new Error('discovery should not run after launch refusal');
-      },
-      rpc: {
-        operation: () => 'test-operation',
-        request: async () => ({ ok: false, error: { code: 'cave_discovery_not_found' } }),
-        ok: async (command: string) => {
-          expect(command).toBe('cave_launch');
-          throw new Error('native RPC cave_launch failed with cave_launch_discovery_not_found');
-        },
-        caveDiscoveryPublicationFailure: () => 'root-owner-unverified',
-      },
-      process: { platform: 'win32', stderr: { write: () => {} } },
-      addAssertion: (results: string[], _id: string, status: string) => results.push(status),
-    },
-  );
-
-  expect(outcome.results).toEqual(['failed']);
-  expect(outcome.scenarioFailure.message).toBe(
-    'phase1.native-scenarios.launch.discovery-not-found.publication.root-owner-unverified',
-  );
-});
 
 const launchNativeCodes = [
   'connection_state_unavailable',

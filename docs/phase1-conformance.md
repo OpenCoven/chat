@@ -109,6 +109,59 @@ user, SYSTEM, or Administrators. Handle pinning, path revalidation, storage
 identity, link-count checks, write-through publication, collision handling,
 single-use consumption, and fail-closed cleanup behavior are unchanged.
 
+## Native launch and profile survival observations (diagnostic only)
+
+[Protected run 34796638173](https://github.com/OpenCoven/chat/actions/runs/34796638173)
+used Chat `7ec15b20b5526ef809c8f237a4dab1f640cb8a4d`, SDK validator
+`ff96d08e19e534e982b3e9ea24fb9cc7e9e22a67`, and Cave `8a06421a`. Unix
+platform jobs succeeded, but Windows failed at
+`phase1.native-scenarios.launch.discovery-not-found`, followed by
+`profile-delete:invalid-operation,profile-survived:invalid-operation`.
+There is no Windows record or aggregate acceptance from that run.
+
+The launch failure means native readiness ended without discovery; it does
+not identify why publication was absent. The native conformance launcher
+inherits Cave stderr, but the RPC client previously drained it without
+observing Cave's existing bounded publication-refusal line. The client now
+observes at most 8 KiB per launch, retains at most 256 bytes from an incomplete
+line, accepts only complete anchored publisher lines with the ten existing
+finite codes, and retains the first accepted code. Fragmented LF/CRLF lines are
+supported. All stderr continues to drain; no raw output is forwarded or
+retained. Only the matching native
+discovery-not-found failure receives a `.publication.<category>` suffix.
+`not-observed` and `output-limit` are local observations, not publisher claims.
+Other failures and the first retained scenario failure keep precedence.
+
+Stdout response delivery does not prove that earlier stderr bytes have been
+dispatched to Node. Each launch therefore uses a fresh opaque request identity.
+Before writing a discovery-not-found response, the native RPC response writer
+writes and flushes a stderr checkpoint containing only the identity's SHA-256. The client
+holds that response until it observes the matching checkpoint, a complete
+stderr EOF, a first refusal, or the byte cap. It does not wait for a persistent
+RPC process to exit. The original RPC timer covers response and drain together;
+an absent checkpoint at that deadline yields `drain-timeout`, and incomplete
+pipe closure yields `drain-unavailable`, without replacing the native failure.
+Wrong checkpoints and duplicate responses cannot settle a different request.
+No new RPC command, readiness deadline, or shutdown operation is introduced.
+Checkpoint I/O failure still delivers the original response where possible and
+is propagated to the native RPC loop. This changes the conformance RPC
+native delta, not the frozen production consumer.
+
+The profile failure already distinguishes native API errors from survival
+after deletion was accepted or the API reported a missing profile. It did not
+identify which postcondition remained. That final failure now reports
+`profile-remained[delete=<outcome>;registry=<0|1>;expected=<0|1>;actual=<0|1>]`
+from the last bounded observation. The three outcomes are `not-needed`,
+`accepted`, and `not-found`; flags indicate only existence, never paths or
+contents. Native error codes, both ten-second cleanup bounds, quarantine,
+handle release, account cleanup, and all failure gates remain unchanged.
+
+These changes repair diagnostic loss, not Windows startup or profile deletion.
+The actual publication cause and residual profile component remain unknown
+until observed on a subsequently reviewed and rebound protected producer.
+No ACL relaxation, additional cleanup deletion, or deadline increase is
+justified by the current evidence.
+
 ## Bounded discovery decoder prerequisite (historical)
 
 The decoder accepts the finite read/publication diagnostics emitted by
@@ -1616,20 +1669,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 167,190 | `a3c406867a8fda5b3bc4d3afc90001a7b110cab5762f3f2da0ce7d5c1d5d2a39` |
+| `.github/workflows/client-v1-conformance.yml` | 167,578 | `e5a34e12d2d13b28eb3154a40db8872c553692eabb8bf8b1e4b180df2490a90a` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d` |
-| `scripts/phase1-conformance.mjs` | 218,837 | `b7899921e8eb30a92bd4db1fcd79cb864cb1ed8d134a006c3acdec9a944b87ac` |
+| `scripts/phase1-conformance.mjs` | 218,063 | `ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 219,454 | `627aa325530a5edc263433eff6bd7745652d057dceab80471a0f9d22fd7dc6d1` |
+| `scripts/phase1-schema-v2-producer.mjs` | 221,929 | `0c83582a519b188a03e31578fe697dc32854570f5b6cbf17da88328db6997cc7` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1641,13 +1694,13 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 353,438 | `d807b27e8594118bb56cb28d447d23e83f5e7aa7f87ea15c94980e3d5dd5eb46` |
+| `scripts/windows-job-supervisor.cs` | 355,031 | `6562d227c9b2347f1b298a956f56309956bab2e98831ee7c5e4768e28fb3fcb6` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 31,812 | `458a6673a182692ef588847f798f63fa3ec423bfa8436d65710a89a46548f23b` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 22,262 | `fb6365248bd8286fa03a950e387f0925ff2c818e72ffc1676e4fc327636b5f03` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
-| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 6,025 | `43688191fcbf8807d5e33ba811f14b0f8a6e780fef30ae2e3f494d540608bdb2` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |

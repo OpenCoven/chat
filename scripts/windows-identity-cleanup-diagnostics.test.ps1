@@ -21,6 +21,31 @@ foreach ($case in $cases) {
 }
 Write-Host 'Bounded identity cleanup classification passed.'
 
+$profileFailureType = [OpenCoven.WindowsJobSupervisor].GetNestedType(
+  'ProfileCleanupException', [Reflection.BindingFlags]'NonPublic')
+if ($null -eq $profileFailureType) { throw 'Missing bounded profile survival diagnostic.' }
+foreach ($outcome in @('not-needed', 'accepted', 'not-found')) {
+  foreach ($mask in 1..7) {
+    $registry = ($mask -band 1) -ne 0
+    $expected = ($mask -band 2) -ne 0
+    $actual = ($mask -band 4) -ne 0
+    $failure = [Activator]::CreateInstance($profileFailureType, [object[]]@(
+      $outcome, $registry, $expected, $actual))
+    $category = $classify.Invoke($null, [object[]]@($failure))
+    $wanted = "profile-remained[delete=$outcome;registry=$([int]$registry);expected=$([int]$expected);actual=$([int]$actual)]"
+    if ($category -cne $wanted) { throw "Profile outcome was collapsed: $category" }
+  }
+}
+foreach ($invalid in @(
+  @('private-secret', $true, $false, $false),
+  @('accepted', $false, $false, $false))) {
+  $rejected = $false
+  try { [Activator]::CreateInstance($profileFailureType, [object[]]$invalid) | Out-Null }
+  catch { $rejected = $_.Exception.GetBaseException() -is [ArgumentException] }
+  if (-not $rejected) { throw 'Invalid profile diagnostic inputs were accepted.' }
+}
+Write-Host 'Bounded profile survival classification passed.'
+
 # Drive the real Dispose path on an identity that was never provisioned. No
 # local account, profile or directory is created; the quarantine callbacks are
 # the only forced failures. Cleanup must stop before any native account/profile
