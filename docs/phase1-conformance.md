@@ -147,11 +147,13 @@ queue, and fixes current and future discovery classifications at
 `drain-timeout`; incomplete pipe closure similarly yields `drain-unavailable`.
 Requests created after stderr completion or attribution poisoning are not
 enqueued. Wrong checkpoints, duplicate responses, and stale post-timeout bytes
-cannot settle or classify a different request. No new RPC command, readiness
-deadline, or shutdown operation is introduced. Checkpoint I/O failure still
-delivers the original response where possible and is propagated to the native
-RPC loop. This changes the conformance RPC native delta, not the frozen
-production consumer.
+cannot settle or classify a different request. A synchronous or asynchronous
+stdin write failure clears pending requests and poisons launch attribution as
+`drain-unavailable`, so an unsent request cannot remain at the FIFO head. No new
+RPC command, readiness deadline, or shutdown operation is introduced.
+Checkpoint I/O failure still delivers the original response where possible and
+is propagated to the native RPC loop. This changes the conformance RPC native
+delta, not the frozen production consumer.
 
 The profile failure already distinguishes native API errors from survival
 after deletion was accepted or the API reported a missing profile. It did not
@@ -1675,7 +1677,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,178 | `c6921e685522fdc9469cc3166aa2570bb365a57759a4c79430e150052fa5a003` |
+| `.github/workflows/client-v1-conformance.yml` | 168,186 | `1914f5d34094d76a9feb15b02b3364b71c298c02c4117474bb53e763e7bca452` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1688,7 +1690,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 224,837 | `6e406b38641c70759a6833284ba060f0827c753043bb870cf4834365188b64ee` |
+| `scripts/phase1-schema-v2-producer.mjs` | 225,357 | `c723f66d80aeb80ba31affae1b0b1862c57a083cd41042ba106fd831a1ce511f` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

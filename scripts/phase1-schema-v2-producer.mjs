@@ -4188,6 +4188,7 @@ export class NativeRpcClient {
     child.stderr?.once('close', () => {
       if (this.stderrCompletion === undefined) finishStderr('drain-unavailable');
     });
+    child.stdin?.on?.('error', () => this.failInput());
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       this.buffer += chunk;
@@ -4230,6 +4231,16 @@ export class NativeRpcClient {
       }
       this.launchPublications = [];
     });
+  }
+
+  failInput() {
+    this.poisonLaunchPublications('drain-unavailable');
+    for (const [id, pending] of [...this.pending]) {
+      if (!this.pending.has(id)) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(new Error('native RPC input failed'));
+    }
   }
 
   poisonLaunchPublications(reason) {
@@ -4304,7 +4315,13 @@ export class NativeRpcClient {
       }, timeoutMs);
       const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
       this.pending.set(id, pending);
-      this.child.stdin.write(`${JSON.stringify(request)}\n`);
+      try {
+        this.child.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+          if (error !== undefined && error !== null) this.failInput();
+        });
+      } catch {
+        this.failInput();
+      }
     });
   }
 

@@ -578,4 +578,40 @@ describe('native launch publication observation', () => {
     );
     expect(client.launchPublications).toHaveLength(0);
   });
+
+  test.each(['synchronous', 'callback'] as const)(
+    'clears and poisons a launch after a %s stdin write failure',
+    async (failureMode) => {
+      const child = new LaunchChild();
+      const requests: { id: string }[] = [];
+      child.stdin.write = (line: string, callback?: (error?: Error | null) => void) => {
+        requests.push(JSON.parse(line));
+        if (requests.length === 1) {
+          if (failureMode === 'synchronous') throw new Error('write failed');
+          queueMicrotask(() => callback?.(new Error('write failed')));
+        }
+        return true;
+      };
+      const client = new NativeRpcClient(child);
+
+      expect((await launchFailure(client)).message).toBe(
+        'phase1.native-scenarios.launch.launch-rpc-unknown',
+      );
+      expect(client.launchPublications).toHaveLength(0);
+
+      const second = launchFailure(client);
+      const secondId = requests[1]?.id;
+      if (secondId === undefined) throw new Error('Second launch request was not sent');
+      child.stderr.write(`${prefix}authority-init\n`);
+      child.stderr.write(
+        `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+      );
+      child.stdout.write(
+        `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
+      );
+      expect((await second).message).toBe(
+        'phase1.native-scenarios.launch.discovery-not-found.publication.drain-unavailable',
+      );
+    },
+  );
 });
