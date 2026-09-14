@@ -302,6 +302,8 @@ residual filesystem states. These run in a separate, `ci:full`-gated Windows job
 with a fifteen-minute deadline, rather than extending the nearly full existing
 supervisor job. Production deadlines and quota limits are unchanged.
 
-Native execution of the repair remains required. The earlier successful
-characterization run does not validate this new deletion authority, establish
-the protected producer's blocker, or resolve Cave's separate early startup exit.
+Native execution of this repair passed in
+[CI 34858077530](https://github.com/OpenCoven/chat/actions/runs/34858077530),
+Windows profile residual cleanup job `104024511058`. This validates the covered
+authorized cleanup and adversarial fixture cases; it does not establish the
+protected producer's blocker or resolve Cave's separate early startup exit.
