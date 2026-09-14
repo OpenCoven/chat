@@ -391,8 +391,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `a9c44b643523f4a4adeb6a03bebf71a449cfa7b5`, tree
-  `d850bf84e299840c565e19449d0601b7a225b824`, retained in the producer ancestry;
+- Chat conformance driver `3621bf8c729549c620ed253fa63bbc7a53c65490`, tree
+  `59ef866d78f0ff4910d1926cba343cfe9a73c49b`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1706,7 +1706,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,186 | `91eea46f41ff704c7f4ccd552fc63e0291760c4b55712275d6056756773e9b7d` |
+| `.github/workflows/client-v1-conformance.yml` | 174,594 | `34f3427d1046d179d577237c387126b4be8d3b72e9e165e221f79cdc6ea4a577` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1731,14 +1731,17 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 357,149 | `1e1eff87c65e7968b18f42b81409315571cc4bfda1d8aff1123876854b5d5435` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,115 | `9ebf051e1abfc08e86d99fd702fa410857005fdd22aa2e31978b17e1687ad3f3` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 31,812 | `458a6673a182692ef588847f798f63fa3ec423bfa8436d65710a89a46548f23b` |
+| `scripts/windows-job-supervisor.cs` | 382,142 | `0603a457e11a599bc5271c24bd8139f3a9f1c39b404af12d41f77f2eead2bf48` |
+| `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 22,262 | `fb6365248bd8286fa03a950e387f0925ff2c818e72ffc1676e4fc327636b5f03` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
+| `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 13,587 | `0b6ad14376918315469eb4cd51ba9df719cc54446ad9a596aecc8e8a0b7e48f7` |
+| `scripts/windows-profile-residual-native.test.ps1` | 32,022 | `8ca5ad2d96d9595367ff221dfea5dbabcce1c81b72f3da3ddfa2064ca3399827` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |

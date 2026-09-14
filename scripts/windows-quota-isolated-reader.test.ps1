@@ -34,7 +34,8 @@ namespace OpenCoven.Tests {
             MethodInfo snapshotOperation,
             object restoration,
             string directory,
-            string expectedSid) {
+            string expectedSid,
+            bool removeBeforeRepeat = false) {
             Calls = 0;
             Func<System.Collections.Generic.List<System.IO.FileSystemInfo>> read = () => {
                 AssertIdentity(expectedSid);
@@ -51,7 +52,14 @@ namespace OpenCoven.Tests {
                 AssertIdentity(expectedSid);
                 WindowsIdentity.RunImpersonated(
                     Microsoft.Win32.SafeHandles.SafeAccessTokenHandle.InvalidHandle,
-                    () => restoration.GetType().GetMethod("Restore").Invoke(restoration, null));
+                    () => {
+                        if (removeBeforeRepeat) {
+                            ((IDisposable)restoration).Dispose();
+                            System.IO.Directory.Delete(directory, true);
+                        } else {
+                            restoration.GetType().GetMethod("Restore").Invoke(restoration, null);
+                        }
+                    });
                 AssertIdentity(expectedSid);
                 return read();
             };
@@ -302,9 +310,39 @@ try {
         [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne $supervisorSid) {
       throw 'Isolated readable enumeration retry did not return one complete snapshot and restore supervisor identity.'
     }
+    # Re-arm restoration before the second real denial; delete only this fixture
+    # between enumerations to distinguish disappearance from a readable retry.
+    $enumerationLease.Dispose()
+    $enumerationLease = [OpenCoven.Tests.OwnerDirectoryQuotaFixture]::new($enumerationDenied)
+    Set-Acl -LiteralPath $enumerationDenied -AclObject $denialAcl
+    $missingRepeat = $null
+    try {
+      [OpenCoven.Tests.QuotaReadableRepeatProbe]::Run(
+        $identity,
+        $read,
+        $readSnapshot,
+        $enumerationLease,
+        $enumerationDenied,
+        $identity.Sid,
+        $true
+      ) | Out-Null
+    } catch {
+      $missingRepeat = $_.Exception.GetBaseException()
+    }
+    if ($null -eq $missingRepeat -or $missingRepeat.GetType().Name -cne 'QuotaMonitorContextException' -or
+        [OpenCoven.Tests.QuotaReadableRepeatProbe]::Calls -ne 2 -or
+        $missingRepeat.GetType().GetProperty('Category', $instanceFlags).GetValue($missingRepeat) -cne 'access-denied' -or
+        $missingRepeat.GetType().GetProperty('Operation', $instanceFlags).GetValue($missingRepeat) -cne 'directory-enumeration-depth-3-plus' -or
+        $missingRepeat.GetType().GetProperty('Repeat', $instanceFlags).GetValue($missingRepeat) -cne 'missing' -or
+        $missingRepeat.ToString().Contains($enumerationDenied) -or
+        [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne $supervisorSid) {
+      throw 'Isolated denied-then-deleted enumeration lost its bounded failure or identity restoration.'
+    }
   } finally {
     $enumerationLease.Dispose()
-    Remove-Item -LiteralPath $enumerationDenied -Recurse -Force
+    if ([IO.Directory]::Exists($enumerationDenied)) {
+      Remove-Item -LiteralPath $enumerationDenied -Recurse -Force
+    }
   }
   Write-Host 'Isolated enumeration repeats remain bounded, identity-stable, and fail-closed unless a complete retry succeeds.'
   $state = [Activator]::CreateInstance($stateType, $true)

@@ -1089,6 +1089,7 @@ describe('Phase 1 specification guards', () => {
       'phase1-conformance',
       'desktop',
       'rust',
+      'windows-profile-residual',
       'unix-supervisor',
       'windows-supervisor-behavior',
     ]);
@@ -1105,6 +1106,7 @@ describe('Phase 1 specification guards', () => {
       'rust',
       'unix-supervisor',
       'windows-supervisor-behavior',
+      'windows-profile-residual',
     ]) {
       const job = jobs.get(name) ?? '';
       expect(job).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'");
