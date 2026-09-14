@@ -1678,17 +1678,18 @@ ${source.slice(start, end)}
       );
 
       const isolatedUserStart = source.indexOf('public sealed class WindowsIsolatedUser');
-      const userDisposeStart = source.indexOf(
-        'public void Dispose()',
-        source.indexOf('private static string GetProfilesRoot()', isolatedUserStart),
-      );
+      const profileRootQuery = source.indexOf('static string GetProfilesRoot()', isolatedUserStart);
+      expect(profileRootQuery).toBeGreaterThan(isolatedUserStart);
+      const userDisposeStart = source.indexOf('public void Dispose()', profileRootQuery);
+      expect(userDisposeStart).toBeGreaterThan(profileRootQuery);
       const userDisposeEnd = source.indexOf(
         '[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
         userDisposeStart,
       );
+      expect(userDisposeEnd).toBeGreaterThan(userDisposeStart);
       const userDispose = source.slice(userDisposeStart, userDisposeEnd);
       expect(userDispose.indexOf('quarantineIsolatedIdentity();')).toBeGreaterThan(-1);
-      expect(userDispose.indexOf('DeleteOperatingSystemProfile(')).toBeGreaterThan(
+      expect(userDispose.indexOf('DeleteOperatingSystemProfileCore(')).toBeGreaterThan(
         userDispose.indexOf('quarantineIsolatedIdentity();'),
       );
       expect(userDispose.indexOf('DeleteDirectoryTree(RootPath)')).toBeGreaterThan(
@@ -2433,6 +2434,8 @@ ${source.slice(start, end)}
       'scripts/windows-identity-cleanup-diagnostics.test.ps1',
       'scripts/windows-cleanup-delete-diagnostics.test.ps1',
       'scripts/windows-profile-cleanup-characterization.test.ps1',
+      'scripts/windows-profile-residual-policy.test.ps1',
+      'scripts/windows-profile-residual-native.test.ps1',
       'scripts/windows-staging-binding.test.ps1',
       'scripts/windows-status-acl-probe.test.ps1',
       'scripts/windows-status-acl-probe.cs',

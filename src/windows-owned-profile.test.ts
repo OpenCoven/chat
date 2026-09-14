@@ -19,6 +19,54 @@ test('native suite characterizes profile deletion before running producer superv
   expect(characterization).toBeLessThan(suite.indexOf('$createProcessWithLogon ='));
 });
 
+test('residual cleanup runs in a separately bounded native CI job', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  const job = workflow.match(
+    /\n {2}windows-profile-residual:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/u,
+  )?.groups?.job;
+  expect(job).toBeDefined();
+  expect(job).toContain('runs-on: windows-2025');
+  expect(job).toContain('timeout-minutes: 15');
+  expect(job).toContain('needs: changes');
+  expect(job).toContain("needs.changes.outputs.docs_only != 'true'");
+  expect(job).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'");
+  expect(job).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
+  expect(job).toContain(
+    'pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-policy.test.ps1',
+  );
+  expect(job).toContain(
+    'pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-native.test.ps1',
+  );
+  expect(job).not.toContain('-CompileOnly');
+  expect(job).not.toContain('continue-on-error:');
+});
+
+test.skipIf(!pwshAvailable).each([
+  {
+    name: 'executes portable production residual policy',
+    args: ['scripts/windows-profile-residual-policy.test.ps1'],
+    output: 'Portable production residual policy passed:',
+  },
+  {
+    name: 'compiles native residual regressions without native side effects',
+    args: ['scripts/windows-profile-residual-native.test.ps1', '-CompileOnly'],
+    output: 'Native residual fixture compiled; Windows behavior was not executed.',
+  },
+])(
+  '$name',
+  ({ args, output }) => {
+    const result = spawnSync(
+      'pwsh',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', ...args],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(output);
+  },
+  30_000,
+);
+
 test.skipIf(!pwshAvailable)(
   'profile cleanup characterization compiles without native operations',
   () => {

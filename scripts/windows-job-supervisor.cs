@@ -77,6 +77,20 @@ namespace OpenCoven
             }
         }
 
+        internal WindowsJobSupervisor.ProfileCleanupIdentity CaptureCleanupIdentity()
+        {
+            lock (sync)
+            {
+                if (profile.IsClosed || application.IsClosed)
+                    throw new ObjectDisposedException("WindowsOwnedProfileApplication");
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                return WindowsJobSupervisor.CaptureProfileCleanupIdentity(
+                    profile.DangerousGetHandle(), profilePath, sid);
+            }
+        }
+
         public void Dispose()
         {
             lock (sync)
@@ -1236,7 +1250,7 @@ namespace OpenCoven
             }
         }
 
-        private static string GetProfilesRoot()
+        internal static string GetProfilesRoot()
         {
             uint length = 0;
             GetProfilesDirectoryW(null, ref length);
@@ -1264,6 +1278,7 @@ namespace OpenCoven
             }
             List<Exception> cleanupFailures = new List<Exception>();
             List<string> cleanupCategories = new List<string>();
+            WindowsJobSupervisor.ProfileCleanupIdentity cleanupIdentity = null;
             if (quarantineIsolatedIdentity != null)
             {
                 bool quarantineComplete = false;
@@ -1303,6 +1318,24 @@ namespace OpenCoven
                         "Ephemeral Windows identity cleanup deferred: " +
                             String.Join(",", cleanupCategories.ToArray()) + ".",
                         new AggregateException(cleanupFailures.ToArray()));
+                if (accountDisabled)
+                {
+                    try
+                    {
+                        RequireDisabledAndVerify();
+                        if (ownedApplication == null)
+                            throw new InvalidOperationException("Owned profile identity is unavailable.");
+                        cleanupIdentity = ownedApplication.CaptureCleanupIdentity();
+                    }
+                    catch (Exception error)
+                    {
+                        RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-identity", error);
+                        throw new InvalidOperationException(
+                            "Ephemeral Windows identity cleanup deferred: " +
+                                String.Join(",", cleanupCategories.ToArray()) + ".",
+                            new AggregateException(cleanupFailures.ToArray()));
+                    }
+                }
             }
             SafeAccessTokenHandle retiredQuotaToken;
             lock (quotaTokenSync)
@@ -1321,13 +1354,15 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
+                cleanupIdentity = null;
                 RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-pins", error);
             }
             try
             {
-                WindowsJobSupervisor.DeleteOperatingSystemProfile(
+                WindowsJobSupervisor.DeleteOperatingSystemProfileCore(
                     Sid,
-                    OperatingSystemProfilePath);
+                    OperatingSystemProfilePath,
+                    cleanupIdentity);
             }
             catch (Exception error)
             {
@@ -3067,7 +3102,17 @@ namespace OpenCoven
                 bool registryExists,
                 bool expectedPathExists,
                 bool actualPathExists)
-                : base("Ephemeral Windows profile survived cleanup.")
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, null)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                Exception residualFailure)
+                : base("Ephemeral Windows profile survived cleanup.", residualFailure)
             {
                 if ((deleteOutcome != "not-needed" &&
                     deleteOutcome != "accepted" &&
@@ -3077,7 +3122,88 @@ namespace OpenCoven
                 Diagnostic = "profile-remained[delete=" + deleteOutcome +
                     ";registry=" + (registryExists ? "1" : "0") +
                     ";expected=" + (expectedPathExists ? "1" : "0") +
-                    ";actual=" + (actualPathExists ? "1" : "0") + "]";
+                    ";actual=" + (actualPathExists ? "1" : "0") +
+                    (residualFailure == null ? String.Empty :
+                        ";residual=" + WindowsIsolatedUser.ClassifyCleanupError(residualFailure)) + "]";
+            }
+        }
+
+        private static void ValidateProfileCleanupRegistration(
+            bool registered, string expectedPath, string actualPath)
+        {
+            if (String.IsNullOrWhiteSpace(expectedPath) ||
+                !Path.IsPathFullyQualified(expectedPath) ||
+                !String.Equals(Path.GetFullPath(expectedPath), expectedPath, StringComparison.OrdinalIgnoreCase) ||
+                (registered && (String.IsNullOrWhiteSpace(actualPath) ||
+                    !String.Equals(TrimDirectorySeparator(expectedPath),
+                        TrimDirectorySeparator(actualPath), StringComparison.OrdinalIgnoreCase))))
+                throw new InvalidOperationException("Profile cleanup registration is not bound to the owned path.");
+        }
+
+        private static bool ProfileCleanupPathExists(string path)
+        {
+            try
+            {
+                File.GetAttributes(path);
+                return true;
+            }
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+        }
+
+        private static void RequireProfileResidualBudget(TimeSpan elapsed, int depth, int entries)
+        {
+            if (elapsed >= TimeSpan.FromSeconds(10))
+                throw new TimeoutException("Profile residual cleanup exceeded its observation budget.");
+            if (depth < 0 || depth > 64 || entries < 0 || entries > 100000)
+                throw new InvalidOperationException("Profile residual traversal exceeded its bounds.");
+        }
+
+        private static void CompleteProfileDeletion(
+            string deleteOutcome,
+            bool residualAuthorized,
+            Func<bool> registrationExists,
+            Func<bool> hivesExist,
+            Func<bool> expectedExists,
+            Func<bool> actualExists,
+            Action removeResidual,
+            Func<TimeSpan> elapsed,
+            Action pause)
+        {
+            Exception lastSharingFailure = null;
+            while (true)
+            {
+                bool registered = registrationExists();
+                bool expected = expectedExists();
+                bool actual = actualExists();
+                if (!registered && !expected && !actual) return;
+                if (elapsed() >= TimeSpan.FromSeconds(10))
+                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                if (residualAuthorized && (deleteOutcome == "accepted" || deleteOutcome == "not-found") &&
+                    !registered && expected && !hivesExist())
+                {
+                    try
+                    {
+                        removeResidual();
+                    }
+                    catch (Exception error) when (error is Win32Exception || error is IOException ||
+                        error is UnauthorizedAccessException || error is InvalidOperationException ||
+                        error is TimeoutException)
+                    {
+                        if (error is TimeoutException && lastSharingFailure != null &&
+                            elapsed() >= TimeSpan.FromSeconds(10))
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                        Win32Exception native = error as Win32Exception;
+                        bool sharing = native != null ? native.NativeErrorCode == ERROR_SHARING_VIOLATION :
+                            error is IOException && error.HResult == unchecked((int)0x80070020);
+                        if (!sharing)
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, error);
+                        lastSharingFailure = error;
+                        pause();
+                        continue;
+                    }
+                }
+                pause();
             }
         }
 
@@ -3085,32 +3211,44 @@ namespace OpenCoven
             string sid,
             string expectedProfilePath)
         {
+            DeleteOperatingSystemProfileCore(sid, expectedProfilePath, null);
+        }
+
+        internal static void DeleteOperatingSystemProfileCore(
+            string sid,
+            string expectedProfilePath,
+            ProfileCleanupIdentity cleanupIdentity)
+        {
+            if (cleanupIdentity != null &&
+                (!String.Equals(sid, cleanupIdentity.Sid, StringComparison.Ordinal) ||
+                    !String.Equals(expectedProfilePath, cleanupIdentity.Path, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Profile cleanup capability does not match its owner.");
             string registryPath =
                 @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid;
             string actualProfilePath = null;
+            bool registryProfileExists;
             using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
             {
+                registryProfileExists = profile != null;
                 if (profile != null)
                 {
                     actualProfilePath = Convert.ToString(
                         profile.GetValue("ProfileImagePath"));
                     if (!String.IsNullOrWhiteSpace(actualProfilePath))
                     {
-                        actualProfilePath = Path.GetFullPath(
-                            Environment.ExpandEnvironmentVariables(actualProfilePath));
+                        actualProfilePath = Environment.ExpandEnvironmentVariables(actualProfilePath);
+                        if (!Path.IsPathFullyQualified(actualProfilePath))
+                            throw new InvalidOperationException("Profile cleanup registration is not bound to an absolute path.");
+                        actualProfilePath = Path.GetFullPath(actualProfilePath);
                     }
                 }
             }
-            bool registryProfileExists;
-            using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
-            {
-                registryProfileExists = profile != null;
-            }
+            ValidateProfileCleanupRegistration(registryProfileExists, expectedProfilePath, actualProfilePath);
             bool profileExists =
                 registryProfileExists ||
-                Directory.Exists(expectedProfilePath) ||
+                ProfileCleanupPathExists(expectedProfilePath) ||
                 (!String.IsNullOrWhiteSpace(actualProfilePath) &&
-                    Directory.Exists(actualProfilePath));
+                    ProfileCleanupPathExists(actualProfilePath));
             bool deleteRequested = !profileExists;
             string deleteOutcome = "not-needed";
             int lastDeleteError = 0;
@@ -3119,7 +3257,7 @@ namespace OpenCoven
                 !deleteRequested &&
                 deleteTimer.Elapsed < TimeSpan.FromSeconds(10))
             {
-                if (DeleteProfileW(sid, null, null))
+                if (DeleteProfileW(sid, expectedProfilePath, null))
                 {
                     deleteRequested = true;
                     deleteOutcome = "accepted";
@@ -3144,33 +3282,346 @@ namespace OpenCoven
                 Thread.Sleep(100);
             }
             Stopwatch timer = Stopwatch.StartNew();
-            bool registryExists = false;
-            bool expectedPathExists = false;
-            bool actualPathExists = false;
-            while (timer.Elapsed < TimeSpan.FromSeconds(10))
+            int residualEntries = 0;
+            try
             {
-                using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
-                {
-                    registryExists = profile != null;
-                }
-                expectedPathExists = Directory.Exists(expectedProfilePath);
-                actualPathExists = !String.IsNullOrWhiteSpace(actualProfilePath) &&
-                    Directory.Exists(actualProfilePath);
-                if (!registryExists && !expectedPathExists && !actualPathExists)
-                {
-                    return;
-                }
-                Thread.Sleep(100);
+                CompleteProfileDeletion(
+                    deleteOutcome, cleanupIdentity != null && deleteRequested,
+                    delegate
+                    {
+                        using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
+                            return profile != null;
+                    },
+                    delegate
+                    {
+                        using (RegistryKey hive = Registry.Users.OpenSubKey(sid))
+                        using (RegistryKey classes = Registry.Users.OpenSubKey(sid + "_Classes"))
+                            return hive != null || classes != null;
+                    },
+                    () => ProfileCleanupPathExists(expectedProfilePath),
+                    () => !String.IsNullOrWhiteSpace(actualProfilePath) && ProfileCleanupPathExists(actualProfilePath),
+                    () => DeleteOwnedProfileResidual(cleanupIdentity, timer, ref residualEntries),
+                    () => timer.Elapsed,
+                    () => Thread.Sleep(100));
             }
-            if (!deleteRequested)
+            catch (ProfileCleanupException) when (!deleteRequested)
             {
                 throw new Win32Exception(
                     lastDeleteError,
                     "Ephemeral Windows profile deletion remained blocked.");
             }
-            throw new ProfileCleanupException(
-                deleteOutcome, registryExists, expectedPathExists, actualPathExists);
         }
+
+        internal sealed class ProfileCleanupIdentity
+        {
+            internal readonly string Path;
+            internal readonly string Sid;
+            private readonly BY_HANDLE_FILE_INFORMATION original;
+
+            internal ProfileCleanupIdentity(IntPtr originalHandle, string path, string sid)
+            {
+                Path = path;
+                Sid = sid;
+                original = QueryFileInformation(originalHandle, "Owned profile identity could not be captured.");
+            }
+
+            internal bool Matches(IntPtr handle)
+            {
+                return SameFileIdentity(original,
+                    QueryFileInformation(handle, "Residual profile identity could not be queried."));
+            }
+
+            internal uint Volume { get { return original.VolumeSerialNumber; } }
+        }
+
+        internal static ProfileCleanupIdentity CaptureProfileCleanupIdentity(IntPtr original, string path, string sid)
+        {
+            string profilesRoot = TrimDirectorySeparator(WindowsIsolatedUser.GetProfilesRoot());
+            if (!String.Equals(Path.GetDirectoryName(path), profilesRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Owned profile cleanup path is not a direct profile-root child.");
+            ValidateOwnedProfilePath(original, path, sid, false);
+            return new ProfileCleanupIdentity(original, path, sid);
+        }
+
+        private static CleanupDeleteException ProfileResidualNativeError(
+            int error, string operation, string kind, int depth)
+        {
+            return new CleanupDeleteException(error, "Owned profile residual operation failed.",
+                "phase=profile-residual;op=" + operation + ";kind=" + kind +
+                ";depth=" + (depth <= 4 ? "le4" : depth <= 16 ? "le16" : "le64"));
+        }
+
+        private static void ValidateProfileResidualName(string name)
+        {
+            if (String.IsNullOrEmpty(name) || name.Length > 255 || name == "." || name == ".." ||
+                name.IndexOfAny(new char[] { '\\', '/', ':', '\0', '*', '?' }) >= 0)
+                throw new InvalidOperationException("Residual child name is not a single literal component.");
+        }
+
+        private static string[] ParseProfileResidualNames(byte[] buffer, int used)
+        {
+            if (buffer == null || buffer.Length > 65536 || used < 12 || used > buffer.Length)
+                throw new InvalidOperationException("Residual directory buffer is outside its bounds.");
+            List<string> names = new List<string>();
+            UnicodeEncoding encoding = new UnicodeEncoding(false, false, true);
+            int offset = 0;
+            while (true)
+            {
+                if (used - offset < 12)
+                    throw new InvalidOperationException("Residual directory record is truncated.");
+                uint next = BitConverter.ToUInt32(buffer, offset);
+                uint length = BitConverter.ToUInt32(buffer, offset + 8);
+                if (length == 0 || length > 510 || (length & 1) != 0 || length > used - offset - 12)
+                    throw new InvalidOperationException("Residual directory name length is invalid.");
+                string name;
+                try { name = encoding.GetString(buffer, offset + 12, checked((int)length)); }
+                catch (DecoderFallbackException)
+                {
+                    throw new InvalidOperationException("Residual directory name is not valid UTF-16.");
+                }
+                if (name != "." && name != "..") ValidateProfileResidualName(name);
+                names.Add(name);
+                if (next == 0)
+                {
+                    if (used - offset - 12 - length > 7)
+                        throw new InvalidOperationException("Residual directory buffer has trailing records.");
+                    return names.ToArray();
+                }
+                if ((next & 3) != 0 || next < 12 + length || next > used - offset - 12)
+                    throw new InvalidOperationException("Residual directory record offset is invalid.");
+                offset += checked((int)next);
+            }
+        }
+
+        private static CleanupDeleteException ProfileResidualNtError(int status, string operation, int depth)
+        {
+            CleanupDeleteException native = ProfileResidualNativeError(
+                unchecked((int)ProfileNtStatusToDosError(status)), operation, "entry", depth);
+            return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT operation failed.",
+                native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture));
+        }
+
+        private static SafeFileHandle OpenProfileResidualRelative(
+            SafeFileHandle parent, string name, bool deleteAccess, int depth)
+        {
+            ValidateProfileResidualName(name);
+            bool retained = false;
+            IntPtr nameBuffer = IntPtr.Zero, unicodePointer = IntPtr.Zero;
+            try
+            {
+                parent.DangerousAddRef(ref retained);
+                nameBuffer = Marshal.StringToHGlobalUni(name);
+                PROFILE_UNICODE_STRING unicode = new PROFILE_UNICODE_STRING();
+                unicode.Length = checked((ushort)(name.Length * 2));
+                unicode.MaximumLength = checked((ushort)(unicode.Length + 2));
+                unicode.Buffer = nameBuffer;
+                unicodePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(PROFILE_UNICODE_STRING)));
+                Marshal.StructureToPtr(unicode, unicodePointer, false);
+                PROFILE_OBJECT_ATTRIBUTES attributes = new PROFILE_OBJECT_ATTRIBUTES();
+                attributes.Length = checked((uint)Marshal.SizeOf(typeof(PROFILE_OBJECT_ATTRIBUTES)));
+                attributes.RootDirectory = parent.DangerousGetHandle();
+                attributes.ObjectName = unicodePointer;
+                attributes.Attributes = 0x00001000; // OBJ_DONT_REPARSE
+                PROFILE_IO_STATUS_BLOCK io;
+                SafeFileHandle handle;
+                int status = OpenProfileResidualFile(out handle,
+                    (deleteAccess ? 0x00010000u : 0u) |
+                        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
+                    ref attributes, out io, IntPtr.Zero, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    1, 0x00200020, IntPtr.Zero, 0); // FILE_OPEN; OPEN_REPARSE_POINT | SYNCHRONOUS_IO_NONALERT
+                if (status == 0) return handle;
+                if (handle != null) handle.Dispose();
+                if (status == unchecked((int)0xc0000034) || status == unchecked((int)0xc000000f))
+                    return null; // The single named entry is absent in the retained parent.
+                throw ProfileResidualNtError(status, "relative-open", depth);
+            }
+            finally
+            {
+                if (unicodePointer != IntPtr.Zero) Marshal.FreeHGlobal(unicodePointer);
+                if (nameBuffer != IntPtr.Zero) Marshal.FreeHGlobal(nameBuffer);
+                if (retained) parent.DangerousRelease();
+            }
+        }
+
+        private static void DeleteOwnedProfileResidual(
+            ProfileCleanupIdentity identity, Stopwatch timer, ref int entries)
+        {
+            // The drive-root bootstrap open uses backup semantics. Do not let the supervisor's enabled
+            // restore privilege turn an explicit deletion denial into a successful cleanup.
+            using (WindowsIdentity supervisor = WindowsIdentity.GetCurrent(TokenAccessLevels.Query | TokenAccessLevels.Duplicate))
+            {
+                SafeAccessTokenHandle token;
+                if (!DuplicateProfileCleanupToken(supervisor.Token, 0x002e, IntPtr.Zero, 2, 2, out token))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Residual cleanup token duplication failed.");
+                using (token)
+                {
+                    TOKEN_PRIVILEGES privileges = new TOKEN_PRIVILEGES();
+                    if (!AdjustTokenPrivileges(token.DangerousGetHandle(), true, ref privileges, 0, IntPtr.Zero, IntPtr.Zero) ||
+                        Marshal.GetLastWin32Error() != 0)
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Residual cleanup privileges could not be disabled.");
+                    int visited = entries;
+                    try
+                    {
+                        WindowsIdentity.RunImpersonated(token,
+                            () => DeleteOwnedProfileResidualCore(identity, timer, ref visited));
+                    }
+                    finally { entries = visited; }
+                }
+            }
+        }
+
+        private static void DeleteOwnedProfileResidualCore(
+            ProfileCleanupIdentity identity, Stopwatch timer, ref int entries)
+        {
+            if (identity == null)
+                throw new InvalidOperationException("Profile residual cleanup requires owned identity evidence.");
+            RequireProfileResidualBudget(timer.Elapsed, 0, entries);
+            string drive = Path.GetPathRoot(identity.Path);
+            if (drive.Length != 3 || drive[1] != ':' || drive[2] != '\\')
+                throw new InvalidOperationException("Profile residual cleanup requires a local drive path.");
+            List<SafeFileHandle> ancestors = new List<SafeFileHandle>();
+            try
+            {
+                string parent = Path.GetDirectoryName(identity.Path);
+                string[] segments = parent.Substring(drive.Length).Split(
+                    new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int index = 0; index <= segments.Length; index++)
+                {
+                    RequireProfileResidualBudget(timer.Elapsed, index, entries);
+                    SafeFileHandle ancestor = index == 0 ?
+                        new SafeFileHandle(OpenOwnedProfileDirectory(drive), true) :
+                        OpenProfileResidualRelative(ancestors[index - 1], segments[index - 1], false, index);
+                    if (ancestor == null)
+                        throw new InvalidOperationException("Profile cleanup ancestor disappeared.");
+                    ancestors.Add(ancestor);
+                    FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(
+                        ancestor.DangerousGetHandle(), "Profile ancestor attributes could not be queried.");
+                    if (GetFileType(ancestor.DangerousGetHandle()) != FILE_TYPE_DISK ||
+                        (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                        (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                        throw new InvalidOperationException("Profile cleanup ancestor is not an ordinary disk directory.");
+                }
+                using (SafeFileHandle root = OpenProfileResidualRelative(
+                    ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path), true, 0))
+                {
+                    if (root == null) return;
+                    if (!identity.Matches(root.DangerousGetHandle()))
+                        throw new InvalidOperationException("Profile residual root identity changed.");
+                    ValidateProfileDirectorySecurity(root.DangerousGetHandle(), identity.Sid, false);
+                    DeleteProfileResidualEntry(root, identity.Volume, timer, 0, ref entries);
+                }
+            }
+            finally
+            {
+                for (int index = ancestors.Count - 1; index >= 0; index--) ancestors[index].Dispose();
+            }
+        }
+
+        private static void DeleteProfileResidualEntry(
+            SafeFileHandle handle, uint volume, Stopwatch timer, int depth, ref int entries)
+        {
+            RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
+            IntPtr pointer = handle.DangerousGetHandle();
+            FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(pointer, "Residual entry attributes unavailable.");
+            BY_HANDLE_FILE_INFORMATION information = QueryFileInformation(pointer, "Residual entry identity unavailable.");
+            bool directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            bool reparse = (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            if (GetFileType(pointer) != FILE_TYPE_DISK || information.VolumeSerialNumber != volume)
+                throw new InvalidOperationException("Residual entry is not on the owned profile volume.");
+            if (!directory && (attributes.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
+                throw new InvalidOperationException("Residual read-only file cannot be removed without metadata mutation.");
+            if (directory && !reparse)
+                DeleteProfileResidualDirectoryContents(handle, volume, timer, depth, ref entries);
+            RequireProfileResidualBudget(timer.Elapsed, depth, entries);
+            byte disposition = 1;
+            if (!SetFileInformationByHandle(pointer, 4, ref disposition, 1))
+                throw ProfileResidualNativeError(Marshal.GetLastWin32Error(), "disposition",
+                    reparse ? "reparse" : directory ? "directory" : "file", depth);
+        }
+
+        private static void DeleteProfileResidualDirectoryContents(
+            SafeFileHandle directory, uint volume, Stopwatch timer, int depth, ref int entries)
+        {
+            byte[] buffer = new byte[65536];
+            bool restart = true;
+            while (true)
+            {
+                RequireProfileResidualBudget(timer.Elapsed, depth, entries);
+                PROFILE_IO_STATUS_BLOCK io;
+                int status = QueryProfileResidualDirectory(directory, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                    out io, buffer, (uint)buffer.Length, 12, false, IntPtr.Zero, restart); // FileNamesInformation
+                restart = false;
+                if (status == unchecked((int)0x80000006)) return; // STATUS_NO_MORE_FILES
+                if (status != 0) throw ProfileResidualNtError(status, "handle-enumeration", depth);
+                ulong used = io.Information.ToUInt64();
+                if (used == 0 || used > (ulong)buffer.Length)
+                    throw new InvalidOperationException("Residual handle enumeration did not return a bounded record.");
+                foreach (string name in ParseProfileResidualNames(buffer, checked((int)used)))
+                {
+                    RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
+                    if (name == "." || name == "..") continue;
+                    RequireProfileResidualBudget(timer.Elapsed, depth + 1, entries);
+                    using (SafeFileHandle child = OpenProfileResidualRelative(directory, name, true, depth + 1))
+                    {
+                        if (child != null)
+                            DeleteProfileResidualEntry(child, volume, timer, depth + 1, ref entries);
+                    }
+                }
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_UNICODE_STRING
+        {
+            internal ushort Length;
+            internal ushort MaximumLength;
+            internal IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_OBJECT_ATTRIBUTES
+        {
+            internal uint Length;
+            internal IntPtr RootDirectory;
+            internal IntPtr ObjectName;
+            internal uint Attributes;
+            internal IntPtr SecurityDescriptor;
+            internal IntPtr SecurityQualityOfService;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_IO_STATUS_BLOCK
+        {
+            internal IntPtr Status;
+            internal UIntPtr Information;
+        }
+
+        [DllImport("ntdll.dll", EntryPoint = "NtCreateFile", ExactSpelling = true)]
+        private static extern int OpenProfileResidualFile(
+            out SafeFileHandle handle, uint access, ref PROFILE_OBJECT_ATTRIBUTES attributes,
+            out PROFILE_IO_STATUS_BLOCK io, IntPtr allocation, uint fileAttributes,
+            uint sharing, uint disposition, uint options, IntPtr eaBuffer, uint eaLength);
+
+        [DllImport("ntdll.dll", EntryPoint = "NtQueryDirectoryFile", ExactSpelling = true)]
+        private static extern int QueryProfileResidualDirectory(
+            SafeFileHandle directory, IntPtr completionEvent, IntPtr apc, IntPtr context,
+            out PROFILE_IO_STATUS_BLOCK io, [Out] byte[] buffer, uint length, int informationClass,
+            [MarshalAs(UnmanagedType.U1)] bool singleEntry, IntPtr name,
+            [MarshalAs(UnmanagedType.U1)] bool restart);
+
+        [DllImport("ntdll.dll", EntryPoint = "RtlNtStatusToDosError", ExactSpelling = true)]
+        private static extern uint ProfileNtStatusToDosError(int status);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetFileInformationByHandle(
+            IntPtr handle, int informationClass, ref byte information, uint size);
+
+        [DllImport("advapi32.dll", EntryPoint = "DuplicateTokenEx", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateProfileCleanupToken(
+            IntPtr existingToken, uint desiredAccess, IntPtr securityAttributes,
+            int impersonationLevel, int tokenType, out SafeAccessTokenHandle duplicate);
 
         internal static void DeleteDirectoryTree(string root)
         {

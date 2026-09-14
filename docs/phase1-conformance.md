@@ -36,7 +36,7 @@ inventories remain 197 Darwin / 197 Linux / 196 Windows.
 
 Cave authority is the actual bounded Windows discovery-probe merge
 `d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
-`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.3. It includes the
+`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.4. It includes the
 0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
 `OWNER RIGHTS` compatibility, and the shared 24-second publication probe
 budget required by the protected Windows profile boundary.
@@ -76,6 +76,21 @@ After reviewed Chat landing, SDK coordination must bind the actual merged
 producer and these actual consumer, candidate, and authority identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
+
+### Cave5391 release-version binding
+
+At pinned Cave `d655b2c3`, `package.json` declares `0.4.4`. The health route
+uses that version through `APP_VERSION`, and the conformance engine emits it
+from the same package manifest. The generic fixture's `0.0.0` example does
+not define the running release. The earlier `0.4.3` binding was stale; it is
+corrected without weakening either strict lock normalization or record-version
+equality. Regression coverage reproduces the stale binding's bounded
+`phase1.stage.evidence-authority.build.cave-record.identity.cave-version`
+rejection. This is not a claim that this failure occurred in a protected run.
+
+The subsequent SDK validator must bind the same Cave release version. The
+private SDK968 candidate, its archives, and production consumer remain frozen;
+later SDK public API changes are not included by this correction.
 
 ## Windows OWNER RIGHTS discovery repair
 
@@ -372,12 +387,12 @@ diagnostic-only change.
   retaining the prior reviewed native production source;
 - SDK package candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4`;
 - Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
-  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.3`;
+  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.4`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `e2520e89e11035d853b9c52e2428af3cb47e4650`, tree
-  `c3f248742ab3d38a14c5953f6fe50b1ba9344c04`, retained in the producer ancestry;
+- Chat conformance driver `a9c44b643523f4a4adeb6a03bebf71a449cfa7b5`, tree
+  `d850bf84e299840c565e19449d0601b7a225b824`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1691,12 +1706,12 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 168,186 | `fcfa80ce47da84d32075e9db480cb2dfd012869e7f0452b6b5dfe966a33e09ec` |
+| `.github/workflows/client-v1-conformance.yml` | 174,594 | `34f3427d1046d179d577237c387126b4be8d3b72e9e165e221f79cdc6ea4a577` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,960 | `f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325` |
 | `scripts/phase1-conformance.mjs` | 218,063 | `ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
@@ -1716,7 +1731,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 357,149 | `1e1eff87c65e7968b18f42b81409315571cc4bfda1d8aff1123876854b5d5435` |
+| `scripts/windows-job-supervisor.cs` | 382,142 | `0603a457e11a599bc5271c24bd8139f3a9f1c39b404af12d41f77f2eead2bf48` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
@@ -1725,6 +1740,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 13,587 | `0b6ad14376918315469eb4cd51ba9df719cc54446ad9a596aecc8e8a0b7e48f7` |
+| `scripts/windows-profile-residual-native.test.ps1` | 30,539 | `eab3cfbbc5bb2b32fa46d9a0f8de06cb9e241bfcbe1501beac71b817bd9ab9f5` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |

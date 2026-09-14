@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: 'e2520e89e11035d853b9c52e2428af3cb47e4650',
-  tree: 'c3f248742ab3d38a14c5953f6fe50b1ba9344c04',
+  revision: 'a9c44b643523f4a4adeb6a03bebf71a449cfa7b5',
+  tree: 'd850bf84e299840c565e19449d0601b7a225b824',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -90,8 +90,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
-      blob: '4191787c4a31a49f0b29c5ecd59b9964be156af5',
-      sha256: 'f89b5a181eee23cbd1012926378b49bb54cca78011c428a4c8cc82586ee7739d',
+      blob: '254802f9a59dc0600b696884666e8f592d7a88c8',
+      sha256: 'fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325',
     },
     {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '046018e8766854babaf8066749f98f20f84cbfa3',
-      sha256: '1e1eff87c65e7968b18f42b81409315571cc4bfda1d8aff1123876854b5d5435',
+      blob: '08c388cea16b9c479615b388d2f26a98b99862df',
+      sha256: '0603a457e11a599bc5271c24bd8139f3a9f1c39b404af12d41f77f2eead2bf48',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -124,9 +124,14 @@ const expectedBehaviorAuthority = {
       sha256: 'a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958',
     },
     {
+      path: '.github/workflows/ci.yml',
+      blob: '0b35d8f305c53984fb7a5bd81d8544be5b30f950',
+      sha256: '8f6f16036681811c3051f430ea93078e6fe58501d6f1594ac2225aadaf94a013',
+    },
+    {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'dd441d15c4290320dc8a0390e6d44719caa8f6c3',
-      sha256: 'fcfa80ce47da84d32075e9db480cb2dfd012869e7f0452b6b5dfe966a33e09ec',
+      blob: '027c0907c4981a36bd851d920d0e94f537116d16',
+      sha256: '34f3427d1046d179d577237c387126b4be8d3b72e9e165e221f79cdc6ea4a577',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -262,7 +267,7 @@ const expectedEntries = {
         sha256: '5318c4c6d511f0bcda42e4fd88168f549fc3ea74a516d7a4b2004e1c5023c4b4',
       },
     ],
-    caveVersion: '0.4.3',
+    caveVersion: '0.4.4',
     covenVersion: '0.1.0',
     consumerLock: {
       path: 'pnpm-lock.yaml',
@@ -520,6 +525,22 @@ function createCheckoutFixture() {
 }
 
 describe('Phase 1 conformance lock', () => {
+  test('requires the Cave5391 release and rejects the historical release version', () => {
+    expect(expectedEntries.cave.revision).toBe('d655b2c3b6ecabf3a5eaea9e314b180028321d81');
+    expect(() =>
+      readPhase1ConformanceLock(writeLock({ version: 5, ...expectedEntries })),
+    ).not.toThrow();
+    expect(() =>
+      readPhase1ConformanceLock(
+        writeLock({
+          version: 5,
+          ...expectedEntries,
+          release: { ...expectedEntries.release, caveVersion: '0.4.3' },
+        }),
+      ),
+    ).toThrow('release authority versions are invalid.');
+  });
+
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     const lock = readPhase1ConformanceLock();
     expect(lock).toEqual({

@@ -252,5 +252,56 @@ not prove that the protected producer had a held-file blocker.
 
 That run stopped because the inherited ACL control did not establish a DELETE
 denial. The corrected control denies deletion directly on the marker as well as
-through its parent, and requires native access denied (5) before disposal. Its
-native result remains pending.
+through its parent, and requires native access denied (5) before disposal.
+
+The corrected [CI34846969329](https://github.com/OpenCoven/chat/actions/runs/34846969329),
+at `8c16cf011ba4ed66bda174906f8e96c454fa41fb`, completed the native Windows
+supervisor job successfully. Empty and ordinary profiles were removed. The
+held-file case reproduced the same survival and ineffective explicit-path retry.
+The explicit ACL denial was established, but userenv nevertheless removed that
+profile completely. This distinguishes these two controlled mechanisms; it does
+not identify the protected producer's blocker or make residual deletion safe
+without its own ownership and traversal guarantees.
+
+Protected [run 34849881134](https://github.com/OpenCoven/chat/actions/runs/34849881134)
+used `535d48196d96a4fde39cd62c47ccec2307a5b3d6`, after #272 corrected the
+Cave release binding to 0.4.4. Windows again reported
+`phase1.cave-authority.startup.exit`, then the same accepted-deletion,
+absent-registration, surviving-profile diagnostic. Linux and Darwin completed.
+The Windows job used `windows-2025-vs2026` image `20260907.229.1`, so the
+reported image version matched the reviewed version. Neither a release-version
+correction nor an image-version mismatch explains away the remaining failures.
+
+## Authorized residual filesystem cleanup
+
+The repair gives userenv the first opportunity to remove the profile. A residual
+pass requires completed terminal quarantine, a disabled isolated account, the
+original retained profile identity, and successful release of the quota token
+and owned directory pins. Ordinary disposal without that authorization and
+creation-failure cleanup retain userenv-only behavior. A present registration
+must identify the expected profile before userenv is called.
+
+Residual deletion is permitted only after the registration and both user hives
+are absent. It reopens the original directory by its saved volume/file identity,
+pins its ancestors and traversed directories, opens entries without following
+their final reparse points, and unlinks through each entry's own DELETE handle.
+It does not reset ACLs or file attributes. Read-only files, access denial, changed
+root identity, unsafe ancestors, and traversal bounds remain terminal failures.
+The residual pass uses a separate supervisor-token duplicate with privileges
+disabled so backup semantics cannot bypass the ACL controls.
+
+Only sharing violation 32 is retryable, within the existing ten-second
+post-userenv budget. Registration, hive, and actual path disappearance remain
+mandatory; an inaccessible path is not reported as absent. Diagnostics contain
+fixed categories and native statuses rather than private paths or exception text.
+
+`scripts/windows-profile-residual-policy.test.ps1` exercises the completion and
+authorization policy portably. `scripts/windows-profile-residual-native.test.ps1`
+covers actual authorized disposal, delayed and persistent holders, and adversarial
+residual filesystem states. These run in a separate, `ci:full`-gated Windows job
+with a fifteen-minute deadline, rather than extending the nearly full existing
+supervisor job. Production deadlines and quota limits are unchanged.
+
+Native execution of the repair remains required. The earlier successful
+characterization run does not validate this new deletion authority, establish
+the protected producer's blocker, or resolve Cave's separate early startup exit.
