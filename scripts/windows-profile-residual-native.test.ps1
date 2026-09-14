@@ -73,6 +73,9 @@ namespace OpenCoven.Tests {
                 return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
         }
         public static void SetReadDenial(string path, bool denied) {
+            SetReadDenialWithAccess(path, denied, 0x00040000, 0x80000004);
+        }
+        private static void SetReadDenialWithAccess(string path, bool denied, uint access, uint information) {
             using (var user = WindowsIdentity.GetCurrent()) {
                 if (user.User == null) throw new InvalidOperationException("Fixture supervisor SID unavailable.");
                 var acl = new RawSecurityDescriptor("D:P" + (denied ? "(D;;0x1;;;WD)" : "") +
@@ -83,14 +86,51 @@ namespace OpenCoven.Tests {
                 try {
                     Marshal.Copy(bytes, 0, native, bytes.Length);
                     // Set only the retained entry's DACL, never the junction target's ACL.
-                    using (var handle = CreateFileW(path, 0x00040000, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
+                    using (var handle = CreateFileW(path, access, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
                         if (handle.IsInvalid)
                             throw new Win32Exception(Marshal.GetLastWin32Error(), "Fixture ACL handle unavailable.");
-                        uint status = SetSecurityInfo(handle, 1, 0x80000004, IntPtr.Zero, IntPtr.Zero, native, IntPtr.Zero);
+                        uint status = SetSecurityInfo(handle, 1, information, IntPtr.Zero, IntPtr.Zero, native, IntPtr.Zero);
                         if (status != 0) throw new Win32Exception((int)status, "Fixture read denial could not be set.");
                     }
                 } finally { Marshal.FreeHGlobal(native); }
             }
+        }
+        public static void CompareReadDenialControls(string root) {
+            Directory.CreateDirectory(root);
+            uint[] access = { 0x00040000, 0x00060000, 0x00040000 };
+            uint[] information = { 0x80000004, 0x80000004, 0x00000004 };
+            string[] labels = { "baseline", "read-control", "unprotected-control" };
+            var cleanupFailures = new List<Exception>();
+            for (int index = 0; index < labels.Length; index++) {
+                string path = Path.Combine(root, index.ToString() + ".bin");
+                string phase = "create";
+                try {
+                    File.WriteAllText(path, "owned");
+                    phase = "install";
+                    SetReadDenialWithAccess(path, true, access[index], information[index]);
+                    phase = "denied-read";
+                    int denied = ReadAccess(path);
+                    Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";denied-read=" + denied);
+                    phase = "restore";
+                    SetReadDenialWithAccess(path, false, access[index], information[index]);
+                    phase = "restored-read";
+                    int restored = ReadAccess(path);
+                    Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";restored-read=" + restored);
+                    if (denied != 5 || restored != 0)
+                        Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";contract=mismatch");
+                } catch (Exception error) {
+                    string operation = error is Win32Exception && error.Message == "Fixture ACL handle unavailable." ? "open" :
+                        error is Win32Exception && error.Message == "Fixture read denial could not be set." ? "set" : "other";
+                    Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";phase=" + phase +
+                        ";operation=" + operation + ";cause=" + FailureCategory(error));
+                } finally {
+                    try { File.Delete(path); } catch (Exception error) { cleanupFailures.Add(error); }
+                }
+            }
+            try { Directory.Delete(root); } catch (Exception error) { cleanupFailures.Add(error); }
+            if (cleanupFailures.Count != 0)
+                throw new InvalidOperationException("Native ACL comparison fixture cleanup failed: count=" + cleanupFailures.Count + ".",
+                    new AggregateException(cleanupFailures));
         }
         private static object Invoke(MethodInfo method, params object[] args) {
             try { return method.Invoke(null, args); }
@@ -401,6 +441,9 @@ if ($invalidSharing -isnot [InvalidOperationException] -or
 }
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
+
+$aclComparisonRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-acl-comparison-' + [Guid]::NewGuid().ToString('N'))
+[OpenCoven.Tests.ProfileResidualNativeFixture]::CompareReadDenialControls($aclComparisonRoot)
 
 $aclProbeRoot = Join-Path ([IO.Path]::GetTempPath()) ('opencoven-residual-acl-' + [Guid]::NewGuid().ToString('N'))
 $aclProbeFile = Join-Path $aclProbeRoot 'marker.bin'
