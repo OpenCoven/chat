@@ -343,4 +343,40 @@ describe('native launch publication observation', () => {
     child.stderr.write(`${prefix}authority-init\n`);
     expect((await first).message).toContain('.publication.authority-init');
   });
+
+  test('does not attribute one launch refusal to a later overlapping request', async () => {
+    const child = new LaunchChild();
+    const requests: { id: string }[] = [];
+    child.stdin.write = (line) => {
+      requests.push(JSON.parse(line));
+      return true;
+    };
+    const client = new NativeRpcClient(child);
+    const first = launchFailure(client);
+    const second = launchFailure(client);
+    const [firstId, secondId] = requests.map((request) => request.id);
+    if (firstId === undefined || secondId === undefined) {
+      throw new Error('Overlapping launch requests were not sent');
+    }
+    child.stdout.write(
+      `${JSON.stringify({ id: firstId, ok: false, error: { code: child.code } })}\n`,
+    );
+    child.stdout.write(
+      `${JSON.stringify({ id: secondId, ok: false, error: { code: child.code } })}\n`,
+    );
+    child.stderr.write(`${prefix}authority-init\n`);
+    child.stderr.write(
+      `[chat] native launch stderr checkpoint: ${createHash('sha256').update(firstId).digest('hex')}\n`,
+    );
+    child.stderr.write(
+      `[chat] native launch stderr checkpoint: ${createHash('sha256').update(secondId).digest('hex')}\n`,
+    );
+
+    expect((await first).message).toBe(
+      'phase1.native-scenarios.launch.discovery-not-found.publication.authority-init',
+    );
+    expect((await second).message).toBe(
+      'phase1.native-scenarios.launch.discovery-not-found.publication.not-observed',
+    );
+  });
 });

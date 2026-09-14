@@ -4046,11 +4046,11 @@ function createCavePublicationObservation(requestId) {
   let observedBytes = 0;
   let pending = Buffer.alloc(0);
   let lineOverflow = false;
+  let lineWithinLimit = true;
   let accepted;
   let completed;
   const checkpoint = `[chat] native launch stderr checkpoint: ${createHash('sha256').update(requestId).digest('hex')}`;
-  const result = () =>
-    accepted ?? completed ?? (observedBytes > limit ? 'output-limit' : undefined);
+  const result = () => accepted ?? (observedBytes > limit ? 'output-limit' : completed);
   const appendPending = (bytes) => {
     if (bytes.length === 0) return;
     if (pending.length + bytes.length <= maximumLineBytes) {
@@ -4069,44 +4069,62 @@ function createCavePublicationObservation(requestId) {
   };
   return {
     observe(chunk) {
-      if (result() !== undefined) return;
+      if (completed !== undefined) return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = limit - observedBytes;
-      observedBytes = Math.min(limit + 1, observedBytes + bytes.length);
-      const inspected = bytes.subarray(0, Math.max(0, remaining));
+      let remaining = Math.max(0, limit - observedBytes);
       let offset = 0;
-      while (offset < inspected.length) {
-        const newline = inspected.indexOf(10, offset);
+      while (offset < bytes.length) {
+        const newline = bytes.indexOf(10, offset);
         if (newline === -1) {
-          appendPending(inspected.subarray(offset));
+          const trailing = bytes.subarray(offset);
+          appendPending(trailing);
+          if (trailing.length > remaining) lineWithinLimit = false;
+          observedBytes = Math.min(limit + 1, observedBytes + trailing.length);
           break;
         }
-        appendPending(inspected.subarray(offset, newline));
+        const lineBytes = bytes.subarray(offset, newline);
+        appendPending(lineBytes);
+        if (lineBytes.length > remaining) lineWithinLimit = false;
+        observedBytes = Math.min(limit + 1, observedBytes + lineBytes.length);
+        remaining = Math.max(0, limit - observedBytes);
+        if (remaining === 0) {
+          lineWithinLimit = false;
+        } else {
+          observedBytes = Math.min(limit + 1, observedBytes + 1);
+          remaining -= 1;
+        }
         const line = pending.toString('utf8').replace(/\r$/u, '');
         pending = Buffer.alloc(0);
         // A checkpoint can follow an unterminated private line; it must not turn
         // that prefix into a complete publisher refusal.
         if (line.endsWith(checkpoint)) {
           completed = 'not-observed';
-          break;
+          lineOverflow = false;
+          lineWithinLimit = true;
+          return bytes.subarray(newline + 1);
         }
-        if (!lineOverflow) {
+        if (!lineOverflow && lineWithinLimit && accepted === undefined) {
           const match = /^\[cave\] client-v1 discovery publication refused: ([a-z-]+)$/u.exec(line);
           if (match !== null && cavePublisherCodes.has(match[1])) {
             accepted = match[1];
-            break;
           }
         }
         lineOverflow = false;
+        lineWithinLimit = true;
         offset = newline + 1;
       }
-      if (observedBytes > limit) pending = Buffer.alloc(0);
+      return Buffer.alloc(0);
     },
     finish(reason) {
-      if (result() === undefined) completed = reason;
+      if (completed === undefined) completed = reason;
       pending = Buffer.alloc(0);
+      lineOverflow = false;
+      lineWithinLimit = true;
     },
     result,
+    closed() {
+      return completed !== undefined;
+    },
   };
 }
 
@@ -4124,6 +4142,7 @@ export class NativeRpcClient {
     this.requestTimeoutMs = requestTimeoutMs;
     this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
     this.pending = new Map();
+    this.launchPublications = [];
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
     this.sequence = 0;
@@ -4137,13 +4156,22 @@ export class NativeRpcClient {
       : 'drain-unavailable';
     // Drain all stderr, retaining only bounded, complete publisher refusal categories.
     child.stderr?.on('data', (chunk) => {
-      for (const [id, pending] of this.pending) {
-        pending.publication?.observe(chunk);
-        this.resolveResponse(id, pending);
+      let remaining = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      while (remaining.length > 0 && this.launchPublications.length > 0) {
+        const current = this.launchPublications[0];
+        remaining = current.publication.observe(remaining);
+        const pending = this.pending.get(current.id);
+        if (pending !== undefined) this.resolveResponse(current.id, pending);
+        if (!current.publication.closed()) break;
+        this.launchPublications.shift();
       }
     });
     const finishStderr = (reason) => {
       this.stderrCompletion = reason;
+      for (const current of this.launchPublications) {
+        current.publication.finish(reason);
+      }
+      this.launchPublications = [];
       for (const [id, pending] of this.pending) {
         pending.publication?.finish(reason);
         this.resolveResponse(id, pending);
@@ -4190,6 +4218,7 @@ export class NativeRpcClient {
         pending.reject(new Error('native RPC closed before responding'));
       }
       this.pending.clear();
+      this.launchPublications = [];
     });
   }
 
@@ -4227,13 +4256,20 @@ export class NativeRpcClient {
       const publication =
         command === 'cave_launch' ? createCavePublicationObservation(id) : undefined;
       if (this.stderrCompletion !== undefined) publication?.finish(this.stderrCompletion);
+      if (publication !== undefined) this.launchPublications.push({ id, publication });
       const timer = setTimeout(() => {
         if (pending.response !== undefined) {
           publication?.finish('drain-timeout');
+          this.launchPublications = this.launchPublications.filter(
+            (entry) => entry.publication !== publication,
+          );
           this.resolveResponse(id, pending);
           return;
         }
         this.pending.delete(id);
+        this.launchPublications = this.launchPublications.filter(
+          (entry) => entry.publication !== publication,
+        );
         rejectRequest(new Error(`native RPC timed out for ${command}`));
       }, timeoutMs);
       const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
