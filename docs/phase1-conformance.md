@@ -34,14 +34,18 @@ The other three archives are byte-identical. Earlier SDK77 evidence remains
 historical and does not qualify the changed runtime. The primary assertion
 inventories remain 197 Darwin / 197 Linux / 196 Windows.
 
-Cave authority is the actual bounded Windows discovery-probe merge
-`d655b2c3b6ecabf3a5eaea9e314b180028321d81` (tree
-`974d43afc735dc9017460a5b95b4c86a13388c1f`), version 0.4.4. It includes the
+Cave authority is the reviewed OpenCoven/coven-cave#5409 merge
+`5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d` (tree
+`23cd75ef310e1f293a40e3eee183ea8df6180544`), version `0.4.2`. It retains the
 0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
 `OWNER RIGHTS` compatibility, and the shared 24-second publication probe
-budget required by the protected Windows profile boundary.
+budget required by the protected Windows profile boundary. The 77-file upgrade
+from historical `d655b2c3` also includes the reviewed deferred device-policy
+and ReviewDesk fixes, native Windows SID handling, bundled YAML dependencies,
+bounded startup-exit diagnostics, and direct-.NET ACL path resolution.
+This is a source/version upgrade, not a metadata-only correction.
 The packed SDK fixture retains its authenticated compatibility-source
-provenance at `e806655a`; the later diagnostic authority contains that
+provenance at `e806655a7100e9d589662a6f3817c3fd8cde48ad`; the adopted authority contains that
 ancestor and identical fixture bytes. The Chat fixture mirror uses the same
 JSON values with repository formatting. Coven authority is unchanged.
 
@@ -77,20 +81,40 @@ producer and these actual consumer, candidate, and authority identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
 
-### Cave5391 release-version binding
+### Cave5409 source-version binding
 
-At pinned Cave `d655b2c3`, `package.json` declares `0.4.4`. The health route
+At pinned Cave `5ee8545`, `package.json` declares `0.4.2`. The health route
 uses that version through `APP_VERSION`, and the conformance engine emits it
-from the same package manifest. The generic fixture's `0.0.0` example does
-not define the running release. The earlier `0.4.3` binding was stale; it is
-corrected without weakening either strict lock normalization or record-version
-equality. Regression coverage reproduces the stale binding's bounded
+from the same package manifest. The engine is 153,390 bytes with SHA-256
+`e2742e3041648082e1087313f005a6e9407e2b8d2180881c42e109257804ec7b`.
+The lower version comes from the qualified upstream source, not a change to
+the SDK candidate. Neither historical `0.4.4` nor `0.4.3` is accepted by the
+new binding. The generic fixture's `0.0.0` example does not define the running
+release. Strict lock normalization and record-version equality remain intact.
+Regression coverage retains the bounded
 `phase1.stage.evidence-authority.build.cave-record.identity.cave-version`
 rejection. This is not a claim that this failure occurred in a protected run.
 
-The subsequent SDK validator must bind the same Cave release version. The
-private SDK968 candidate, its archives, and production consumer remain frozen;
-later SDK public API changes are not included by this correction.
+The registry is an assertion inventory, not npm metadata. Its schema-2
+`provenance` identifies the exact Cave commit, tree, engine bytes, and coverage
+options. `sources.cave.releaseVersion` identifies the source manifest version.
+Neither field establishes a compatible published package; Cave's manifest is
+private. The historical schema-1 registry stays unchanged.
+
+The complete SDK `88332efc` lock and registry fixtures retain their original
+bytes and demonstrate rejection of this new Cave pin. Before protected
+execution, the subsequent SDK validator must bind the actual integrated Chat
+producer, its separate harness authority, Cave `5ee8545`, the new engine and
+registry provenance, and release version `0.4.2`. The ordered 109 required Cave
+assertions (110 with coverage), 197 Darwin / 197 Linux / 196 Windows primary
+totals, and exclusions remain unchanged.
+
+The private SDK968 candidate, its archives, and production consumer
+`ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49` remain frozen. The harness source
+branches from `9c4aa1f2` before Chat #277, so the newer UI's native changes do
+not enter the frozen production deltas. A true merge preserves both histories.
+This source preparation is not SDK #38 acceptance, a validator-scope rotation,
+a protected-run approval, SHIP authorization, or package publication.
 
 ### Bounded pre-readiness exit observations
 
@@ -117,10 +141,12 @@ accepted as diagnostic fields.
 The existing ordinary Windows job runs the finite parser and actual Node-pipe
 transport cases without a protected approval. That is transport coverage, not
 a reproduction of the protected Cave server failure: the native supervisor
-suite does not build and launch that server. Pinned Cave `d655b2c3` still emits
-the generic exit message; observing the additional categories requires the
-separately reviewed Cave counterpart and an explicit authority rebind. No
-startup repair or residual-profile cleanup is claimed by this instrumentation.
+suite does not build and launch that server. Historical Cave `d655b2c3` emits
+the generic exit message; adopted Cave `5ee8545` includes the bounded categories
+from #5401 and the direct-.NET ACL path-resolution repair from #5409.
+The qualified source's ordinary CI passed, but no new protected run establishes
+the original startup failure's cause or its resolution. The separate Chat
+residual-profile cleanup work is not part of this adoption.
 
 ## Windows OWNER RIGHTS discovery repair
 
@@ -416,8 +442,8 @@ diagnostic-only change.
   `ffd1963ef9539c7a679909200175fb11a9305c95`, the fresh SDK 0.0.1 consumer
   retaining the prior reviewed native production source;
 - SDK package candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4`;
-- Cave authority `d655b2c3b6ecabf3a5eaea9e314b180028321d81`, tree
-  `974d43afc735dc9017460a5b95b4c86a13388c1f`, release `0.4.4`;
+- Cave authority `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d`, tree
+  `23cd75ef310e1f293a40e3eee183ea8df6180544`, release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
@@ -1736,12 +1762,12 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 174,594 | `3a777a392bda7a39fb110ff4570869e4776dc6544e2920d225219491670aebe6` |
+| `.github/workflows/client-v1-conformance.yml` | 174,594 | `6fb18c7aa7e433fe4157cf0543b4ee2a339d0ed7d6201a13aa16883645027786` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 48,960 | `fb9e078262de61f4af8ad783cb782d22c05e02ef332979acb29542de164f1325` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
 | `scripts/phase1-conformance.mjs` | 218,132 | `4fec116b52831427acb6b84d68d7916c33d30e00e72e0eb0c04a1432f4ac49ce` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
