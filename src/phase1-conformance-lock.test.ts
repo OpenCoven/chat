@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '498bf82da2c7008a6750a89c9655fa5a3cc82b9b',
-  tree: '004f89bc392154de62463ffbce2da74c58ddb54c',
+  revision: '2b242c53ef7655d8b6759cf4d206d84eb773884c',
+  tree: 'b2cbe21fffce4c38751005167ca54beb62305ccd',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: 'eb81af47dbee7fbb509c1df89dd81b775227d040',
-      sha256: 'b7899921e8eb30a92bd4db1fcd79cb864cb1ed8d134a006c3acdec9a944b87ac',
+      blob: '6e8af2f30c90e6cfc32010a40941449f36a20c31',
+      sha256: 'ca9f25bb730d335a060c99be4ce67d38a9b8900eca2242fb5591f462fb23173c',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: 'c0783960973391e53897006617892829d959be6d',
-      sha256: '627aa325530a5edc263433eff6bd7745652d057dceab80471a0f9d22fd7dc6d1',
+      blob: '0a45b266d5e935c24e9676ecf9a71bef9ef9fff7',
+      sha256: '0c83582a519b188a03e31578fe697dc32854570f5b6cbf17da88328db6997cc7',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '4460373e7dd89ecdd937dde5b52465906a64b512',
-      sha256: 'd807b27e8594118bb56cb28d447d23e83f5e7aa7f87ea15c94980e3d5dd5eb46',
+      blob: '95e5105dfe8eabb5aa0a2142450dac1eda26d3f0',
+      sha256: '6562d227c9b2347f1b298a956f56309956bab2e98831ee7c5e4768e28fb3fcb6',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '19be242bf703d31630291c385a0a4eb548f5f308',
-      sha256: 'a3c406867a8fda5b3bc4d3afc90001a7b110cab5762f3f2da0ce7d5c1d5d2a39',
+      blob: '3f7ec5a265f992f638dfbacb0d60a5bf2fbf9636',
+      sha256: 'e5a34e12d2d13b28eb3154a40db8872c553692eabb8bf8b1e4b180df2490a90a',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
