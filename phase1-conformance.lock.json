@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "b1b38d3fc5beb679b3962cfcfee12cb668f5c39d"
+    "revision": "e2520e89e11035d853b9c52e2428af3cb47e4650"
   },
   "harnessAuthority": {
-    "revision": "b1b38d3fc5beb679b3962cfcfee12cb668f5c39d",
-    "tree": "f221b423ce232683b5f534ed8365eba4098021c9",
+    "revision": "e2520e89e11035d853b9c52e2428af3cb47e4650",
+    "tree": "c3f248742ab3d38a14c5953f6fe50b1ba9344c04",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -141,8 +141,8 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "c0cbfce43ab56715eb31b4d7813d94e6e40cc725",
-        "sha256": "a4ed6cea6d9ce627a1556630e68d330d0706f85c3912f82e3078a7ebbfd67a64"
+        "blob": "50fc256732ad8abda6e9f7d74ffd0b6946edf7aa",
+        "sha256": "d2e3a59877c1f93fb9bede10b70e9d7cbe0bdefa37da0c298acf8fb43a4ae1b5"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
