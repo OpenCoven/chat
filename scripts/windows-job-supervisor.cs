@@ -1415,6 +1415,9 @@ namespace OpenCoven
 
         internal static string ClassifyCleanupError(Exception error)
         {
+            WindowsJobSupervisor.ProfileCleanupException profile =
+                error as WindowsJobSupervisor.ProfileCleanupException;
+            if (profile != null) return profile.Diagnostic;
             Win32Exception native = error as Win32Exception;
             if (native != null)
             {
@@ -3056,6 +3059,29 @@ namespace OpenCoven
             }
         }
 
+        internal sealed class ProfileCleanupException : InvalidOperationException
+        {
+            internal string Diagnostic { get; private set; }
+
+            public ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists)
+                : base("Ephemeral Windows profile survived cleanup.")
+            {
+                if ((deleteOutcome != "not-needed" &&
+                    deleteOutcome != "accepted" &&
+                    deleteOutcome != "not-found") ||
+                    (!registryExists && !expectedPathExists && !actualPathExists))
+                    throw new ArgumentException("Invalid profile cleanup diagnostic.");
+                Diagnostic = "profile-remained[delete=" + deleteOutcome +
+                    ";registry=" + (registryExists ? "1" : "0") +
+                    ";expected=" + (expectedPathExists ? "1" : "0") +
+                    ";actual=" + (actualPathExists ? "1" : "0") + "]";
+            }
+        }
+
         internal static void DeleteOperatingSystemProfile(
             string sid,
             string expectedProfilePath)
@@ -3087,6 +3113,7 @@ namespace OpenCoven
                 (!String.IsNullOrWhiteSpace(actualProfilePath) &&
                     Directory.Exists(actualProfilePath));
             bool deleteRequested = !profileExists;
+            string deleteOutcome = "not-needed";
             int lastDeleteError = 0;
             Stopwatch deleteTimer = Stopwatch.StartNew();
             while (
@@ -3096,6 +3123,7 @@ namespace OpenCoven
                 if (DeleteProfileW(sid, null, null))
                 {
                     deleteRequested = true;
+                    deleteOutcome = "accepted";
                     break;
                 }
                 int error = Marshal.GetLastWin32Error();
@@ -3104,6 +3132,7 @@ namespace OpenCoven
                     error == ERROR_NOT_FOUND)
                 {
                     deleteRequested = true;
+                    deleteOutcome = "not-found";
                     break;
                 }
                 if (error != ERROR_SHARING_VIOLATION)
@@ -3116,17 +3145,19 @@ namespace OpenCoven
                 Thread.Sleep(100);
             }
             Stopwatch timer = Stopwatch.StartNew();
+            bool registryExists = false;
+            bool expectedPathExists = false;
+            bool actualPathExists = false;
             while (timer.Elapsed < TimeSpan.FromSeconds(10))
             {
-                bool registryExists;
                 using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
                 {
                     registryExists = profile != null;
                 }
-                if (!registryExists &&
-                    !Directory.Exists(expectedProfilePath) &&
-                    (String.IsNullOrWhiteSpace(actualProfilePath) ||
-                        !Directory.Exists(actualProfilePath)))
+                expectedPathExists = Directory.Exists(expectedProfilePath);
+                actualPathExists = !String.IsNullOrWhiteSpace(actualProfilePath) &&
+                    Directory.Exists(actualProfilePath);
+                if (!registryExists && !expectedPathExists && !actualPathExists)
                 {
                     return;
                 }
@@ -3138,8 +3169,8 @@ namespace OpenCoven
                     lastDeleteError,
                     "Ephemeral Windows profile deletion remained blocked.");
             }
-            throw new InvalidOperationException(
-                "Ephemeral Windows profile survived cleanup.");
+            throw new ProfileCleanupException(
+                deleteOutcome, registryExists, expectedPathExists, actualPathExists);
         }
 
         internal static void DeleteDirectoryTree(string root)
