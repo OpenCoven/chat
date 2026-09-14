@@ -38,6 +38,7 @@ fn marker_home_from(
     cleanup_home.or(ambient_home)
 }
 
+#[cfg(any(windows, test))]
 fn marker_home_uses_profile_identity(cleanup_home: &Option<OsString>) -> bool {
     cleanup_home.is_some()
 }
