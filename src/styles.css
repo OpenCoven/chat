@@ -60,10 +60,23 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: clip;
+  overscroll-behavior: none;
+}
+
+html {
+  height: 100dvh;
+}
+
 body {
   margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
 
   /*
    * Restrained sacred geometry: a hexagonal field, held at an opacity where it
@@ -115,10 +128,6 @@ code {
   background: rgba(103, 232, 249, 0.06);
   color: var(--accent-cyan);
   font-size: 0.92em;
-}
-
-#root {
-  min-height: 100vh;
 }
 
 .app-shell {

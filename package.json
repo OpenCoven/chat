@@ -31,8 +31,7 @@
     "cargo:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "cargo:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "app:dev": "tauri dev",
-    "app:build": "tauri build",
-    "app:build:demo": "VITE_DEFAULT_DEMO=chat tauri build --config src-tauri/tauri.demo.conf.json"
+    "app:build": "tauri build"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
@@ -44,7 +43,9 @@
     "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.0.1.tgz",
     "@tauri-apps/api": "2.11.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "pnpm": {
     "overrides": {
