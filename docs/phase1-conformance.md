@@ -2355,3 +2355,18 @@ the returned fresh snapshot. Native Windows coverage keeps a real owner-only
 denial across both reads to prove persistent denial remains terminal, then
 restores only the test fixture between reads and verifies complete snapshot
 accounting plus a real byte-limit breach.
+
+## Native cleanup absence verification
+
+Native cleanup checks every account in the authenticated cleanup scope after
+all delete calls finish and before consuming the grant or returning the empty
+custody digest. The mutation lock remains held across deletion and readback.
+macOS readback searches the same isolated keychain used for deletion; Windows
+and Linux use the same native service/account entries. A retained entry or a
+readback error rejects cleanup and preserves the grant for retry.
+
+This closes the gap where a successful delete call alone could produce an
+`empty: true` response. It does not establish the cause of the Windows native
+E2E failure in Chat #274, or prove that another process cannot create an entry
+after verification. Fresh native CI, reviewed source binding, and protected
+validation remain required before accepting this producer.
