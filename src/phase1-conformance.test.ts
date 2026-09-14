@@ -4002,9 +4002,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
     setImmediate(() => {
       observer.write(
-        Buffer.from(
-          '[cave] client-v1 discovery publication refused: target-owner-shared\n',
-        ),
+        Buffer.from('[cave] client-v1 discovery publication refused: target-owner-shared\n'),
       );
     });
 

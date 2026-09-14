@@ -4285,8 +4285,7 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   const caveDiscoveryPublicationObserver = createCaveDiscoveryPublicationObserver();
   child.stderr.on('data', (chunk) => caveDiscoveryPublicationObserver.write(chunk));
   return new NativeRpcClient(child, {
-    caveDiscoveryPublicationFailure: () =>
-      caveDiscoveryPublicationObserver.failureAfterDrain(),
+    caveDiscoveryPublicationFailure: () => caveDiscoveryPublicationObserver.failureAfterDrain(),
   });
 }
 
