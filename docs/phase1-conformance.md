@@ -2376,3 +2376,8 @@ The cleanup readback source is pinned at
 `3974a8a05eafb2d5c38c87047d4e7396f44a3c91`. Preserve that commit in producer
 ancestry when landing; the following lock update binds its harness and native
 production deltas without changing the SDK candidate or counterpart revisions.
+
+Local validation passed all 173 Rust library tests, Clippy with warnings denied,
+and formatting. Independent review found no issues. Chat #275 carries `ci:full`
+to run the native PR lanes; those results and fresh protected validation are
+separate requirements and are not implied by the local checks.
