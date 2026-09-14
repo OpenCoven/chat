@@ -38,6 +38,10 @@ fn marker_home_from(
     cleanup_home.or(ambient_home)
 }
 
+fn marker_home_uses_profile_identity(cleanup_home: &Option<OsString>) -> bool {
+    cleanup_home.is_some()
+}
+
 fn marker_home() -> Option<OsString> {
     marker_home_from(std::env::var_os(CLEANUP_HOME_ENV), std::env::var_os("HOME"))
 }
@@ -808,7 +812,13 @@ mod marker_io {
 
     impl MarkerDirectory {
         fn open() -> Result<Self, ()> {
-            let home = super::marker_home().ok_or(())?;
+            let cleanup_home = std::env::var_os(super::CLEANUP_HOME_ENV);
+            let home_owner = if super::marker_home_uses_profile_identity(&cleanup_home) {
+                WindowsDirectoryOwner::Trusted
+            } else {
+                WindowsDirectoryOwner::CurrentUser
+            };
+            let home = super::marker_home_from(cleanup_home, std::env::var_os("HOME")).ok_or(())?;
             let home = PathBuf::from(home);
             if !home.is_absolute()
                 || home
@@ -817,7 +827,7 @@ mod marker_io {
             {
                 return Err(());
             }
-            let mut chain = vec![pin_directory(home.clone(), WindowsDirectoryOwner::Trusted)?];
+            let mut chain = vec![pin_directory(home.clone(), home_owner)?];
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
@@ -1241,7 +1251,9 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{marker_home_from, marker_io, MarkerIdentityError};
+    use super::{
+        marker_home_from, marker_home_uses_profile_identity, marker_io, MarkerIdentityError,
+    };
 
     struct TestHome(PathBuf);
 
@@ -1279,6 +1291,14 @@ mod tests {
             marker_home_from(Some(isolated.clone()), Some(ambient)),
             Some(isolated)
         );
+    }
+
+    #[test]
+    fn only_an_explicit_cleanup_home_uses_the_windows_profile_identity() {
+        assert!(marker_home_uses_profile_identity(&Some(
+            std::ffi::OsString::from(r"C:\Users\Coven"),
+        )));
+        assert!(!marker_home_uses_profile_identity(&None));
     }
 
     #[test]

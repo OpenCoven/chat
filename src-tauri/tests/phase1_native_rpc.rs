@@ -1088,6 +1088,36 @@ mod windows_cleanup {
         (path.clone(), HomeCleanup { profile, path })
     }
 
+    struct ProfileMarkerCleanup(Vec<(PathBuf, bool)>);
+
+    impl Drop for ProfileMarkerCleanup {
+        fn drop(&mut self) {
+            for (path, existed) in self.0.iter().rev() {
+                if !existed {
+                    let _ = fs::remove_dir(path);
+                }
+            }
+        }
+    }
+
+    fn token_profile_marker_home() -> (PathBuf, ProfileMarkerCleanup) {
+        let profile =
+            PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE must be set"));
+        let coven = profile.join(".coven");
+        let chat = coven.join("chat");
+        let markers = chat.join("phase1-cleanup-grants-v1");
+        let cleanup = ProfileMarkerCleanup(
+            [coven, chat, markers]
+                .into_iter()
+                .map(|path| {
+                    let existed = path.exists();
+                    (path, existed)
+                })
+                .collect(),
+        );
+        (profile, cleanup)
+    }
+
     struct RpcProcess {
         child: Child,
         stdin: ChildStdin,
@@ -1097,6 +1127,15 @@ mod windows_cleanup {
 
     impl RpcProcess {
         fn spawn(home: &Path, service: &str, hook: Option<(&str, &Path)>) -> Self {
+            Self::spawn_with_cleanup_home(home, None, service, hook)
+        }
+
+        fn spawn_with_cleanup_home(
+            home: &Path,
+            cleanup_home: Option<&Path>,
+            service: &str,
+            hook: Option<(&str, &Path)>,
+        ) -> Self {
             let mut command = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"));
             command
                 .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
@@ -1105,6 +1144,9 @@ mod windows_cleanup {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            if let Some(cleanup_home) = cleanup_home {
+                command.env("OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME", cleanup_home);
+            }
             if let Some((name, directory)) = hook {
                 command
                     .env(CLEANUP_HOOK_ENV, name)
@@ -1371,6 +1413,22 @@ mod windows_cleanup {
         assert!(!entry_present(&service, &credential_account(TARGET_A)));
         assert!(entry_present(&service, &credential_account(UNRELATED)));
         assert!(entry_present(&unrelated_service, &unrelated_account));
+        rpc.shutdown();
+    }
+
+    #[test]
+    fn native_cleanup_accepts_the_explicit_token_profile_marker_home() {
+        let (home, _home_cleanup) = isolated_home();
+        let (profile, _profile_marker_cleanup) = token_profile_marker_home();
+        let service = service_name();
+        let mut credential_cleanup = CredentialCleanup(Vec::new());
+        set_cleanup_entries(&mut credential_cleanup, &service, &[TARGET_A]);
+        let mut rpc = RpcProcess::spawn_with_cleanup_home(&home, Some(&profile), &service, None);
+
+        let grant = rpc.issue(&[TARGET_A]);
+        assert_eq!(rpc.cleanup(&grant)["ok"], true);
+        assert!(!entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(!entry_present(&service, &credential_account(TARGET_A)));
         rpc.shutdown();
     }
 
