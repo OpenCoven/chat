@@ -109,6 +109,19 @@ export const NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS = Object.freeze(
   ),
 );
 const nativeLaunchPublicationFailures = new WeakMap();
+const nativeRpcFailureCategories = new WeakMap();
+const nativeInstallationResponseCategories = new Map([
+  ['secure_store_unavailable', 'secure-store-unavailable'],
+  ['keychain_failure', 'keychain-failure'],
+  ['credential_missing', 'credential-missing'],
+]);
+
+function nativeRpcFailure(message, category) {
+  const failure = new Error(message);
+  nativeRpcFailureCategories.set(failure, category);
+  return failure;
+}
+
 const nativeLaunchPublicationResponses = new WeakMap();
 export const CAVE_STARTUP_EXIT_DIAGNOSTICS = Object.freeze(
   ['zero', 'nonzero', 'signal', 'windows-crash', 'unknown'].flatMap((exit) =>
@@ -150,6 +163,13 @@ const schemaV2NativeFailureStages = new Set([
   'native-preflight-custody-rpc',
   'native-preflight-custody-proof',
   'native-preflight-installation-rpc',
+  'native-preflight-installation-secure-store-unavailable',
+  'native-preflight-installation-keychain-failure',
+  'native-preflight-installation-credential-missing',
+  'native-preflight-installation-response-rejected',
+  'native-preflight-installation-timeout',
+  'native-preflight-installation-transport-closed',
+  'native-preflight-installation-input-failed',
   'native-preflight-installation-id',
   'launch',
   'pairing',
@@ -4255,7 +4275,7 @@ export class NativeRpcClient {
           continue;
         }
         clearTimeout(pending.timer);
-        pending.reject(new Error('native RPC closed before responding'));
+        pending.reject(nativeRpcFailure('native RPC closed before responding', 'transport-closed'));
       }
       this.pending.clear();
       for (const current of this.launchPublications) {
@@ -4273,7 +4293,7 @@ export class NativeRpcClient {
       if (!this.pending.has(id)) continue;
       clearTimeout(pending.timer);
       this.pending.delete(id);
-      pending.reject(new Error('native RPC input failed'));
+      pending.reject(nativeRpcFailure('native RPC input failed', 'input-failed'));
     }
   }
 
@@ -4317,7 +4337,7 @@ export class NativeRpcClient {
 
   request(command, args) {
     if (this.closed) {
-      return Promise.reject(new Error('native RPC transport closed'));
+      return Promise.reject(nativeRpcFailure('native RPC transport closed', 'transport-closed'));
     }
     this.commandCounts.set(command, (this.commandCounts.get(command) ?? 0) + 1);
     this.sequence += 1;
@@ -4348,7 +4368,7 @@ export class NativeRpcClient {
           this.poisonLaunchPublications('drain-timeout');
         }
         this.pending.delete(id);
-        rejectRequest(new Error(`native RPC timed out for ${command}`));
+        rejectRequest(nativeRpcFailure(`native RPC timed out for ${command}`, 'timeout'));
       }, timeoutMs);
       const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
       this.pending.set(id, pending);
@@ -4376,6 +4396,12 @@ export class NativeRpcClient {
       const failure = new Error(
         `native RPC ${command} failed with ${response.error?.code ?? 'unknown'}`,
       );
+      if (command === 'app_installation_id') {
+        nativeRpcFailureCategories.set(
+          failure,
+          nativeInstallationResponseCategories.get(response.error?.code) ?? 'response-rejected',
+        );
+      }
       if (command === 'cave_launch' && response.error?.code === 'cave_launch_discovery_not_found') {
         nativeLaunchPublicationFailures.set(
           failure,
@@ -4744,7 +4770,14 @@ export async function runNativePreflight(rpc, expectedBackend, onStage) {
     'Native custody preflight',
   );
   onStage('native-preflight-installation-rpc');
-  const installationId = await rpc.ok('app_installation_id');
+  let installationId;
+  try {
+    installationId = await rpc.ok('app_installation_id');
+  } catch (error) {
+    const category = nativeRpcFailureCategories.get(error);
+    if (category !== undefined) onStage(`native-preflight-installation-${category}`);
+    throw error;
+  }
   onStage('native-preflight-installation-id');
   if (
     typeof installationId !== 'string' ||

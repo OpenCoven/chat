@@ -3,26 +3,12 @@ name: CI
 on:
   pull_request:
   push:
+    branches:
+      - main
 
-# Both triggers fire for a branch with an open pull request, so every commit
-# started two full runs of this workflow: the same suites executed twice, for
-# the same commit, at double the cost. One run per branch is enough.
-#
-# This does not explain the runs that hung and held a runner until GitHub's
-# six-hour limit. That was first attributed to the two runs racing for the
-# preview server's fixed port, and the attribution was wrong: with concurrency
-# in place and only one run, the job still stalled. The cause was apt-get, in
-# two different jobs that had nothing in common except calling it, and it is
-# addressed by the prebuilt image rather than here.
-#
-# The group name has to match across both events, which `github.ref` does not:
-# a push gives `refs/heads/name` and a pull_request gives `refs/pull/N/merge`.
-# `head_ref` is the source branch on a pull_request and empty on a push, so
-# falling back to `ref_name` yields the same bare branch name for both.
-#
-# main is exempt from cancellation. Cancelling there would abandon the
-# verification of a merge that has already landed, which is the one place the
-# result still matters after the fact.
+# Validate feature branches through pull requests and retain main-push verification.
+# Creating and cancelling a second run for the same commit leaves cancelled
+# required checks that can prevent a fully passing pull request from merging.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
