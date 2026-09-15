@@ -355,3 +355,5 @@ export function assertSdkCandidateProvenance(
   roots: { sdkRoot: string; sdkEvidenceRoot: string },
   lock: unknown,
 ): void;
+
+export function runPublicPhase1StageAsync<T>(id: string, action: () => Promise<T>): Promise<T>;

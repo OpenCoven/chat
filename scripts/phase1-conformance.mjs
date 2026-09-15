@@ -268,7 +268,19 @@ const covenIdentityDiagnosticIds = new Set(
   [...covenIdentityFailureStages, 'unknown'].map((stage) => `phase1.coven-identity.${stage}`),
 );
 
+const schemaV2UnexpectedErrorKinds = [
+  [TypeError, 'type-error'],
+  [ReferenceError, 'reference-error'],
+  [RangeError, 'range-error'],
+  [SyntaxError, 'syntax-error'],
+  [AggregateError, 'aggregate-error'],
+  [Error, 'error'],
+];
+
 const publicPhase1DiagnosticIds = new Set([
+  ...[...schemaV2UnexpectedErrorKinds.map(([, kind]) => kind), 'non-error'].map(
+    (kind) => `phase1.stage.schema-v2-production.unclassified.${kind}`,
+  ),
   'phase1.operator-fingerprint.failed',
   'phase1.operator-fingerprint.unsafe-root',
   'phase1.operator-fingerprint.entry-limit',
@@ -308,6 +320,9 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
   'phase1.stage.schema-v2-production.failed',
+  'phase1.stage.schema-v2-production.authorization-scrub',
+  'phase1.stage.schema-v2-production.lock-version',
+  'phase1.stage.schema-v2-production.platform',
   'phase1.stage.native-provider.failed',
   'phase1.stage.execution-root.failed',
   'phase1.stage.environment.failed',
@@ -1070,12 +1085,19 @@ function runPublicPhase1Stage(id, action) {
   }
 }
 
-async function runPublicPhase1StageAsync(id, action) {
+export async function runPublicPhase1StageAsync(id, action) {
   try {
     return await action();
   } catch (cause) {
     if (publicPhase1FailureDiagnostic(cause) !== undefined) {
       throw cause;
+    }
+    if (id === 'phase1.stage.schema-v2-production.failed') {
+      // Report only a fixed built-in error kind. Messages, stacks, names and codes
+      // can contain private paths or subprocess output and must stay in memory.
+      const kind =
+        schemaV2UnexpectedErrorKinds.find(([type]) => cause instanceof type)?.[1] ?? 'non-error';
+      throw new Error(`phase1.stage.schema-v2-production.unclassified.${kind}`, { cause });
     }
     throw new Error(id, { cause });
   }
