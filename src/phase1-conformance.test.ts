@@ -1997,6 +1997,33 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect((caught as Error).message).not.toContain('private');
   });
 
+  test.each(['native-preflight', 'pairing-recovery', 'revocation-repair'])(
+    'preserves the schema-v2 native %s stage through infrastructure and launcher wrapping',
+    async (stage) => {
+      const modulePath = '../scripts/phase1-conformance.mjs';
+      const { runPublicPhase1StageAsync } = await import(modulePath);
+      const diagnostic = `phase1.native-scenarios.${stage}`;
+      const privateCause = new Error('/private/operator/native-custody');
+      const nativeFailure = await schemaV2Producer
+        .runSchemaV2StageAsync(diagnostic, async () => {
+          throw privateCause;
+        })
+        .catch((error: Error) => error);
+      const infrastructureFailure = schemaV2Producer.wrapInfrastructureFailure(nativeFailure, {});
+      const caught = await runPublicPhase1StageAsync(
+        'phase1.stage.schema-v2-production.failed',
+        async () => {
+          throw infrastructureFailure;
+        },
+      ).catch((error: unknown) => error);
+      expect(caught).toBe(infrastructureFailure);
+      expect(publicPhase1FailureDiagnostic(caught)).toBe(diagnostic);
+      expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+      expect((caught as Error).message).not.toContain('private');
+      expect(nativeFailure.cause).toBe(privateCause);
+    },
+  );
+
   test('preserves a classified schema-v2 failure and unrelated stage fallbacks', async () => {
     const modulePath = '../scripts/phase1-conformance.mjs';
     const { runPublicPhase1StageAsync } = await import(modulePath);
