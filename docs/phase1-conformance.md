@@ -1,5 +1,30 @@
 # Phase 1 real-authority conformance
 
+## Cave rc.7 adoption in progress
+
+The current Cave pin is `ecdcdcf8a75b62bb912ec48215ae20ab0809a181`,
+tree `1634a8eb0a391419bf28af4be0020cfd8c4df472`, the reviewed
+[Cave #5410](https://github.com/OpenCoven/coven-cave/pull/5410) merge.
+[Candidate run 34896723149](https://github.com/OpenCoven/coven-cave/actions/runs/34896723149)
+passed all 17 jobs, including Windows runtime and native behavior.
+The repair removes cmdlet discovery from the stripped Windows ACL-probe
+environment while retaining the ownership and DACL acceptance rules.
+
+The package manifest, assertion engine, contract fixture and HPKE vectors
+are byte-identical to the prior Cave pin. Version `0.4.2`, ordered assertions,
+SDK candidate, consumer and Coven identities remain unchanged.
+
+Protected Chat run `34916510997` used the preceding Cave `5ee8545`.
+Linux and macOS passed authenticated records; Windows reported
+`startup.discovery.missing.read.not-found.publication.root-owner-unverified`
+and a separate residual child-open access denial. It produced no Windows
+record. The upstream repair is not yet proof that this protected failure is
+resolved. A new source-bound harness, actual Chat landing, SDK validator
+binding, both scope readbacks and fresh protected acceptance remain required.
+
+The preceding Cave5409 and combined-harness checkpoints below are historical
+evidence, not acceptance of this rc.7 adoption.
+
 The trusted non-Node platform launcher is the runner for the Phase 1 read-only
 desktop release gate. It packages the reviewed Chat production commit,
 consumes the four frozen SDK tarballs, builds the locked Cave and Coven

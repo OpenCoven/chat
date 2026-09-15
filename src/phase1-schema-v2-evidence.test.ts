@@ -1656,7 +1656,7 @@ describe('bounded Cave record diagnostics', () => {
     'binds the Cave5409 engine release without accepting %s',
     (oldVersion) => {
       const lock = readPhase1ConformanceLock();
-      expect(lock.cave.revision).toBe('5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d');
+      expect(lock.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
       const record = {
         platform: 'linux-x64',
         commit: lock.cave.revision,

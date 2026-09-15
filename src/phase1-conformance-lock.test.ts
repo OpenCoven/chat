@@ -152,7 +152,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d',
+    revision: 'ecdcdcf8a75b62bb912ec48215ae20ab0809a181',
   },
   coven: {
     repository: 'OpenCoven/coven',
@@ -528,7 +528,7 @@ describe('Phase 1 conformance lock', () => {
   test.each(['0.4.3', '0.4.4'])(
     'requires the Cave5409 source release and rejects %s',
     (oldVersion) => {
-      expect(expectedEntries.cave.revision).toBe('5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d');
+      expect(expectedEntries.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
       expect(() =>
         readPhase1ConformanceLock(writeLock({ version: 5, ...expectedEntries })),
       ).not.toThrow();
