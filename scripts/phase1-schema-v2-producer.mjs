@@ -170,6 +170,9 @@ const schemaV2NativeFailureStages = new Set([
   'native-preflight-installation-timeout',
   'native-preflight-installation-transport-closed',
   'native-preflight-installation-input-failed',
+  'native-preflight-installation-unexpected-type-error',
+  'native-preflight-installation-unexpected-error',
+  'native-preflight-installation-unexpected-value',
   'native-preflight-installation-id',
   'launch',
   'pairing',
@@ -4393,9 +4396,12 @@ export class NativeRpcClient {
   async ok(command, args) {
     const response = await this.request(command, args);
     if (response.ok !== true) {
-      const failure = new Error(
-        `native RPC ${command} failed with ${response.error?.code ?? 'unknown'}`,
-      );
+      const responseCode = response.error?.code;
+      const diagnosticCode =
+        command === 'app_installation_id' && typeof responseCode !== 'string'
+          ? 'unknown'
+          : (responseCode ?? 'unknown');
+      const failure = new Error(`native RPC ${command} failed with ${diagnosticCode}`);
       if (command === 'app_installation_id') {
         nativeRpcFailureCategories.set(
           failure,
@@ -4774,8 +4780,14 @@ export async function runNativePreflight(rpc, expectedBackend, onStage) {
   try {
     installationId = await rpc.ok('app_installation_id');
   } catch (error) {
-    const category = nativeRpcFailureCategories.get(error);
-    if (category !== undefined) onStage(`native-preflight-installation-${category}`);
+    const category =
+      nativeRpcFailureCategories.get(error) ??
+      (error instanceof TypeError
+        ? 'unexpected-type-error'
+        : error instanceof Error
+          ? 'unexpected-error'
+          : 'unexpected-value');
+    onStage(`native-preflight-installation-${category}`);
     throw error;
   }
   onStage('native-preflight-installation-id');
