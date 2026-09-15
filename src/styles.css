@@ -45,11 +45,17 @@
   --radius-panel: 1rem;
   --radius-pill: 999px;
 
-  /* Inter is not bundled, so the system face is what actually renders on most
-     machines. It is listed first to say so honestly rather than implying a
-     webfont that never loads. */
+  /* Inter *is* bundled: src/main.tsx imports @fontsource-variable/inter, which
+     registers the face under the family name "Inter Variable". The platform UI
+     face is still listed first on purpose -- it is the face the OS renders its
+     own chrome in, and matching it is what keeps the window from looking like a
+     web page in a frame. Inter is the fallback for platforms without one.
+
+     Note the family name has to be the fontsource one. A bare `Inter` matches
+     nothing here, because no face is registered under that name. */
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter Variable", Roboto, "Helvetica Neue",
+    sans-serif;
   line-height: 1.5;
   font-weight: 400;
   background: var(--surface-base);

@@ -346,28 +346,36 @@ immediately after a mistaken push, before distribution.
 
 ---
 
-## 7. Branch protection (enable before the public release)
+## 7. Branch protection
 
-> **`main` currently has _no_ branch protection.** The rules below are **not**
-> applied by any automation in this repository and must be enabled by a
-> repository admin in **Settings → Branches → Branch protection rules** before
-> the public release. Do not attempt to apply them from a workflow.
+`main` **is** protected. Pull requests are required, force pushes and deletions
+are refused, and these checks must pass before a merge:
 
-Recommended rules for `main`:
+- `Changed paths`
+- `Web checks`
+- `Rust`
+- `E2E`
+- `Desktop build`
+- `Contract canary`
+- `Unix producer supervisor (linux-x64)`
+- `Windows supervisor behavior`
 
-- **Require a pull request before merging** (no direct pushes).
-- **Require status checks to pass** before merging, and require branches to be
-  up to date. Required checks (job names from `.github/workflows/ci.yml` and
-  the conformance workflows):
-  - `Web checks`
-  - `Rust`
-  - `E2E`
-  - `Desktop build`
-  - `Contract canary`
-  - `Phase 1 real-authority conformance`
-- **Require signed commits.**
-- **Do not allow force pushes.**
-- **Do not allow deletions.**
+Protection is configured by a repository admin under **Settings → Branches**.
+No automation in this repository applies it, and none should: a workflow that
+can edit its own merge requirements is not a control.
 
-These match the guarantees the release pipeline assumes: that what is tagged on
-`main` has passed CI and is composed of signed, non-rewritten history.
+Read the current rules rather than trusting this list, which goes stale:
+
+```bash
+gh api repos/OpenCoven/chat/branches/main/protection \
+  --jq '{checks: .required_status_checks.contexts, signed: .required_signatures.enabled}'
+```
+
+> **Still missing: required signed commits.** `required_signatures` is
+> `false`. The release pipeline verifies the *tag* signature and refuses an
+> unsigned one, but nothing yet enforces that the commits under that tag are
+> signed. Enable **Require signed commits** to close the gap between "the tag
+> is signed" and "the history it points at is."
+
+These rules are the guarantee the release pipeline assumes: that what is tagged
+on `main` has passed CI and is composed of non-rewritten history.
