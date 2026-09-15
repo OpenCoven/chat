@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # ci:full is commonly applied after the PR is opened.
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches:
       - main
