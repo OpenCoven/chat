@@ -89,6 +89,11 @@ initialization failures use that same cleanup path; if cleanup also fails, the
 trusted exception retains the cleanup owner alongside both errors. The native
 lifecycle fixture covers loaded-hive presence, persistent credential capability,
 unload failure/retry, post-load rollback, and final hive/profile/account absence.
+The residual-cleanup fixture also unloads the owned hive before directly
+retiring its token and seeding adversarial userenv residuals. This preserves
+the intended sharing-violation and denied-access controls under profile loading.
+If fixture unload fails, later teardown stages retain the owned identity and
+skip profile/account deletion while independently restoring injected blockers.
 Native Windows verification remains required; the immutable source binding is
 recorded below.
 
@@ -1939,7 +1944,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-profile-residual-policy.test.ps1` | 14,097 | `26485b24eb4bbafbf33390823c55c6b5d803681f784fda820fd7dbb24d149ccc` |
-| `scripts/windows-profile-residual-native.test.ps1` | 42,891 | `01c707e863557f6c45515a460ef7a3c711a63851797be98c734187224d5c6712` |
+| `scripts/windows-profile-residual-native.test.ps1` | 43,464 | `e2e63c621533721951bba9c0148f61749fa5f8e828ef7fef6a90ee39f2e1ddfa` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
