@@ -101,6 +101,7 @@ namespace OpenCoven.Tests {
             uint[] information = { 0x80000004, 0x80000004, 0x00000004 };
             string[] labels = { "baseline", "read-control", "unprotected-control" };
             var cleanupFailures = new List<Exception>();
+            int contractFailures = 0;
             for (int index = 0; index < labels.Length; index++) {
                 string path = Path.Combine(root, index.ToString() + ".bin");
                 string phase = "create";
@@ -116,13 +117,18 @@ namespace OpenCoven.Tests {
                     phase = "restored-read";
                     int restored = ReadAccess(path);
                     Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";restored-read=" + restored);
-                    if (denied != 5 || restored != 0)
+                    if (index != 1 || denied != 5 || restored != 0) {
+                        contractFailures++;
                         Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";contract=mismatch");
+                    }
                 } catch (Exception error) {
                     string operation = error is Win32Exception && error.Message == "Fixture ACL handle unavailable." ? "open" :
                         error is Win32Exception && error.Message == "Fixture read denial could not be set." ? "set" : "other";
                     Console.WriteLine("Native ACL comparison: control=" + labels[index] + ";phase=" + phase +
                         ";operation=" + operation + ";cause=" + FailureCategory(error));
+                    if (index == 1 || phase != "install" || operation != "set" ||
+                        !(error is Win32Exception nativeError) || nativeError.NativeErrorCode != 5)
+                        contractFailures++;
                 } finally {
                     try { File.Delete(path); } catch (Exception error) { cleanupFailures.Add(error); }
                 }
@@ -131,6 +137,8 @@ namespace OpenCoven.Tests {
             if (cleanupFailures.Count != 0)
                 throw new InvalidOperationException("Native ACL comparison fixture cleanup failed: count=" + cleanupFailures.Count + ".",
                     new AggregateException(cleanupFailures));
+            if (contractFailures != 0)
+                throw new InvalidOperationException("Native ACL comparison contract failed: count=" + contractFailures + ".");
         }
         private static object Invoke(MethodInfo method, params object[] args) {
             try { return method.Invoke(null, args); }

@@ -447,8 +447,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `1cf8693e86a8c323708a3d9050d5cff86a158ae6`, tree
-  `c70819a63dbd6ecc268f6195083e3ed1224aed52`, retained in the producer ancestry;
+- Chat conformance driver `3fb86bdac464b1b6e20a929db327808d49a2ab95`, tree
+  `6fc0690bf253fd817fc2938830eef2da7c223777`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1797,7 +1797,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-profile-residual-policy.test.ps1` | 14,097 | `26485b24eb4bbafbf33390823c55c6b5d803681f784fda820fd7dbb24d149ccc` |
-| `scripts/windows-profile-residual-native.test.ps1` | 42,379 | `986a919e9fc7108379b27cc660255f05343d277dd885b2033b1dc888f426dafe` |
+| `scripts/windows-profile-residual-native.test.ps1` | 42,891 | `01c707e863557f6c45515a460ef7a3c711a63851797be98c734187224d5c6712` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
