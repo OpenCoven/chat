@@ -1,6 +1,52 @@
 # Delivery roadmap and consolidation audit
 
-## Current consolidation checkpoint, 2026-09-15 (Chat #285)
+## Current consolidation checkpoint, 2026-09-15 (Chat #290)
+
+Chat [#289](https://github.com/OpenCoven/chat/pull/289) landed as
+`a94ecb2456a5bcb2d3e9f46c6cf300447b6cd068`, retaining bounded completion
+synchronization for the cleanup regression test. Chat
+[#290](https://github.com/OpenCoven/chat/pull/290) landed as
+`3b1c7f7500370e75c839c9e87a797e4a652a58b4`. Both PR and push CI passed;
+the normal merges retained their reviewed source ancestry and signatures.
+
+The native preflight now distinguishes custody RPC, custody proof,
+installation-ID RPC, and installation-ID validation through four fixed
+operation diagnostics. This preserves private causes and the existing checks.
+It does not prove a Windows repair or establish a record mismatch.
+
+SDK binding verification rejected #290's delivery because its integration tree
+contains intervening main changes and differs from its reviewed branch tree.
+The equal-tree requirement remains enforced. This documentation follow-up
+starts from integrated main so its reviewed tree can match its delivery tree.
+The next SDK binding must authenticate the exact delivery and reviewed commits,
+then retain the existing parent chain through `3b1c7f7` and `8cd0216a` to
+harness `683e99918eb38978680e46aed7c496f6801c3306`. Recheck tree equality
+immediately before landing; subsequent main changes can invalidate that proof.
+
+Both validator scopes still select SDK #274, `1535e48e`. Protected run
+[34935323170](https://github.com/OpenCoven/chat/actions/runs/34935323170)
+remains the latest terminal evidence: Linux/macOS records passed independent
+inspection of all 197 ordered assertions; Windows failed during native
+preflight and emitted no record. No aggregate or release acceptance exists.
+Next: land the reviewed integration checkpoint, bind its actual merge in SDK,
+verify and land that validator, rotate both scopes, and obtain fresh protected
+validation after authenticating the supervisor artifact. Candidate `96804bc4`
+and the assertion registry remain frozen.
+
+Issue [#288](https://github.com/OpenCoven/chat/issues/288) is complete: repaired
+main run `34940117877` passed Desktop and Rust checks, including the cleanup
+regression and optimized native suite (209 passed, 4 ignored). Concurrent [#291](https://github.com/OpenCoven/chat/pull/291)
+needs to retain #289's bounded cleanup synchronization when integrating its
+separate operation-queue test bounds. Its active worktree is preserved.
+SDK [#45](https://github.com/OpenCoven/sdk/issues/45) holds the refreshed
+consolidation inventory: 32 registered worktrees, including 10 dirty and
+11 locked registrations, with one canonical status unverified. These counts
+are an audit snapshot, not retirement proof. Chat #86 remains parked;
+#154/#155 and protected acceptance remain open. Keep this chat and active,
+dirty, locked, or uncertain worktrees. The full minimum-working-set audit is
+still incomplete. GitHub issues hold current ownership and evidence.
+
+## Historical consolidation checkpoint, 2026-09-15 (Chat #285)
 
 Chat [#285](https://github.com/OpenCoven/chat/pull/285) landed as
 `6089bab8fb71e692a4c62a722457dbbb5e81d117`. SDK
