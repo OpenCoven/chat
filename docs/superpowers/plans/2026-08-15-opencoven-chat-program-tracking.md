@@ -1,39 +1,32 @@
 # OpenCoven Chat v1 Program Tracking
 
-> **Program tracker:** Coven Cave Beads database  
-> **Root epic:** `cave-k0aqq`  
-> **Plan of record:** the eight phase plans dated 2026-08-15 in this directory
-
-## Purpose
-
-This document is the durable index for delivering OpenCoven Chat, the local-first
-TypeScript/Rust clients, and the `opencoven` developer CLI. Detailed implementation
-steps stay in the phase plans; Beads records ownership, readiness, blocking
-dependencies, verification evidence, and release gates.
-
-The central Beads graph lives in `OpenCoven/coven-cave` because that repository
-owns the established Beads/Dolt workflow. A bead's `repo:*` label and repository
-metadata identify where implementation occurs. Cross-repository ownership is not
-represented through experimental cross-database dependencies.
+Use GitHub issues for current delivery tracking. The Beads IDs, counts, and
+phase register below preserve the original 2026-08-15 plan; they are not a
+current execution queue. Cave retired Beads in
+[#5399](https://github.com/OpenCoven/coven-cave/issues/5399). Do not run `bd`,
+claim Beads, or sync Dolt for this work.
 
 ## Current delivery audit
 
-See the [delivery roadmap and dated checkpoints](../../roadmap.md) for the latest audited
-Chat PR and conformance state. The counts and initial readiness below are the
-program-creation baseline; refresh Beads before claiming work or closing gates.
+The [delivery roadmap](../../roadmap.md) records verified Chat #285 and SDK
+#274 landings and fresh protected run `34935323170`. Follow
+[Chat #219](https://github.com/OpenCoven/chat/issues/219) and
+[SDK #38](https://github.com/OpenCoven/sdk/issues/38) for current protected
+validation evidence. Run `34935323170` failed at Windows native preflight;
+Linux and macOS records passed independent inspection. Windows and aggregate
+acceptance remain required.
+Chat #86 remains parked for candidate/artifact reconciliation; #154/#155
+sequence production delegation after conformance and SDK dependency work.
 
-The inventory and readiness counts below are historical baselines. Current
-ownership, blocking dependencies and verification evidence live in Beads
-`cave-k0aqq` and its Teamwork mirror. The latest roadmap checkpoint distinguishes
-landed Chat #278/Cave authority and SDK #268, both verified validator scope
-rotations, and fresh protected run `34916510997`. Protected platform and
-aggregate acceptance remain required; completed run `34879698263` failed.
+For Cave ownership and Project status, follow its
+[GitHub work tracking guide](https://github.com/OpenCoven/coven-cave/blob/main/docs/workflows/github-work-tracking.md).
+Preserve historical IDs, owners, dependencies, and citations. Do not bulk-import
+legacy rows or infer current readiness from the baseline below.
 
-Chat #86 remains parked pending explicit candidate adoption and verification.
-Production familiar delegation in #154/#155 follows the protected conformance
-and SDK dependency work. Diagnostic landings do not close historical-cause
-issues #206/#246, and ordinary CI does not close the release gate. Historical
-phase closures and the baseline register below remain unchanged.
+## Historical program baseline
+
+The eight phase plans dated 2026-08-15 remain the detailed specification.
+The following register describes the original Beads graph and its counts.
 
 ## Tracker Summary
 
@@ -177,50 +170,27 @@ canary. Phase 0 closes through `cave-bt9wx`.
 | `cave-udcn7` | Cross-repo | shared | OS acceptance, staged rollout, and rollback |
 | `cave-ilh1h` | Cross-repo | shared | Production v1 gate |
 
-## Operating Rules
+## Operating rules
 
-1. Run `bd show <id>` and read the linked phase plan before claiming work.
-2. Confirm readiness with `bd ready --json`; do not bypass active blockers.
-3. Claim atomically with `bd update <id> --claim`.
-4. Use a dedicated worktree named with the bead ID. Never implement on a
-   repository's dirty main checkout.
-5. Keep each lane within its owning repository. Cross-repository E2E beads begin
-   only after their same-phase implementation blockers close.
-6. Generate authority fixtures only through their exporter. Consumers must not
-   hand-edit copied fixtures.
-7. Record the exact commands, counterpart commit/release, and relevant artifact
-   paths in bead notes.
-8. Do not close a gate from unit-test proxies alone. Gates require the exact
-   live-authority or packaged acceptance stated in the phase plan.
-9. Do not push Git branches, Dolt state, packages, crates, installers, or rollout
-   metadata without explicit operator authorization.
-10. Preserve the authority boundaries and approved v1 non-goals in the master
-    plan.
+1. Read the owning GitHub issue and linked phase plan before starting work.
+   Record the acting agent, scope, branch/worktree, evidence, blocker, and next
+   step there. Preserve existing ownership and dependencies.
+2. Keep implementation in its owning repository and preserve active or dirty
+   worktrees. Cross-repository E2E follows its implementation blockers.
+3. Generate authority fixtures through their exporter; do not hand-edit copies.
+4. Record exact verification commands, counterpart revisions, and artifact
+   evidence in the owning issue before requesting closure.
+5. Require the live-authority or packaged acceptance stated in the phase plan.
+   Unit tests alone cannot close those gates.
+6. Preserve authority boundaries, approved non-goals, and operator approval
+   requirements for Git branch pushes, publishing, and rollout.
 
-## Verification Commands
+## Verification evidence
 
-Run from `/Users/buns/Documents/GitHub/OpenCoven/coven-cave` or another clean
-checkout containing the canonical `.beads` database:
-
-```bash
-bd list --label program:chat-v1 --json --limit 0 --flat
-bd dep cycles
-bd ready --json --limit 0
-bd list --label program:chat-v1 --label surface:shared --json --limit 0 --flat
-bd list --label program:chat-v1 --label surface:desktop --json --limit 0 --flat
-```
-
-Expected program-specific results:
-
-- 57 total beads
-- 0 dependency cycles
-- 47 `surface:shared`
-- 10 `surface:desktop`
-- Four initial ready implementation lanes
-
-The repository-wide `pnpm beads:surfaces` audit currently reports older,
-unrelated beads without surface labels. Program-specific counts above isolate
-this graph from those pre-existing warnings.
+The historical baseline had 57 Beads, no dependency cycles, 47 shared-surface
+items, 10 desktop items, and four initially ready lanes. Those counts do not
+establish current ownership, readiness, or completion. Verify current GitHub
+issues, PR heads, workflow results, and the phase-specific artifacts instead.
 
 Phase 1 gate evidence is the completed, secret-scanned
 `test-results/phase1-conformance/report.json` produced through
@@ -228,7 +198,7 @@ Phase 1 gate evidence is the completed, secret-scanned
 `phase1-conformance.lock.json`. It is a complete SDK #38 platform record; a
 failed or incomplete run publishes no evidence and leaves the gate open.
 
-## Bead Evidence Template
+## Issue evidence template
 
 Append this information before requesting closure:
 
