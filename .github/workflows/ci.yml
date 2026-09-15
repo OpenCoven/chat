@@ -661,7 +661,8 @@ jobs:
     name: Unix producer supervisor (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    # Keep this matrix enabled for docs-only changes: skipping it before
+    # expansion omits the required linux-x64 check context.
     permissions:
       contents: read
     timeout-minutes: 15
