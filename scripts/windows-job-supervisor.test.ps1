@@ -5237,6 +5237,108 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
 
+        # Exercise actual credential creation under the same restricted logon and Job.
+        $installationScript = Join-Path $root 'native-installation-roundtrip.ps1'
+        [IO.File]::WriteAllText($installationScript, @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$start = [Diagnostics.ProcessStartInfo]::new($env:OPENCOVEN_NATIVE_TEST_BINARY)
+$start.UseShellExecute = $false
+$start.RedirectStandardInput = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+$process = [Diagnostics.Process]::Start($start)
+$stderr = $process.StandardError.ReadToEndAsync()
+$grant = $null
+$terminalSuccess = $false
+function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
+  $request = @{ id = $command; command = $command; args = $arguments }
+  $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress -Depth 8))
+  $process.StandardInput.Flush()
+  $read = $process.StandardOutput.ReadLineAsync()
+  if (-not $read.Wait(10000)) { throw 'installation-roundtrip: response-timeout' }
+  $line = $read.Result
+  if ($null -eq $line -or $line.Length -gt 65536) {
+    throw 'installation-roundtrip: response-invalid'
+  }
+  try { $response = $line | ConvertFrom-Json }
+  catch { throw 'installation-roundtrip: response-invalid' }
+  if ($response.id -cne $command -or $response.ok -ne $true) {
+    # Never print arbitrary native response text or credential material.
+    throw "installation-roundtrip: $command-failed"
+  }
+  return $response.result
+}
+function Assert-EmptyCustody($proof) {
+  if ($proof.backend -cne 'windows-credential-manager' -or
+      $proof.available -ne $true -or $proof.empty -ne $true -or
+      $proof.stateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'installation-roundtrip: custody-invalid'
+  }
+}
+try {
+  $before = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $before
+  $issued = Invoke-InstallationRpc 'conformance_issue_native_custody_cleanup' @{ instanceIds = @() }
+  $grant = $issued.grant
+  if ($grant -cnotmatch '^[A-Za-z0-9_-]{43}$') { throw 'installation-roundtrip: grant-invalid' }
+  $first = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') {
+    throw 'installation-roundtrip: installation-invalid'
+  }
+  $second = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cne $second) { throw 'installation-roundtrip: installation-changed' }
+  $cleaned = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+  $grant = $null
+  Assert-EmptyCustody $cleaned
+  $after = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $after
+  if ($before.stateSha256 -cne $after.stateSha256) { throw 'installation-roundtrip: custody-changed' }
+} finally {
+  try {
+    if ($null -ne $grant -and -not $process.HasExited) {
+      $null = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+    }
+  } finally {
+    $process.StandardInput.Close()
+    if ($process.WaitForExit(10000)) {
+      $terminalSuccess = $process.ExitCode -eq 0
+    } else {
+      $process.Kill($true)
+      $null = $process.WaitForExit(10000)
+    }
+    $process.Dispose()
+  }
+}
+if (-not $terminalSuccess) { throw 'installation-roundtrip: native-exit-failed' }
+if (-not $stderr.Wait(10000) -or $stderr.Result -ne '') {
+  throw 'installation-roundtrip: unexpected-stderr'
+}
+Write-Output 'installation-roundtrip: passed'
+'@, [Text.UTF8Encoding]::new($false))
+        $installationNonce = [Guid]::NewGuid().ToString('N')
+        $installationJobName = "Local\OpenCoven.Chat.Conformance.$installationNonce"
+        $installationEnvironment = $validNativeEnvironment.Clone()
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $installationNonce
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $installationJobName
+        $installationEnvironment.OPENCOVEN_NATIVE_TEST_BINARY = $nativeRpc
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET = 'system-native'
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE =
+          "ai.opencoven.chat.phase1.$installationNonce"
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.ProfilePath
+        $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
+        try {
+          $installationResult = $installationJob.RunAsUser(
+            $isolatedUser, $trustedPwsh,
+            "-NoLogo -NoProfile -NonInteractive -File `"$installationScript`"",
+            $root, $installationEnvironment, [TimeSpan]::FromSeconds(120), 1MB, 1MB
+          )
+          if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
+              $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
+            throw 'Restricted native installation roundtrip failed.'
+          }
+        } finally { $installationJob.Dispose() }
+
         $nativeDiscoveryNonce = '33333333333333333333333333333333'
         $nativeDiscoveryJobName =
           "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"

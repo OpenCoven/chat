@@ -21,8 +21,34 @@ The regression clones the selected Git revision, verifies its harness authority,
 and executes its native preflight diagnostic module in a child Node process.
 This checks the selected module, not the complete protected bootstrap.
 Frozen consumer, SDK candidate, Cave and Coven revisions remain unchanged.
-Landing this binding, rebinding the SDK validator, rotating both validator
-scopes and obtaining fresh protected results remain necessary.
+Chat #296 landed this binding as `047e8ad7f4a2ca5a9009217de3c3f5f32fd98ba6`.
+SDK #284 bound it at `e37b195c246d55a5929dc74f7e7d116b1fc6dfd0`; both validator
+scopes were rotated before protected run `34977202052`. Linux and macOS each
+passed all 197 ordered assertions and independent identity, timing and scan
+checks. Windows failed at
+`phase1.native-scenarios.native-preflight-installation-secure-store-unavailable`.
+Validation, attestation and aggregation were skipped. The diagnostic binding
+worked; the underlying Windows store failure remains unresolved.
+
+### Installation operation diagnostics
+
+Conformance builds classify unavailable installation operations as `lock`,
+`entry`, `read`, `write`, or `persistence`, each with an `-unavailable` suffix
+under `phase1.native-scenarios.native-preflight-installation-`. These fixed
+labels preserve retryability without exposing provider messages or credentials.
+Other error kinds and ordinary-build diagnostics are unchanged. Persistence
+still combines attribute read, policy rejection and Enterprise migration;
+it does not identify the underlying Windows API error.
+
+Fault-injection tests exercise creation and existing-ID reads; Windows tests
+also cover legacy UTF-16 rewrites. The Windows supervisor behavior suite runs
+empty custody, grant issuance, creation, stable reread and authorized cleanup
+inside a separate Job for its isolated user. Local syntax and mocked tests do
+not establish restricted Windows runtime success.
+
+These new diagnostic bytes still require an immutable reviewed harness binding,
+SDK rebinding, both scope rotations and fresh protected validation. The current
+lock continues to select the previously reviewed `e28b2ccb` harness.
 
 ## Cave rc.7 adoption in progress
 
@@ -1817,20 +1843,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `d81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `3bcc6113be449adafe840d3629644233a8b38acba70bf601c93000a469e3deb4` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 220,276 | `f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5` |
+| `scripts/phase1-conformance.mjs` | 220,665 | `9417170b0f860bcb84cbd7edd2d3c60a3360d7fa112e89b393854e29b4eb0ab9` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 229,269 | `828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211` |
+| `scripts/phase1-schema-v2-producer.mjs` | 229,841 | `282e4f5f0e65361cfabebb6e54b67d6c05c1ee206ae388e28e815491e0787a46` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1843,7 +1869,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
+| `scripts/windows-job-supervisor.test.ps1` | 192,268 | `61046c09dff0315b53f8e6c1f6c6ee6d80f21418750bd6d726683e4a5d706f50` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |

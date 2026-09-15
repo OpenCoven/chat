@@ -80,6 +80,8 @@ fn configured_conformance_service() -> Result<String, KeyringError> {
 pub(crate) enum KeyringError {
     NotFound,
     Unavailable,
+    #[cfg(feature = "phase1-conformance")]
+    InstallationUnavailable(InstallationStage),
     Failure,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRejected,
@@ -125,11 +127,41 @@ pub(crate) enum KeyringError {
     CleanupCredentialDeleteUnavailable,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum InstallationStage {
+    Lock,
+    Entry,
+    Read,
+    Write,
+    Persistence,
+}
+
+impl InstallationStage {
+    fn classify(self, error: KeyringError) -> KeyringError {
+        #[cfg(feature = "phase1-conformance")]
+        if matches!(error, KeyringError::Unavailable) {
+            return KeyringError::InstallationUnavailable(self);
+        }
+        error
+    }
+}
+
 impl KeyringError {
     pub(crate) const fn diagnostic(&self) -> NativeDiagnostic {
         match self {
             Self::NotFound => NativeDiagnostic::new("credential_missing", true),
             Self::Unavailable => NativeDiagnostic::new("secure_store_unavailable", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::InstallationUnavailable(stage) => NativeDiagnostic::new(
+                match stage {
+                    InstallationStage::Lock => "installation_lock_unavailable",
+                    InstallationStage::Entry => "installation_entry_unavailable",
+                    InstallationStage::Read => "installation_read_unavailable",
+                    InstallationStage::Write => "installation_write_unavailable",
+                    InstallationStage::Persistence => "installation_persistence_unavailable",
+                },
+                true,
+            ),
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
@@ -1709,10 +1741,36 @@ fn decode_legacy_windows_password(value: &[u8]) -> Result<Zeroizing<Vec<u8>>, Ke
     Ok(Zeroizing::new(decoded.as_bytes().to_vec()))
 }
 
-fn parse_installation_id_entry(entry: &Entry, value: &[u8]) -> Result<String, KeyringError> {
+// Keep installation operations injectable without replacing the process-global store.
+trait InstallationEntry {
+    fn get_secret(&self) -> Result<Vec<u8>, KeyringBackendError>;
+    fn set_secret(&self, value: &[u8]) -> Result<(), KeyringBackendError>;
+    fn ensure_local_persistence(&self, value: &[u8]) -> Result<(), KeyringError>;
+}
+
+impl InstallationEntry for Entry {
+    fn get_secret(&self) -> Result<Vec<u8>, KeyringBackendError> {
+        Entry::get_secret(self)
+    }
+
+    fn set_secret(&self, value: &[u8]) -> Result<(), KeyringBackendError> {
+        Entry::set_secret(self, value)
+    }
+
+    fn ensure_local_persistence(&self, value: &[u8]) -> Result<(), KeyringError> {
+        ensure_windows_local_persistence(self, value)
+    }
+}
+
+fn parse_installation_id_entry(
+    entry: &impl InstallationEntry,
+    value: &[u8],
+) -> Result<String, KeyringError> {
     if let Ok(installation_id) = std::str::from_utf8(value) {
         if validate_installation_id(installation_id).is_ok() {
-            ensure_windows_local_persistence(entry, value)?;
+            entry
+                .ensure_local_persistence(value)
+                .map_err(|error| InstallationStage::Persistence.classify(error))?;
             return Ok(installation_id.to_owned());
         }
     }
@@ -1725,8 +1783,10 @@ fn parse_installation_id_entry(entry: &Entry, value: &[u8]) -> Result<String, Ke
         validate_installation_id(installation_id)?;
         entry
             .set_secret(decoded.as_slice())
-            .map_err(map_keyring_error)?;
-        ensure_windows_local_persistence(entry, decoded.as_slice())?;
+            .map_err(|error| InstallationStage::Write.classify(map_keyring_error(error)))?;
+        entry
+            .ensure_local_persistence(decoded.as_slice())
+            .map_err(|error| InstallationStage::Persistence.classify(error))?;
         return Ok(installation_id.to_owned());
     }
 
@@ -1758,6 +1818,26 @@ fn parse_stored_credential_entry(
     Err(KeyringError::Failure)
 }
 
+fn installation_id_from_entry(entry: &impl InstallationEntry) -> Result<String, KeyringError> {
+    match entry.get_secret() {
+        Ok(bytes) => {
+            let bytes = Zeroizing::new(bytes);
+            parse_installation_id_entry(entry, bytes.as_slice())
+        }
+        Err(KeyringBackendError::NoEntry) => {
+            let installation_id = Uuid::new_v4().to_string();
+            entry
+                .set_secret(installation_id.as_bytes())
+                .map_err(|error| InstallationStage::Write.classify(map_keyring_error(error)))?;
+            entry
+                .ensure_local_persistence(installation_id.as_bytes())
+                .map_err(|error| InstallationStage::Persistence.classify(error))?;
+            Ok(installation_id)
+        }
+        Err(error) => Err(InstallationStage::Read.classify(map_keyring_error(error))),
+    }
+}
+
 impl CredentialCustody for NativeKeyring {
     fn installation_id(&self) -> Result<String, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
@@ -1766,23 +1846,11 @@ impl CredentialCustody for NativeKeyring {
         let service = self.service_name();
         #[cfg(not(feature = "phase1-conformance"))]
         let service = SERVICE;
-        let _guard = acquire_mutation_lock()?;
-        let entry = Self::installation_id_entry_for_service(service)?;
-        match entry.get_secret() {
-            Ok(bytes) => {
-                let bytes = Zeroizing::new(bytes);
-                parse_installation_id_entry(&entry, bytes.as_slice())
-            }
-            Err(KeyringBackendError::NoEntry) => {
-                let installation_id = Uuid::new_v4().to_string();
-                entry
-                    .set_secret(installation_id.as_bytes())
-                    .map_err(map_keyring_error)?;
-                ensure_windows_local_persistence(&entry, installation_id.as_bytes())?;
-                Ok(installation_id)
-            }
-            Err(error) => Err(map_keyring_error(error)),
-        }
+        let _guard =
+            acquire_mutation_lock().map_err(|error| InstallationStage::Lock.classify(error))?;
+        let entry = Self::installation_id_entry_for_service(service)
+            .map_err(|error| InstallationStage::Entry.classify(error))?;
+        installation_id_from_entry(&entry)
     }
 
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
@@ -2155,6 +2223,132 @@ fn map_keyring_error(error: KeyringBackendError) -> KeyringError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn installation_operations_classify_failures_at_the_executed_boundary() {
+        use std::cell::RefCell;
+        struct FaultEntry {
+            stored: Option<Vec<u8>>,
+            fail: &'static str,
+            calls: RefCell<Vec<&'static str>>,
+        }
+        impl super::InstallationEntry for FaultEntry {
+            fn get_secret(&self) -> Result<Vec<u8>, super::KeyringBackendError> {
+                self.calls.borrow_mut().push("read");
+                if self.fail == "read" {
+                    return Err(super::KeyringBackendError::NoDefaultStore);
+                }
+                self.stored
+                    .clone()
+                    .ok_or(super::KeyringBackendError::NoEntry)
+            }
+            fn set_secret(&self, value: &[u8]) -> Result<(), super::KeyringBackendError> {
+                self.calls.borrow_mut().push("write");
+                assert!(
+                    super::validate_installation_id(std::str::from_utf8(value).unwrap()).is_ok()
+                );
+                if self.fail == "write" {
+                    Err(super::KeyringBackendError::NoDefaultStore)
+                } else {
+                    Ok(())
+                }
+            }
+            fn ensure_local_persistence(&self, _: &[u8]) -> Result<(), KeyringError> {
+                self.calls.borrow_mut().push("persistence");
+                if self.fail == "persistence" {
+                    Err(KeyringError::Unavailable)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let id = "01234567-89ab-4cde-8fab-0123456789ab";
+        for (stored, fail, expected_calls) in [
+            (None, "read", vec!["read"]),
+            (None, "write", vec!["read", "write"]),
+            (None, "persistence", vec!["read", "write", "persistence"]),
+            (
+                Some(id.as_bytes().to_vec()),
+                "persistence",
+                vec!["read", "persistence"],
+            ),
+        ] {
+            let entry = FaultEntry {
+                stored,
+                fail,
+                calls: RefCell::new(Vec::new()),
+            };
+            let error = super::installation_id_from_entry(&entry)
+                .unwrap_err()
+                .diagnostic();
+            assert_eq!(error.code, format!("installation_{fail}_unavailable"));
+            assert!(error.retryable);
+            assert_eq!(*entry.calls.borrow(), expected_calls);
+        }
+        let entry = FaultEntry {
+            stored: Some(id.as_bytes().to_vec()),
+            fail: "",
+            calls: RefCell::new(Vec::new()),
+        };
+        assert_eq!(super::installation_id_from_entry(&entry).unwrap(), id);
+        assert_eq!(*entry.calls.borrow(), vec!["read", "persistence"]);
+        #[cfg(windows)]
+        for fail in ["write", "persistence"] {
+            let entry = FaultEntry {
+                stored: Some(id.encode_utf16().flat_map(u16::to_le_bytes).collect()),
+                fail,
+                calls: RefCell::new(Vec::new()),
+            };
+            let error = super::installation_id_from_entry(&entry)
+                .unwrap_err()
+                .diagnostic();
+            assert_eq!(error.code, format!("installation_{fail}_unavailable"));
+            assert_eq!(entry.calls.borrow()[..2], ["read", "write"]);
+        }
+    }
+    #[test]
+    fn installation_stage_diagnostics_preserve_other_errors_and_retryability() {
+        for (stage, code) in [
+            (
+                super::InstallationStage::Lock,
+                "installation_lock_unavailable",
+            ),
+            (
+                super::InstallationStage::Entry,
+                "installation_entry_unavailable",
+            ),
+            (
+                super::InstallationStage::Read,
+                "installation_read_unavailable",
+            ),
+            (
+                super::InstallationStage::Write,
+                "installation_write_unavailable",
+            ),
+            (
+                super::InstallationStage::Persistence,
+                "installation_persistence_unavailable",
+            ),
+        ] {
+            let diagnostic = stage.classify(KeyringError::Unavailable).diagnostic();
+            #[cfg(feature = "phase1-conformance")]
+            assert_eq!(diagnostic.code, code);
+            #[cfg(not(feature = "phase1-conformance"))]
+            {
+                let _ = code;
+                assert_eq!(diagnostic.code, "secure_store_unavailable");
+            }
+            assert!(diagnostic.retryable);
+            assert!(matches!(
+                stage.classify(KeyringError::NotFound),
+                KeyringError::NotFound
+            ));
+            assert!(matches!(
+                stage.classify(KeyringError::Failure),
+                KeyringError::Failure
+            ));
+        }
+    }
     #[cfg(unix)]
     use super::{
         acquire_mutation_lock_detailed_with_timeout_at, acquire_mutation_lock_with_timeout_at,
