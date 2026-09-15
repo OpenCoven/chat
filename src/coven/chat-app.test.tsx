@@ -152,7 +152,11 @@ function runtime(): CovenRuntime {
 }
 
 async function ready(api: CovenRuntime) {
-  const view = render(<ChatApp runtime={api} />);
+  let view!: ReturnType<typeof render>;
+  // Flush initialization and the canonical-head read effect before observing readiness.
+  await act(async () => {
+    view = render(<ChatApp runtime={api} />);
+  });
   await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
   return view;
 }
@@ -244,6 +248,7 @@ describe('canonical familiar controller', () => {
       }),
     );
     await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('one-next'));
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
     expect(screen.getByRole('textbox')).toHaveValue('newer unsent');
     click('Send');
     await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
