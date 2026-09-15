@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '3fb86bdac464b1b6e20a929db327808d49a2ab95',
-  tree: '6fc0690bf253fd817fc2938830eef2da7c223777',
+  revision: 'a443b625e94bf059a50c3f47f16fa44171334ea1',
+  tree: '6375117ef56a85e09c21941ecd257c88c92c2398',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
@@ -125,8 +125,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/ci.yml',
-      blob: '924aae4492c04990259412329d0d928a00f87561',
-      sha256: '9e069c6661edcaf4f6af0f2e6000723d3838434c1140c9573dfb6e07132d85fc',
+      blob: '540113156cf3e5d76f99e82d1d7580e0eaa63c63',
+      sha256: 'ddcf045d07cc2cc915969bbf289dc00b849801541eb450515d54e3e8c7c20908',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
@@ -152,7 +152,7 @@ const expectedEntries = {
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d',
+    revision: 'ecdcdcf8a75b62bb912ec48215ae20ab0809a181',
   },
   coven: {
     repository: 'OpenCoven/coven',
@@ -528,7 +528,7 @@ describe('Phase 1 conformance lock', () => {
   test.each(['0.4.3', '0.4.4'])(
     'requires the Cave5409 source release and rejects %s',
     (oldVersion) => {
-      expect(expectedEntries.cave.revision).toBe('5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d');
+      expect(expectedEntries.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
       expect(() =>
         readPhase1ConformanceLock(writeLock({ version: 5, ...expectedEntries })),
       ).not.toThrow();

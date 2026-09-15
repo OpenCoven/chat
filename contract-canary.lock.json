@@ -45,7 +45,7 @@
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d",
+    "revision": "ecdcdcf8a75b62bb912ec48215ae20ab0809a181",
     "artifacts": {
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",
