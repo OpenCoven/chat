@@ -13,7 +13,7 @@ import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatio, type HexColor } from '../
  * the design makes about legibility are checkable, so they are checked.
  */
 
-const stylesheet = readFileSync(resolve(process.cwd(), 'src/demo/familiars-shell.css'), 'utf8');
+const stylesheet = readFileSync(resolve(process.cwd(), 'src/design/familiars-shell.css'), 'utf8');
 
 function tokens(): Map<string, string> {
   const root = stylesheet.match(/\.fr-shell\s*\{([\s\S]*?)\n\}/);

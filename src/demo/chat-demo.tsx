@@ -12,8 +12,8 @@ import {
 } from 'react';
 import { ChatInspector } from './chat-inspector';
 import './chat-demo.css';
+import { Icon } from '../design/minimal-icons';
 import { DocumentReader, type ReaderDocument } from './document-reader';
-import { Icon } from './minimal-icons';
 import {
   MOCK_COMMANDS,
   MOCK_CONVERSATIONS,

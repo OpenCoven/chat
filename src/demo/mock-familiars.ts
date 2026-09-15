@@ -22,6 +22,8 @@
  * compliant familiar may not accept.
  */
 
+import type { Presence } from '../design/familiars-ui';
+
 /** The five normative properties. Order matches the contract. */
 export const CONTRACT_PROPERTIES = [
   'Named Identity',
@@ -56,7 +58,7 @@ export type MockFamiliar = {
   description: string;
   pronouns: string;
   emoji: string;
-  status: 'available' | 'working' | 'offline';
+  status: Presence;
   soul: {
     purpose: string;
     coreWork: string[];

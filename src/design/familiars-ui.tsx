@@ -1,7 +1,6 @@
 import type { ButtonHTMLAttributes, CSSProperties } from 'react';
 
 import { Icon, type IconName } from './minimal-icons';
-import type { MockFamiliar } from './mock-familiars';
 
 /**
  * The handful of primitives the Familiars Redesign v2 surface builds on.
@@ -16,7 +15,14 @@ export type InspectorTab = 'overview' | 'access' | 'activity';
 export type ActivityKey = 'completion' | 'duration' | 'tools' | 'recent';
 export type AccessGroupKey = 'auto' | 'review' | 'paths' | 'contract';
 export type DemoEmpty = 'conversations' | 'runs' | 'familiar';
-export type Presence = MockFamiliar['status'];
+/**
+ * Presence is declared here rather than derived from a fixture. The design
+ * system is what the app renders; deriving its vocabulary from mock data made
+ * production typing depend on `src/demo`, which is the coupling this module's
+ * move out of that directory exists to remove. `mock-familiars` now imports
+ * this type, so the two still cannot drift.
+ */
+export type Presence = 'available' | 'working' | 'offline';
 
 export const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'access', 'activity'];
 

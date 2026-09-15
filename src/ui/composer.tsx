@@ -1,6 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, useId } from 'react';
 
-import { Icon } from '../demo/minimal-icons';
+import { Icon } from '../design/minimal-icons';
 import { AttachmentChip, type AttachmentState } from './attachment-chip';
 import { Button } from './button';
 import type { CompletionCommand } from './completion-palette';

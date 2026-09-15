@@ -10,7 +10,18 @@ import {
   useState,
 } from 'react';
 import { type CompletionCommand, Composer, type ComposerAttachment } from '../ui';
-import './familiars-shell.css';
+import '../design/familiars-shell.css';
+import {
+  type AccessGroupKey,
+  type ActivityKey,
+  Avatar,
+  cx,
+  type DemoEmpty,
+  FamButton,
+  FamIconButton,
+  type InspectorTab,
+} from '../design/familiars-ui';
+import { Icon } from '../design/minimal-icons';
 import {
   clockLabel,
   FAM_COMMANDS,
@@ -32,17 +43,6 @@ import {
 } from './familiars-data';
 import { type DocRequest, FamiliarInspector } from './familiars-inspector';
 import { EvidenceMap, MessageRow, ThinkingRow } from './familiars-messages';
-import {
-  type AccessGroupKey,
-  type ActivityKey,
-  Avatar,
-  cx,
-  type DemoEmpty,
-  FamButton,
-  FamIconButton,
-  type InspectorTab,
-} from './familiars-ui';
-import { Icon } from './minimal-icons';
 import { FAMILIAR_TEMPLATES, MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
 
 /**

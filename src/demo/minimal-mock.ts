@@ -1,4 +1,4 @@
-import type { IconName } from './minimal-icons';
+import type { IconName } from '../design/minimal-icons';
 
 /**
  * Mock content for the Minimal (macOS) surface.

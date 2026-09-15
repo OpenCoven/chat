@@ -1,4 +1,4 @@
-import type { IconName } from './minimal-icons';
+import type { IconName } from '../design/minimal-icons';
 import { FAMILIAR_TEMPLATES, MOCK_FAMILIARS, type MockFamiliar } from './mock-familiars';
 
 /**
