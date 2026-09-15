@@ -1320,6 +1320,7 @@ function Remove-IsolatedTestContext {
   }
 }
 
+$primarySupervisorFailure = $null
 try {
   [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
   [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
@@ -5246,6 +5247,120 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
 
+        $nativeDiscoveryNonce = '33333333333333333333333333333333'
+        $nativeDiscoveryJobName =
+          "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
+        $nativeDiscoveryEnvironment = $childEnvironment.Clone()
+        $nativeDiscoveryEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeDiscoveryNonce
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeDiscoveryJobName
+        $nativeDiscoveryJob = [OpenCoven.WindowsJobSupervisor]::Create(
+          $nativeDiscoveryJobName,
+          $isolatedUser
+        )
+        try {
+          $nativeProfileOwnerScript = Join-Path $root 'native-profile-owner.ps1'
+          [IO.File]::WriteAllText($nativeProfileOwnerScript, @'
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class NativeProfileOwnerProbe {
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool GetUserProfileDirectoryW(IntPtr token, StringBuilder path, ref uint size);
+    public static string Read() {
+        IntPtr token;
+        if (!OpenProcessToken(GetCurrentProcess(), 8, out token))
+            throw new InvalidOperationException("Token profile probe failed.");
+        try {
+            uint size = 0;
+            GetUserProfileDirectoryW(token, null, ref size);
+            if (size == 0 || size > 32768)
+                throw new InvalidOperationException("Token profile size invalid.");
+            var path = new StringBuilder((int)size);
+            if (!GetUserProfileDirectoryW(token, path, ref size))
+                throw new InvalidOperationException("Token profile query failed.");
+            return path.ToString();
+        } finally { CloseHandle(token); }
+    }
+}
+"@
+$profileOwner = (Get-Acl -LiteralPath ([NativeProfileOwnerProbe]::Read())).GetOwner(
+  [Security.Principal.SecurityIdentifier]
+).Value
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+  if ($profileOwner -eq $currentIdentity.User.Value -or
+      $profileOwner -notin @('S-1-5-18', 'S-1-5-32-544')) {
+    throw 'Native discovery regression requires a SYSTEM or Administrators profile owner.'
+  }
+} finally { $currentIdentity.Dispose() }
+'@, [Text.UTF8Encoding]::new($false))
+          # Keep the owner probe and native RPC in independent Job lifetimes.
+          $nativeProfileOwnerNonce = '44444444444444444444444444444444'
+          $nativeProfileOwnerJobName =
+            "Local\OpenCoven.Chat.Conformance.$nativeProfileOwnerNonce"
+          $nativeProfileOwnerEnvironment = $nativeDiscoveryEnvironment.Clone()
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeProfileOwnerNonce
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeProfileOwnerJobName
+          $nativeProfileOwnerJob = [OpenCoven.WindowsJobSupervisor]::Create(
+            $nativeProfileOwnerJobName,
+            $isolatedUser
+          )
+          try {
+            $nativeProfileOwner = $nativeProfileOwnerJob.RunAsUser(
+              $isolatedUser,
+              $trustedPwsh,
+              "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
+              $root,
+              $nativeProfileOwnerEnvironment,
+              [TimeSpan]::FromSeconds(30),
+              1MB,
+              1MB
+            )
+            if ($nativeProfileOwner.ExitCode -ne 0 -or
+                $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
+              throw 'Native discovery token-profile owner assertion failed.'
+            }
+          } finally {
+            $nativeProfileOwnerJob.Dispose()
+          }
+          $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
+            '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
+              "`n"
+          )
+          $nativeDiscovery = $nativeDiscoveryJob.RunAsUserWithStandardInput(
+            $isolatedUser,
+            $nativeRpc,
+            '',
+            $root,
+            $nativeDiscoveryEnvironment,
+            [TimeSpan]::FromSeconds(30),
+            1MB,
+            1MB,
+            $nativeDiscoveryRequest
+          )
+          if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
+            throw 'Native discovery profile-root regression probe failed.'
+          }
+          $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
+          if (
+            $nativeDiscoveryResponse.id -cne 'discovery' -or
+            $nativeDiscoveryResponse.ok -ne $false -or
+            $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
+          ) {
+            throw 'Native discovery rejected the isolated Windows profile root.'
+          }
+        } finally {
+          $nativeDiscoveryJob.Dispose()
+        }
+
         # Exercise actual credential creation under the same restricted logon and Job.
         $installationScript = Join-Path $root 'native-installation-roundtrip.ps1'
         [IO.File]::WriteAllText($installationScript, @'
@@ -5383,8 +5498,9 @@ Write-Output 'installation-roundtrip: passed'
         # Match nativeScenarioHomes: explicit cleanup homes require the trusted OS profile.
         $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.OperatingSystemProfilePath
         $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
+        $primaryInstallationFailure = $null
         try {
-          $installationResult = $installationJob.RunAsUser(
+          $installationResult = $installationJob.RunProducerAsUserAndQuarantine(
             $isolatedUser, $trustedPwsh,
             "-NoLogo -NoProfile -NonInteractive -File `"$installationScript`"",
             $root, $installationEnvironment, [TimeSpan]::FromSeconds(120), 1MB, 1MB
@@ -5397,121 +5513,25 @@ Write-Output 'installation-roundtrip: passed'
             }
             throw "Restricted native installation roundtrip failed: $category; secondary: $secondary"
           }
-        } finally { $installationJob.Dispose() }
-
-        $nativeDiscoveryNonce = '33333333333333333333333333333333'
-        $nativeDiscoveryJobName =
-          "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
-        $nativeDiscoveryEnvironment = $childEnvironment.Clone()
-        $nativeDiscoveryEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
-        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
-        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeDiscoveryNonce
-        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeDiscoveryJobName
-        $nativeDiscoveryJob = [OpenCoven.WindowsJobSupervisor]::Create(
-          $nativeDiscoveryJobName,
-          $isolatedUser
-        )
-        try {
-          $nativeProfileOwnerScript = Join-Path $root 'native-profile-owner.ps1'
-          [IO.File]::WriteAllText($nativeProfileOwnerScript, @'
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class NativeProfileOwnerProbe {
-    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
-    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
-    [DllImport("advapi32.dll", SetLastError = true)]
-    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
-    [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool GetUserProfileDirectoryW(IntPtr token, StringBuilder path, ref uint size);
-    public static string Read() {
-        IntPtr token;
-        if (!OpenProcessToken(GetCurrentProcess(), 8, out token))
-            throw new InvalidOperationException("Token profile probe failed.");
-        try {
-            uint size = 0;
-            GetUserProfileDirectoryW(token, null, ref size);
-            if (size == 0 || size > 32768)
-                throw new InvalidOperationException("Token profile size invalid.");
-            var path = new StringBuilder((int)size);
-            if (!GetUserProfileDirectoryW(token, path, ref size))
-                throw new InvalidOperationException("Token profile query failed.");
-            return path.ToString();
-        } finally { CloseHandle(token); }
-    }
-}
-"@
-$profileOwner = (Get-Acl -LiteralPath ([NativeProfileOwnerProbe]::Read())).GetOwner(
-  [Security.Principal.SecurityIdentifier]
-).Value
-$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-try {
-  if ($profileOwner -eq $currentIdentity.User.Value -or
-      $profileOwner -notin @('S-1-5-18', 'S-1-5-32-544')) {
-    throw 'Native discovery regression requires a SYSTEM or Administrators profile owner.'
-  }
-} finally { $currentIdentity.Dispose() }
-'@, [Text.UTF8Encoding]::new($false))
-          # Keep the owner probe and native RPC in independent Job lifetimes.
-          $nativeProfileOwnerNonce = '44444444444444444444444444444444'
-          $nativeProfileOwnerJobName =
-            "Local\OpenCoven.Chat.Conformance.$nativeProfileOwnerNonce"
-          $nativeProfileOwnerEnvironment = $nativeDiscoveryEnvironment.Clone()
-          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeProfileOwnerNonce
-          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeProfileOwnerJobName
-          $nativeProfileOwnerJob = [OpenCoven.WindowsJobSupervisor]::Create(
-            $nativeProfileOwnerJobName,
-            $isolatedUser
-          )
-          try {
-            $nativeProfileOwner = $nativeProfileOwnerJob.RunAsUser(
-              $isolatedUser,
-              $trustedPwsh,
-              "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
-              $root,
-              $nativeProfileOwnerEnvironment,
-              [TimeSpan]::FromSeconds(30),
-              1MB,
-              1MB
-            )
-            if ($nativeProfileOwner.ExitCode -ne 0 -or
-                $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
-              throw 'Native discovery token-profile owner assertion failed.'
-            }
-          } finally {
-            $nativeProfileOwnerJob.Dispose()
+          if (-not $installationJob.IsQuarantineComplete) {
+            throw 'Restricted native installation quarantine incomplete.'
           }
-          $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
-            '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
-              "`n"
-          )
-          $nativeDiscovery = $nativeDiscoveryJob.RunAsUserWithStandardInput(
-            $isolatedUser,
-            $nativeRpc,
-            '',
-            $root,
-            $nativeDiscoveryEnvironment,
-            [TimeSpan]::FromSeconds(30),
-            1MB,
-            1MB,
-            $nativeDiscoveryRequest
-          )
-          if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
-            throw 'Native discovery profile-root regression probe failed.'
-          }
-          $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
-          if (
-            $nativeDiscoveryResponse.id -cne 'discovery' -or
-            $nativeDiscoveryResponse.ok -ne $false -or
-            $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
-          ) {
-            throw 'Native discovery rejected the isolated Windows profile root.'
-          }
+          Write-Output 'Restricted native installation roundtrip and quarantine passed.'
+        } catch {
+          $primaryInstallationFailure = $_.Exception
+          throw
         } finally {
-          $nativeDiscoveryJob.Dispose()
+          try { $installationJob.Dispose() } catch {
+            if ($null -ne $primaryInstallationFailure) {
+              throw [AggregateException]::new(
+                'Windows installation test and disposal failed.',
+                [Exception[]]@($primaryInstallationFailure, $_.Exception)
+              )
+            }
+            throw
+          }
         }
+
       } finally {
         $jobB.Dispose()
         $jobA.Dispose()
@@ -5521,6 +5541,9 @@ try {
     $membershipB.Dispose()
     $membershipA.Dispose()
   }
+} catch {
+  $primarySupervisorFailure = $_.Exception
+  throw
 } finally {
   $cleanupErrors = [Collections.Generic.List[Exception]]::new()
   try {
@@ -5536,6 +5559,10 @@ try {
     }
   }
   if ($cleanupErrors.Count -ne 0) {
+    if ($null -ne $primarySupervisorFailure) {
+      [Exception[]]$failures = @($primarySupervisorFailure) + $cleanupErrors.ToArray()
+      throw [AggregateException]::new('Windows supervisor test and cleanup failed.', $failures)
+    }
     $cleanupDetails = (
       $cleanupErrors |
         ForEach-Object { $_.ToString() }

@@ -52,8 +52,17 @@ Follow-up job `104446263997` preserved the primary category:
 That failure precedes installation-ID creation. The fixture supplied the
 redirected profile, owned by the isolated user, where explicit cleanup homes
 require a trusted owner. It now uses the authoritative OS profile, matching
-protected production's `nativeScenarioHomes` selection. Native verification of
-this correction remains pending.
+protected production's `nativeScenarioHomes` selection. Follow-up Windows job
+`104456151454` failed during OS-profile cleanup after Windows accepted deletion.
+Its outer cleanup could hide a primary exception, so it does not establish
+whether the installation roundtrip passed.
+
+The fixture now runs installation last for this identity and uses production's
+`RunProducerAsUserAndQuarantine` path, which registers terminal quarantine for
+authorized profile-residual cleanup. It checks quarantine completion and emits
+a fixed success marker. The outer boundary preserves both primary and cleanup
+exceptions, including Job-disposal failures. Portable tests cover simultaneous failures; Windows runtime
+verification remains pending.
 
 The child and parent share the same allowlist, including existing fixed native
 cleanup-grant subtypes bound to the issuance command. Private response text,
@@ -1888,7 +1897,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
-| `scripts/windows-job-supervisor.test.ps1` | 195,536 | `98fc3816335c717824c1cca8c9833277a7c6c81ecc6163fb340e867a032afbd1` |
+| `scripts/windows-job-supervisor.test.ps1` | 196,593 | `1528d8e2f14d6be5ba0e11be29fa29f62aaf3af9dbc5e130be58e3dbc1054582` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |

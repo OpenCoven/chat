@@ -164,4 +164,43 @@ try {
     if (-not (Test-Path $receipt)) { throw 'Native shutdown was not attempted after cleanup failure.' }
   } finally { $probe.Dispose() }
 } finally { Remove-Item -Recurse -Force $temp }
+# Execute actual cleanup clauses with simultaneous primary and disposal failures.
+foreach ($boundary in @('outer', 'installation')) {
+$outer = @($tree.FindAll({ param($node)
+  $node -is [Management.Automation.Language.TryStatementAst] -and
+  $null -ne $node.Finally -and
+  $(if ($boundary -eq 'outer') {
+    $node.Finally.Extent.Text.Contains('Windows supervisor test cleanup failed:')
+  } else {
+    $node.Finally.Extent.Text.Contains('Windows installation test and disposal failed.') -and
+    $node.Body.Extent.Text.Contains('$installationResult =')
+  })
+}, $true))
+if ($outer.Count -ne 1) { throw 'Outer cleanup boundary missing or ambiguous.' }
+$isolatedUser = [pscustomobject]@{}
+$isolatedUser | Add-Member ScriptMethod Dispose { throw [IO.IOException]::new('synthetic cleanup failure') }
+$operatorPrivateRoot = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+$primarySupervisorFailure = $null
+$primaryInstallationFailure = $null
+$installationJob = $isolatedUser
+$outerCaught = $null
+$clauses = (@($outer[0].CatchClauses | ForEach-Object { $_.Extent.Text }) -join "`n") +
+  "`nfinally " + $outer[0].Finally.Extent.Text
+try {
+  Invoke-Expression ("try { throw [InvalidOperationException]::new('synthetic primary failure') }`n" + $clauses)
+} catch { $outerCaught = $_.Exception }
+$pending = [Collections.Generic.Queue[Exception]]::new()
+if ($null -ne $outerCaught) { $pending.Enqueue($outerCaught) }
+$messages = [Collections.Generic.List[string]]::new()
+while ($pending.Count -gt 0 -and $messages.Count -lt 12) {
+  $exception = $pending.Dequeue()
+  $messages.Add($exception.Message)
+  if ($exception -is [AggregateException]) {
+    foreach ($inner in $exception.InnerExceptions) { $pending.Enqueue($inner) }
+  } elseif ($null -ne $exception.InnerException) { $pending.Enqueue($exception.InnerException) }
+}
+if ('synthetic primary failure' -cnotin $messages -or 'synthetic cleanup failure' -cnotin $messages) {
+  throw 'Outer cleanup replaced the primary test failure.'
+}
+}
 Write-Output 'Bounded installation diagnostics passed.' 
