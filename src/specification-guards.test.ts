@@ -1104,9 +1104,14 @@ describe('Phase 1 specification guards', () => {
       'desktop',
       'rust',
       'windows-profile-residual',
-      'unix-supervisor',
       'windows-supervisor-behavior',
     ]);
+
+    // A job-level skip prevents matrix expansion and omits the required Linux
+    // context. Keep the native Unix check enabled even for prose-only changes.
+    const unixJob = jobs.get('unix-supervisor') ?? '';
+    expect(unixJob).not.toMatch(/^ {4}if:/m);
+    expect(unixJob).toContain('run: bash scripts/unix-producer-supervisor.test.sh');
 
     // Prose is not the only minute worth not spending. macOS bills at ten
     // times the Linux rate and Windows at twice it, so those runners also wait
