@@ -374,6 +374,9 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.invocation.windows-path-extensions',
   'phase1.operator-fingerprint.failed',
   'phase1.stage.schema-v2-production.failed',
+  'phase1.stage.schema-v2-production.authorization-scrub',
+  'phase1.stage.schema-v2-production.lock-version',
+  'phase1.stage.schema-v2-production.platform',
   'phase1.stage.execution-root.failed',
   'phase1.stage.environment.failed',
   'phase1.stage.checkouts.failed',
@@ -6026,17 +6029,19 @@ function fillMissingAssertions(results, status, diagnosticId) {
 }
 
 export async function runSchemaV2Conformance(options, lock, harnessAuthorityVerification) {
-  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.failed', () =>
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.authorization-scrub', () =>
     scrubEvidenceAuthorizationEnvironment(),
   );
   runSchemaV2PreflightStage('phase1.stage.evidence-authority.failed', () =>
     requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot),
   );
   const schemaV2 = options.platform !== undefined;
-  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.failed', () => {
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.lock-version', () => {
     if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
       throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
     }
+  });
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.platform', () => {
     if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
       throw new Error(
         `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,

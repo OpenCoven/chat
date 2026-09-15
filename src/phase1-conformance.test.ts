@@ -1696,7 +1696,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
 
     for (const stage of [
-      'phase1.stage.schema-v2-production.failed',
+      'phase1.stage.schema-v2-production.authorization-scrub',
+      'phase1.stage.schema-v2-production.lock-version',
+      'phase1.stage.schema-v2-production.platform',
       'phase1.stage.evidence-authority.failed',
       'phase1.stage.checkouts.failed',
       'phase1.operator-fingerprint.failed',
@@ -1724,7 +1726,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     const runStart = source.indexOf('export async function runSchemaV2Conformance');
     const runSource = source.slice(runStart, source.indexOf('\nasync function main(', runStart));
     for (const stage of [
-      'phase1.stage.schema-v2-production.failed',
+      'phase1.stage.schema-v2-production.authorization-scrub',
+      'phase1.stage.schema-v2-production.lock-version',
+      'phase1.stage.schema-v2-production.platform',
       'phase1.stage.evidence-authority.failed',
       'phase1.stage.checkouts.failed',
       'phase1.operator-fingerprint.failed',
@@ -1963,6 +1967,118 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
     expect(source).toContain(
       'cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment)',
+    );
+  });
+
+  test.each([
+    [new TypeError('/private/operator/type'), 'type-error'],
+    [new ReferenceError('/private/operator/reference'), 'reference-error'],
+    [new RangeError('/private/operator/range'), 'range-error'],
+    [new SyntaxError('/private/operator/syntax'), 'syntax-error'],
+    [
+      new AggregateError([new Error('private nested cause')], 'private aggregate'),
+      'aggregate-error',
+    ],
+    [new Error('private failure'), 'error'],
+    ['private thrown value', 'non-error'],
+  ])('bounds an unexpected schema-v2 failure to its error kind (%#)', async (failure, kind) => {
+    const modulePath = '../scripts/phase1-conformance.mjs';
+    const { runPublicPhase1StageAsync } = await import(modulePath);
+    const diagnostic = `phase1.stage.schema-v2-production.unclassified.${kind}`;
+    const caught = await runPublicPhase1StageAsync(
+      'phase1.stage.schema-v2-production.failed',
+      async () => {
+        throw failure;
+      },
+    ).catch((error: unknown) => error);
+    expect(publicPhase1FailureDiagnostic(caught)).toBe(diagnostic);
+    expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(diagnostic);
+    expect((caught as Error).cause).toBe(failure);
+    expect((caught as Error).message).not.toContain('private');
+  });
+
+  test('preserves a classified schema-v2 failure and unrelated stage fallbacks', async () => {
+    const modulePath = '../scripts/phase1-conformance.mjs';
+    const { runPublicPhase1StageAsync } = await import(modulePath);
+    const classified = new Error('phase1.stage.cave-authority.failed');
+    await expect(
+      runPublicPhase1StageAsync('phase1.stage.schema-v2-production.failed', async () => {
+        throw classified;
+      }),
+    ).rejects.toBe(classified);
+    await expect(
+      runPublicPhase1StageAsync('phase1.stage.runner-bootstrap.failed', async () => {
+        throw new TypeError('private');
+      }),
+    ).rejects.toThrow('phase1.stage.runner-bootstrap.failed');
+  });
+
+  test.each(['authorization-scrub', 'lock-version', 'platform'])(
+    'retains the bounded schema-v2 %s preflight diagnostic',
+    (stage) => {
+      const diagnostic = `phase1.stage.schema-v2-production.${stage}`;
+      try {
+        schemaV2Producer.runSchemaV2PreflightStage(diagnostic, () => {
+          throw new Error('/private/operator/preflight');
+        });
+        throw new Error('Expected preflight failure');
+      } catch (error) {
+        expect(publicPhase1FailureDiagnostic(error)).toBe(diagnostic);
+        expect(extractVerifiedRunnerDiagnostic(`phase1-conformance: ${diagnostic}`)).toBe(
+          diagnostic,
+        );
+      }
+    },
+  );
+
+  test('wires distinct diagnostics to the actual schema-v2 preflight checks', () => {
+    const source = readFileSync(
+      resolve(projectRoot, 'scripts/phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const entry = source.slice(source.indexOf('export async function runSchemaV2Conformance'));
+    const preflight = entry.slice(0, entry.indexOf('const supervisorEnvironment'));
+    const scrub = preflight.indexOf(
+      "runSchemaV2PreflightStage('phase1.stage.schema-v2-production.authorization-scrub'",
+    );
+    const lock = preflight.indexOf(
+      "runSchemaV2PreflightStage('phase1.stage.schema-v2-production.lock-version'",
+    );
+    const platform = preflight.indexOf(
+      "runSchemaV2PreflightStage('phase1.stage.schema-v2-production.platform'",
+    );
+    expect(scrub).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(scrub);
+    expect(platform).toBeGreaterThan(lock);
+    expect(preflight.slice(scrub, lock)).toContain('scrubEvidenceAuthorizationEnvironment()');
+    expect(preflight.slice(lock, platform)).toContain('lock.version !== 3 && lock.version !== 5');
+    expect(preflight.slice(platform)).toContain(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Match literal producer source.
+      'options.platform !== `${process.platform}-${process.arch}`',
+    );
+    expect(preflight).not.toContain("'phase1.stage.schema-v2-production.failed'");
+  });
+
+  test('preserves nested classified errors and ignores spoofed private error names', async () => {
+    const modulePath = '../scripts/phase1-conformance.mjs';
+    const { runPublicPhase1StageAsync } = await import(modulePath);
+    const classified = new Error('phase1.stage.cave-authority.failed');
+    const combined = new AggregateError([classified], 'private combined error');
+    await expect(
+      runPublicPhase1StageAsync('phase1.stage.schema-v2-production.failed', async () => {
+        throw combined;
+      }),
+    ).rejects.toBe(combined);
+    const spoofed = new Error('private message');
+    spoofed.name = 'TypeError/private/path';
+    const caught = await runPublicPhase1StageAsync(
+      'phase1.stage.schema-v2-production.failed',
+      async () => {
+        throw spoofed;
+      },
+    ).catch((error: unknown) => error);
+    expect(publicPhase1FailureDiagnostic(caught)).toBe(
+      'phase1.stage.schema-v2-production.unclassified.error',
     );
   });
 

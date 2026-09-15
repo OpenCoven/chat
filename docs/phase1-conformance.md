@@ -1793,20 +1793,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `8da55cf4657733792e38dcc499b0faca422614f1ff4b9d28bd1ff7b09946cee6` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `449d609f0471695fcfb1f28834dfda3d0109a95c4f152b973d3780f975b100ef` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 218,132 | `4fec116b52831427acb6b84d68d7916c33d30e00e72e0eb0c04a1432f4ac49ce` |
+| `scripts/phase1-conformance.mjs` | 219,131 | `588a99a97a58692d831807d8ac90771f605cc2ac8ae0d814113b4cddd6c64d02` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 226,590 | `958602a95f78774973c7a7ec3e0e3c6ca4accbdd221fff936c9bad3bafd4c591` |
+| `scripts/phase1-schema-v2-producer.mjs` | 226,856 | `1a3b307a5a19ec5f6d05076a752be06e60ddd965887d617f3eae1671eb34973d` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -2525,3 +2525,24 @@ The combined residual-open diagnostic reports only the fixed role `ancestor`,
 `profile-root`, or `child`, plus the existing bounded depth and NT status.
 It accepts no caller-supplied path or arbitrary role text. These labels identify
 the failing open call; they do not establish the cause of Cave startup failure.
+
+## Unclassified schema-v2 production failures
+
+Protected run `34922030401` failed on Windows with
+`phase1.stage.schema-v2-production.failed`; it produced no Windows record.
+Linux and macOS records passed identity, Cave timing, and all 197 ordered
+assertions, but validation, attestation, and aggregation were skipped.
+The separate profile cleanup child-open access denial remains unresolved.
+
+The producer distinguishes authorization-environment scrubbing, lock-version
+validation, and platform validation with bounded preflight diagnostics. An
+unexpected error escaping schema-v2 production is reported as
+`phase1.stage.schema-v2-production.unclassified.<kind>`, where `kind` is one of
+`type-error`, `reference-error`, `range-error`, `syntax-error`, `aggregate-error`,
+`error`, or `non-error`. Existing approved diagnostics retain priority.
+These categories identify a failure path, not its root cause. No error message,
+stack, name, code, environment value, or subprocess output is published by this
+fallback. Private causes remain in memory only.
+
+Fresh reviewed source binding, SDK rebinding, and protected validation are
+required before attributing the Windows failure or claiming a repaired run.
