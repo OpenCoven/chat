@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "1cf8693e86a8c323708a3d9050d5cff86a158ae6"
+    "revision": "3fb86bdac464b1b6e20a929db327808d49a2ab95"
   },
   "harnessAuthority": {
-    "revision": "1cf8693e86a8c323708a3d9050d5cff86a158ae6",
-    "tree": "c70819a63dbd6ecc268f6195083e3ed1224aed52",
+    "revision": "3fb86bdac464b1b6e20a929db327808d49a2ab95",
+    "tree": "6fc0690bf253fd817fc2938830eef2da7c223777",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "08c388cea16b9c479615b388d2f26a98b99862df",
-        "sha256": "0603a457e11a599bc5271c24bd8139f3a9f1c39b404af12d41f77f2eead2bf48"
+        "blob": "51f19219d752b630bb0222a2ee9b7b0bbdde4b17",
+        "sha256": "02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -146,20 +146,20 @@
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "0460c4098d07167f7298e2b804e7c183f2028106",
-        "sha256": "6fb18c7aa7e433fe4157cf0543b4ee2a339d0ed7d6201a13aa16883645027786"
+        "blob": "876aa2d7978ddd9440ebbdbdf709e5ab3f27922a",
+        "sha256": "8da55cf4657733792e38dcc499b0faca422614f1ff4b9d28bd1ff7b09946cee6"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "5204ef50c5530e085b594470255b7b74b766e764",
-        "sha256": "c6bb5e6d4c570126e22b6b5db2981b7bc3a372b591842900bbfacf52eab8e507"
+        "blob": "cfec1ed6006c9bad8dd929f1abcc0d8cec315381",
+        "sha256": "f3032d54b1ef4f1556faa8cf17fde271d38d1e7d54e42d9550800f4a8c837433"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "76ae14bde61639edbffe5a2e519a3c1078183eff",
-        "sha256": "cc8b647d8f1099a71cd44726eedfc7e730b9dbc5cffe4c483e6808ac49699221"
+        "blob": "a60251859246794cd62d37b60b97fb6b6a3bfcae",
+        "sha256": "e3a40166cffeda91dd6dbd0116a2642c71ce8f9c8eef2c48ddef9321fcd89ea2"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -198,8 +198,8 @@
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "a0fbe1740af89e9c65f4de5d6a92eecf032945dc",
-        "sha256": "344b275750ae7ea44078beb1e7b78eb888212cf3ca1e74a36d1a98f3bfd99f42"
+        "blob": "b3294577336ff0ca5a681860b8bd00daac6ea25c",
+        "sha256": "379e5c15dc65e1ea66b0e8de6ecb69539e726d95342b2aeda30313a80800f07f"
       }
     ]
   },

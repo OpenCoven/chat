@@ -447,8 +447,8 @@ diagnostic-only change.
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
-- Chat conformance driver `1cf8693e86a8c323708a3d9050d5cff86a158ae6`, tree
-  `c70819a63dbd6ecc268f6195083e3ed1224aed52`, retained in the producer ancestry;
+- Chat conformance driver `3fb86bdac464b1b6e20a929db327808d49a2ab95`, tree
+  `6fc0690bf253fd817fc2938830eef2da7c223777`, retained in the producer ancestry;
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
@@ -1762,7 +1762,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 174,594 | `6fb18c7aa7e433fe4157cf0543b4ee2a339d0ed7d6201a13aa16883645027786` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `8da55cf4657733792e38dcc499b0faca422614f1ff4b9d28bd1ff7b09946cee6` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1787,7 +1787,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 382,142 | `0603a457e11a599bc5271c24bd8139f3a9f1c39b404af12d41f77f2eead2bf48` |
+| `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
 | `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
@@ -1796,8 +1796,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
-| `scripts/windows-profile-residual-policy.test.ps1` | 13,587 | `0b6ad14376918315469eb4cd51ba9df719cc54446ad9a596aecc8e8a0b7e48f7` |
-| `scripts/windows-profile-residual-native.test.ps1` | 32,022 | `8ca5ad2d96d9595367ff221dfea5dbabcce1c81b72f3da3ddfa2064ca3399827` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 14,097 | `26485b24eb4bbafbf33390823c55c6b5d803681f784fda820fd7dbb24d149ccc` |
+| `scripts/windows-profile-residual-native.test.ps1` | 42,891 | `01c707e863557f6c45515a460ef7a3c711a63851797be98c734187224d5c6712` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -2446,3 +2446,51 @@ separate requirements and are not implied by the local checks.
 Historical source `d8d18fa991c03a28417fdd5b98e70c702d332a0f`, tree `f9064ad8892e8a0b90eeac296110b63358f19d93`, combines reviewed Windows residual cleanup, bounded Cave startup-exit diagnostics, and native credential absence readback. The Cave5409 harness source `1cf8693e86a8c323708a3d9050d5cff86a158ae6` retains that source and its original PR commits in ancestry, with identical native production deltas.
 
 All 46 bounded Cave diagnostic tests passed locally. The integration also passed 129 portable tests; 13 timed out. Bounded controls reproduced local PowerShell Add-Type timeouts for trivial C# and the baseline supervisor, so full native CI remains required. No timeouts, resource limits, or dependency settings were relaxed. Fresh SDK rebinding and protected cross-platform validation remain outstanding.
+
+## Residual deletion without directory-read access
+
+Residual source `1d5dc89b0f4fb1aedefe6203459184befbed8a20`
+(tree `03d85a77d79f9f7c44cdcb9c19bb846941954102`) is retained in ancestry.
+The combined binding integrates the qualified Cave authority from #280 while
+preserving the residual cleanup correction and protected approval gates.
+
+Residual cleanup opens entries for deletion and metadata inspection without
+requesting `FILE_LIST_DIRECTORY` (also `FILE_READ_DATA` for files).
+[Windows profile compatibility junctions](https://learn.microsoft.com/en-us/windows/win32/vss/junction-points)
+deliberately deny read access. Deleting the junction itself must not require
+enumerating its target.
+
+For ordinary directories, cleanup retains the original deletion handle and
+opens the same single-component name relative to its retained parent to obtain
+a separate enumeration handle for the same object.
+It checks the reopened identity and rejects reparse points before enumeration.
+The enumeration handle shares deletion only to coexist with the original
+handle, which still denies delete sharing and remains open throughout traversal.
+Child lookup stays relative to that original retained handle.
+
+The first native run of this correction, `34902663819`, rejected the earlier
+`ReOpenFile` enumeration attempt with access denied in the initial ordinary
+directory case. The relative NT open keeps both the parent and deletion handles
+retained and checks the reopened identity before reading directory records.
+
+Run the existing native regression on Windows:
+
+```powershell
+pwsh -NoProfile -File scripts/windows-profile-residual-native.test.ps1
+```
+
+The regression includes read-denied files and junctions, denied enumeration of
+ordinary directories, and the existing denied-delete and external-sentinel
+controls. Cleanup does not enable privileges, modify ACLs or file attributes,
+follow junction targets, retry access denial, or extend deadlines.
+
+This source correction addresses the unnecessary access request. The bounded
+`relative-open` access denial in protected run `34879698263` does not identify
+the failed entry or establish that it was a compatibility junction. Native
+execution, reviewed producer rebinding, and fresh protected conformance remain
+required before you treat the release blocker as resolved.
+
+The combined residual-open diagnostic reports only the fixed role `ancestor`,
+`profile-root`, or `child`, plus the existing bounded depth and NT status.
+It accepts no caller-supplied path or arbitrary role text. These labels identify
+the failing open call; they do not establish the cause of Cave startup failure.

@@ -3401,10 +3401,32 @@ namespace OpenCoven
                 native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture));
         }
 
+        private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth)
+        {
+            if (role != "ancestor" && role != "profile-root" && role != "child")
+                throw new InvalidOperationException("Residual open role is invalid.");
+            CleanupDeleteException native = ProfileResidualNativeError(nativeError, "relative-open", "entry", depth);
+            return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT open failed.",
+                native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture) +
+                ";role=" + role);
+        }
+
+        private static uint ProfileResidualOpenAccess(bool deleteAccess)
+        {
+            // Profile compatibility junctions deny LIST_DIRECTORY. Removing the link
+            // itself, or an ordinary file, must not require reading its contents.
+            return (deleteAccess ? DELETE : FILE_LIST_DIRECTORY) |
+                FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
+        }
+
         private static SafeFileHandle OpenProfileResidualRelative(
-            SafeFileHandle parent, string name, bool deleteAccess, int depth)
+            SafeFileHandle parent, string name, bool deleteAccess, int depth, string role,
+            bool shareDelete = false)
         {
             ValidateProfileResidualName(name);
+            if (deleteAccess && shareDelete)
+                throw new InvalidOperationException("Residual deletion handles must deny delete sharing.");
             bool retained = false;
             IntPtr nameBuffer = IntPtr.Zero, unicodePointer = IntPtr.Zero;
             try
@@ -3424,16 +3446,15 @@ namespace OpenCoven
                 attributes.Attributes = 0x00001000; // OBJ_DONT_REPARSE
                 PROFILE_IO_STATUS_BLOCK io;
                 SafeFileHandle handle;
-                int status = OpenProfileResidualFile(out handle,
-                    (deleteAccess ? 0x00010000u : 0u) |
-                        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
-                    ref attributes, out io, IntPtr.Zero, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                int status = OpenProfileResidualFile(out handle, ProfileResidualOpenAccess(deleteAccess),
+                    ref attributes, out io, IntPtr.Zero, 0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | (shareDelete ? 0x00000004u : 0u),
                     1, 0x00200020, IntPtr.Zero, 0); // FILE_OPEN; OPEN_REPARSE_POINT | SYNCHRONOUS_IO_NONALERT
                 if (status == 0) return handle;
                 if (handle != null) handle.Dispose();
                 if (status == unchecked((int)0xc0000034) || status == unchecked((int)0xc000000f))
                     return null; // The single named entry is absent in the retained parent.
-                throw ProfileResidualNtError(status, "relative-open", depth);
+                throw ProfileResidualOpenError(status, unchecked((int)ProfileNtStatusToDosError(status)), role, depth);
             }
             finally
             {
@@ -3490,7 +3511,7 @@ namespace OpenCoven
                     RequireProfileResidualBudget(timer.Elapsed, index, entries);
                     SafeFileHandle ancestor = index == 0 ?
                         new SafeFileHandle(OpenOwnedProfileDirectory(drive), true) :
-                        OpenProfileResidualRelative(ancestors[index - 1], segments[index - 1], false, index);
+                        OpenProfileResidualRelative(ancestors[index - 1], segments[index - 1], false, index, "ancestor");
                     if (ancestor == null)
                         throw new InvalidOperationException("Profile cleanup ancestor disappeared.");
                     ancestors.Add(ancestor);
@@ -3502,13 +3523,14 @@ namespace OpenCoven
                         throw new InvalidOperationException("Profile cleanup ancestor is not an ordinary disk directory.");
                 }
                 using (SafeFileHandle root = OpenProfileResidualRelative(
-                    ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path), true, 0))
+                    ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path), true, 0, "profile-root"))
                 {
                     if (root == null) return;
                     if (!identity.Matches(root.DangerousGetHandle()))
                         throw new InvalidOperationException("Profile residual root identity changed.");
                     ValidateProfileDirectorySecurity(root.DangerousGetHandle(), identity.Sid, false);
-                    DeleteProfileResidualEntry(root, identity.Volume, timer, 0, ref entries);
+                    DeleteProfileResidualEntry(ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path),
+                        root, identity.Volume, timer, 0, ref entries);
                 }
             }
             finally
@@ -3518,7 +3540,8 @@ namespace OpenCoven
         }
 
         private static void DeleteProfileResidualEntry(
-            SafeFileHandle handle, uint volume, Stopwatch timer, int depth, ref int entries)
+            SafeFileHandle parent, string name, SafeFileHandle handle,
+            uint volume, Stopwatch timer, int depth, ref int entries)
         {
             RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
             IntPtr pointer = handle.DangerousGetHandle();
@@ -3531,7 +3554,7 @@ namespace OpenCoven
             if (!directory && (attributes.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
                 throw new InvalidOperationException("Residual read-only file cannot be removed without metadata mutation.");
             if (directory && !reparse)
-                DeleteProfileResidualDirectoryContents(handle, volume, timer, depth, ref entries);
+                DeleteProfileResidualDirectoryContents(parent, name, handle, volume, timer, depth, ref entries);
             RequireProfileResidualBudget(timer.Elapsed, depth, entries);
             byte disposition = 1;
             if (!SetFileInformationByHandle(pointer, 4, ref disposition, 1))
@@ -3540,31 +3563,48 @@ namespace OpenCoven
         }
 
         private static void DeleteProfileResidualDirectoryContents(
-            SafeFileHandle directory, uint volume, Stopwatch timer, int depth, ref int entries)
+            SafeFileHandle parent, string name, SafeFileHandle directory,
+            uint volume, Stopwatch timer, int depth, ref int entries)
         {
-            byte[] buffer = new byte[65536];
-            bool restart = true;
-            while (true)
+            // Keep the original DELETE handle (which denies delete sharing) alive while
+            // reopening its single name through the retained parent for enumeration.
+            using (SafeFileHandle enumeration = OpenProfileResidualRelative(
+                parent, name, false, depth, depth == 0 ? "profile-root" : "child", true))
             {
-                RequireProfileResidualBudget(timer.Elapsed, depth, entries);
-                PROFILE_IO_STATUS_BLOCK io;
-                int status = QueryProfileResidualDirectory(directory, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
-                    out io, buffer, (uint)buffer.Length, 12, false, IntPtr.Zero, restart); // FileNamesInformation
-                restart = false;
-                if (status == unchecked((int)0x80000006)) return; // STATUS_NO_MORE_FILES
-                if (status != 0) throw ProfileResidualNtError(status, "handle-enumeration", depth);
-                ulong used = io.Information.ToUInt64();
-                if (used == 0 || used > (ulong)buffer.Length)
-                    throw new InvalidOperationException("Residual handle enumeration did not return a bounded record.");
-                foreach (string name in ParseProfileResidualNames(buffer, checked((int)used)))
+                if (enumeration == null)
+                    throw new InvalidOperationException("Retained residual directory disappeared before enumeration.");
+                FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(
+                    enumeration.DangerousGetHandle(), "Residual enumeration attributes unavailable.");
+                if (GetFileType(enumeration.DangerousGetHandle()) != FILE_TYPE_DISK ||
+                    (attributes.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != FILE_ATTRIBUTE_DIRECTORY ||
+                    !SameFileIdentity(
+                        QueryFileInformation(directory.DangerousGetHandle(), "Retained residual identity unavailable."),
+                        QueryFileInformation(enumeration.DangerousGetHandle(), "Residual enumeration identity unavailable.")))
+                    throw new InvalidOperationException("Residual enumeration requires the same ordinary directory.");
+                byte[] buffer = new byte[65536];
+                bool restart = true;
+                while (true)
                 {
-                    RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
-                    if (name == "." || name == "..") continue;
-                    RequireProfileResidualBudget(timer.Elapsed, depth + 1, entries);
-                    using (SafeFileHandle child = OpenProfileResidualRelative(directory, name, true, depth + 1))
+                    RequireProfileResidualBudget(timer.Elapsed, depth, entries);
+                    PROFILE_IO_STATUS_BLOCK io;
+                    int status = QueryProfileResidualDirectory(enumeration, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                        out io, buffer, (uint)buffer.Length, 12, false, IntPtr.Zero, restart); // FileNamesInformation
+                    restart = false;
+                    if (status == unchecked((int)0x80000006)) return; // STATUS_NO_MORE_FILES
+                    if (status != 0) throw ProfileResidualNtError(status, "handle-enumeration", depth);
+                    ulong used = io.Information.ToUInt64();
+                    if (used == 0 || used > (ulong)buffer.Length)
+                        throw new InvalidOperationException("Residual handle enumeration did not return a bounded record.");
+                    foreach (string childName in ParseProfileResidualNames(buffer, checked((int)used)))
                     {
-                        if (child != null)
-                            DeleteProfileResidualEntry(child, volume, timer, depth + 1, ref entries);
+                        RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
+                        if (childName == "." || childName == "..") continue;
+                        RequireProfileResidualBudget(timer.Elapsed, depth + 1, entries);
+                        using (SafeFileHandle child = OpenProfileResidualRelative(directory, childName, true, depth + 1, "child"))
+                        {
+                            if (child != null)
+                                DeleteProfileResidualEntry(directory, childName, child, volume, timer, depth + 1, ref entries);
+                        }
                     }
                 }
             }
