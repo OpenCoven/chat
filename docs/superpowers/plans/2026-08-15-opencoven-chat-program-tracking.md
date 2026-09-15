@@ -12,7 +12,9 @@ The [delivery roadmap](../../roadmap.md) records verified Chat #285 and SDK
 #274 landings and fresh protected run `34935323170`. Follow
 [Chat #219](https://github.com/OpenCoven/chat/issues/219) and
 [SDK #38](https://github.com/OpenCoven/sdk/issues/38) for current protected
-validation evidence. Platform and aggregate acceptance remain required.
+validation evidence. Run `34935323170` failed at Windows native preflight;
+Linux and macOS records passed independent inspection. Windows and aggregate
+acceptance remain required.
 Chat #86 remains parked for candidate/artifact reconciliation; #154/#155
 sequence production delegation after conformance and SDK dependency work.
 

@@ -10,10 +10,14 @@ signatures, independent reviews, and required CI were verified before landing.
 Both validator scopes were rotated to SDK `1535e48e` and read back.
 
 Fresh protected [run 34935323170](https://github.com/OpenCoven/chat/actions/runs/34935323170)
-uses these revisions. Its supervisor artifact and frozen workflow were
-authenticated before protected approval. Platform records and aggregate
-attestation still require verification; dispatch and ordinary CI are not
-protected acceptance. Read the live run and
+used these revisions and completed with failure. Its supervisor artifact and
+frozen workflow were authenticated before protected approval. Linux and macOS
+records independently passed archive binding, canonical schema, private scans,
+exact identities, Cave timing, and all 197 ordered assertions each. Windows
+reported `phase1.native-scenarios.native-preflight` and published no record;
+cleanup separately reported `ntstatus=c0000022`. Validation, attestation, and
+aggregation were skipped. No Windows record identity, timing, or assertion
+mismatch is established. Read the run and
 [Chat #219](https://github.com/OpenCoven/chat/issues/219) /
 [SDK #38](https://github.com/OpenCoven/sdk/issues/38) for subsequent results.
 
@@ -29,7 +33,9 @@ was established. Validation, attestation, and aggregation were skipped.
 Chat #285 preserves three existing native diagnostic IDs that the outer
 allowlist had discarded: `native-preflight`, `pairing-recovery`, and
 `revocation-repair`. Regression tests prove diagnostic preservation, not a
-Windows repair or the hosted failing operation. Candidate
+Windows repair. The fresh result narrows the failure to custody preflight or
+installation-ID checks before Cave launch; bounded operation diagnostics are
+still needed to distinguish them. Candidate
 `96804bc483a063e41e9a9738a4ace61970f6c0a4` remains frozen.
 
 Chat #86 remains parked for SDK candidate/artifact reconciliation. Production
