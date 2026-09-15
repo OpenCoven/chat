@@ -17,8 +17,10 @@ through reviewed head `30a2668`, binding `07a3b3a` and harness `3fb86bd`.
 Head `1558669b0433d3b44df529b7c26d84c4f73c59ae` passed all eight GitHub checks;
 local repository verification passed 2,630 tests with two skips in both normal
 and coverage runs, package/contract checks, stress tests and lint. Independent
-review verified nine commit objects and 166 retained files. The PR remains
-unmerged at the conversation-resolution gate. Clarified documentation identifies
+review verified nine commit objects and 166 retained files. The addressed review
+thread was resolved and the PR landed as signed squash
+`7ed60f0cc6210e8c89d489d1bb5ddf42e1b13baa`, with the exact tested tree.
+Clarified documentation identifies
 the first parent as Chat main, distinct from the frozen Cave repository commit.
 
 The latest completed protected run,
@@ -30,11 +32,11 @@ access denial. No Windows record was produced. Validation, attestation and
 aggregation were skipped. No Windows record identity, timing or assertion
 mismatch is established, and protected acceptance remains incomplete.
 
-Next: verify SDK #268's addressed review-thread resolution and land through
-ordinary protection, rotate both validator scopes to the actual SDK merge with
-readback, authenticate the fresh supervisor artifact, and obtain protected
-platform and aggregate acceptance. Limited GraphQL approval for #268's thread
-inspection/resolution is pending; no override or scope rotation is claimed.
+Both validator scopes now read back SDK merge `7ed60f0`. Fresh protected run
+[34916510997](https://github.com/OpenCoven/chat/actions/runs/34916510997)
+uses Chat producer `39ca573`; its supervisor build is in progress. Next:
+authenticate that artifact before environment approval, then obtain protected
+platform and aggregate acceptance. Dispatch is not acceptance evidence.
 Chat #86 remains a parked draft requiring explicit candidate/artifact adoption
 and exact-head verification. Issues #154/#155 sequence production delegation
 after the protected conformance and SDK dependency work.

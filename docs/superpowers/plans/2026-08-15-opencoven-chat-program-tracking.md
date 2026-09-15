@@ -25,9 +25,9 @@ program-creation baseline; refresh Beads before claiming work or closing gates.
 The inventory and readiness counts below are historical baselines. Current
 ownership, blocking dependencies and verification evidence live in Beads
 `cave-k0aqq` and its Teamwork mirror. The latest roadmap checkpoint distinguishes
-landed Chat #278/Cave authority, SDK #268 awaiting review resolution, and the
-failed protected run `34879698263`. SDK #268 landing, both validator scope
-rotations and fresh protected platform/aggregate acceptance remain required.
+landed Chat #278/Cave authority and SDK #268, both verified validator scope
+rotations, and fresh protected run `34916510997`. Protected platform and
+aggregate acceptance remain required; completed run `34879698263` failed.
 
 Chat #86 remains parked pending explicit candidate adoption and verification.
 Production familiar delegation in #154/#155 follows the protected conformance
