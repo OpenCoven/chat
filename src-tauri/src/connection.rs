@@ -3015,6 +3015,7 @@ mod tests {
         state: Arc<BlockingChildState>,
         cleanup_started: Arc<Barrier>,
         cleanup_release: Arc<Barrier>,
+        cleanup_completed: std::sync::mpsc::Sender<()>,
     }
 
     impl CaveChild for BlockingChild {
@@ -3031,6 +3032,7 @@ mod tests {
             self.cleanup_started.wait();
             self.cleanup_release.wait();
             self.state.reaped.fetch_add(1, Ordering::SeqCst);
+            self.cleanup_completed.send(()).unwrap();
             Ok(())
         }
     }
@@ -3319,6 +3321,7 @@ mod tests {
         let clock = Arc::new(TestLaunchClock::default());
         let cleanup_started = Arc::new(Barrier::new(2));
         let cleanup_release = Arc::new(Barrier::new(2));
+        let (cleanup_completed, cleanup_completion) = std::sync::mpsc::channel();
         let child_state = Arc::new(BlockingChildState::default());
         let state = deadline_state(
             clock.clone(),
@@ -3328,6 +3331,7 @@ mod tests {
                     state: child_state.clone(),
                     cleanup_started: cleanup_started.clone(),
                     cleanup_release: cleanup_release.clone(),
+                    cleanup_completed,
                 }))),
             }),
             Arc::new(InlineThenThreadTaskRunner {
@@ -3345,12 +3349,9 @@ mod tests {
         cleanup_started.wait();
         assert_eq!(child_state.terminated.load(Ordering::SeqCst), 1);
         cleanup_release.wait();
-        for _ in 0..1_000 {
-            if child_state.reaped.load(Ordering::SeqCst) == 1 {
-                break;
-            }
-            std::thread::yield_now();
-        }
+        cleanup_completion
+            .recv_timeout(Duration::from_secs(5))
+            .expect("released cleanup worker must finish reaping");
         assert_eq!(child_state.reaped.load(Ordering::SeqCst), 1);
     }
 
