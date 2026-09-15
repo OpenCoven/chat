@@ -1793,20 +1793,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `31f4f824e0bc93f0f3b0051038ea399444e7fc0e85bcd5a88935b094021ea5e8` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `d81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 220,043 | `513c737dc76958304210da9e209bd09be5266a5db148e9162085a5908fcae952` |
+| `scripts/phase1-conformance.mjs` | 220,276 | `f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 228,780 | `4adeba7eb3737604410ba150611269698c443a1538e109567e1b5188b9bb4c4f` |
+| `scripts/phase1-schema-v2-producer.mjs` | 229,269 | `828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -2559,3 +2559,26 @@ proves a diagnostic-loss bug, not which stage failed in the protected run.
 
 Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
+
+
+### Unexpected installation RPC failures
+
+Protected run `34964120550` used Chat `d84195c61b86598e691ccd47163e46a15b154417`
+and SDK `3490a801e1c1b079fd39351b12793b44aab8f9c8`. Linux and macOS each passed
+197 ordered assertions and independent identity, timing, and scan checks.
+Windows failed at `phase1.native-scenarios.native-preflight-installation-rpc`
+without a narrower response or transport category. It produced no record;
+validation, attestation, and aggregation were skipped.
+
+Installation exceptions without a private RPC category now receive one of
+three fixed suffixes: `unexpected-type-error`, `unexpected-error`, or
+`unexpected-value`. These classify the thrown value without publishing its
+message, code, stack, or cause. Existing privately assigned response and
+transport categories take precedence, and the original thrown value is retained.
+
+A malformed non-string installation response code is also rejected without
+string coercion. A regression reproduced coercion throwing before private
+classification. The frozen Rust consumer emits string codes, so this regression
+does not establish the protected Windows failure's cause. Neither correction
+changes request counts, timeouts, resource limits, or native-provider behavior.
+A verified source/SDK binding and fresh protected run remain required.

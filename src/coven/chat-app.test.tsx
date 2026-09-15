@@ -184,8 +184,10 @@ describe('canonical familiar controller', () => {
     localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: '' }));
     const api = runtime();
     await ready(api);
-    expect(api.readSession).toHaveBeenCalledWith('one');
-    expect(screen.getByTestId('head')).toHaveTextContent('one');
+    await waitFor(() => {
+      expect(api.readSession).toHaveBeenCalledWith('one');
+      expect(screen.getByTestId('head')).toHaveTextContent('one');
+    });
   });
 
   it('keeps unsent drafts out of browser storage', async () => {

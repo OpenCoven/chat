@@ -18,7 +18,7 @@ const installationId = '12345678-1234-4123-8123-123456789abc';
 test.each([
   ['custody-rpc', 'native-preflight-custody-rpc'],
   ['custody-proof', 'native-preflight-custody-proof'],
-  ['installation-rpc', 'native-preflight-installation-rpc'],
+  ['installation-rpc', 'native-preflight-installation-unexpected-error'],
   ['installation-id', 'native-preflight-installation-id'],
 ])('retains the bounded native preflight boundary for %s', async (failure, expected) => {
   const privateError = Object.assign(new Error('private account and credential detail'), {
@@ -74,6 +74,9 @@ test.each([
   'installation-timeout',
   'installation-transport-closed',
   'installation-input-failed',
+  'installation-unexpected-type-error',
+  'installation-unexpected-error',
+  'installation-unexpected-value',
 ])('preserves native preflight %s through the outer public boundary', async (operation) => {
   const producerPath = '../scripts/phase1-schema-v2-producer.mjs';
   const harnessPath = '../scripts/phase1-conformance.mjs';
@@ -102,7 +105,7 @@ class InstallationChild extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   mode = 'response';
-  code = 'keychain_failure';
+  code: unknown = 'keychain_failure';
   readonly stdin = {
     write: (line: string) => {
       const request = JSON.parse(line) as { id: string; command: string };
@@ -150,6 +153,43 @@ test.each([
   expect(stage).toBe(`native-preflight-installation-${category}`);
   expect(schemaV2NativeFailureDiagnostic(stage, error)).toBe(`phase1.native-scenarios.${stage}`);
   expect(stage).not.toContain('private');
+  expect(rpc.commandCount('app_installation_id')).toBe(1);
+  expect(rpc.pending.size).toBe(0);
+});
+
+test.each([
+  [new TypeError('private type detail'), 'unexpected-type-error'],
+  [Object.assign(new Error('private detail'), { code: 'keychain_failure' }), 'unexpected-error'],
+  ['private thrown value', 'unexpected-value'],
+] as const)(
+  'retains unexpected installation failure without exposing its cause',
+  async (failure, category) => {
+    const rpc = { ok: vi.fn().mockResolvedValueOnce(proof).mockRejectedValueOnce(failure) };
+    let stage = '';
+    await expect(
+      runNativePreflight(rpc, proof.backend, (value: string) => {
+        stage = value;
+      }),
+    ).rejects.toBe(failure);
+    expect(stage).toBe(`native-preflight-installation-${category}`);
+    expect(schemaV2NativeFailureDiagnostic(stage, failure)).toBe(
+      `phase1.native-scenarios.${stage}`,
+    );
+    expect(rpc.ok).toHaveBeenCalledTimes(2);
+  },
+);
+
+test('classifies malformed installation error codes without coercing them', async () => {
+  const child = new InstallationChild();
+  child.code = { toString: null, private: 'private detail' };
+  const rpc = new NativeRpcClient(child);
+  let stage = '';
+  await expect(
+    runNativePreflight(rpc, proof.backend, (value: string) => {
+      stage = value;
+    }),
+  ).rejects.toBeInstanceOf(Error);
+  expect(stage).toBe('native-preflight-installation-response-rejected');
   expect(rpc.commandCount('app_installation_id')).toBe(1);
   expect(rpc.pending.size).toBe(0);
 });
