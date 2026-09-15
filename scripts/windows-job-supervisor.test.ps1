@@ -74,6 +74,15 @@ function Write-ExceptionChain {
   }
 }
 
+function Get-NativeInstallationFailureCategory {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $pattern = '^installation-roundtrip: (response-timeout|response-invalid|custody-invalid|grant-invalid|installation-invalid|installation-changed|custody-changed|native-exit-failed|unexpected-stderr|(?:app_installation_id|conformance_native_custody_state|conformance_issue_native_custody_cleanup|conformance_cleanup_native_custody)-failed|app_installation_id-(?:installation_(?:lock|entry|read|write|persistence)_unavailable|secure_store_unavailable|keychain_failure|credential_missing))$'
+  if ($null -ne $OutputText -and $OutputText.Trim() -cmatch $pattern) {
+    return $Matches[1]
+  }
+  return 'unclassified'
+}
+
 trap {
   Write-Host '--- windows-job-supervisor.test.ps1 failure ---'
   Write-ExceptionChain -Failure $_
@@ -5242,6 +5251,11 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         [IO.File]::WriteAllText($installationScript, @'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+  $category = Get-NativeInstallationFailureCategory $_.Exception.Message
+  [Console]::Out.WriteLine("installation-roundtrip: $category")
+  exit 1
+}
 $start = [Diagnostics.ProcessStartInfo]::new($env:OPENCOVEN_NATIVE_TEST_BINARY)
 $start.UseShellExecute = $false
 $start.RedirectStandardInput = $true
@@ -5251,6 +5265,8 @@ $process = [Diagnostics.Process]::Start($start)
 $stderr = $process.StandardError.ReadToEndAsync()
 $grant = $null
 $terminalSuccess = $false
+$primaryFailure = $null
+$secondaryFailure = $null
 function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
   $request = @{ id = $command; command = $command; args = $arguments }
   $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress -Depth 8))
@@ -5264,7 +5280,16 @@ function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
   try { $response = $line | ConvertFrom-Json }
   catch { throw 'installation-roundtrip: response-invalid' }
   if ($response.id -cne $command -or $response.ok -ne $true) {
-    # Never print arbitrary native response text or credential material.
+    # Only installation's fixed native codes may cross the test-process boundary.
+    if ($command -ceq 'app_installation_id' -and $response.id -ceq $command -and
+        $response.error.code -is [string] -and $response.error.code -cin @(
+          'installation_lock_unavailable', 'installation_entry_unavailable',
+          'installation_read_unavailable', 'installation_write_unavailable',
+          'installation_persistence_unavailable', 'secure_store_unavailable',
+          'keychain_failure', 'credential_missing'
+        )) {
+      throw "installation-roundtrip: app_installation_id-$($response.error.code)"
+    }
     throw "installation-roundtrip: $command-failed"
   }
   return $response.result
@@ -5294,12 +5319,17 @@ try {
   $after = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
   Assert-EmptyCustody $after
   if ($before.stateSha256 -cne $after.stateSha256) { throw 'installation-roundtrip: custody-changed' }
+} catch {
+  $primaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
 } finally {
   try {
     if ($null -ne $grant -and -not $process.HasExited) {
       $null = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
     }
-  } finally {
+  } catch {
+    $secondaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
+  }
+  try {
     $process.StandardInput.Close()
     if ($process.WaitForExit(10000)) {
       $terminalSuccess = $process.ExitCode -eq 0
@@ -5307,15 +5337,43 @@ try {
       $process.Kill($true)
       $null = $process.WaitForExit(10000)
     }
-    $process.Dispose()
+  } catch {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+  } finally {
+    try { $process.Dispose() } catch {
+      if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+    }
   }
 }
-if (-not $terminalSuccess) { throw 'installation-roundtrip: native-exit-failed' }
-if (-not $stderr.Wait(10000) -or $stderr.Result -ne '') {
-  throw 'installation-roundtrip: unexpected-stderr'
+if (-not $terminalSuccess -and $null -eq $secondaryFailure) {
+  $secondaryFailure = 'native-exit-failed'
+}
+try {
+  if (-not $stderr.Wait(10000) -or $stderr.Result -ne '') {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+  }
+} catch {
+  if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+}
+if ($null -ne $primaryFailure -or $null -ne $secondaryFailure) {
+  if ($null -eq $primaryFailure) {
+    $primaryFailure = $secondaryFailure
+    $secondaryFailure = $null
+  }
+  [Console]::Out.WriteLine("installation-roundtrip: $primaryFailure")
+  if ($null -ne $secondaryFailure) {
+    [Console]::Error.WriteLine("installation-roundtrip: $secondaryFailure")
+  }
+  exit 1
 }
 Write-Output 'installation-roundtrip: passed'
 '@, [Text.UTF8Encoding]::new($false))
+        # Prepend the exact tested classifier instead of maintaining a child copy.
+        $classifierSource = "function Get-NativeInstallationFailureCategory {`n" +
+          ${function:Get-NativeInstallationFailureCategory}.ToString() + "`n}`n"
+        [IO.File]::WriteAllText($installationScript,
+          $classifierSource + [IO.File]::ReadAllText($installationScript),
+          [Text.UTF8Encoding]::new($false))
         $installationNonce = [Guid]::NewGuid().ToString('N')
         $installationJobName = "Local\OpenCoven.Chat.Conformance.$installationNonce"
         $installationEnvironment = $validNativeEnvironment.Clone()
@@ -5335,7 +5393,11 @@ Write-Output 'installation-roundtrip: passed'
           )
           if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
               $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
-            throw 'Restricted native installation roundtrip failed.'
+            $category = Get-NativeInstallationFailureCategory $installationResult.Stdout
+            $secondary = if ($installationResult.Stderr -eq '') { 'none' } else {
+              Get-NativeInstallationFailureCategory $installationResult.Stderr
+            }
+            throw "Restricted native installation roundtrip failed: $category; secondary: $secondary"
           }
         } finally { $installationJob.Dispose() }
 

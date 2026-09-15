@@ -46,6 +46,13 @@ empty custody, grant issuance, creation, stable reread and authorized cleanup
 inside a separate Job for its isolated user. Local syntax and mocked tests do
 not establish restricted Windows runtime success.
 
+Windows supervisor job `104433590803` reached this round trip and failed, but
+the original wrapper discarded its child diagnostic. The child now emits only
+an allowlisted category and the parent preserves that category in its failure.
+Both use the same tested classifier; arbitrary response text, parser messages,
+and extra output remain excluded. This diagnostic correction does not establish
+the failing installation operation or relax the round-trip assertions.
+
 The lock now selects reviewed source `4addac7ec94f4a26eaaf61f6169c645d627451c5`,
 tree `247eb2f3409156ebf8b273f5a195000dff883b29`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
@@ -1871,7 +1878,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
-| `scripts/windows-job-supervisor.test.ps1` | 192,268 | `61046c09dff0315b53f8e6c1f6c6ee6d80f21418750bd6d726683e4a5d706f50` |
+| `scripts/windows-job-supervisor.test.ps1` | 195,389 | `5de82affbd8fe51b6bedb3b3af4cb7ef0f16bd6ce9162b197ea7455b1898aac7` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
