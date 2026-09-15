@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '683e99918eb38978680e46aed7c496f6801c3306',
-  tree: '216f6c2fdb698229973a49d448fd7953e66c24a6',
+  revision: 'e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b',
+  tree: '64b1e1812e9bfc729f2d7d148b224afe6f17f775',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: 'a27e35f53816157f3c53ef18de44c502ae3d778e',
-      sha256: 'd4200cea0a2d0634828d52ab66e23aefe6b2156096b492f3e27ed11c65ccc870',
+      blob: '5d78e7a61cefcb7efc57b25abff52d450a8aa41b',
+      sha256: 'f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '9a4225168d1254693b027c19ecbd46d734fa58f9',
-      sha256: '673384c3a9658649431127e9bab1b330c51dbf132af62d65acac7cee23e4593c',
+      blob: '836d08084f9cffa26d168d8719f060d3493e7cb0',
+      sha256: '828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -125,13 +125,13 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/ci.yml',
-      blob: '540113156cf3e5d76f99e82d1d7580e0eaa63c63',
-      sha256: 'ddcf045d07cc2cc915969bbf289dc00b849801541eb450515d54e3e8c7c20908',
+      blob: 'aeb0e438bc2eed017b6b5ae55d83e52c2eb3742a',
+      sha256: '18e3fec615827b1ce416f875ac709b3ef8d5ec08f2d9ade3f7fa1cf65d03608b',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '31e4bb82285f69f30d029c4dc90731f9ed999567',
-      sha256: 'd6043736cd4b5b240fb71f4c4051c7370faa40c11b02bc70572fdfc01dcd291d',
+      blob: 'da9d169d608419776dd29efaa7d5cb0a03d4c971',
+      sha256: 'd81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -565,6 +565,49 @@ describe('Phase 1 conformance lock', () => {
         ),
       ).toEqual(expected);
     }
+  });
+
+  gitTest('executes installation diagnostics from the lock-selected harness checkout', () => {
+    const lock = readPhase1ConformanceLock();
+    const checkout = resolve(createScratchRoot('locked-harness-diagnostics'), 'harness');
+    runGit(['clone', '--no-checkout', '--no-hardlinks', projectRoot, checkout], projectRoot);
+    runGit(['checkout', '--detach', lock.harness.revision], checkout);
+    phase1ConformanceLock.assertPhase1HarnessAuthorityCheckout(lock, checkout);
+
+    // A workspace import would miss a stale bootstrap pin even when local tests pass.
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+      import assert from 'node:assert/strict';
+      import { runNativePreflight, schemaV2NativeFailureDiagnostic }
+        from './scripts/phase1-schema-v2-producer.mjs';
+      const proof = { backend: 'windows-credential-manager', available: true,
+        empty: true, stateSha256: 'a'.repeat(64) };
+      const failure = new Error('private credential detail');
+      const commands = [];
+      let stage = '';
+      await assert.rejects(runNativePreflight({ ok: async (command) => {
+        commands.push(command);
+        if (command === 'conformance_native_custody_state') return proof;
+        throw failure;
+      } }, proof.backend, value => { stage = value; }), error => error === failure);
+      assert.deepEqual(commands, ['conformance_native_custody_state', 'app_installation_id']);
+      process.stdout.write(schemaV2NativeFailureDiagnostic(stage, failure));
+    `,
+      ],
+      {
+        cwd: checkout,
+        encoding: 'utf8',
+        env: createTestGitEnvironment(),
+        timeout: gitTestCommandTimeout,
+        maxBuffer: gitTestMaxBuffer,
+        stdio: 'pipe',
+      },
+    );
+    expect(output).toBe('phase1.native-scenarios.native-preflight-installation-unexpected-error');
   });
 
   gitTest('binds the production Chat authority to the pinned Git objects', () => {
