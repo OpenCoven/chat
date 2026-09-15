@@ -22,18 +22,18 @@ See the [delivery roadmap and dated checkpoints](../../roadmap.md) for the lates
 Chat PR and conformance state. The counts and initial readiness below are the
 program-creation baseline; refresh Beads before claiming work or closing gates.
 
-The September 9 full inventory includes 68 records: 30 closed, one open, and
-37 blocked. Teamwork card text, board Status fields, and missing mirrors are
-being reconciled separately. Preserve `until` gates when projecting blocking
-dependencies. The roadmap records the current protected run and unresolved
-release acceptance; historical phase closures do not satisfy that gate. The September 12 checkpoint records
-merged Chat #228 and SDK #211, both validator scopes bound to SDK `5730979`,
-and protected run `34666399779`. Linux and macOS records independently passed
-all 197 assertions, identities and timing. Windows failed at quota directory
-enumeration before Cave diagnostics; aggregate acceptance remains incomplete.
-Chat #219, Coven #984, SDK #38 and final gate `cave-ilh1h` remain open. The
-roadmap and Beads retain the terminal evidence and bounded diagnostic follow-up;
-historical phase closures remain unchanged.
+The inventory and readiness counts below are historical baselines. Current
+ownership, blocking dependencies and verification evidence live in Beads
+`cave-k0aqq` and its Teamwork mirror. The latest roadmap checkpoint distinguishes
+landed Chat #278/Cave authority, SDK #268 awaiting review resolution, and the
+failed protected run `34879698263`. SDK #268 landing, both validator scope
+rotations and fresh protected platform/aggregate acceptance remain required.
+
+Chat #86 remains parked pending explicit candidate adoption and verification.
+Production familiar delegation in #154/#155 follows the protected conformance
+and SDK dependency work. Diagnostic landings do not close historical-cause
+issues #206/#246, and ordinary CI does not close the release gate. Historical
+phase closures and the baseline register below remain unchanged.
 
 ## Tracker Summary
 
