@@ -80,6 +80,17 @@ same installation write failure. The native entry requires local-machine
 persistence. The current logon therefore lacks a prerequisite for that write;
 the separate profile-residual access denial remains unresolved.
 
+Hosted Windows job `104496796949` then observed `hive=present;persistence=session`
+and the same installation-write failure. Hive presence alone is insufficient;
+this result does not prove a repaired credential store or cleanup path. A
+read-only comparison now snapshots credential capability under the retained
+validated token through `RunQuotaRead` immediately before the existing child
+launch, then compares it with that child's fixed environment report on failure.
+Only allowlisted hive/persistence categories are published. Different capability
+between the two tokens would isolate a launch-session boundary; equal session-only
+capability leaves retained-logon/profile/policy behavior unresolved. No additional
+child, credential write, launch API, policy, or ACL change is introduced.
+
 The repair loads the verified profile explicitly during `WindowsIsolatedUser`
 creation and retains its hive handle with the validated token. Children still
 launch with zero logon flags. After terminal quarantine, disposal unloads the
@@ -1838,7 +1849,7 @@ and retains the returned handle until quarantine completes. It unloads the hive
 before token retirement and profile deletion, preserving ownership on unload
 failure. Profile loading occurs during identity creation under the existing
 outer lifecycle/job budget; the production execution deadline is unchanged.
-This restores the persistent-credential prerequisite without depending on an
+This owns the hive lifetime explicitly without depending on an
 automatic unload at child-process exit. Native cleanup acceptance remains required.
 
 An isolated quota pass that observes only the exact
@@ -1935,7 +1946,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 389,154 | `81bcbf6beb97d1292d171ef2cd9def96c6aeca11fd5f6cd57c0d10377b4ab78d` |
-| `scripts/windows-job-supervisor.test.ps1` | 199,635 | `3f460c66c011ed7b57a5750d672184e44d26745473d0b8eb9b834dfa15fb463f` |
+| `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |

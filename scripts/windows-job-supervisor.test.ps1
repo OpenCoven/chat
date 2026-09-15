@@ -151,6 +151,27 @@ public static class NativeInstallationEnvironmentProbe {
   }
 }
 
+function Read-NativeInstallationRetainedEnvironment($User) {
+  try {
+    # Initialize the exact same read-only native probe used by the child.
+    Read-NativeInstallationEnvironment | Out-Null
+    $method = $User.GetType().GetMethod('RunQuotaRead', [Reflection.BindingFlags]'NonPublic,Instance')
+    $reader = [Delegate]::CreateDelegate([Func[string]], [NativeInstallationEnvironmentProbe].GetMethod('Read'))
+    $value = $method.MakeGenericMethod([string]).Invoke($User, [object[]]@($reader))
+    if ($value -cmatch '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z') {
+      return $value
+    }
+  } catch { }
+  return 'hive=unavailable;persistence=unavailable'
+}
+
+function Format-NativeInstallationCapabilityComparison([string]$Retained, [string]$Child) {
+  $pattern = '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z'
+  if ($Retained -cnotmatch $pattern) { $Retained = 'unavailable' }
+  if ($Child -cnotmatch $pattern) { $Child = 'unavailable' }
+  return "Native installation capability comparison: retained=$Retained;child=$Child"
+}
+
 trap {
   Write-Host '--- windows-job-supervisor.test.ps1 failure ---'
   Write-ExceptionChain -Failure $_
@@ -5570,6 +5591,7 @@ Write-Output 'installation-roundtrip: passed'
         # Match nativeScenarioHomes: explicit cleanup homes require the trusted OS profile.
         $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.OperatingSystemProfilePath
         $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
+        $retainedInstallationEnvironment = Read-NativeInstallationRetainedEnvironment $isolatedUser
         $primaryInstallationFailure = $null
         try {
           $installationResult = $installationJob.RunProducerAsUserAndQuarantine(
@@ -5580,6 +5602,7 @@ Write-Output 'installation-roundtrip: passed'
           if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
               $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
             $report = Get-NativeInstallationFailureReport $installationResult.Stdout
+            Write-Host (Format-NativeInstallationCapabilityComparison $retainedInstallationEnvironment $report.Environment)
             $category = $report.Category
             $secondary = if ($installationResult.Stderr -eq '') { 'none' } else {
               Get-NativeInstallationFailureCategory $installationResult.Stderr

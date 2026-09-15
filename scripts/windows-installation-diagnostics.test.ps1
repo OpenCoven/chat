@@ -12,7 +12,7 @@ $function = @($tree.FindAll({ param($node)
 }, $false))
 if ($function.Count -ne 1) { throw 'Bounded installation classifier missing.' }
 Invoke-Expression $function[0].Extent.Text
-foreach ($name in @('Get-NativeInstallationFailureReport', 'Read-NativeInstallationEnvironment')) {
+foreach ($name in @('Get-NativeInstallationFailureReport', 'Read-NativeInstallationEnvironment', 'Read-NativeInstallationRetainedEnvironment', 'Format-NativeInstallationCapabilityComparison')) {
   $definition = @($tree.FindAll({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name
   }, $false))
@@ -46,6 +46,32 @@ if ($environment -cnotmatch '^hive=(present|absent|unavailable);persistence=(non
 foreach ($pair in @(@(0, 'none'), @(1, 'session'), @(2, 'local'), @(3, 'enterprise'), @(99, 'unrecognized'))) {
   if ([NativeInstallationEnvironmentProbe]::PersistenceCategory([uint32]$pair[0]) -cne $pair[1]) {
     throw 'Native generic-credential persistence mapping changed.'
+  }
+}
+Add-Type -TypeDefinition @'
+using System;
+public class RetainedCapabilityFixture {
+    public bool Called;
+    public string Result = "hive=present;persistence=enterprise";
+    internal T RunQuotaRead<T>(Func<T> read) { Called = true; return (T)(object)Result; }
+}
+'@
+$retainedFixture = [RetainedCapabilityFixture]::new()
+$retained = Read-NativeInstallationRetainedEnvironment $retainedFixture
+if (-not $retainedFixture.Called -or $retained -cne 'hive=present;persistence=enterprise') {
+  throw 'Retained probe did not use the locked token reader.'
+}
+$comparison = Format-NativeInstallationCapabilityComparison $retained 'hive=present;persistence=session'
+if ($comparison -cne 'Native installation capability comparison: retained=hive=present;persistence=enterprise;child=hive=present;persistence=session') {
+  throw 'Capability comparison lost the session boundary.'
+}
+$retainedFixture.Result = 'private-token-data'
+$retained = Read-NativeInstallationRetainedEnvironment $retainedFixture
+if ($retained -cne 'hive=unavailable;persistence=unavailable') { throw 'Retained probe leaked unbounded output.' }
+foreach ($untrusted in @('private-token-data', "hive=present;persistence=session`nprivate", 'hive=present;persistence=session;private')) {
+  $comparison = Format-NativeInstallationCapabilityComparison $untrusted $untrusted
+  if ($comparison -cne 'Native installation capability comparison: retained=unavailable;child=unavailable') {
+    throw 'Capability comparison accepted unbounded data.'
   }
 }
 # Run the fixture's actual home selection with distinct redirected and OS profiles.
