@@ -147,6 +147,10 @@ const schemaV2NativeFailureStages = new Set([
   'fixture',
   'rpc-start',
   'native-preflight',
+  'native-preflight-custody-rpc',
+  'native-preflight-custody-proof',
+  'native-preflight-installation-rpc',
+  'native-preflight-installation-id',
   'launch',
   'pairing',
   'pairing-recovery',
@@ -4730,6 +4734,27 @@ function validateNativeCustodyProof(value, expectedBackend, label) {
   return value;
 }
 
+export async function runNativePreflight(rpc, expectedBackend, onStage) {
+  onStage('native-preflight-custody-rpc');
+  const proof = await rpc.ok('conformance_native_custody_state', { instanceIds: [] });
+  onStage('native-preflight-custody-proof');
+  const nativeStateBefore = validateNativeCustodyProof(
+    proof,
+    expectedBackend,
+    'Native custody preflight',
+  );
+  onStage('native-preflight-installation-rpc');
+  const installationId = await rpc.ok('app_installation_id');
+  onStage('native-preflight-installation-id');
+  if (
+    typeof installationId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(installationId)
+  ) {
+    throw new Error('native custody returned a non-canonical installation ID');
+  }
+  return { nativeStateBefore, installationId };
+}
+
 async function runNativeScenarios({
   artifactRoot,
   roots,
@@ -4840,20 +4865,13 @@ async function runNativeScenarios({
     let installationId = 'phase1-installation-1';
     if (platformEnvironment !== undefined) {
       activeNativeStage = 'native-preflight';
-      nativeStateBefore = validateNativeCustodyProof(
-        await rpc.ok('conformance_native_custody_state', { instanceIds: [] }),
+      ({ nativeStateBefore, installationId } = await runNativePreflight(
+        rpc,
         platformEnvironment.nativeCustody,
-        'Native custody preflight',
-      );
-      installationId = await rpc.ok('app_installation_id');
-      if (
-        typeof installationId !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-          installationId,
-        )
-      ) {
-        throw new Error('native custody returned a non-canonical installation ID');
-      }
+        (stage) => {
+          activeNativeStage = stage;
+        },
+      ));
     }
 
     activeNativeStage = 'launch';
