@@ -1,6 +1,56 @@
 # Delivery roadmap and consolidation audit
 
-## Current consolidation checkpoint, 2026-09-15 (Chat #290)
+## Current delivery and authority checkpoint, 2026-09-15
+
+Chat [#291](https://github.com/OpenCoven/chat/pull/291) landed as
+`490908c46bf6f3b00c00aef0a5edb27af426e7ee` after all eleven jobs in
+[PR CI 34943642095](https://github.com/OpenCoven/chat/actions/runs/34943642095)
+passed. Its three bounded operation-queue waits preserve #289's cleanup-test
+synchronization. The complete delivered tree matches reviewed head
+`c7598c6c7b17b5580b46c546e691701922a49f13`.
+
+The concurrent squash merge has only one parent. The SDK validator requires
+a normal delivery merge with the reviewed source as its second parent and an
+identical complete tree. Tree equality alone does not satisfy that contract.
+This checkpoint starts from the delivered #291 tree and must land through a
+normal merge. Recheck its exact head, both parents, and complete tree equality
+before binding the actual merge; preserve the existing validator gate.
+Its direct source ancestry runs through `490908c4`, `b7578a65`, `92151f06`,
+`3b1c7f7`, and `8cd0216a` to harness
+`683e99918eb38978680e46aed7c496f6801c3306`. Every edge requires authentication.
+
+SDK [#275](https://github.com/OpenCoven/sdk/pull/275) landed as
+`2b41077bad567757137575f68a11f32ea3a30ea7`, with its reviewed tree intact and
+all eight exact-head checks passed. Both validator scopes select that merge.
+It binds Chat #292 (`b7578a65`) and preserves the native-preflight operation
+diagnostics. Fresh protected
+[run 34945048615](https://github.com/OpenCoven/chat/actions/runs/34945048615)
+uses those frozen revisions. Its supervisor artifact and workflow passed
+independent authentication. Linux completed successfully; its record passed
+archive/run binding, schema, scans, exact identities, Cave timing, and all
+197 ordered assertions. Windows and macOS records remain pending at this
+checkpoint. No accepted aggregate or publication approval is established.
+[Chat #219](https://github.com/OpenCoven/chat/issues/219) and
+[SDK #38](https://github.com/OpenCoven/sdk/issues/38) carry subsequent results.
+
+Next: land this reviewed checkpoint with the required merge structure, bind
+its actual delivery on SDK #275 while retaining all parent/tree rejection
+coverage, complete verification and landing, rotate both scopes with readback,
+and obtain fresh protected validation. The existing run continues against
+its original frozen inputs. Candidate `96804bc4`, counterparts, assertions,
+and protected controls remain unchanged.
+
+The unused local SDK preparation branch was retired after ancestry and
+archived-draft verification; no worktree or remote was removed for that
+retirement. SDK [#45](https://github.com/OpenCoven/sdk/issues/45) tracks the
+remaining ownership and HPKE reconciliation. Chat #86 remains parked;
+#154/#155 and production acceptance remain open. Preserve this chat and
+active, dirty, locked, or uncertain worktrees. Consolidation is incomplete.
+Use GitHub issues and current repository tracking guides for live coordination;
+the dated Beads snapshots below are historical evidence, not instructions to
+resume retired tooling.
+
+## Historical consolidation checkpoint, 2026-09-15 (Chat #290)
 
 Chat [#289](https://github.com/OpenCoven/chat/pull/289) landed as
 `a94ecb2456a5bcb2d3e9f46c6cf300447b6cd068`, retaining bounded completion
@@ -765,9 +815,10 @@ refresh GitHub runs and branch heads before acting on it.
 The [program register](superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md)
 remains the Beads dependency index. Its initial counts and ready lanes describe
 program creation, not verified current completion. No phase gate is closed by
-this audit. Current Beads and Project reconciliation findings appear below.
+this audit. The dated findings below describe the former tracking system;
+current coordination follows GitHub issues and the tracking guide above.
 
-## Delivery order
+### Historical delivery order
 
 | Priority | Work | Current evidence | Completion requirement |
 | --- | --- | --- | --- |
@@ -782,7 +833,7 @@ release readiness. The applicable workflow is
 [client-v1-conformance.yml](../.github/workflows/client-v1-conformance.yml), with
 its evidence contract in [phase1-conformance.md](phase1-conformance.md).
 
-## Beads and GitHub Project reconciliation
+### Historical beads and GitHub Project reconciliation
 
 Chat program cards already live in the organization's
 [Teamwork project](https://github.com/orgs/OpenCoven/projects/9). These are Beads
@@ -813,7 +864,7 @@ The organization `.github` repository's profile was also inspected; it is a
 general organization overview rather than Chat's delivery tracker. Keep this
 roadmap and the existing Teamwork mirrors as the Chat tracking entry points.
 
-## Local branch and worktree disposition
+### Historical local branch and worktree disposition
 
 The initial inventory contained 10 worktrees, including the primary checkout.
 One clean secondary worktree, `protected-local-clone-safe-directory`, was
@@ -852,7 +903,7 @@ The documentation branch for this audit uses the primary checkout and adds no
 worktree. The minimum remaining checkout set is not yet proven: active and
 unreconciled work must be resolved first.
 
-## Audit follow-through
+### Historical audit follow-through
 
 - Recover v15 test results from the existing process; do not start another run
   merely because its output is temporarily unavailable.
@@ -866,7 +917,7 @@ unreconciled work must be resolved first.
 - Keep roadmap links, phase plans, PR descriptions, and workflow evidence
   consistent as each item lands. Do not close a gate from unit tests alone.
 
-## Remote branch closeout
+### Historical remote branch closeout
 
 The roadmap audit landed through [PR #139](https://github.com/OpenCoven/chat/pull/139)
 at `ded69f2`, after Web checks and Contract canary passed in
