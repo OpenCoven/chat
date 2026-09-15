@@ -89,7 +89,8 @@ initialization failures use that same cleanup path; if cleanup also fails, the
 trusted exception retains the cleanup owner alongside both errors. The native
 lifecycle fixture covers loaded-hive presence, persistent credential capability,
 unload failure/retry, post-load rollback, and final hive/profile/account absence.
-Native Windows verification and a new immutable source binding remain required.
+Native Windows verification remains required; the immutable source binding is
+recorded below.
 
 The child and parent share the same allowlist, including existing fixed native
 cleanup-grant subtypes bound to the issuance command. Private response text,
@@ -99,8 +100,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `4addac7ec94f4a26eaaf61f6169c645d627451c5`,
-tree `247eb2f3409156ebf8b273f5a195000dff883b29`, including all 25 governed files
+The lock now selects reviewed source `0ff40d2c1fcf7abf8d0d9d3a2aa85dbc48d05280`,
+tree `61785c7123c64fdc68f46fff6c628357610d09db`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
