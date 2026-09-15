@@ -368,11 +368,12 @@ $instance = [Reflection.BindingFlags]'NonPublic,Instance'
 $register = [OpenCoven.WindowsIsolatedUser].GetMethod('RegisterTerminalQuarantine', $instance)
 $applicationField = [OpenCoven.WindowsIsolatedUser].GetField('ownedApplication', $instance)
 $quotaField = [OpenCoven.WindowsIsolatedUser].GetField('quotaToken', $instance)
+$unloadProfile = [OpenCoven.WindowsIsolatedUser].GetMethod('UnloadOwnedProfile', $instance)
 $deleteTree = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteDirectoryTree', $static)
 $residual = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOwnedProfileResidual', $static)
 $deleteCore = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOperatingSystemProfileCore', $static)
 $classify = [OpenCoven.WindowsIsolatedUser].GetMethod('ClassifyCleanupError', $static)
-foreach ($seam in @($register, $applicationField, $quotaField, $deleteTree, $residual, $deleteCore, $classify)) {
+foreach ($seam in @($register, $applicationField, $quotaField, $unloadProfile, $deleteTree, $residual, $deleteCore, $classify)) {
   if ($null -eq $seam) { throw 'Native residual cleanup regression seam is missing.' }
 }
 function Test-ResidualPath([string]$Path) {
@@ -484,6 +485,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
   $external = $null
   $canary = $null
   $user = $null
+  $profileLifecycle = @{ Unloaded = $false }
   $job = $null
   $application = $null
   $held = $null
@@ -551,6 +553,8 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
         # Seed adversarial residuals through real userenv after successful quarantine and
         # actual pin/token release. Reuse the genuine captured identity in the production core.
         $application.Dispose()
+        $unloadProfile.Invoke($user, @()) | Out-Null
+        $profileLifecycle.Unloaded = $true
         $quotaField.GetValue($user).Dispose()
         [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $profile)
         if (-not (Test-ResidualPath $marker)) { throw 'Held residual seed unexpectedly disappeared.' }
@@ -680,17 +684,19 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       { if ($null -ne $application) { $application.Dispose() } },
       {
         if ($null -ne $user) {
+          $unloadProfile.Invoke($user, @()) | Out-Null
+          $profileLifecycle.Unloaded = $true
           $token = $quotaField.GetValue($user)
           if ($null -ne $token) { $token.Dispose() }
         }
       },
       {
-        if ($null -ne $moved -and (Test-ResidualPath $profile)) {
+        if ($profileLifecycle.Unloaded -and $null -ne $moved -and (Test-ResidualPath $profile)) {
           if ($case -eq 'root-junction') { [IO.Directory]::Delete($profile) }
           else { [IO.Directory]::Delete($profile, $true) }
         }
       },
-      { if ($null -ne $moved) { [IO.Directory]::Move($moved, $profile) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $moved) { [IO.Directory]::Move($moved, $profile) } },
       {
         if ($null -ne $originalParentAcl -and (Test-ResidualPath $control)) {
           Set-Acl -LiteralPath $control -AclObject $originalParentAcl
@@ -713,11 +719,11 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       },
       # These identities never launch a producer. Manual teardown is fixture-only,
       # after closing its real pins and releasing/restoring every injected blocker.
-      { if ($null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $user.OperatingSystemProfilePath) } },
-      { if ($null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.OperatingSystemProfilePath)) | Out-Null } },
-      { if ($null -ne $moved -and (Test-ResidualPath $moved)) { $deleteTree.Invoke($null, [object[]]@([string]$moved)) | Out-Null } },
-      { if ($null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.RootPath)) | Out-Null } },
-      { if ($null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::RemoveAccount($user.UserName) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $user.OperatingSystemProfilePath) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.OperatingSystemProfilePath)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $moved -and (Test-ResidualPath $moved)) { $deleteTree.Invoke($null, [object[]]@([string]$moved)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.RootPath)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::RemoveAccount($user.UserName) } },
       { if ($null -ne $canary -and (Test-ResidualPath $canary)) { [IO.File]::SetAttributes($canary, [IO.FileAttributes]::Normal) } },
       { if ($null -ne $external -and (Test-ResidualPath $external)) { [IO.Directory]::Delete($external, $true) } }
     ))

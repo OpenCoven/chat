@@ -79,6 +79,9 @@ function Assert-ProfileFixtureMissing([string]$Path) {
   $stage = 'profile-create'
   try {
     $createdProfile = $context.User.OperatingSystemProfilePath
+    if (-not (Test-Path "Registry::HKEY_USERS\$($context.User.Sid)")) {
+      throw 'Owned user hive was not loaded during identity creation.'
+    }
     $stage = 'token-agreement'
     $tokenProfile = [OpenCoven.Tests.ProfileLifecycleFixture]::ReadTokenProfile($context.User)
     if (-not [IO.Path]::IsPathFullyQualified($createdProfile) -or
@@ -102,6 +105,15 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 public static class ChildProfileFixture {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CredGetSessionTypes(uint count, [Out] uint[] persistence);
+    public static void RequirePersistentCredentials() {
+        uint[] persistence = new uint[7];
+        if (!CredGetSessionTypes((uint)persistence.Length, persistence) ||
+            persistence[1] < 2 || persistence[1] > 3)
+            throw new Exception("Persistent generic credentials are unavailable.");
+    }
     [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern bool GetUserProfileDirectoryW(IntPtr token, StringBuilder path, ref uint size);
     public static string Read() {
@@ -117,6 +129,7 @@ public static class ChildProfileFixture {
     }
 }
 "@
+[ChildProfileFixture]::RequirePersistentCredentials()
 if (-not [string]::Equals([ChildProfileFixture]::Read(),
     $env:OPENCOVEN_PROFILE_FIXTURE_EXPECTED, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
 if (-not [string]::Equals([ChildProfileFixture]::Read(),
@@ -129,13 +142,41 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NAME = $jobName
     $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $context.User)
-    $result = $job.RunAsUser(
-      $context.User, $trustedPwsh,
-      "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
-      $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
-    if ($result.ExitCode -ne 0 -or $result.Stdout -ne '' -or $result.Stderr -ne '') {
-      throw 'Child launch after explicit profile creation failed.'
+    $retainedCapability = Read-NativeInstallationRetainedEnvironment $context.User
+    if ($retainedCapability -cnotmatch '\Ahive=present;persistence=(local|enterprise)\z') {
+      throw 'Retained profile token lacks persistent credential capability.'
     }
+    foreach ($launchIndex in 0..2) {
+      if ($launchIndex -eq 2) {
+        $result = $job.RunProducerAsUserAndQuarantine(
+          $context.User, $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
+          $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
+      } else {
+        $result = $job.RunAsUser(
+          $context.User, $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
+          $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
+      }
+      if ($result.ExitCode -ne 0 -or $result.Stdout -ne '' -or $result.Stderr -ne '') {
+        throw 'Child launch after explicit profile creation failed.'
+      }
+    }
+    if (-not $job.IsQuarantineComplete) { throw 'Profile lifecycle quarantine incomplete.' }
+    $stage = 'unload-failure-retains-ownership'
+    $unloadField = [OpenCoven.WindowsIsolatedUser].GetField('unloadProfile', [Reflection.BindingFlags]'NonPublic,Instance')
+    $originalUnload = $unloadField.GetValue($context.User)
+    try {
+      $unloadField.SetValue($context.User,
+        [Func[Microsoft.Win32.SafeHandles.SafeAccessTokenHandle,IntPtr,bool]]{ param($token, $handle) return $false })
+      $unloadFailed = $false
+      try { $context.User.Dispose() } catch { $unloadFailed = $_.Exception.ToString().Contains('profile-unload') }
+      if (-not $unloadFailed -or -not [IO.Directory]::Exists($createdProfile) -or
+          -not (Test-Path "Registry::HKEY_USERS\$($context.User.Sid)")) {
+        throw 'Failed unload did not retain the owned profile for retry.'
+      }
+      [OpenCoven.Tests.ProfileLifecycleFixture]::ReadTokenProfile($context.User) | Out-Null
+    } finally { $unloadField.SetValue($context.User, $originalUnload) }
   } catch {
     $cause = $_.Exception.GetBaseException()
     if ($cause -is [Runtime.InteropServices.COMException]) {
@@ -154,14 +195,19 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
         throw 'Owned profile registry entry survived cleanup.'
       }
       [OpenCoven.Tests.ProfileLifecycleFixture]::RequireAccountMissing($context.User.UserName)
+      if ((Test-Path "Registry::HKEY_USERS\$($context.User.Sid)") -or
+          (Test-Path "Registry::HKEY_USERS\$($context.User.Sid)_Classes")) {
+        throw 'Owned hive survived final identity cleanup.'
+      }
     } catch { $cleanupFailed = $true }
     if ($cleanupFailed) { throw 'Native profile lifecycle cleanup failed.' }
   }
 }
 
 # Exercise the production initialization catch after successful profile ownership.
+foreach ($hookName in @('CreateCore', 'CreateCoreAfterProfileLoaded')) {
 $createCore = [OpenCoven.WindowsIsolatedUser].GetMethod(
-  'CreateCore', [Reflection.BindingFlags]'NonPublic,Static')
+  $hookName, [Reflection.BindingFlags]'NonPublic,Static')
 if ($null -eq $createCore) { throw 'Owned profile initialization seam is missing.' }
 $failureRoot = Join-Path ([IO.Path]::GetTempPath()) "opencoven-profile-failure-$PID-$([Guid]::NewGuid().ToString('N'))"
 $owned = @{ Sid = $null; Path = $null; UserName = $null }
@@ -171,6 +217,9 @@ $failAfterCreation = [Action[string,string]] {
   $owned.Path = $path
   $identity = [Security.Principal.SecurityIdentifier]::new($sid)
   $owned.UserName = $identity.Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+  if ($hookName -ceq 'CreateCoreAfterProfileLoaded' -and -not (Test-Path "Registry::HKEY_USERS\$sid")) {
+    throw 'Post-load initialization hook did not observe a loaded hive.'
+  }
   throw 'injected-profile-initialization-failure'
 }
 $injectedFailureObserved = $false
@@ -214,4 +263,9 @@ if (Test-Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\Curren
   throw 'Failed initialization left an owned profile registry entry.'
 }
 [OpenCoven.Tests.ProfileLifecycleFixture]::RequireAccountMissing($owned.UserName)
+if ((Test-Path "Registry::HKEY_USERS\$($owned.Sid)") -or
+    (Test-Path "Registry::HKEY_USERS\$($owned.Sid)_Classes")) {
+  throw 'Failed initialization left an owned hive loaded.'
+}
+}
 Write-Host 'Native profile lifecycle fixture passed: token agreement, child launch, duplicate rejection, and production failure cleanup.'

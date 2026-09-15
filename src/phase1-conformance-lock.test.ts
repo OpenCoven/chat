@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: 'e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b',
-  tree: '64b1e1812e9bfc729f2d7d148b224afe6f17f775',
+  revision: '158dc464a9329f3927576ba54bbc16a753d96eb3',
+  tree: '87dd4788b78965e1d3581781c36c1d4b1070cdac',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '5d78e7a61cefcb7efc57b25abff52d450a8aa41b',
-      sha256: 'f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5',
+      blob: 'fe52383eb4e58348bc88a44b97b64b47b83c3f1c',
+      sha256: '9417170b0f860bcb84cbd7edd2d3c60a3360d7fa112e89b393854e29b4eb0ab9',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '836d08084f9cffa26d168d8719f060d3493e7cb0',
-      sha256: '828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211',
+      blob: 'e7b66145bcc20e8d09a42be04af42056ab5f8e8f',
+      sha256: '282e4f5f0e65361cfabebb6e54b67d6c05c1ee206ae388e28e815491e0787a46',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -110,8 +110,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '51f19219d752b630bb0222a2ee9b7b0bbdde4b17',
-      sha256: '02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c',
+      blob: '64f7341bb4c6429c26bc5c5fa52b937a8d48c3b8',
+      sha256: '82d249788d7e208b75b8b97c0c50f0f9b56149b8bab9172ede7f3576ebd9bccd',
     },
     {
       path: 'scripts/unix-producer-command.sh',
@@ -125,13 +125,13 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/ci.yml',
-      blob: 'aeb0e438bc2eed017b6b5ae55d83e52c2eb3742a',
-      sha256: '18e3fec615827b1ce416f875ac709b3ef8d5ec08f2d9ade3f7fa1cf65d03608b',
+      blob: '464820d196689b68e32bdd910075b8df7b91132f',
+      sha256: '653493224b2dc93109a1df101535e6511f63f59ad8edf4d971c153988f8c77f5',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'da9d169d608419776dd29efaa7d5cb0a03d4c971',
-      sha256: 'd81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c',
+      blob: 'd031d7b7d667dbd5eee05ad76f92b397489d30c9',
+      sha256: 'c6988a6e7ffadc0f3ba5895fdbb04ff403bf5d9da410f39df5a6bc5f6f55b9d9',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -582,7 +582,9 @@ describe('Phase 1 conformance lock', () => {
         '--eval',
         `
       import assert from 'node:assert/strict';
-      import { runNativePreflight, schemaV2NativeFailureDiagnostic }
+      import { EventEmitter } from 'node:events';
+      import { PassThrough } from 'node:stream';
+      import { NativeRpcClient, runNativePreflight, schemaV2NativeFailureDiagnostic }
         from './scripts/phase1-schema-v2-producer.mjs';
       const proof = { backend: 'windows-credential-manager', available: true,
         empty: true, stateSha256: 'a'.repeat(64) };
@@ -595,7 +597,30 @@ describe('Phase 1 conformance lock', () => {
         throw failure;
       } }, proof.backend, value => { stage = value; }), error => error === failure);
       assert.deepEqual(commands, ['conformance_native_custody_state', 'app_installation_id']);
-      process.stdout.write(schemaV2NativeFailureDiagnostic(stage, failure));
+      assert.equal(schemaV2NativeFailureDiagnostic(stage, failure),
+        'phase1.native-scenarios.native-preflight-installation-unexpected-error');
+      for (const boundary of ['lock', 'entry', 'read', 'write', 'persistence']) {
+        const child = new EventEmitter();
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        child.stdin = { write: line => {
+          const request = JSON.parse(line);
+          const response = request.command === 'conformance_native_custody_state'
+            ? { id: request.id, ok: true, result: proof }
+            : { id: request.id, ok: false, error: { code: 'installation_' + boundary + '_unavailable' } };
+          child.stdout.write(JSON.stringify(response) + String.fromCharCode(10));
+          return true;
+        } };
+        const rpc = new NativeRpcClient(child);
+        let caught;
+        try { await runNativePreflight(rpc, proof.backend, value => { stage = value; }); }
+        catch (error) { caught = error; }
+        assert.ok(caught instanceof Error);
+        assert.equal(schemaV2NativeFailureDiagnostic(stage, caught),
+          'phase1.native-scenarios.native-preflight-installation-' + boundary + '-unavailable');
+        assert.equal(rpc.commandCount('app_installation_id'), 1);
+      }
+      process.stdout.write('installation-boundaries-verified');
     `,
       ],
       {
@@ -607,7 +632,7 @@ describe('Phase 1 conformance lock', () => {
         stdio: 'pipe',
       },
     );
-    expect(output).toBe('phase1.native-scenarios.native-preflight-installation-unexpected-error');
+    expect(output).toBe('installation-boundaries-verified');
   });
 
   gitTest('binds the production Chat authority to the pinned Git objects', () => {

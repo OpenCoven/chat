@@ -111,7 +111,8 @@ namespace OpenCoven.Tests {
             foreach (string scenario in new[] { "accepted", "not-found", "unauthorized",
                 "registry", "hive", "not-needed", "sharing", "managed-sharing",
                 "denied", "managed-other", "late-sharing", "expired", "already-missing", "no-progress",
-                "sharing-deadline-inside" }) {
+                "sharing-deadline-inside", "delayed-hive", "persistent-hive",
+                "missing-delayed-hive", "missing-persistent-hive" }) {
                 string root = Path.Combine(Path.GetTempPath(), "opencoven-residual-policy-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(root);
                 File.WriteAllText(Path.Combine(root, "marker"), "owned");
@@ -120,13 +121,16 @@ namespace OpenCoven.Tests {
                     scenario == "sharing-deadline-inside" ? 8000 : 0;
                 bool authorized = scenario != "unauthorized";
                 bool registered = scenario == "registry";
-                bool hive = scenario == "hive";
+                bool hive = scenario == "hive" || scenario.Contains("-hive");
+                Func<bool> hivePresent = () => hive && (!scenario.Contains("delayed-hive") || milliseconds < 3000);
+                bool initiallyMissing = scenario == "already-missing" || scenario.StartsWith("missing-");
                 string outcome = scenario == "not-found" ? "not-found" : scenario == "not-needed" ? "not-needed" : "accepted";
-                if (scenario == "already-missing") Directory.Delete(root, true);
+                if (initiallyMissing) Directory.Delete(root, true);
                 Exception failure = null;
                 try {
                     Func<bool> present = () => (bool)Invoke(exists, root);
                     Action remove = () => {
+                        Require(!hivePresent(), "Residual deletion ran while a hive remained loaded.");
                         attempts++;
                         if (scenario == "sharing-deadline-inside") {
                             if (attempts == 1) throw new Win32Exception(32, "private-path");
@@ -144,7 +148,7 @@ namespace OpenCoven.Tests {
                     };
                     try {
                         Invoke(complete, outcome, authorized,
-                            (Func<bool>)(() => registered), (Func<bool>)(() => hive),
+                            (Func<bool>)(() => registered), hivePresent,
                             present, present, remove,
                             (Func<TimeSpan>)(() => TimeSpan.FromMilliseconds(milliseconds)),
                             (Action)(() => { milliseconds += 1000; pauses++; }));
@@ -152,10 +156,11 @@ namespace OpenCoven.Tests {
                         failure = error;
                     }
                     bool succeeds = scenario == "accepted" || scenario == "not-found" ||
-                        scenario == "sharing" || scenario == "managed-sharing" || scenario == "already-missing";
+                        scenario == "sharing" || scenario == "managed-sharing" || scenario == "already-missing" ||
+                        scenario == "delayed-hive" || scenario == "missing-delayed-hive";
                     Require((failure == null) == succeeds, "Residual policy completion changed: " + scenario);
-                    Require(present() != succeeds, "Residual policy did not preserve real filesystem state: " + scenario);
-                    int expectedAttempts = scenario == "already-missing" || scenario == "unauthorized" ||
+                    Require(present() == (!succeeds && !initiallyMissing), "Residual policy did not preserve real filesystem state: " + scenario);
+                    int expectedAttempts = initiallyMissing || scenario == "persistent-hive" || scenario == "unauthorized" ||
                         scenario == "registry" || scenario == "hive" || scenario == "not-needed" ||
                         scenario == "expired" ? 0 :
                         scenario == "sharing" || scenario == "managed-sharing" ? 3 :
@@ -165,6 +170,8 @@ namespace OpenCoven.Tests {
                     if (failure != null) {
                         string diagnostic = (string)failure.GetType().GetProperty("Diagnostic",
                             BindingFlags.Instance | BindingFlags.NonPublic).GetValue(failure);
+                        if (scenario.Contains("persistent-hive"))
+                            Require(diagnostic.Contains(";hive=1"), "Persistent hive failure was not classified.");
                         Require(!diagnostic.Contains("private-path") && !diagnostic.Contains(root),
                             "Residual diagnostic disclosed private input.");
                         if (scenario == "denied" || scenario == "managed-other")

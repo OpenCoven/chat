@@ -157,6 +157,8 @@ namespace OpenCoven
 
         private readonly object quotaTokenSync = new object();
         private SafeAccessTokenHandle quotaToken;
+        private IntPtr ownedProfileHandle;
+        private Func<SafeAccessTokenHandle, IntPtr, bool> unloadProfile = UnloadUserProfile;
         private WindowsOwnedProfileApplication ownedApplication;
         private string password;
         private bool accountDisabled;
@@ -228,6 +230,21 @@ namespace OpenCoven
             string rootPath,
             Action<string, string> afterProfileCreated)
         {
+            return CreateCoreWithProfileHook(rootPath, afterProfileCreated, null);
+        }
+
+        private static WindowsIsolatedUser CreateCoreAfterProfileLoaded(
+            string rootPath,
+            Action<string, string> afterProfileLoaded)
+        {
+            return CreateCoreWithProfileHook(rootPath, null, afterProfileLoaded);
+        }
+
+        private static WindowsIsolatedUser CreateCoreWithProfileHook(
+            string rootPath,
+            Action<string, string> afterProfileCreated,
+            Action<string, string> afterProfileLoaded)
+        {
             if (String.IsNullOrWhiteSpace(rootPath) || !Path.IsPathRooted(rootPath))
             {
                 throw new ArgumentException(
@@ -247,6 +264,7 @@ namespace OpenCoven
             string ownedProfilePath = null;
             WindowsOwnedProfileApplication ownedApplication = null;
             SafeAccessTokenHandle validatedQuotaToken = null;
+            WindowsIsolatedUser created = null;
             try
             {
                 for (int attempt = 0; attempt < MaximumAccountCreationAttempts; attempt++)
@@ -311,6 +329,15 @@ namespace OpenCoven
                 string tempPath = Path.Combine(fullRoot, "temp");
                 string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                 string workspacePath = Path.Combine(fullRoot, "workspace");
+                // Own the token and profile before any loaded-hive initialization can fail.
+                created = new WindowsIsolatedUser(
+                    userName, passwordValue, sid, fullRoot, profilePath, tempPath,
+                    statusStagingPath, workspacePath, ownedProfilePath,
+                    validationSummary, validatedQuotaToken);
+                created.LoadOwnedProfile();
+                VerifyCreatedProfile(ownedProfilePath, validatedQuotaToken);
+                if (afterProfileLoaded != null)
+                    afterProfileLoaded(sid, ownedProfilePath);
                 Directory.CreateDirectory(fullRoot);
                 Directory.CreateDirectory(profilePath);
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
@@ -351,28 +378,29 @@ namespace OpenCoven
                     supervisor.Value);
 
                 ownedApplication = WindowsJobSupervisor.CreateOwnedProfileApplication(ownedProfilePath, sid);
+                created.ownedApplication = ownedApplication;
                 WindowsIdentity.RunImpersonated(validatedQuotaToken,
                     () => ownedApplication.ReadVerified(path => true));
-
-                WindowsIsolatedUser created = new WindowsIsolatedUser(
-                    userName,
-                    passwordValue,
-                    sid,
-                    fullRoot,
-                    profilePath,
-                    tempPath,
-                    statusStagingPath,
-                    workspacePath,
-                    ownedProfilePath,
-                    validationSummary,
-                    validatedQuotaToken);
-                created.ownedApplication = ownedApplication;
                 ownedApplication = null;
                 validatedQuotaToken = null;
                 return created;
             }
             catch (Exception original)
             {
+                if (created != null)
+                {
+                    try { created.Dispose(); }
+                    catch (Exception cleanup)
+                    {
+                        var failure = new InvalidOperationException(
+                            "Ephemeral local user cleanup failed during creation.",
+                            new AggregateException(original, cleanup));
+                        // Keep deferred cleanup ownership reachable by the trusted caller.
+                        failure.Data["WindowsIsolatedUserCleanupContext"] = created;
+                        throw failure;
+                    }
+                    throw;
+                }
                 List<Exception> cleanupFailures = new List<Exception>();
                 if (validatedQuotaToken != null)
                 {
@@ -442,6 +470,36 @@ namespace OpenCoven
                 }
                 throw;
             }
+        }
+
+        private void LoadOwnedProfile()
+        {
+            lock (quotaTokenSync)
+            {
+                ThrowIfDisposed();
+                PROFILEINFOW profile = new PROFILEINFOW();
+                profile.dwSize = (uint)Marshal.SizeOf(typeof(PROFILEINFOW));
+                profile.dwFlags = 1; // PI_NOUI. The caller is the privileged supervisor.
+                profile.lpUserName = UserName;
+                if (!LoadUserProfileW(quotaToken, ref profile))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be loaded.");
+                ownedProfileHandle = profile.hProfile;
+                if (ownedProfileHandle == IntPtr.Zero)
+                    throw new InvalidOperationException("Owned Windows profile handle is unavailable.");
+            }
+        }
+
+        private void UnloadOwnedProfile()
+        {
+            if (ownedProfileHandle == IntPtr.Zero) return;
+            if (!unloadProfile(quotaToken, ownedProfileHandle))
+                throw new InvalidOperationException(
+                    "Ephemeral Windows identity cleanup deferred: profile-unload.",
+                    new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be unloaded."));
+            // UnloadUserProfile closes hProfile. Never close it as an ordinary key handle.
+            ownedProfileHandle = IntPtr.Zero;
         }
 
         internal void ThrowIfDisposed()
@@ -1340,6 +1398,7 @@ namespace OpenCoven
             SafeAccessTokenHandle retiredQuotaToken;
             lock (quotaTokenSync)
             {
+                UnloadOwnedProfile();
                 disposed = true;
                 retiredQuotaToken = quotaToken;
                 quotaToken = null;
@@ -1662,6 +1721,27 @@ namespace OpenCoven
         private static extern int CreateProfile(
             string sid, string userName, [Out] StringBuilder profilePath, uint capacity);
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PROFILEINFOW
+        {
+            public uint dwSize;
+            public uint dwFlags;
+            public string lpUserName;
+            public string lpProfilePath;
+            public string lpDefaultPath;
+            public string lpServerName;
+            public string lpPolicyPath;
+            public IntPtr hProfile;
+        }
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LoadUserProfileW(SafeAccessTokenHandle token, ref PROFILEINFOW profile);
+
+        [DllImport("userenv.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnloadUserProfile(SafeAccessTokenHandle token, IntPtr profile);
+
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetUserProfileDirectoryW(
@@ -1810,6 +1890,7 @@ namespace OpenCoven
 
     public sealed class WindowsJobSupervisor : IDisposable
     {
+        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
@@ -3112,17 +3193,29 @@ namespace OpenCoven
                 bool expectedPathExists,
                 bool actualPathExists,
                 Exception residualFailure)
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, false, residualFailure)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                bool hivesExist,
+                Exception residualFailure)
                 : base("Ephemeral Windows profile survived cleanup.", residualFailure)
             {
                 if ((deleteOutcome != "not-needed" &&
                     deleteOutcome != "accepted" &&
                     deleteOutcome != "not-found") ||
-                    (!registryExists && !expectedPathExists && !actualPathExists))
+                    (!registryExists && !expectedPathExists && !actualPathExists && !hivesExist))
                     throw new ArgumentException("Invalid profile cleanup diagnostic.");
                 Diagnostic = "profile-remained[delete=" + deleteOutcome +
                     ";registry=" + (registryExists ? "1" : "0") +
                     ";expected=" + (expectedPathExists ? "1" : "0") +
                     ";actual=" + (actualPathExists ? "1" : "0") +
+                    (hivesExist ? ";hive=1" : String.Empty) +
                     (residualFailure == null ? String.Empty :
                         ";residual=" + WindowsIsolatedUser.ClassifyCleanupError(residualFailure)) + "]";
             }
@@ -3176,11 +3269,12 @@ namespace OpenCoven
                 bool registered = registrationExists();
                 bool expected = expectedExists();
                 bool actual = actualExists();
-                if (!registered && !expected && !actual) return;
+                bool hives = hivesExist();
+                if (!registered && !expected && !actual && !hives) return;
                 if (elapsed() >= TimeSpan.FromSeconds(10))
-                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                 if (residualAuthorized && (deleteOutcome == "accepted" || deleteOutcome == "not-found") &&
-                    !registered && expected && !hivesExist())
+                    !registered && expected && !hives)
                 {
                     try
                     {
@@ -3192,12 +3286,12 @@ namespace OpenCoven
                     {
                         if (error is TimeoutException && lastSharingFailure != null &&
                             elapsed() >= TimeSpan.FromSeconds(10))
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                         Win32Exception native = error as Win32Exception;
                         bool sharing = native != null ? native.NativeErrorCode == ERROR_SHARING_VIOLATION :
                             error is IOException && error.HResult == unchecked((int)0x80070020);
                         if (!sharing)
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, error);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, error);
                         lastSharingFailure = error;
                         pause();
                         continue;
@@ -7388,11 +7482,13 @@ namespace OpenCoven
                     commandLine.Append(arguments);
                 }
 
+                // Load the fresh child logon session; the supervisor separately owns
+                // its profile reference until terminal quarantine and explicit unload.
                 bool created = CreateProcessWithLogonW(
                     isolatedUser.UserName,
                     Environment.MachineName,
                     isolatedUser.Password,
-                    0,
+                    LOGON_WITH_PROFILE,
                     applicationName,
                     commandLine,
                     CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,

@@ -74,6 +74,104 @@ function Write-ExceptionChain {
   }
 }
 
+function Get-NativeInstallationFailureCategory {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $pattern = '^installation-roundtrip: (response-timeout|response-invalid|custody-invalid|grant-invalid|installation-invalid|installation-changed|custody-changed|native-exit-failed|unexpected-stderr|(?:app_installation_id|conformance_native_custody_state|conformance_issue_native_custody_cleanup|conformance_cleanup_native_custody)-failed|app_installation_id-(?:installation_(?:lock|entry|read|write|persistence)_unavailable|secure_store_unavailable|keychain_failure|credential_missing)|conformance_issue_native_custody_cleanup-(?:cleanup_grant_(?:rejected|collision_exhausted|(?:service|process_secret|random|marker_(?:home|directory_create|directory_open|directory_metadata|directory_trust|sync|identity|publish))_unavailable)|secure_store_unavailable|keychain_failure))$'
+  if ($null -ne $OutputText -and $OutputText.Trim() -cmatch $pattern) {
+    return $Matches[1]
+  }
+  return 'unclassified'
+}
+
+function Get-NativeInstallationFailureReport {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $category = Get-NativeInstallationFailureCategory $OutputText
+  $environment = 'unavailable'
+  $lines = @(([string]$OutputText).Trim() -split '\r?\n')
+  if ($lines.Count -eq 2 -and $lines[1] -cmatch '^installation-environment: (hive=(?:present|absent|unavailable);persistence=(?:none|session|local|enterprise|no-logon-session|unavailable|unrecognized))$') {
+    $environment = $Matches[1]
+    $category = Get-NativeInstallationFailureCategory $lines[0]
+    if ($category -ceq 'unclassified') { $environment = 'unavailable' }
+  }
+  return [pscustomobject]@{ Category = $category; Environment = $environment }
+}
+
+function Read-NativeInstallationEnvironment {
+  try {
+    if (-not ('NativeInstallationEnvironmentProbe' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using Microsoft.Win32;
+public static class NativeInstallationEnvironmentProbe {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool CredGetSessionTypes(uint count, [Out] uint[] maximumPersist);
+
+    public static string PersistenceCategory(uint value) {
+        switch (value) {
+            case 0: return "none";
+            case 1: return "session";
+            case 2: return "local";
+            case 3: return "enterprise";
+            default: return "unrecognized";
+        }
+    }
+
+    public static string Read() {
+        string hive = "unavailable";
+        string persistence = "unavailable";
+        try {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent()) {
+                if (identity.User != null) {
+                    using (RegistryKey key = Registry.Users.OpenSubKey(identity.User.Value, false)) {
+                        hive = key == null ? "absent" : "present";
+                    }
+                }
+            }
+        } catch { }
+        try {
+            // CRED_TYPE_MAXIMUM = 7; CRED_TYPE_GENERIC = 1.
+            uint[] maximumPersist = new uint[7];
+            if (CredGetSessionTypes((uint)maximumPersist.Length, maximumPersist)) {
+                persistence = PersistenceCategory(maximumPersist[1]);
+            } else if (Marshal.GetLastWin32Error() == 1312) {
+                persistence = "no-logon-session";
+            }
+        } catch { }
+        return "hive=" + hive + ";persistence=" + persistence;
+    }
+}
+'@
+    }
+    return [NativeInstallationEnvironmentProbe]::Read()
+  } catch {
+    return 'hive=unavailable;persistence=unavailable'
+  }
+}
+
+function Read-NativeInstallationRetainedEnvironment($User) {
+  try {
+    # Initialize the exact same read-only native probe used by the child.
+    Read-NativeInstallationEnvironment | Out-Null
+    $method = $User.GetType().GetMethod('RunQuotaRead', [Reflection.BindingFlags]'NonPublic,Instance')
+    $reader = [Delegate]::CreateDelegate([Func[string]], [NativeInstallationEnvironmentProbe].GetMethod('Read'))
+    $value = $method.MakeGenericMethod([string]).Invoke($User, [object[]]@($reader))
+    if ($value -cmatch '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z') {
+      return $value
+    }
+  } catch { }
+  return 'hive=unavailable;persistence=unavailable'
+}
+
+function Format-NativeInstallationCapabilityComparison([string]$Retained, [string]$Child) {
+  $pattern = '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z'
+  if ($Retained -cnotmatch $pattern) { $Retained = 'unavailable' }
+  if ($Child -cnotmatch $pattern) { $Child = 'unavailable' }
+  return "Native installation capability comparison: retained=$Retained;child=$Child"
+}
+
 trap {
   Write-Host '--- windows-job-supervisor.test.ps1 failure ---'
   Write-ExceptionChain -Failure $_
@@ -1311,6 +1409,7 @@ function Remove-IsolatedTestContext {
   }
 }
 
+$primarySupervisorFailure = $null
 try {
   [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
   [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
@@ -5350,6 +5449,185 @@ try {
         } finally {
           $nativeDiscoveryJob.Dispose()
         }
+
+        # Exercise actual credential creation under the same restricted logon and Job.
+        $installationScript = Join-Path $root 'native-installation-roundtrip.ps1'
+        [IO.File]::WriteAllText($installationScript, @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+trap {
+  $category = Get-NativeInstallationFailureCategory $_.Exception.Message
+  [Console]::Out.WriteLine("installation-roundtrip: $category")
+  exit 1
+}
+$start = [Diagnostics.ProcessStartInfo]::new($env:OPENCOVEN_NATIVE_TEST_BINARY)
+$installationEnvironmentSnapshot = Read-NativeInstallationEnvironment
+$start.UseShellExecute = $false
+$start.RedirectStandardInput = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+$process = [Diagnostics.Process]::Start($start)
+$stderr = $process.StandardError.ReadToEndAsync()
+$grant = $null
+$terminalSuccess = $false
+$primaryFailure = $null
+$secondaryFailure = $null
+function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
+  $request = @{ id = $command; command = $command; args = $arguments }
+  $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress -Depth 8))
+  $process.StandardInput.Flush()
+  $read = $process.StandardOutput.ReadLineAsync()
+  if (-not $read.Wait(10000)) { throw 'installation-roundtrip: response-timeout' }
+  $line = $read.Result
+  if ($null -eq $line -or $line.Length -gt 65536) {
+    throw 'installation-roundtrip: response-invalid'
+  }
+  try { $response = $line | ConvertFrom-Json }
+  catch { throw 'installation-roundtrip: response-invalid' }
+  if ($response.id -cne $command -or $response.ok -ne $true) {
+    # The shared allowlist binds every native subtype to its expected command.
+    if ($response.id -ceq $command -and $response.error.code -is [string]) {
+      $category = Get-NativeInstallationFailureCategory "installation-roundtrip: $command-$($response.error.code)"
+      if ($category -cne 'unclassified') {
+        throw "installation-roundtrip: $category"
+      }
+    }
+    throw "installation-roundtrip: $command-failed"
+  }
+  return $response.result
+}
+function Assert-EmptyCustody($proof) {
+  if ($proof.backend -cne 'windows-credential-manager' -or
+      $proof.available -ne $true -or $proof.empty -ne $true -or
+      $proof.stateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'installation-roundtrip: custody-invalid'
+  }
+}
+try {
+  $before = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $before
+  $issued = Invoke-InstallationRpc 'conformance_issue_native_custody_cleanup' @{ instanceIds = @() }
+  $grant = $issued.grant
+  if ($grant -cnotmatch '^[A-Za-z0-9_-]{43}$') { throw 'installation-roundtrip: grant-invalid' }
+  $first = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') {
+    throw 'installation-roundtrip: installation-invalid'
+  }
+  $second = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cne $second) { throw 'installation-roundtrip: installation-changed' }
+  $cleaned = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+  $grant = $null
+  Assert-EmptyCustody $cleaned
+  $after = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $after
+  if ($before.stateSha256 -cne $after.stateSha256) { throw 'installation-roundtrip: custody-changed' }
+} catch {
+  $primaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
+} finally {
+  try {
+    if ($null -ne $grant -and -not $process.HasExited) {
+      $null = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+    }
+  } catch {
+    $secondaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
+  }
+  try {
+    $process.StandardInput.Close()
+    if ($process.WaitForExit(10000)) {
+      $terminalSuccess = $process.ExitCode -eq 0
+    } else {
+      $process.Kill($true)
+      $null = $process.WaitForExit(10000)
+    }
+  } catch {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+  } finally {
+    try { $process.Dispose() } catch {
+      if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+    }
+  }
+}
+if (-not $terminalSuccess -and $null -eq $secondaryFailure) {
+  $secondaryFailure = 'native-exit-failed'
+}
+try {
+  if (-not $stderr.Wait(10000) -or $stderr.Result -ne '') {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+  }
+} catch {
+  if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+}
+if ($null -ne $primaryFailure -or $null -ne $secondaryFailure) {
+  if ($null -eq $primaryFailure) {
+    $primaryFailure = $secondaryFailure
+    $secondaryFailure = $null
+  }
+  [Console]::Out.WriteLine("installation-roundtrip: $primaryFailure")
+  [Console]::Out.WriteLine('installation-environment: ' + $installationEnvironmentSnapshot)
+  if ($null -ne $secondaryFailure) {
+    [Console]::Error.WriteLine("installation-roundtrip: $secondaryFailure")
+  }
+  exit 1
+}
+Write-Output 'installation-roundtrip: passed'
+'@, [Text.UTF8Encoding]::new($false))
+        # Prepend the exact tested classifier instead of maintaining a child copy.
+        $classifierSource = "function Get-NativeInstallationFailureCategory {`n" +
+          ${function:Get-NativeInstallationFailureCategory}.ToString() + "`n}`n"
+        $classifierSource += "function Read-NativeInstallationEnvironment {`n" +
+          ${function:Read-NativeInstallationEnvironment}.ToString() + "`n}`n"
+        [IO.File]::WriteAllText($installationScript,
+          $classifierSource + [IO.File]::ReadAllText($installationScript),
+          [Text.UTF8Encoding]::new($false))
+        $installationNonce = [Guid]::NewGuid().ToString('N')
+        $installationJobName = "Local\OpenCoven.Chat.Conformance.$installationNonce"
+        $installationEnvironment = $validNativeEnvironment.Clone()
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $installationNonce
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $installationJobName
+        $installationEnvironment.OPENCOVEN_NATIVE_TEST_BINARY = $nativeRpc
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET = 'system-native'
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE =
+          "ai.opencoven.chat.phase1.$installationNonce"
+        # Match nativeScenarioHomes: explicit cleanup homes require the trusted OS profile.
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.OperatingSystemProfilePath
+        $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
+        $retainedInstallationEnvironment = Read-NativeInstallationRetainedEnvironment $isolatedUser
+        $primaryInstallationFailure = $null
+        try {
+          $installationResult = $installationJob.RunProducerAsUserAndQuarantine(
+            $isolatedUser, $trustedPwsh,
+            "-NoLogo -NoProfile -NonInteractive -File `"$installationScript`"",
+            $root, $installationEnvironment, [TimeSpan]::FromSeconds(120), 1MB, 1MB
+          )
+          if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
+              $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
+            $report = Get-NativeInstallationFailureReport $installationResult.Stdout
+            Write-Host (Format-NativeInstallationCapabilityComparison $retainedInstallationEnvironment $report.Environment)
+            $category = $report.Category
+            $secondary = if ($installationResult.Stderr -eq '') { 'none' } else {
+              Get-NativeInstallationFailureCategory $installationResult.Stderr
+            }
+            throw "Restricted native installation roundtrip failed: $category; secondary: $secondary; environment: $($report.Environment)"
+          }
+          if (-not $installationJob.IsQuarantineComplete) {
+            throw 'Restricted native installation quarantine incomplete.'
+          }
+          Write-Output 'Restricted native installation roundtrip and quarantine passed.'
+        } catch {
+          $primaryInstallationFailure = $_.Exception
+          throw
+        } finally {
+          try { $installationJob.Dispose() } catch {
+            if ($null -ne $primaryInstallationFailure) {
+              throw [AggregateException]::new(
+                'Windows installation test and disposal failed.',
+                [Exception[]]@($primaryInstallationFailure, $_.Exception)
+              )
+            }
+            throw
+          }
+        }
+
       } finally {
         $jobB.Dispose()
         $jobA.Dispose()
@@ -5359,6 +5637,9 @@ try {
     $membershipB.Dispose()
     $membershipA.Dispose()
   }
+} catch {
+  $primarySupervisorFailure = $_.Exception
+  throw
 } finally {
   $cleanupErrors = [Collections.Generic.List[Exception]]::new()
   try {
@@ -5374,6 +5655,10 @@ try {
     }
   }
   if ($cleanupErrors.Count -ne 0) {
+    if ($null -ne $primarySupervisorFailure) {
+      [Exception[]]$failures = @($primarySupervisorFailure) + $cleanupErrors.ToArray()
+      throw [AggregateException]::new('Windows supervisor test and cleanup failed.', $failures)
+    }
     $cleanupDetails = (
       $cleanupErrors |
         ForEach-Object { $_.ToString() }

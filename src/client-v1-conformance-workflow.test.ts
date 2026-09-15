@@ -1764,7 +1764,7 @@ ${source.slice(start, end)}
           'out PROCESS_INFORMATION processInformation',
         ].join(' '),
       );
-      expect(source).not.toContain('LOGON_WITH_PROFILE');
+      expect(source).toContain('private const uint LOGON_WITH_PROFILE = 0x00000001;');
 
       const invocation = source.match(/bool created = CreateProcessWithLogonW\(([\s\S]*?)\);/u);
       expect(invocation).not.toBeNull();
@@ -1773,7 +1773,7 @@ ${source.slice(start, end)}
           'isolatedUser.UserName,',
           'Environment.MachineName,',
           'isolatedUser.Password,',
-          '0,',
+          'LOGON_WITH_PROFILE,',
           'applicationName,',
           'commandLine,',
           'CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,',
