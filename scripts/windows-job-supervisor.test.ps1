@@ -76,7 +76,7 @@ function Write-ExceptionChain {
 
 function Get-NativeInstallationFailureCategory {
   param([AllowNull()][AllowEmptyString()][string]$OutputText)
-  $pattern = '^installation-roundtrip: (response-timeout|response-invalid|custody-invalid|grant-invalid|installation-invalid|installation-changed|custody-changed|native-exit-failed|unexpected-stderr|(?:app_installation_id|conformance_native_custody_state|conformance_issue_native_custody_cleanup|conformance_cleanup_native_custody)-failed|app_installation_id-(?:installation_(?:lock|entry|read|write|persistence)_unavailable|secure_store_unavailable|keychain_failure|credential_missing))$'
+  $pattern = '^installation-roundtrip: (response-timeout|response-invalid|custody-invalid|grant-invalid|installation-invalid|installation-changed|custody-changed|native-exit-failed|unexpected-stderr|(?:app_installation_id|conformance_native_custody_state|conformance_issue_native_custody_cleanup|conformance_cleanup_native_custody)-failed|app_installation_id-(?:installation_(?:lock|entry|read|write|persistence)_unavailable|secure_store_unavailable|keychain_failure|credential_missing)|conformance_issue_native_custody_cleanup-(?:cleanup_grant_(?:rejected|collision_exhausted|(?:service|process_secret|random|marker_(?:home|directory_create|directory_open|directory_metadata|directory_trust|sync|identity|publish))_unavailable)|secure_store_unavailable|keychain_failure))$'
   if ($null -ne $OutputText -and $OutputText.Trim() -cmatch $pattern) {
     return $Matches[1]
   }
@@ -5280,15 +5280,12 @@ function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
   try { $response = $line | ConvertFrom-Json }
   catch { throw 'installation-roundtrip: response-invalid' }
   if ($response.id -cne $command -or $response.ok -ne $true) {
-    # Only installation's fixed native codes may cross the test-process boundary.
-    if ($command -ceq 'app_installation_id' -and $response.id -ceq $command -and
-        $response.error.code -is [string] -and $response.error.code -cin @(
-          'installation_lock_unavailable', 'installation_entry_unavailable',
-          'installation_read_unavailable', 'installation_write_unavailable',
-          'installation_persistence_unavailable', 'secure_store_unavailable',
-          'keychain_failure', 'credential_missing'
-        )) {
-      throw "installation-roundtrip: app_installation_id-$($response.error.code)"
+    # The shared allowlist binds every native subtype to its expected command.
+    if ($response.id -ceq $command -and $response.error.code -is [string]) {
+      $category = Get-NativeInstallationFailureCategory "installation-roundtrip: $command-$($response.error.code)"
+      if ($category -cne 'unclassified') {
+        throw "installation-roundtrip: $category"
+      }
     }
     throw "installation-roundtrip: $command-failed"
   }
@@ -5383,7 +5380,8 @@ Write-Output 'installation-roundtrip: passed'
         $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET = 'system-native'
         $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE =
           "ai.opencoven.chat.phase1.$installationNonce"
-        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.ProfilePath
+        # Match nativeScenarioHomes: explicit cleanup homes require the trusted OS profile.
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.OperatingSystemProfilePath
         $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
         try {
           $installationResult = $installationJob.RunAsUser(

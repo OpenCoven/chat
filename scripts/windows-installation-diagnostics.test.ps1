@@ -12,6 +12,22 @@ $function = @($tree.FindAll({ param($node)
 }, $false))
 if ($function.Count -ne 1) { throw 'Bounded installation classifier missing.' }
 Invoke-Expression $function[0].Extent.Text
+# Run the fixture's actual home selection with distinct redirected and OS profiles.
+$homeAssignment = @($tree.FindAll({ param($node)
+  $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+  $node.Left.Extent.Text -ceq '$installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME'
+}, $true))
+if ($homeAssignment.Count -ne 1) { throw 'Cleanup home assignment missing or ambiguous.' }
+$installationEnvironment = @{}
+$isolatedUser = [pscustomobject]@{
+  ProfilePath = 'C:\fixture\redirected-profile'
+  OperatingSystemProfilePath = 'C:\Users\fixture-native-profile'
+}
+Invoke-Expression $homeAssignment[0].Extent.Text
+if ($installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME -cne $isolatedUser.OperatingSystemProfilePath) {
+  throw 'Cleanup grant fixture must use the authoritative OS profile.'
+}
+
 foreach ($stage in @('lock', 'entry', 'read', 'write', 'persistence')) {
   $code = "app_installation_id-installation_${stage}_unavailable"
   if ((Get-NativeInstallationFailureCategory "installation-roundtrip: $code`r`n") -cne $code) {
@@ -45,6 +61,58 @@ $child = $children[0].Value
 $start = $child.IndexOf("try {`n  $" + "before = Invoke-InstallationRpc")
 if ($start -lt 0) { throw 'Installation exception pipeline missing.' }
 $pipeline = $child.Substring($start)
+# Exercise the real response decoder, including command binding and unknown-code rejection.
+$childTree = [Management.Automation.Language.Parser]::ParseInput($child, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Installation child syntax invalid.' }
+$rpc = @($childTree.FindAll({ param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+  $node.Name -ceq 'Invoke-InstallationRpc'
+}, $false))
+if ($rpc.Count -ne 1) { throw 'Installation RPC decoder missing.' }
+Invoke-Expression $rpc[0].Extent.Text
+$process = [pscustomobject]@{
+  StandardInput = [IO.StringWriter]::new()
+  StandardOutput = [pscustomobject]@{}
+}
+$process.StandardOutput | Add-Member ScriptMethod ReadLineAsync {
+  return [Threading.Tasks.Task]::FromResult([string]$script:responseJson)
+}
+$grantCodes = @('cleanup_grant_rejected', 'cleanup_grant_service_unavailable',
+  'cleanup_grant_process_secret_unavailable', 'cleanup_grant_random_unavailable',
+  'cleanup_grant_marker_home_unavailable', 'cleanup_grant_marker_directory_create_unavailable',
+  'cleanup_grant_marker_directory_open_unavailable', 'cleanup_grant_marker_directory_metadata_unavailable',
+  'cleanup_grant_marker_directory_trust_unavailable', 'cleanup_grant_marker_sync_unavailable',
+  'cleanup_grant_marker_identity_unavailable', 'cleanup_grant_marker_publish_unavailable',
+  'cleanup_grant_collision_exhausted', 'secure_store_unavailable', 'keychain_failure')
+$rpcCases = @($grantCodes | ForEach-Object {
+  @{ command = 'conformance_issue_native_custody_cleanup'; code = $_ }
+}) + @(@('lock', 'entry', 'read', 'write', 'persistence') | ForEach-Object {
+  @{ command = 'app_installation_id'; code = "installation_${_}_unavailable" }
+})
+foreach ($case in $rpcCases) {
+  $command = $case.command
+  $code = $case.code
+  $script:responseJson = @{ id = $command; ok = $false; error = @{ code = $code } } | ConvertTo-Json -Compress
+  $caught = $null
+  try { $null = Invoke-InstallationRpc $command } catch { $caught = $_.Exception.Message }
+  if ($caught -cne "installation-roundtrip: $command-$code") { throw 'Native RPC subtype lost.' }
+  if ((Get-NativeInstallationFailureCategory $caught) -cne "$command-$code") {
+    throw 'Parent rejected bounded native subtype.'
+  }
+}
+$command = 'conformance_issue_native_custody_cleanup'
+foreach ($case in @(
+  @{ id = $command; code = 'private credential material' },
+  @{ id = $command; code = 'installation_write_unavailable' },
+  @{ id = 'app_installation_id'; code = 'cleanup_grant_marker_home_unavailable' }
+)) {
+  $script:responseJson = @{ id = $case.id; ok = $false; error = @{ code = $case.code } } | ConvertTo-Json -Compress
+  $caught = $null
+  try { $null = Invoke-InstallationRpc $command } catch { $caught = $_.Exception.Message }
+  if ($caught -cne "installation-roundtrip: $command-failed") { throw 'Untrusted or mismatched RPC category accepted.' }
+}
+$process.StandardInput.Dispose()
+
 $fixture = @'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
