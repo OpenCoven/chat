@@ -22,6 +22,12 @@ record. The upstream repair is not yet proof that this protected failure is
 resolved. A new source-bound harness, actual Chat landing, SDK validator
 binding, both scope readbacks and fresh protected acceptance remain required.
 
+The source snapshot is `a443b625e94bf059a50c3f47f16fa44171334ea1`,
+tree `6375117ef56a85e09c21941ecd257c88c92c2398`. The harness binding
+verifies all 25 governed files and ten production deltas against that snapshot.
+Only the governed CI workflow hash changes from the prior harness, incorporating
+Chat #281's required Unix matrix check for documentation changes.
+
 The preceding Cave5409 and combined-harness checkpoints below are historical
 evidence, not acceptance of this rc.7 adoption.
 
