@@ -242,4 +242,46 @@ if ('synthetic primary failure' -cnotin $messages -or 'synthetic cleanup failure
   throw 'Outer cleanup replaced the primary test failure.'
 }
 }
-Write-Output 'Bounded installation diagnostics passed.' 
+Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'windows-job-supervisor.cs')))
+$leaseType = [OpenCoven.WindowsIsolatedUser]
+$leaseFlags = [Reflection.BindingFlags]'Instance,NonPublic'
+$leaseUnload = $leaseType.GetMethod('UnloadOwnedProfile', $leaseFlags)
+if ($null -eq $leaseUnload) { throw 'Owned profile unload boundary missing.' }
+$leaseUser = [Runtime.CompilerServices.RuntimeHelpers]::GetUninitializedObject($leaseType)
+$leaseToken = if ($IsWindows) {
+  [Microsoft.Win32.SafeHandles.SafeAccessTokenHandle]::new([IntPtr]::Zero)
+} else { $null }
+$leaseType.GetField('quotaTokenSync', $leaseFlags).SetValue($leaseUser, [object]::new())
+$leaseType.GetField('quotaToken', $leaseFlags).SetValue($leaseUser, $leaseToken)
+$leaseType.GetField('ownedProfileHandle', $leaseFlags).SetValue($leaseUser, [IntPtr]42)
+$leaseType.GetField('unloadProfile', $leaseFlags).SetValue($leaseUser,
+  [Func[Microsoft.Win32.SafeHandles.SafeAccessTokenHandle,IntPtr,bool]]{
+    param($token, $handle)
+    return $false
+  })
+$leaseFailure = $null
+try { $leaseUser.Dispose() } catch { $leaseFailure = $_.Exception }
+if ($null -eq $leaseFailure -or $leaseFailure.ToString() -notmatch 'profile-unload' -or
+    ($null -ne $leaseToken -and $leaseToken.IsClosed) -or $leaseType.GetField('disposed', $leaseFlags).GetValue($leaseUser) -or
+    $leaseType.GetField('ownedProfileHandle', $leaseFlags).GetValue($leaseUser) -ne [IntPtr]42 -or
+    -not [object]::ReferenceEquals($leaseToken, $leaseType.GetField('quotaToken', $leaseFlags).GetValue($leaseUser))) {
+  throw 'Failed unload must preserve profile and token ownership before destructive cleanup.'
+}
+$script:leaseUnloadCalls = 0
+$leaseType.GetField('unloadProfile', $leaseFlags).SetValue($leaseUser,
+  [Func[Microsoft.Win32.SafeHandles.SafeAccessTokenHandle,IntPtr,bool]]{
+    param($token, $handle)
+    if (-not [object]::ReferenceEquals($token, $leaseToken) -or $handle -ne [IntPtr]42) {
+      throw 'Unload received different owned handles.'
+    }
+    $script:leaseUnloadCalls++
+    return $true
+  })
+$leaseUnload.Invoke($leaseUser, @())
+$leaseUnload.Invoke($leaseUser, @())
+if ($script:leaseUnloadCalls -ne 1 -or ($null -ne $leaseToken -and $leaseToken.IsClosed) -or
+    $leaseType.GetField('ownedProfileHandle', $leaseFlags).GetValue($leaseUser) -ne [IntPtr]::Zero) {
+  throw 'Successful unload must release the profile once while retaining the token for cleanup.'
+}
+if ($null -ne $leaseToken) { $leaseToken.Dispose() }
+Write-Output 'Bounded installation diagnostics passed.'

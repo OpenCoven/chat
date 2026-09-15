@@ -75,6 +75,22 @@ when the roundtrip fails, alongside the unchanged primary category. These
 observations test the profile/session hypothesis; they do not change logon flags,
 load a profile, write credentials, or relax the original assertions.
 
+Job `104478918965` reported `hive=absent;persistence=session` alongside the
+same installation write failure. The native entry requires local-machine
+persistence. The current logon therefore lacks a prerequisite for that write;
+the separate profile-residual access denial remains unresolved.
+
+The repair loads the verified profile explicitly during `WindowsIsolatedUser`
+creation and retains its hive handle with the validated token. Children still
+launch with zero logon flags. After terminal quarantine, disposal unloads the
+owned hive before closing the token or deleting profile/account state. Unload
+failure defers destructive cleanup and retains ownership for retry. Post-load
+initialization failures use that same cleanup path; if cleanup also fails, the
+trusted exception retains the cleanup owner alongside both errors. The native
+lifecycle fixture covers loaded-hive presence, persistent credential capability,
+unload failure/retry, post-load rollback, and final hive/profile/account absence.
+Native Windows verification and a new immutable source binding remain required.
+
 The child and parent share the same allowlist, including existing fixed native
 cleanup-grant subtypes bound to the issuance command. Private response text,
 parser messages and extra output remain excluded. Cleanup/shutdown cannot
@@ -1116,7 +1132,8 @@ reopens and silent-breakaway mutation are denied. The supervisor launches the
 bootstrap with `CreateProcessWithLogonW` using zero logon flags and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
 membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-and profile-hive flags are not enabled. The outer process retains
+and automatic profile-hive flags are not enabled; the isolated-user object owns
+explicit hive loading and unloading. The outer process retains
 non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
@@ -1809,10 +1826,14 @@ exception text remain private.
 
 The restricted Windows producer still runs as the generated local user with the
 same explicit environment and suspended Job assignment, but
-`CreateProcessWithLogonW` no longer loads that user's registry hive. The OS
-profile remains created, pinned, token-verified, and deleted by the existing
-lifecycle. This removes an unnecessary asynchronous hive-unload dependency from
-the bounded profile-disappearance proof.
+`CreateProcessWithLogonW` does not automatically load that user's registry hive.
+The isolated-user object explicitly loads the created, token-verified profile
+and retains the returned handle until quarantine completes. It unloads the hive
+before token retirement and profile deletion, preserving ownership on unload
+failure. Profile loading occurs during identity creation under the existing
+outer lifecycle/job budget; the production execution deadline is unchanged.
+This restores the persistent-credential prerequisite without depending on an
+automatic unload at child-process exit. Native cleanup acceptance remains required.
 
 An isolated quota pass that observes only the exact
 `access-denied` followed by `repeat=missing` deletion race receives one complete
@@ -1882,7 +1903,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `3bcc6113be449adafe840d3629644233a8b38acba70bf601c93000a469e3deb4` |
+| `.github/workflows/client-v1-conformance.yml` | 176,178 | `40c91faba174818a013bd98301a4903c7708134a58643c532220f0d0553b9871` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1907,7 +1928,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
+| `scripts/windows-job-supervisor.cs` | 389,154 | `81bcbf6beb97d1292d171ef2cd9def96c6aeca11fd5f6cd57c0d10377b4ab78d` |
 | `scripts/windows-job-supervisor.test.ps1` | 199,635 | `3f460c66c011ed7b57a5750d672184e44d26745473d0b8eb9b834dfa15fb463f` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
