@@ -146,7 +146,9 @@ test('familiar return restores the exact older conversation and anchor, not newe
   await screen.findByText('b text');
   fireEvent.change(screen.getByRole('combobox', { name: 'Familiar' }), { target: { value: 'a' } });
   await screen.findByText('a-old text');
-  expect(document.getElementById(chapterTurnElementId('a-old', 'a-old-message'))).toHaveFocus();
+  await waitFor(() => {
+    expect(document.getElementById(chapterTurnElementId('a-old', 'a-old-message'))).toHaveFocus();
+  });
   view.unmount();
   render(<ChatShell queryAdapter={adapter} />);
   expect(await screen.findByText('a-old text')).toBeVisible();

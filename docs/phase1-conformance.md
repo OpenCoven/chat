@@ -1793,7 +1793,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `449d609f0471695fcfb1f28834dfda3d0109a95c4f152b973d3780f975b100ef` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `3bea211a4f40f3f18d7a8feb07dab23c938e38a076f4a3012a9252bf52864892` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
