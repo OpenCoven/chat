@@ -1,5 +1,29 @@
 # Phase 1 real-authority conformance
 
+## Executable diagnostic harness binding
+
+[Protected run 34970370434](https://github.com/OpenCoven/chat/actions/runs/34970370434)
+completed with Linux and macOS platform jobs passing and Windows failing at
+`phase1.native-scenarios.native-preflight-installation-rpc`. Artifact validation,
+attestation and aggregation were skipped; this run does not establish aggregate
+acceptance or identify the underlying Windows RPC failure.
+
+Although its producer was Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+the bootstrap cloned the lock-selected harness `683e99918eb38978680e46aed7c496f6801c3306`.
+That harness imported its own older producer module, so the newer installation
+diagnostic classification was never executed. Workspace-module tests alone
+could not detect this stale executable binding.
+
+The lock now selects reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+tree `64b1e1812e9bfc729f2d7d148b224afe6f17f775`, as the executable harness.
+Its governed file and production-delta identities are refreshed together.
+The regression clones the selected Git revision, verifies its harness authority,
+and executes its native preflight diagnostic module in a child Node process.
+This checks the selected module, not the complete protected bootstrap.
+Frozen consumer, SDK candidate, Cave and Coven revisions remain unchanged.
+Landing this binding, rebinding the SDK validator, rotating both validator
+scopes and obtaining fresh protected results remain necessary.
+
 ## Cave rc.7 adoption in progress
 
 The current Cave pin is `ecdcdcf8a75b62bb912ec48215ae20ab0809a181`,
