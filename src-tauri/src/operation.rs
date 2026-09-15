@@ -1104,7 +1104,9 @@ mod tests {
                 },
             ))
         });
+        let deadline = Instant::now() + Duration::from_secs(2);
         while !queue.busy.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "mutation must enter the queue");
             std::thread::yield_now();
         }
         registry
@@ -1115,7 +1117,12 @@ mod tests {
             Err(NativeDiagnostic::new("aborted", false))
         );
         drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
         while queue.busy.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "cancelled queued mutation must drain"
+            );
             std::thread::yield_now();
         }
         assert!(!started.load(Ordering::SeqCst));
@@ -1143,7 +1150,12 @@ mod tests {
 
         assert_eq!(operation, Err(NativeDiagnostic::new("timeout", true)));
         drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
         while queue.busy.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "expired queued mutation must drain"
+            );
             std::thread::yield_now();
         }
         assert!(!started.load(Ordering::SeqCst));
