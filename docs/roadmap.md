@@ -1,6 +1,58 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-12 04:36 UTC
+## Consolidation checkpoint, 2026-09-15
+
+Chat [#278](https://github.com/OpenCoven/chat/pull/278) landed as verified
+merge `39ca57341647d7b00c210103dfc844a9d170d2cd`. It preserves reviewed head
+`30a266807bbe2c253f5962a8ba2c8698f7ea3c43`, source ancestry and the exact tree
+that passed all eleven jobs in
+[CI 34911594595](https://github.com/OpenCoven/chat/actions/runs/34911594595).
+Native Windows tests verified the enforced ACL comparison outcomes and passed
+the residual cleanup regression tests. The integration includes Chat #280's qualified
+Cave authority `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d`.
+Overlapping #279 is closed as superseded.
+
+[SDK #268](https://github.com/OpenCoven/sdk/pull/268) binds that actual merge
+through reviewed head `30a2668`, binding `07a3b3a` and harness `3fb86bd`.
+Head `1558669b0433d3b44df529b7c26d84c4f73c59ae` passed all eight GitHub checks;
+local repository verification passed 2,630 tests with two skips in both normal
+and coverage runs, package/contract checks, stress tests and lint. Independent
+review verified nine commit objects and 166 retained files. The addressed review
+thread was resolved and the PR landed as signed squash
+`7ed60f0cc6210e8c89d489d1bb5ddf42e1b13baa`, with the exact tested tree.
+Clarified documentation identifies
+the first parent as Chat main, distinct from the frozen Cave repository commit.
+
+The latest completed protected run,
+[34879698263](https://github.com/OpenCoven/chat/actions/runs/34879698263),
+used Chat `9c4aa1f2de8f38fd776e76f7882ffc871f9b426e` and SDK validator
+`5d166480161102a0cc693ca636b66f122a5cb7b8`. Linux and macOS passed;
+Windows failed at Cave startup exit with a separate residual relative-open
+access denial. No Windows record was produced. Validation, attestation and
+aggregation were skipped. No Windows record identity, timing or assertion
+mismatch is established, and protected acceptance remains incomplete.
+
+Both validator scopes now read back SDK merge `7ed60f0`. Fresh protected run
+[34916510997](https://github.com/OpenCoven/chat/actions/runs/34916510997)
+uses Chat producer `39ca573`; its supervisor build is in progress. Next:
+authenticate that artifact before environment approval, then obtain protected
+platform and aggregate acceptance. Dispatch is not acceptance evidence.
+Chat #86 remains a parked draft requiring explicit candidate/artifact adoption
+and exact-head verification. Issues #154/#155 sequence production delegation
+after the protected conformance and SDK dependency work.
+
+The current inventory has the canonical Chat checkout and the familiar-source
+and single-coven-chat worktrees, plus this temporary documentation checkout.
+Inventory counts alone do not establish retirement eligibility.
+Chat and active/dirty/uncertain worktrees remain preserved. Issue #246's
+prospective diagnostics landed in [Chat #268](https://github.com/OpenCoven/chat/pull/268),
+but its historical criterion remains
+open. Issues #188, #206 and #219 also remain open; ordinary CI does not close
+protected or historical-cause requirements. Beads `cave-k0aqq` and its Teamwork
+mirror hold the current delivery record. The minimum working set and the full
+cross-repository consolidation remain unproven.
+
+## Historical consolidation checkpoint, 2026-09-12 04:36 UTC
 
 Chat [#230](https://github.com/OpenCoven/chat/pull/230) merged as
 `09410982d3a85cbfbcdf2d2d193c3a96e8e80f74`; exact-head CI run
