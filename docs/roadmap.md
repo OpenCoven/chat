@@ -1,6 +1,51 @@
 # Delivery roadmap and consolidation audit
 
-## Consolidation checkpoint, 2026-09-15
+## Current consolidation checkpoint, 2026-09-15 (Chat #285)
+
+Chat [#285](https://github.com/OpenCoven/chat/pull/285) landed as
+`6089bab8fb71e692a4c62a722457dbbb5e81d117`. SDK
+[#274](https://github.com/OpenCoven/sdk/pull/274) binds that actual merge and
+landed as `1535e48eb550aa4e318b61bf02d2fbf9d9ae8c3f`. Reviewed trees,
+signatures, independent reviews, and required CI were verified before landing.
+Both validator scopes were rotated to SDK `1535e48e` and read back.
+
+Fresh protected [run 34935323170](https://github.com/OpenCoven/chat/actions/runs/34935323170)
+uses these revisions. Its supervisor artifact and frozen workflow were
+authenticated before protected approval. Platform records and aggregate
+attestation still require verification; dispatch and ordinary CI are not
+protected acceptance. Read the live run and
+[Chat #219](https://github.com/OpenCoven/chat/issues/219) /
+[SDK #38](https://github.com/OpenCoven/sdk/issues/38) for subsequent results.
+
+The preceding [run 34928011200](https://github.com/OpenCoven/chat/actions/runs/34928011200)
+passed Linux and macOS. Both records independently passed archive binding,
+schema, private scans, exact source and validator identities, Cave timing,
+and all 197 ordered assertions. Windows failed at
+`phase1.stage.schema-v2-production.unclassified.error`; no Windows record
+was produced. Cleanup separately reported child relative-open
+`ntstatus=c0000022`. No Windows record identity, timing, or assertion mismatch
+was established. Validation, attestation, and aggregation were skipped.
+
+Chat #285 preserves three existing native diagnostic IDs that the outer
+allowlist had discarded: `native-preflight`, `pairing-recovery`, and
+`revocation-repair`. Regression tests prove diagnostic preservation, not a
+Windows repair or the hosted failing operation. Candidate
+`96804bc483a063e41e9a9738a4ace61970f6c0a4` remains frozen.
+
+Chat #86 remains parked for SDK candidate/artifact reconciliation. Production
+delegation in #154/#155 and protected release acceptance remain open.
+Historical-cause issues #206/#246 are not closed by diagnostic changes.
+The completed #285 worktree was retired after verified landing; active, dirty,
+and uncertain worktrees and this chat remain preserved. The minimum working
+set and full cross-repository consolidation remain unproven.
+
+Use GitHub issues for current ownership, blockers, and evidence. Cave retired
+Beads in [#5399](https://github.com/OpenCoven/coven-cave/issues/5399); legacy
+IDs and the checkpoints below are historical references. Follow Cave's
+[current tracking guide](https://github.com/OpenCoven/coven-cave/blob/main/docs/workflows/github-work-tracking.md)
+for Cave Project status. Do not run `bd` or sync Dolt to update this program.
+
+## Historical consolidation checkpoint, 2026-09-15 (Chat #278)
 
 Chat [#278](https://github.com/OpenCoven/chat/pull/278) landed as verified
 merge `39ca57341647d7b00c210103dfc844a9d170d2cd`. It preserves reviewed head
