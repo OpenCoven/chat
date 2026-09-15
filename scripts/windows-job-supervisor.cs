@@ -1890,6 +1890,7 @@ namespace OpenCoven
 
     public sealed class WindowsJobSupervisor : IDisposable
     {
+        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
@@ -3192,17 +3193,29 @@ namespace OpenCoven
                 bool expectedPathExists,
                 bool actualPathExists,
                 Exception residualFailure)
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, false, residualFailure)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                bool hivesExist,
+                Exception residualFailure)
                 : base("Ephemeral Windows profile survived cleanup.", residualFailure)
             {
                 if ((deleteOutcome != "not-needed" &&
                     deleteOutcome != "accepted" &&
                     deleteOutcome != "not-found") ||
-                    (!registryExists && !expectedPathExists && !actualPathExists))
+                    (!registryExists && !expectedPathExists && !actualPathExists && !hivesExist))
                     throw new ArgumentException("Invalid profile cleanup diagnostic.");
                 Diagnostic = "profile-remained[delete=" + deleteOutcome +
                     ";registry=" + (registryExists ? "1" : "0") +
                     ";expected=" + (expectedPathExists ? "1" : "0") +
                     ";actual=" + (actualPathExists ? "1" : "0") +
+                    (hivesExist ? ";hive=1" : String.Empty) +
                     (residualFailure == null ? String.Empty :
                         ";residual=" + WindowsIsolatedUser.ClassifyCleanupError(residualFailure)) + "]";
             }
@@ -3256,11 +3269,12 @@ namespace OpenCoven
                 bool registered = registrationExists();
                 bool expected = expectedExists();
                 bool actual = actualExists();
-                if (!registered && !expected && !actual) return;
+                bool hives = hivesExist();
+                if (!registered && !expected && !actual && !hives) return;
                 if (elapsed() >= TimeSpan.FromSeconds(10))
-                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                 if (residualAuthorized && (deleteOutcome == "accepted" || deleteOutcome == "not-found") &&
-                    !registered && expected && !hivesExist())
+                    !registered && expected && !hives)
                 {
                     try
                     {
@@ -3272,12 +3286,12 @@ namespace OpenCoven
                     {
                         if (error is TimeoutException && lastSharingFailure != null &&
                             elapsed() >= TimeSpan.FromSeconds(10))
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                         Win32Exception native = error as Win32Exception;
                         bool sharing = native != null ? native.NativeErrorCode == ERROR_SHARING_VIOLATION :
                             error is IOException && error.HResult == unchecked((int)0x80070020);
                         if (!sharing)
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, error);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, error);
                         lastSharingFailure = error;
                         pause();
                         continue;
@@ -7468,11 +7482,13 @@ namespace OpenCoven
                     commandLine.Append(arguments);
                 }
 
+                // Load the fresh child logon session; the supervisor separately owns
+                // its profile reference until terminal quarantine and explicit unload.
                 bool created = CreateProcessWithLogonW(
                     isolatedUser.UserName,
                     Environment.MachineName,
                     isolatedUser.Password,
-                    0,
+                    LOGON_WITH_PROFILE,
                     applicationName,
                     commandLine,
                     CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,

@@ -142,13 +142,27 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NAME = $jobName
     $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $context.User)
-    $result = $job.RunAsUser(
-      $context.User, $trustedPwsh,
-      "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
-      $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
-    if ($result.ExitCode -ne 0 -or $result.Stdout -ne '' -or $result.Stderr -ne '') {
-      throw 'Child launch after explicit profile creation failed.'
+    $retainedCapability = Read-NativeInstallationRetainedEnvironment $context.User
+    if ($retainedCapability -cnotmatch '\Ahive=present;persistence=(local|enterprise)\z') {
+      throw 'Retained profile token lacks persistent credential capability.'
     }
+    foreach ($launchIndex in 0..2) {
+      if ($launchIndex -eq 2) {
+        $result = $job.RunProducerAsUserAndQuarantine(
+          $context.User, $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
+          $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
+      } else {
+        $result = $job.RunAsUser(
+          $context.User, $trustedPwsh,
+          "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
+          $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
+      }
+      if ($result.ExitCode -ne 0 -or $result.Stdout -ne '' -or $result.Stderr -ne '') {
+        throw 'Child launch after explicit profile creation failed.'
+      }
+    }
+    if (-not $job.IsQuarantineComplete) { throw 'Profile lifecycle quarantine incomplete.' }
     $stage = 'unload-failure-retains-ownership'
     $unloadField = [OpenCoven.WindowsIsolatedUser].GetField('unloadProfile', [Reflection.BindingFlags]'NonPublic,Instance')
     $originalUnload = $unloadField.GetValue($context.User)

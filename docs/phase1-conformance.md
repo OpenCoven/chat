@@ -91,9 +91,24 @@ between the two tokens would isolate a launch-session boundary; equal session-on
 capability leaves retained-logon/profile/policy behavior unresolved. No additional
 child, credential write, launch API, policy, or ACL change is introduced.
 
+Job `104506428191` compared the retained token and child directly: both saw the
+hive, but the retained token supported `enterprise` persistence while the child
+supported only `session`. The candidate now requests `LOGON_WITH_PROFILE` for
+each fresh child logon while retaining the supervisor's explicit profile reference
+through quarantine. This preserves fresh-logon account-disable rejection.
+Whether it restores native credential writes remains a hosted verification gate.
+
+Cleanup completion now requires both SID hives to be absent even when profile
+registration and paths have disappeared. A persistent hive reports fixed
+`hive=1` detail and fails within the existing ten-second observation budget;
+residual deletion never runs while a hive remains. Portable delayed/permanent
+hive tests cover both present and already-absent paths. The native lifecycle
+fixture launches three children against the owned profile, quarantines the last,
+and requires persistent credential capability and final hive/profile/account absence.
+No cleanup retry category or budget is expanded.
+
 The repair loads the verified profile explicitly during `WindowsIsolatedUser`
-creation and retains its hive handle with the validated token. Children still
-launch with zero logon flags. After terminal quarantine, disposal unloads the
+creation and retains its hive handle with the validated token. Each child loads its own logon-session profile through `LOGON_WITH_PROFILE`. After terminal quarantine, disposal unloads the
 owned hive before closing the token or deleting profile/account state. Unload
 failure defers destructive cleanup and retains ownership for retry. Post-load
 initialization failures use that same cleanup path; if cleanup also fails, the
@@ -1146,11 +1161,11 @@ non-inherited ACE granting the ephemeral SID only
 `JOB_OBJECT_QUERY | SYNCHRONIZE`; the Job owner remains the trusted runner
 identity, which retains the original full-access handle. Set/assign/terminate
 reopens and silent-breakaway mutation are denied. The supervisor launches the
-bootstrap with `CreateProcessWithLogonW` using zero logon flags and
+bootstrap with `CreateProcessWithLogonW` using `LOGON_WITH_PROFILE` and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
-membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-and automatic profile-hive flags are not enabled; the isolated-user object owns
-explicit hive loading and unloading. The outer process retains
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway remains disabled. The isolated-user object owns a separate profile
+reference until terminal quarantine and explicit unloading; bounded cleanup
+also requires the child-session hives to disappear. The outer process retains
 non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
@@ -1843,14 +1858,16 @@ exception text remain private.
 
 The restricted Windows producer still runs as the generated local user with the
 same explicit environment and suspended Job assignment, but
-`CreateProcessWithLogonW` does not automatically load that user's registry hive.
+`CreateProcessWithLogonW` now requests profile loading for each fresh child
+logon session.
 The isolated-user object explicitly loads the created, token-verified profile
 and retains the returned handle until quarantine completes. It unloads the hive
 before token retirement and profile deletion, preserving ownership on unload
 failure. Profile loading occurs during identity creation under the existing
 outer lifecycle/job budget; the production execution deadline is unchanged.
-This owns the hive lifetime explicitly without depending on an
-automatic unload at child-process exit. Native cleanup acceptance remains required.
+The separate owned reference protects the profile during supervision. Cleanup
+still waits within its existing budget for any child-session unload to finish.
+Native credential and cleanup acceptance remain required.
 
 An isolated quota pass that observes only the exact
 `access-denied` followed by `repeat=missing` deletion race receives one complete
@@ -1920,7 +1937,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 176,178 | `40c91faba174818a013bd98301a4903c7708134a58643c532220f0d0553b9871` |
+| `.github/workflows/client-v1-conformance.yml` | 176,386 | `c6988a6e7ffadc0f3ba5895fdbb04ff403bf5d9da410f39df5a6bc5f6f55b9d9` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1945,7 +1962,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 389,154 | `81bcbf6beb97d1292d171ef2cd9def96c6aeca11fd5f6cd57c0d10377b4ab78d` |
+| `scripts/windows-job-supervisor.cs` | 389,971 | `82d249788d7e208b75b8b97c0c50f0f9b56149b8bab9172ede7f3576ebd9bccd` |
 | `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
@@ -1954,7 +1971,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
-| `scripts/windows-profile-residual-policy.test.ps1` | 14,097 | `26485b24eb4bbafbf33390823c55c6b5d803681f784fda820fd7dbb24d149ccc` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
 | `scripts/windows-profile-residual-native.test.ps1` | 43,464 | `e2e63c621533721951bba9c0148f61749fa5f8e828ef7fef6a90ee39f2e1ddfa` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
