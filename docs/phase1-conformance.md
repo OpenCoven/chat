@@ -1799,7 +1799,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 219,131 | `588a99a97a58692d831807d8ac90771f605cc2ac8ae0d814113b4cddd6c64d02` |
+| `scripts/phase1-conformance.mjs` | 219,270 | `a0199a346602a873ca37d0ebd8f07a997a626996dad90aae60ad6ffa2234fad5` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
@@ -2540,9 +2540,22 @@ unexpected error escaping schema-v2 production is reported as
 `phase1.stage.schema-v2-production.unclassified.<kind>`, where `kind` is one of
 `type-error`, `reference-error`, `range-error`, `syntax-error`, `aggregate-error`,
 `error`, or `non-error`. Existing approved diagnostics retain priority.
-These categories identify a failure path, not its root cause. No error message,
+These categories identify an error kind, not the failing operation or its root cause. No error message,
 stack, name, code, environment value, or subprocess output is published by this
 fallback. Private causes remain in memory only.
+
+Protected run `34928011200` subsequently reported
+`phase1.stage.schema-v2-production.unclassified.error` on Windows. Linux and
+macOS records again passed all 197 assertions, identities, timing, and privacy
+checks. Windows produced no record; downstream acceptance jobs were skipped.
+
+The diagnostic audit found three producer-native stages missing from the outer
+launcher's allowlist: `phase1.native-scenarios.native-preflight`,
+`phase1.native-scenarios.pairing-recovery`, and
+`phase1.native-scenarios.revocation-repair`. The launcher now preserves those
+fixed identifiers through infrastructure wrapping. Regression tests reproduced
+all three being replaced by `unclassified.error` before this correction. This
+proves a diagnostic-loss bug, not which stage failed in the protected run.
 
 Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
