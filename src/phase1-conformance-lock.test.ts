@@ -80,13 +80,13 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: 'e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b',
-  tree: '64b1e1812e9bfc729f2d7d148b224afe6f17f775',
+  revision: '4addac7ec94f4a26eaaf61f6169c645d627451c5',
+  tree: '247eb2f3409156ebf8b273f5a195000dff883b29',
   files: [
     {
       path: 'scripts/phase1-conformance.mjs',
-      blob: '5d78e7a61cefcb7efc57b25abff52d450a8aa41b',
-      sha256: 'f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5',
+      blob: 'fe52383eb4e58348bc88a44b97b64b47b83c3f1c',
+      sha256: '9417170b0f860bcb84cbd7edd2d3c60a3360d7fa112e89b393854e29b4eb0ab9',
     },
     {
       path: 'scripts/phase1-conformance-lock.mjs',
@@ -100,8 +100,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: 'scripts/phase1-schema-v2-producer.mjs',
-      blob: '836d08084f9cffa26d168d8719f060d3493e7cb0',
-      sha256: '828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211',
+      blob: 'e7b66145bcc20e8d09a42be04af42056ab5f8e8f',
+      sha256: '282e4f5f0e65361cfabebb6e54b67d6c05c1ee206ae388e28e815491e0787a46',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
@@ -130,8 +130,8 @@ const expectedBehaviorAuthority = {
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: 'da9d169d608419776dd29efaa7d5cb0a03d4c971',
-      sha256: 'd81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c',
+      blob: '98842b90b77be0cb9000ed2361160835204d6676',
+      sha256: '3bcc6113be449adafe840d3629644233a8b38acba70bf601c93000a469e3deb4',
     },
     {
       path: 'scripts/process-owned-artifact-root.mjs',
@@ -582,7 +582,9 @@ describe('Phase 1 conformance lock', () => {
         '--eval',
         `
       import assert from 'node:assert/strict';
-      import { runNativePreflight, schemaV2NativeFailureDiagnostic }
+      import { EventEmitter } from 'node:events';
+      import { PassThrough } from 'node:stream';
+      import { NativeRpcClient, runNativePreflight, schemaV2NativeFailureDiagnostic }
         from './scripts/phase1-schema-v2-producer.mjs';
       const proof = { backend: 'windows-credential-manager', available: true,
         empty: true, stateSha256: 'a'.repeat(64) };
@@ -595,7 +597,30 @@ describe('Phase 1 conformance lock', () => {
         throw failure;
       } }, proof.backend, value => { stage = value; }), error => error === failure);
       assert.deepEqual(commands, ['conformance_native_custody_state', 'app_installation_id']);
-      process.stdout.write(schemaV2NativeFailureDiagnostic(stage, failure));
+      assert.equal(schemaV2NativeFailureDiagnostic(stage, failure),
+        'phase1.native-scenarios.native-preflight-installation-unexpected-error');
+      for (const boundary of ['lock', 'entry', 'read', 'write', 'persistence']) {
+        const child = new EventEmitter();
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        child.stdin = { write: line => {
+          const request = JSON.parse(line);
+          const response = request.command === 'conformance_native_custody_state'
+            ? { id: request.id, ok: true, result: proof }
+            : { id: request.id, ok: false, error: { code: 'installation_' + boundary + '_unavailable' } };
+          child.stdout.write(JSON.stringify(response) + String.fromCharCode(10));
+          return true;
+        } };
+        const rpc = new NativeRpcClient(child);
+        let caught;
+        try { await runNativePreflight(rpc, proof.backend, value => { stage = value; }); }
+        catch (error) { caught = error; }
+        assert.ok(caught instanceof Error);
+        assert.equal(schemaV2NativeFailureDiagnostic(stage, caught),
+          'phase1.native-scenarios.native-preflight-installation-' + boundary + '-unavailable');
+        assert.equal(rpc.commandCount('app_installation_id'), 1);
+      }
+      process.stdout.write('installation-boundaries-verified');
     `,
       ],
       {
@@ -607,7 +632,7 @@ describe('Phase 1 conformance lock', () => {
         stdio: 'pipe',
       },
     );
-    expect(output).toBe('phase1.native-scenarios.native-preflight-installation-unexpected-error');
+    expect(output).toBe('installation-boundaries-verified');
   });
 
   gitTest('binds the production Chat authority to the pinned Git objects', () => {

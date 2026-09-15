@@ -14,7 +14,7 @@ That harness imported its own older producer module, so the newer installation
 diagnostic classification was never executed. Workspace-module tests alone
 could not detect this stale executable binding.
 
-The lock now selects reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+Chat #296 selected reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
 tree `64b1e1812e9bfc729f2d7d148b224afe6f17f775`, as the executable harness.
 Its governed file and production-delta identities are refreshed together.
 The regression clones the selected Git revision, verifies its harness authority,
@@ -46,9 +46,11 @@ empty custody, grant issuance, creation, stable reread and authorized cleanup
 inside a separate Job for its isolated user. Local syntax and mocked tests do
 not establish restricted Windows runtime success.
 
-These new diagnostic bytes still require an immutable reviewed harness binding,
-SDK rebinding, both scope rotations and fresh protected validation. The current
-lock continues to select the previously reviewed `e28b2ccb` harness.
+The lock now selects reviewed source `4addac7ec94f4a26eaaf61f6169c645d627451c5`,
+tree `247eb2f3409156ebf8b273f5a195000dff883b29`, including all 25 governed files
+and ten production deltas. The checkout regression exercises all five labels
+from that immutable revision. SDK rebinding, both scope rotations and fresh
+protected validation remain required; this binding alone is not acceptance.
 
 ## Cave rc.7 adoption in progress
 
