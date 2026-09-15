@@ -12,6 +12,42 @@ $function = @($tree.FindAll({ param($node)
 }, $false))
 if ($function.Count -ne 1) { throw 'Bounded installation classifier missing.' }
 Invoke-Expression $function[0].Extent.Text
+foreach ($name in @('Get-NativeInstallationFailureReport', 'Read-NativeInstallationEnvironment')) {
+  $definition = @($tree.FindAll({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name
+  }, $false))
+  if ($definition.Count -ne 1) { throw "Missing bounded probe function: $name" }
+  Invoke-Expression $definition[0].Extent.Text
+}
+$primaryLine = 'installation-roundtrip: app_installation_id-installation_write_unavailable'
+foreach ($hive in @('present', 'absent', 'unavailable')) {
+  foreach ($persistence in @('none', 'session', 'local', 'enterprise', 'no-logon-session', 'unavailable', 'unrecognized')) {
+    $environment = "hive=$hive;persistence=$persistence"
+    $report = Get-NativeInstallationFailureReport "$primaryLine`ninstallation-environment: $environment"
+    if ($report.Category -cne 'app_installation_id-installation_write_unavailable' -or $report.Environment -cne $environment) {
+      throw 'Bounded environment report lost the primary failure.'
+    }
+  }
+}
+foreach ($outputText in @(
+  "$primaryLine`ninstallation-environment: hive=private;persistence=session",
+  "$primaryLine`ninstallation-environment: hive=absent;persistence=session`nprivate data",
+  "$primaryLine`nprivate data"
+)) {
+  $report = Get-NativeInstallationFailureReport $outputText
+  if ($report.Category -cne 'unclassified' -or $report.Environment -cne 'unavailable') {
+    throw 'Untrusted probe output accepted.'
+  }
+}
+$environment = Read-NativeInstallationEnvironment
+if ($environment -cnotmatch '^hive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)$') {
+  throw 'Environment probe emitted unbounded output.'
+}
+foreach ($pair in @(@(0, 'none'), @(1, 'session'), @(2, 'local'), @(3, 'enterprise'), @(99, 'unrecognized'))) {
+  if ([NativeInstallationEnvironmentProbe]::PersistenceCategory([uint32]$pair[0]) -cne $pair[1]) {
+    throw 'Native generic-credential persistence mapping changed.'
+  }
+}
 # Run the fixture's actual home selection with distinct redirected and OS profiles.
 $homeAssignment = @($tree.FindAll({ param($node)
   $node -is [Management.Automation.Language.AssignmentStatementAst] -and
@@ -127,6 +163,7 @@ $process | Add-Member ScriptMethod Dispose { [IO.File]::WriteAllText($env:INSTAL
 $stderr = [pscustomobject]@{ Result = '' }
 $stderr | Add-Member ScriptMethod Wait { param($milliseconds) return $true }
 function Assert-EmptyCustody($proof) { }
+$installationEnvironmentSnapshot = 'hive=absent;persistence=session'
 function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
   switch ($command) {
     'conformance_native_custody_state' { return @{} }
@@ -156,8 +193,10 @@ try {
     $stdout = $probe.StandardOutput.ReadToEndAsync()
     $stderr = $probe.StandardError.ReadToEndAsync()
     if (-not $probe.WaitForExit(10000)) { $probe.Kill($true); throw 'Pipeline probe timed out.' }
+    $report = Get-NativeInstallationFailureReport $stdout.Result
     if ($probe.ExitCode -ne 1 -or
-        $stdout.Result.Trim() -cne 'installation-roundtrip: app_installation_id-installation_write_unavailable' -or
+        $report.Category -cne 'app_installation_id-installation_write_unavailable' -or
+        $report.Environment -cne 'hive=absent;persistence=session' -or
         $stderr.Result.Trim() -cne 'installation-roundtrip: conformance_cleanup_native_custody-failed') {
       throw 'Primary installation failure was lost or secondary failure was not bounded.'
     }

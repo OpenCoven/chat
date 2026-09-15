@@ -83,6 +83,74 @@ function Get-NativeInstallationFailureCategory {
   return 'unclassified'
 }
 
+function Get-NativeInstallationFailureReport {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $category = Get-NativeInstallationFailureCategory $OutputText
+  $environment = 'unavailable'
+  $lines = @(([string]$OutputText).Trim() -split '\r?\n')
+  if ($lines.Count -eq 2 -and $lines[1] -cmatch '^installation-environment: (hive=(?:present|absent|unavailable);persistence=(?:none|session|local|enterprise|no-logon-session|unavailable|unrecognized))$') {
+    $environment = $Matches[1]
+    $category = Get-NativeInstallationFailureCategory $lines[0]
+    if ($category -ceq 'unclassified') { $environment = 'unavailable' }
+  }
+  return [pscustomobject]@{ Category = $category; Environment = $environment }
+}
+
+function Read-NativeInstallationEnvironment {
+  try {
+    if (-not ('NativeInstallationEnvironmentProbe' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using Microsoft.Win32;
+public static class NativeInstallationEnvironmentProbe {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool CredGetSessionTypes(uint count, [Out] uint[] maximumPersist);
+
+    public static string PersistenceCategory(uint value) {
+        switch (value) {
+            case 0: return "none";
+            case 1: return "session";
+            case 2: return "local";
+            case 3: return "enterprise";
+            default: return "unrecognized";
+        }
+    }
+
+    public static string Read() {
+        string hive = "unavailable";
+        string persistence = "unavailable";
+        try {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent()) {
+                if (identity.User != null) {
+                    using (RegistryKey key = Registry.Users.OpenSubKey(identity.User.Value, false)) {
+                        hive = key == null ? "absent" : "present";
+                    }
+                }
+            }
+        } catch { }
+        try {
+            // CRED_TYPE_MAXIMUM = 7; CRED_TYPE_GENERIC = 1.
+            uint[] maximumPersist = new uint[7];
+            if (CredGetSessionTypes((uint)maximumPersist.Length, maximumPersist)) {
+                persistence = PersistenceCategory(maximumPersist[1]);
+            } else if (Marshal.GetLastWin32Error() == 1312) {
+                persistence = "no-logon-session";
+            }
+        } catch { }
+        return "hive=" + hive + ";persistence=" + persistence;
+    }
+}
+'@
+    }
+    return [NativeInstallationEnvironmentProbe]::Read()
+  } catch {
+    return 'hive=unavailable;persistence=unavailable'
+  }
+}
+
 trap {
   Write-Host '--- windows-job-supervisor.test.ps1 failure ---'
   Write-ExceptionChain -Failure $_
@@ -5372,6 +5440,7 @@ trap {
   exit 1
 }
 $start = [Diagnostics.ProcessStartInfo]::new($env:OPENCOVEN_NATIVE_TEST_BINARY)
+$installationEnvironmentSnapshot = Read-NativeInstallationEnvironment
 $start.UseShellExecute = $false
 $start.RedirectStandardInput = $true
 $start.RedirectStandardOutput = $true
@@ -5473,6 +5542,7 @@ if ($null -ne $primaryFailure -or $null -ne $secondaryFailure) {
     $secondaryFailure = $null
   }
   [Console]::Out.WriteLine("installation-roundtrip: $primaryFailure")
+  [Console]::Out.WriteLine('installation-environment: ' + $installationEnvironmentSnapshot)
   if ($null -ne $secondaryFailure) {
     [Console]::Error.WriteLine("installation-roundtrip: $secondaryFailure")
   }
@@ -5483,6 +5553,8 @@ Write-Output 'installation-roundtrip: passed'
         # Prepend the exact tested classifier instead of maintaining a child copy.
         $classifierSource = "function Get-NativeInstallationFailureCategory {`n" +
           ${function:Get-NativeInstallationFailureCategory}.ToString() + "`n}`n"
+        $classifierSource += "function Read-NativeInstallationEnvironment {`n" +
+          ${function:Read-NativeInstallationEnvironment}.ToString() + "`n}`n"
         [IO.File]::WriteAllText($installationScript,
           $classifierSource + [IO.File]::ReadAllText($installationScript),
           [Text.UTF8Encoding]::new($false))
@@ -5507,11 +5579,12 @@ Write-Output 'installation-roundtrip: passed'
           )
           if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
               $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
-            $category = Get-NativeInstallationFailureCategory $installationResult.Stdout
+            $report = Get-NativeInstallationFailureReport $installationResult.Stdout
+            $category = $report.Category
             $secondary = if ($installationResult.Stderr -eq '') { 'none' } else {
               Get-NativeInstallationFailureCategory $installationResult.Stderr
             }
-            throw "Restricted native installation roundtrip failed: $category; secondary: $secondary"
+            throw "Restricted native installation roundtrip failed: $category; secondary: $secondary; environment: $($report.Environment)"
           }
           if (-not $installationJob.IsQuarantineComplete) {
             throw 'Restricted native installation quarantine incomplete.'

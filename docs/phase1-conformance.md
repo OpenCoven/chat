@@ -64,6 +64,17 @@ a fixed success marker. The outer boundary preserves both primary and cleanup
 exceptions, including Job-disposal failures. Portable tests cover simultaneous failures; Windows runtime
 verification remains pending.
 
+Job `104468314603` preserved the primary failure:
+`app_installation_id-installation_write_unavailable`, with no native secondary
+error. Outer profile cleanup separately failed with child relative-open access
+denied (`ntstatus=c0000022`). No successful installation roundtrip is established.
+The fixture captures a read-only snapshot before native startup: whether the
+current user's registry hive is loaded and the maximum generic-credential
+persistence reported by `CredGetSessionTypes`. It emits only fixed categories
+when the roundtrip fails, alongside the unchanged primary category. These
+observations test the profile/session hypothesis; they do not change logon flags,
+load a profile, write credentials, or relax the original assertions.
+
 The child and parent share the same allowlist, including existing fixed native
 cleanup-grant subtypes bound to the issuance command. Private response text,
 parser messages and extra output remain excluded. Cleanup/shutdown cannot
@@ -1897,7 +1908,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 385,159 | `02084f474bde53ad77f156e33dd86759be3f9177adba35a9837e47f07d19615c` |
-| `scripts/windows-job-supervisor.test.ps1` | 196,593 | `1528d8e2f14d6be5ba0e11be29fa29f62aaf3af9dbc5e130be58e3dbc1054582` |
+| `scripts/windows-job-supervisor.test.ps1` | 199,635 | `3f460c66c011ed7b57a5750d672184e44d26745473d0b8eb9b834dfa15fb463f` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
