@@ -1,12 +1,11 @@
 import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react';
-
+import { Icon, type IconName } from '../design/minimal-icons';
 import {
   CAVE_FAMILIAR_ANALYTICS,
   type CaveExecutionWindow,
   formatDuration,
   formatSuccessRate,
 } from './minimal-familiar-sdk';
-import { Icon, type IconName } from './minimal-icons';
 import { contractReport, type MockFamiliar } from './mock-familiars';
 import { MOCK_CREDENTIAL, MOCK_HEALTH } from './mock-settings';
 

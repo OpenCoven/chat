@@ -1,5 +1,5 @@
 import { type CSSProperties, useState } from 'react';
-import { cx } from '../demo/familiars-ui';
+import { cx } from '../design/familiars-ui';
 
 export type FamiliarAvatarProps = {
   name: string;

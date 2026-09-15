@@ -8,8 +8,8 @@ import {
   Segmented,
   ThinkingIndicator,
   titleCase,
-} from '../demo/familiars-ui';
-import { Icon } from '../demo/minimal-icons';
+} from '../design/familiars-ui';
+import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle } from '../lib/coven-runtime';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
@@ -19,7 +19,7 @@ import type { ChatMessage } from './events';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage } from './formatted-message';
 import { useViewportTier } from './viewport';
-import '../demo/familiars-shell.css';
+import '../design/familiars-shell.css';
 import './chat-app.css';
 import './attachments.css';
 

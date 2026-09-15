@@ -5,6 +5,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Avatar, cx, FamButton, ThinkingIndicator } from '../design/familiars-ui';
+import { Icon } from '../design/minimal-icons';
 import { AttachmentChip } from '../ui';
 import type {
   FamMessage,
@@ -14,8 +16,6 @@ import type {
   ReasoningCardData,
   ReasoningStep,
 } from './familiars-data';
-import { Avatar, cx, FamButton, ThinkingIndicator } from './familiars-ui';
-import { Icon } from './minimal-icons';
 import type { MockFamiliar } from './mock-familiars';
 
 /**

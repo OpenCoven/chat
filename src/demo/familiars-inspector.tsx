@@ -1,14 +1,4 @@
 import type { CSSProperties } from 'react';
-
-import {
-  dayBars,
-  FAM_ACTIVITY,
-  FAM_PROJECTS,
-  type FamActivity,
-  type RunRow,
-  type RunTone,
-  runRow,
-} from './familiars-data';
 import {
   type AccessGroupKey,
   type ActivityKey,
@@ -20,8 +10,17 @@ import {
   type Presence,
   Segmented,
   titleCase,
-} from './familiars-ui';
-import { Icon, type IconName } from './minimal-icons';
+} from '../design/familiars-ui';
+import { Icon, type IconName } from '../design/minimal-icons';
+import {
+  dayBars,
+  FAM_ACTIVITY,
+  FAM_PROJECTS,
+  type FamActivity,
+  type RunRow,
+  type RunTone,
+  runRow,
+} from './familiars-data';
 import { contractReport, type MockFamiliar } from './mock-familiars';
 
 /**

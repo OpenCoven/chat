@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
 import { canUseTauriCommands } from '../lib/desktop-host';
 import './minimal-macos.css';
+import { Icon, type IconName } from '../design/minimal-icons';
 import {
   backfillNote,
   CAVE_ANALYTICS_WINDOWS,
@@ -17,7 +18,6 @@ import {
   formatSuccessRate,
   formatTokens,
 } from './minimal-familiar-sdk';
-import { Icon, type IconName } from './minimal-icons';
 import {
   type AgentId,
   type ApprovalOutcome,
