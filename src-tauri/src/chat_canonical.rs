@@ -118,7 +118,7 @@ pub(crate) fn require_current(data: &Path, id: &str) -> Result<String, String> {
         .into_iter()
         .find_map(|(familiar, head)| (head.as_deref() == Some(id)).then_some(familiar))
         .ok_or_else(|| {
-            "This is not the familiar's canonical Chat thread. Refresh before continuing.".into()
+            "This conversation is no longer this familiar's current chat. Reopen the familiar from the sidebar to continue.".into()
         })
 }
 
@@ -138,7 +138,10 @@ pub(crate) fn advance(
     id: &str,
 ) -> Result<(), String> {
     if head(data, familiar)?.as_deref() != parent {
-        return Err("The canonical Chat thread changed; this run cannot replace its head.".into());
+        return Err(
+            "This familiar's chat has changed since the run started, so the run cannot save its reply here."
+                .into(),
+        );
     }
     crate::chat_origin::require_chat_origin(data, id)?;
     chat_lifecycle::require_active(data, id)?;

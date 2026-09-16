@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ChatLayout, type ChatLayoutProps } from './chat-layout';
+import { ChatLayout, type ChatLayoutProps, composerCopy, emptyThreadText } from './chat-layout';
 
 function layoutProps(): ChatLayoutProps {
   return {
@@ -12,6 +12,7 @@ function layoutProps(): ChatLayoutProps {
     draft: '',
     status: 'Open the desktop app to use the Coven CLI.',
     ready: false,
+    connected: false,
     busy: false,
     loading: false,
     cancelling: false,
@@ -23,6 +24,105 @@ function layoutProps(): ChatLayoutProps {
     onRefresh: vi.fn(),
   };
 }
+
+describe('empty transcript copy', () => {
+  it('names the three states without contradicting the heading', () => {
+    expect(emptyThreadText(false)).toContain('Connect to your local Coven CLI');
+    expect(emptyThreadText(false, 'Astra')).toContain('Connect to your local Coven CLI');
+    expect(emptyThreadText(true)).toContain('Select a familiar');
+    expect(emptyThreadText(true, 'Astra')).toContain('conversation with Astra');
+    expect(emptyThreadText(true, 'Astra')).not.toContain('Select a familiar');
+  });
+
+  it('does not tell the reader to select the familiar they already selected', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        connected
+        ready
+      />,
+    );
+    expect(screen.getByText('Chat with Astra')).toBeInTheDocument();
+    expect(screen.getByText(/start of your conversation with Astra/)).toBeInTheDocument();
+    expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
+  });
+
+  it('does not claim the CLI is down when it is up but nothing is selected', () => {
+    // `ready` is false here in the real app (it demands a selection), so this
+    // is precisely the state that used to read "Connect to your local Coven CLI".
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} connected />);
+    expect(screen.getByText(/Select a familiar from the sidebar/)).toBeInTheDocument();
+    expect(screen.queryByText(/Connect to your local Coven CLI/)).not.toBeInTheDocument();
+  });
+
+  it('yields the transcript to the run indicator while a run is active', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+        busy
+      />,
+    );
+    expect(screen.queryByText('Chat with Astra')).not.toBeInTheDocument();
+    expect(screen.getByText(/Coven is running/)).toBeInTheDocument();
+  });
+});
+
+describe('top bar identity', () => {
+  it('shows no familiar identity when none is selected', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    expect(screen.queryByText('Coven')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'No familiar selected' })).toBeDisabled();
+  });
+
+  it('names the selected familiar and opens its card', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+      />,
+    );
+    expect(screen.getByRole('button', { name: "Open Astra's familiar card" })).toBeEnabled();
+  });
+});
+
+describe('composer copy', () => {
+  it('names the addressee only when there is one', () => {
+    expect(composerCopy('Astra')).toEqual({
+      label: 'Message Astra',
+      placeholder: 'Message Astra',
+    });
+    expect(composerCopy().placeholder).toBe('Select a familiar to send a message.');
+    expect(composerCopy().label).toBe('Message');
+    // An archived chat still addresses its familiar, and `ready` is false
+    // there, so selection -- not `ready` -- decides the addressee.
+    expect(composerCopy('Lifecycle familiar').label).toBe('Message Lifecycle familiar');
+  });
+
+  it('does not offer to message the fallback name when nothing is selected', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    expect(screen.queryByPlaceholderText('Message Coven')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
+  });
+
+  it('addresses the selected familiar', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+      />,
+    );
+    expect(screen.getByPlaceholderText('Message Astra')).toBeInTheDocument();
+  });
+});
 
 describe('production Familiars layout', () => {
   it('hides archived familiar rows until the settings filter is enabled', () => {

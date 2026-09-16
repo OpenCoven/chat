@@ -342,7 +342,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         } catch (failure) {
           if (lifetime.current === life) {
             setError(
-              `Cannot refresh the familiar's canonical thread: ${errorText(failure)}. Refresh before sending again.`,
+              `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
             );
             setAvailable(false);
           }
@@ -513,6 +513,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           ? status
           : `${status}\nSaved navigation could not be restored and is preserved unchanged. Drafts are memory-only until you recover the saved navigation outside this app and reopen this window.`
       }
+      connected={available}
       ready={
         available &&
         Boolean(navigation.familiarId) &&

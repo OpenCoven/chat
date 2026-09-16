@@ -37,6 +37,8 @@ function MockLayout(props: ChatLayoutProps) {
         ))}
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
+      <output data-testid="connected">{String(props.connected)}</output>
+      <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
       <textarea
         aria-label="Draft"
@@ -418,7 +420,9 @@ describe('canonical familiar controller', () => {
     draft('work');
     click('Send');
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Refresh before sending again'),
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Reopen the familiar before sending again',
+      ),
     );
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(api.send).toHaveBeenCalledOnce();
@@ -482,6 +486,27 @@ describe('canonical familiar controller', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'note.txt' })).not.toBeInTheDocument(),
     );
+  });
+
+  it('reports a live runtime as connected even while nothing is selected', async () => {
+    // `ready` folds selection and lifecycle into runtime health, so the empty
+    // transcript cannot use it to decide whether the CLI is reachable: with a
+    // healthy CLI and no familiar chosen it would claim the CLI was down.
+    const api = runtime();
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    vi.mocked(api.listFamiliars).mockResolvedValue([]);
+    render(<ChatApp runtime={api} />);
+    await waitFor(() => expect(screen.getByTestId('connected')).toHaveTextContent('true'));
+    expect(screen.getByTestId('familiar')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('ready')).toHaveTextContent('false');
+  });
+
+  it('reports a missing runtime as not connected', async () => {
+    const api = runtime();
+    vi.mocked(api.status).mockResolvedValue({ available: false, error: 'Open desktop app' });
+    render(<ChatApp runtime={api} />);
+    await screen.findByText('Open desktop app');
+    expect(screen.getByTestId('connected')).toHaveTextContent('false');
   });
 
   it('disables sending without a familiar and never requests CLI history in browser mode', async () => {

@@ -49,6 +49,8 @@ export type ChatLayoutProps = Readonly<{
   draft: string;
   status: string;
   ready: boolean;
+  /** Real runtime availability. `ready` also demands a live, non-archived selection. */
+  connected: boolean;
   readOnly?: boolean;
   archivedFilter?: boolean;
   selectedArchived?: boolean;
@@ -95,6 +97,28 @@ function useFocusReturn(
       : shell.current?.querySelector<HTMLElement>(`[data-opens="${rail}"]`);
     target?.focus();
   }, [rail, open, opener, shell, panel]);
+}
+
+/**
+ * Copy for the empty transcript. The three states are distinct: a disconnected
+ * runtime, a connected runtime with no familiar chosen, and a chosen familiar
+ * whose thread has no messages yet.
+ *
+ * `connected` must be real runtime availability, NOT the layout's `ready`.
+ * `ready` is `available && familiarId && !changingLifecycle && !archived`, so
+ * it is false whenever no familiar is selected -- feeding it here claimed the
+ * CLI was disconnected on a perfectly healthy runtime.
+ */
+export function emptyThreadText(connected: boolean, familiarName?: string) {
+  if (!connected) return 'Connect to your local Coven CLI to see real conversations here.';
+  if (!familiarName) return 'Select a familiar from the sidebar to start a conversation.';
+  return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
+}
+
+export function composerCopy(familiarName?: string) {
+  if (!familiarName)
+    return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
+  return { label: `Message ${familiarName}`, placeholder: `Message ${familiarName}` };
 }
 
 function activeControl(): HTMLElement | null {
@@ -156,6 +180,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
+  const composer = composerCopy(familiar?.name);
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -323,15 +348,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                 onClick={openSidebar}
               />
             ) : null}
-            <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={24} />
+            {familiar ? (
+              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={24} />
+            ) : null}
             <button
               type="button"
               className="fr-thread-title coven-familiar-card-trigger"
               disabled={!familiar}
               onClick={showFamiliarCard}
-              aria-label={`Open ${name}'s familiar card`}
+              aria-label={familiar ? `Open ${name}'s familiar card` : 'No familiar selected'}
             >
-              {name}
+              {familiar ? name : 'No familiar selected'}
             </button>
           </div>
           {session && props.onLifecycle && (
@@ -453,14 +480,16 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ),
             )}
-            {!props.messages.length && !props.loading ? (
+            {!props.messages.length && !props.loading && !props.busy ? (
               <div className="fr-thread-empty">
-                <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={36} ring />
-                <span className="fr-thread-empty-title">{`Chat with ${name}`}</span>
+                {familiar ? (
+                  <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
+                ) : null}
+                <span className="fr-thread-empty-title">
+                  {familiar ? `Chat with ${name}` : 'No familiar selected'}
+                </span>
                 <span className="fr-empty-text">
-                  {props.ready
-                    ? 'Select a familiar to start a conversation with Coven.'
-                    : 'Connect to your local Coven CLI to see real conversations here.'}
+                  {emptyThreadText(props.connected, familiar?.name)}
                 </span>
               </div>
             ) : null}
@@ -496,8 +525,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                 attachmentIcon="plus"
                 value={props.draft}
                 onValueChange={props.onDraft}
-                label={`Message ${name}`}
-                placeholder={`Message ${name}`}
+                label={composer.label}
+                placeholder={composer.placeholder}
                 onSend={props.onSend}
                 running={props.busy && !composerDisabled}
                 onStop={props.onCancel}
@@ -555,11 +584,18 @@ export function ChatLayout(props: ChatLayoutProps) {
             onClick={() => setInspector(false)}
             aria-label="Close inspector"
           >
-            <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} ring />
+            {familiar ? (
+              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} ring />
+            ) : (
+              // .fr-inspector-head is a 3-column grid whose first column is a
+              // fixed 22px avatar slot; leaving it empty shifts the name into
+              // 22px and wraps it over the close icon.
+              <span className="fr-inspector-mark" aria-hidden="true" />
+            )}
             <span className="fr-inspector-who">
-              <span className="fr-inspector-name">{name}</span>
+              <span className="fr-inspector-name">{familiar ? name : 'Coven CLI'}</span>
               <span className="fr-inspector-kind">
-                {familiar ? 'Coven familiar' : 'Local Coven CLI'}
+                {familiar ? 'Coven familiar' : 'No familiar selected'}
               </span>
             </span>
             <Icon name="sidebar-simple" size={15} />
