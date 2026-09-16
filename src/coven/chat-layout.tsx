@@ -49,6 +49,8 @@ export type ChatLayoutProps = Readonly<{
   draft: string;
   status: string;
   ready: boolean;
+  /** Real runtime availability. `ready` also demands a live, non-archived selection. */
+  connected: boolean;
   readOnly?: boolean;
   archivedFilter?: boolean;
   selectedArchived?: boolean;
@@ -100,22 +102,19 @@ function useFocusReturn(
 /**
  * Copy for the empty transcript. The three states are distinct: a disconnected
  * runtime, a connected runtime with no familiar chosen, and a chosen familiar
- * whose thread has no messages yet. Keying only off `ready` used to show
- * "Select a familiar" underneath a "Chat with <name>" heading, which told the
- * reader to do something they had already done.
+ * whose thread has no messages yet.
+ *
+ * `connected` must be real runtime availability, NOT the layout's `ready`.
+ * `ready` is `available && familiarId && !changingLifecycle && !archived`, so
+ * it is false whenever no familiar is selected -- feeding it here claimed the
+ * CLI was disconnected on a perfectly healthy runtime.
  */
-export function emptyThreadText(ready: boolean, familiarName?: string) {
-  if (!ready) return 'Connect to your local Coven CLI to see real conversations here.';
+export function emptyThreadText(connected: boolean, familiarName?: string) {
+  if (!connected) return 'Connect to your local Coven CLI to see real conversations here.';
   if (!familiarName) return 'Select a familiar from the sidebar to start a conversation.';
   return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
 }
 
-/**
- * Composer copy. With no familiar chosen there is no addressee, but `name`
- * falls back to "Coven", which rendered "Message Coven" above a send that can
- * only fail with "Select a familiar before sending a message." Name the
- * missing step instead of inviting the failing one.
- */
 export function composerCopy(familiarName?: string) {
   if (!familiarName)
     return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
@@ -490,7 +489,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {familiar ? `Chat with ${name}` : 'No familiar selected'}
                 </span>
                 <span className="fr-empty-text">
-                  {emptyThreadText(props.ready, familiar?.name)}
+                  {emptyThreadText(props.connected, familiar?.name)}
                 </span>
               </div>
             ) : null}

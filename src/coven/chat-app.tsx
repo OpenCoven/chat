@@ -513,6 +513,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           ? status
           : `${status}\nSaved navigation could not be restored and is preserved unchanged. Drafts are memory-only until you recover the saved navigation outside this app and reopen this window.`
       }
+      connected={available}
       ready={
         available &&
         Boolean(navigation.familiarId) &&

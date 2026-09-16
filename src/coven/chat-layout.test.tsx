@@ -12,6 +12,7 @@ function layoutProps(): ChatLayoutProps {
     draft: '',
     status: 'Open the desktop app to use the Coven CLI.',
     ready: false,
+    connected: false,
     busy: false,
     loading: false,
     cancelling: false,
@@ -39,11 +40,21 @@ describe('empty transcript copy', () => {
         {...layoutProps()}
         familiars={[{ id: 'f', name: 'Astra' }]}
         familiarId="f"
+        connected
         ready
       />,
     );
     expect(screen.getByText('Chat with Astra')).toBeInTheDocument();
+    expect(screen.getByText(/start of your conversation with Astra/)).toBeInTheDocument();
     expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
+  });
+
+  it('does not claim the CLI is down when it is up but nothing is selected', () => {
+    // `ready` is false here in the real app (it demands a selection), so this
+    // is precisely the state that used to read "Connect to your local Coven CLI".
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} connected />);
+    expect(screen.getByText(/Select a familiar from the sidebar/)).toBeInTheDocument();
+    expect(screen.queryByText(/Connect to your local Coven CLI/)).not.toBeInTheDocument();
   });
 
   it('yields the transcript to the run indicator while a run is active', () => {
