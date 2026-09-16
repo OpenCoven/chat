@@ -144,17 +144,21 @@ export function buildIsolationEvidence({
   if (
     !Array.isArray(opaqueIds) ||
     opaqueIds.length !== isolationRootIds.length ||
-    opaqueIds.some((value) => typeof value !== 'string' || !opaqueIdPattern.test(value)) ||
-    new Set(opaqueIds).size !== opaqueIds.length
+    opaqueIds.some((value) => typeof value !== 'string' || !opaqueIdPattern.test(value))
   ) {
-    throw new Error('Isolation roots require four unique opaque identifiers.');
+    throw new Error('phase1.stage.evidence-authority.isolation.opaque-ids.invalid');
+  }
+  if (new Set(opaqueIds).size !== opaqueIds.length) {
+    throw new Error('phase1.stage.evidence-authority.isolation.opaque-ids.duplicate');
   }
   if (
     !digestPattern.test(nativeBeforeSha256 ?? '') ||
-    !digestPattern.test(nativeAfterSha256 ?? '') ||
-    nativeBeforeSha256 !== nativeAfterSha256
+    !digestPattern.test(nativeAfterSha256 ?? '')
   ) {
-    throw new Error('Native credential state changed or is invalid.');
+    throw new Error('phase1.stage.evidence-authority.isolation.native-credential-store.invalid');
+  }
+  if (nativeBeforeSha256 !== nativeAfterSha256) {
+    throw new Error('phase1.stage.evidence-authority.isolation.native-credential-store.changed');
   }
   const filesystemState = operatorStateIds.map((id) => {
     const before = operatorBefore?.[id];
@@ -162,12 +166,16 @@ export function buildIsolationEvidence({
     if (
       before === undefined ||
       after === undefined ||
-      before.path !== after.path ||
       !digestPattern.test(before.sha256 ?? '') ||
-      !digestPattern.test(after.sha256 ?? '') ||
-      before.sha256 !== after.sha256
+      !digestPattern.test(after.sha256 ?? '')
     ) {
-      throw new Error(`Operator state ${id} changed or is invalid.`);
+      throw new Error(`phase1.stage.evidence-authority.isolation.operator.${id}.invalid`);
+    }
+    if (before.path !== after.path) {
+      throw new Error(`phase1.stage.evidence-authority.isolation.operator.${id}.path`);
+    }
+    if (before.sha256 !== after.sha256) {
+      throw new Error(`phase1.stage.evidence-authority.isolation.operator.${id}.changed`);
     }
     return {
       id,

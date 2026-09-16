@@ -1,6 +1,23 @@
 # Delivery roadmap and consolidation audit
 
-## Current delivery and authority checkpoint, 2026-09-15
+## Current delivery and consolidation checkpoint, 2026-09-16
+
+GitHub issues and repository roadmaps hold current ownership, blockers, and evidence. Original acceptance criteria and historical records below remain preserved.
+
+- Chat [#297](https://github.com/OpenCoven/chat/pull/297) landed at `43504f646e7ffe01ee6019d468401f99be839420`. Its complete tree equals signed reviewed head `1e007af60a6224d8d4f80d06cd3c974064cabd48`, whose direct executable source is `6e74fb60e44549b91aa75fb956eb63a85dc668fc`. All eleven jobs in [CI35100844684](https://github.com/OpenCoven/chat/actions/runs/35100844684) passed, including the native profile lifecycle, owner cleanup, installation roundtrip, and residual confinement controls. Local sequential suites passed 2,082 tests with 98 skips; default-parallel PowerShell timeouts remain recorded, with deadlines unchanged.
+- SDK [#290](https://github.com/OpenCoven/sdk/pull/290) landed at `ca3f4ed1ab7f5732ff51e30c29ddbcab529eee0e`. Its signed reviewed head `0999547bf9c24f3a8791bfa2251b1341332d608b` passed all eight CI checks, including 2,675 tests in both pinned-runtime normal and coverage runs. Three documentation review findings were corrected and resolved. Both validator scopes were rotated and read back at the actual merge.
+- Fresh protected [run35111662551](https://github.com/OpenCoven/chat/actions/runs/35111662551) targets those exact Chat and SDK merges. The frozen workflow, run-bound supervisor archive, and binary size/SHA-256 passed independent authentication. Protected environment approval was verified by readback. The run failed in Windows at `phase1.stage.evidence-authority.isolation.failed`, with no Windows record. Linux and macOS records independently passed exact identities, privacy, Cave timing, and all 197 ordered assertions each. Downstream validation, attestation, and aggregation were skipped; no accepted aggregate exists.
+- The latest main-equivalent native Chat app built and opened from the preserved Chat #297 worktree. Its exact running executable, familiar sidebar, saved conversation, and Coven 0.4.2 / coven-code 0.7.0 connection were verified. This local launch is not protected conformance or publication acceptance.
+- Historical run35100084575 used Chat #302 and SDK #288. Linux and macOS records passed independent identity, timing, privacy, and all 197 ordered assertions each. Windows failed installation secure-store preflight and deletion-purpose child-open cleanup, uploaded no record, and downstream validation, attestation, and aggregation were skipped. That result predates the current Chat #297 repair.
+- The working inventory includes nine Chat and three SDK worktrees after creating a dedicated, locked isolation-diagnostics tree. Counts are an audit snapshot, not retirement proof. Preserve active, dirty, primary, open-PR, and ownership-uncertain state. Chat #86 remains parked for feature and vendor-artifact reconciliation; WorkOS #303 and its implementation tree remain active. The retired HPKE tip `c4ab99e` is preserved in a restore-tested full-history bundle, while selective managed iterator/authority continuity remains open. SDK #242's clean tree remains ownership-uncertain. Consolidation is incomplete.
+
+The next protected run needs bounded isolation diagnostics. Thirteen fixed categories distinguish invalid or duplicate opaque IDs, invalid or changed native credential state, and missing/invalid snapshots, path mismatches, or digest changes for each operator root. The original acceptance predicates remain enforced; errors expose no paths, digests, or input values. This instrumentation does not yet identify or repair the Windows isolation failure. Land the reviewed source and its binding, rebind SDK to the actual Chat delivery, rotate both validator scopes, and obtain fresh protected evidence.
+
+Chat [#304](https://github.com/OpenCoven/chat/pull/304) was closed after verifying that its complete tree equals main and its changed-file list is empty; its remote branch is preserved. Remaining work includes ownership confirmation before retirement, Chat #86 reconciliation, the managed HPKE iterator authority gap, and the Project 9 tracking refresh.
+
+Candidate `96804bc4`, counterpart identities, and publication restrictions remain frozen. Follow [Chat #219](https://github.com/OpenCoven/chat/issues/219), [SDK #38](https://github.com/OpenCoven/sdk/issues/38), and [SDK #45](https://github.com/OpenCoven/sdk/issues/45). Preserve this chat and active worktrees.
+
+## Historical delivery and authority checkpoint, 2026-09-15 (Chat #293)
 
 Chat [#291](https://github.com/OpenCoven/chat/pull/291) landed as
 `490908c46bf6f3b00c00aef0a5edb27af426e7ee` after all eleven jobs in
