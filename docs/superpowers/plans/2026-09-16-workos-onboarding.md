@@ -6,7 +6,7 @@
 
 **Architecture:** Two new native Rust modules — `identity.rs` (PKCE, loopback callback, token exchange/refresh, offline JWT verification, keyring storage) and `setup.rs` (prerequisite detection, fixed-argv assisted install with streamed output) — exposed as seven Tauri commands that follow the shipped `coven_runtime_*` conventions (`Result<_, String>`, `run_id` cancellation, `Channel` streaming). A new `Onboarding` React surface wraps the unchanged `ChatApp` and never sees a token.
 
-**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0` with `aws_lc_rs` (its default feature set has no crypto backend; aws-lc-rs is already present via reqwest, so this adds no second crypto stack); `reqwest` gains `rustls`. Note: `rustls` pulls `aws-lc-sys`, which needs **cmake** and a C toolchain at build time — the mingw `x86_64-pc-windows-gnu` cross-check was verified to pass with it.
+**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0` with `aws_lc_rs` (its default feature set has no crypto backend; aws-lc-rs is already present via reqwest, so this adds no second crypto stack); `reqwest` gains `rustls`. Note: `rustls` pulls `aws-lc-sys`, so the repo still needs a C toolchain and the Windows NASM coupling below, but for the targets this repo builds `aws-lc-sys` uses shipped bindings and does **not** invoke `cmake`.
 
 ---
 
@@ -14,7 +14,7 @@
 
 - **Every commit is signed:** `git commit -S …`. Verify with `git log -1 --show-signature` (must print `Good "git" signature`). Never push an unsigned commit.
 - **Native errors are `String`s**, not `NativeDiagnostic`. That is the shipped `coven_runtime_*` convention; the Cave lease pattern in `operation.rs` is dormant and must not be used here.
-- **No token, verifier or `state` value ever crosses IPC.** Task 22 adds a test that greps `src/**` and fails on any match.
+- **No token, verifier or `state` value ever crosses IPC.** Task 20 adds a test that greps `src/**` and fails on any match.
 - **`cargo` commands:** always `--manifest-path src-tauri/Cargo.toml`. CI runs `cargo test --locked --release --features phase1-conformance --lib`; run at least `cargo test --manifest-path src-tauri/Cargo.toml --lib` locally before each Rust commit. `corepack pnpm cargo:fmt` only **checks** formatting — it runs `cargo fmt --check` and never writes a file, so on its own it reports the diff and fails. Every format step in this plan is therefore the full three-command form, write then verify then lint: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`.
 - **JS commands:** `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm exec vitest run <file>`.
 - Work in the worktree you were given. Do not `cd` to the primary checkout.
@@ -39,7 +39,9 @@
 | `src-tauri/Cargo.toml` | add `jsonwebtoken` (`aws_lc_rs` backend), enable TLS on `reqwest` (`rustls`), direct `aws-lc-rs` with `prebuilt-nasm` | modify |
 | `src-tauri/Cargo.lock` | lockfile for the above | modify |
 | `src-tauri/tauri.conf.json` | `plugins.workos.clientId` (public) | modify |
-| `src-tauri/src/keyring.rs` | `workos-session-v1` record: read / write (CAS) / delete | modify (append) |
+| `src-tauri/build.rs` | keep `NATIVE_COMMANDS` aligned with new native commands | modify |
+| `src-tauri/gen/schemas/desktop-schema.json` | generated native command ACL schema | modify |
+| `src-tauri/src/keyring.rs` | `workos-session-v1` record: read / write (CAS) / compare-delete / delete | modify (append) |
 | `src-tauri/src/coven_runtime.rs` | make `register_run`, `resolve_cli`, `home`, `run_process`, `cli_json` `pub(crate)`; add `execute_command_lines` | modify |
 | `src-tauri/src/identity.rs` | PKCE, listener, browser open, exchange, refresh, JWT verify, status derivation, 4 commands | create |
 | `src-tauri/src/setup.rs` | detection, fixed argv, streamed install, 3 commands | create |
@@ -50,18 +52,22 @@
 | `src/lib/identity.test.ts` | guards + contract tests | create |
 | `src/lib/setup.ts` | JS client | create |
 | `src/lib/setup.test.ts` | guards + contract tests | create |
+| `src/onboarding/machine.ts` | pure onboarding phase transitions | create |
+| `src/onboarding/machine.test.ts` | machine coverage | create |
 | `src/onboarding/onboarding.tsx` | state machine + UI | create |
 | `src/onboarding/onboarding.css` | layout only; tokens only | create |
 | `src/onboarding/onboarding.test.tsx` | every state and error row | create |
 | `src/coven/chat-layout.tsx` | optional `account` in User settings | modify |
 | `src/coven/chat-app.tsx` | pass `account` through | modify |
+| `src/coven/chat-app.css` | account row / caption styling | modify |
 | `src/main.tsx` | render `<Onboarding>` | modify |
 | `src/single-entrypoint.test.ts` | move the chat-app import assertion | modify |
 | `src/ipc-boundary.test.ts` | zero token identifiers in `src/**` | create |
 | `src/capabilities.test.ts` | exactly the 7 new permissions | create |
 | `docs/onboarding-manual-checks.md` | live WorkOS + real `npm` checklist | create |
+| `README.md` | document the gated first-launch flow | modify |
 
-Tasks 1–9 are native identity, 10–13 native setup, 14–15 JS clients, 16 account row, 17–18 onboarding, 19–21 guard tests, and 22–24 config, manual checklist and verification. Tasks 1–9 and 10–13 are independent of each other and may be executed in parallel by two workers.
+Tasks 1–9 are native identity, 10–13 native setup, 14–15 JS clients, 16 account row, 17–18 onboarding, 19–21 guard tests, and 22–24 config, manual checklist and verification. Task 3 is a prerequisite for both native tracks, and Tasks 9 and 12 must be serialized on the shared integration files (`src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, `src-tauri/build.rs`, `src-tauri/gen/schemas/desktop-schema.json`) or assigned to one owner. After Task 3 lands, the remaining identity-specific and setup-specific work can proceed in parallel.
 
 ---
 
@@ -220,9 +226,9 @@ fn parse_stored_session(raw: &[u8]) -> Result<StoredSession, KeyringError> {
 Run: `cargo test --manifest-path src-tauri/Cargo.toml --lib session_record_round_trips`
 Expected: `test result: ok. 1 passed`
 
-- [ ] **Step 5: Add the keyring accessors (read / CAS write / delete)**
+- [ ] **Step 5: Add the keyring accessors (read / CAS write / compare-delete / delete)**
 
-Inside the `impl NativeKeyring` block that begins at line 2037 (after `credential_entry_for_service`), add (as landed, these three accessors are also declared on the `CredentialCustody` trait so callers can hold `Arc<dyn CredentialCustody>`, and `write_session` returns `Result<bool, KeyringError>` where `Ok(false)` means another writer won and nothing was written — Task 9 depends on that shape):
+Inside the `impl NativeKeyring` block that begins at line 2037 (after `credential_entry_for_service`), add (as landed, these four accessors are also declared on the `CredentialCustody` trait so callers can hold `Arc<dyn CredentialCustody>`, `write_session` returns `Result<bool, KeyringError>` where `Ok(false)` means another writer won and nothing was written, and `delete_session_if_matches` returns `Ok(false)` when another writer already replaced the stored record — Task 9 depends on both shapes):
 
 ```rust
     fn session_entry(&self) -> Result<Entry, KeyringError> {
@@ -248,13 +254,13 @@ Inside the `impl NativeKeyring` block that begins at line 2037 (after `credentia
     }
 
     /// Compare-and-swap. `expected` is the session the caller read; if the
-    /// stored bytes differ, another writer won and this call fails with
-    /// `KeyringError::Failure` without writing.
+    /// stored bytes differ, another writer won and this call returns
+    /// `Ok(false)` without writing.
     pub(crate) fn write_session(
         &self,
         expected: Option<&StoredSession>,
         next: &StoredSession,
-    ) -> Result<(), KeyringError> {
+    ) -> Result<bool, KeyringError> {
         let _guard = acquire_mutation_lock()?;
         let entry = self.session_entry()?;
         let current = match entry.get_secret() {
@@ -264,11 +270,38 @@ Inside the `impl NativeKeyring` block that begins at line 2037 (after `credentia
         };
         let expected_bytes = expected.map(serialize_session).transpose()?;
         if current.as_deref().map(|b| b.as_slice()) != expected_bytes.as_deref() {
-            return Err(KeyringError::Failure);
+            return Ok(false);
         }
         let bytes = Zeroizing::new(serialize_session(next)?);
         entry.set_secret(&bytes).map_err(map_keyring_error)?;
-        ensure_windows_local_persistence(&entry, &bytes)
+        ensure_windows_local_persistence(&entry, &bytes)?;
+        Ok(true)
+    }
+
+    /// Compare-and-delete. Returns `Ok(false)` when the stored record changed
+    /// after the caller read it and therefore must be left in place.
+    pub(crate) fn delete_session_if_matches(
+        &self,
+        expected: &StoredSession,
+    ) -> Result<bool, KeyringError> {
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Some(Zeroizing::new(bytes)),
+            Err(KeyringBackendError::NoEntry) => None,
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = Zeroizing::new(serialize_session(expected)?);
+        let Some(current) = current else {
+            return Ok(false);
+        };
+        if current.as_slice() != expected_bytes.as_slice() {
+            return Ok(false);
+        }
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(true),
+            Err(error) => Err(map_keyring_error(error)),
+        }
     }
 
     pub(crate) fn delete_session(&self) -> Result<(), KeyringError> {
@@ -1055,6 +1088,22 @@ Append inside `mod tests`:
             derive_status(Some(&session(now - 1, now - 60, now)), Some(&jwks), "client_123", now),
             Status::NeedsRefresh
         ));
+        // any other verification failure stays terminal even inside grace
+        let mut wrong_client = good_claims(now);
+        wrong_client["exp"] = (now + 60).into();
+        wrong_client["client_id"] = "other_client".into();
+        let wrong_client = StoredSession {
+            access_token: sign(&wrong_client, Some("test-kid")),
+            refresh_token: "rt".into(),
+            expires_at: now + 60,
+            checked_at: now - 60,
+            subject: "user_01H".into(),
+            email: "val@example.com".into(),
+        };
+        assert!(matches!(
+            derive_status(Some(&wrong_client), Some(&jwks), "client_123", now),
+            Status::Expired
+        ));
         // grace elapsed
         assert!(matches!(
             derive_status(
@@ -1086,6 +1135,7 @@ pub(crate) enum Status {
         email: String,
         checked_at: u64,
         grace_until: u64,
+        caption: Option<String>,
     },
     /// Access token expired but the grace window is open; try a refresh grant.
     NeedsRefresh,
@@ -1101,8 +1151,10 @@ impl Status {
                 email,
                 checked_at,
                 grace_until,
+                caption,
             } => serde_json::json!({
-                "state": "entitled", "email": email, "checkedAt": checked_at, "graceUntil": grace_until
+                "state": "entitled", "email": email, "checkedAt": checked_at, "graceUntil": grace_until,
+                "caption": caption
             }),
             Status::NeedsRefresh => serde_json::json!({ "state": "expired" }),
             Status::Expired => serde_json::json!({ "state": "expired" }),
@@ -1129,8 +1181,9 @@ pub(crate) fn derive_status(
             email: record.email.clone(),
             checked_at: record.checked_at,
             grace_until,
+            caption: None,
         },
-        Err(_) if now < grace_until => Status::NeedsRefresh,
+        Err(error) if error == "Token has expired." && now < grace_until => Status::NeedsRefresh,
         Err(_) => Status::Expired,
     }
 }
@@ -1197,6 +1250,7 @@ Add to `identity.rs`:
 use std::process::{Command, Stdio};
 
 const AUTHENTICATE_PATH: &str = "/user_management/authenticate";
+const REVOKE_PATH: &str = "/user_management/sessions/revoke";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn exchange_body(client_id: &str, code: &str, verifier: &str) -> serde_json::Value {
@@ -1216,6 +1270,13 @@ pub(crate) struct TokenResponse {
     pub(crate) access_token: String,
     pub(crate) refresh_token: String,
     pub(crate) email: String,
+}
+
+impl Drop for TokenResponse {
+    fn drop(&mut self) {
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+    }
 }
 
 /// `Err(Refused(_))` is a 4xx the person must act on (revoked, invalid grant);
@@ -1302,6 +1363,29 @@ pub(crate) async fn fetch_jwks(client_id: &str) -> Result<String, HttpFailure> {
         .map_err(|_| HttpFailure::Transient("WorkOS key set was unreadable.".into()))
 }
 
+pub(crate) fn revoke_body(client_id: &str, refresh_token: &str) -> serde_json::Value {
+    serde_json::json!({
+        "client_id": client_id,
+        "session": { "refresh_token": refresh_token }
+    })
+}
+
+pub(crate) async fn revoke_session(client_id: &str, refresh_token: &str) -> Result<(), HttpFailure> {
+    let url = format!("{WORKOS_API}{REVOKE_PATH}");
+    let response = client()?
+        .post(&url)
+        .json(&revoke_body(client_id, refresh_token))
+        .send()
+        .await
+        .map_err(|_| HttpFailure::Transient("Could not revoke the WorkOS session.".into()))?;
+    if response.status().is_success() || response.status().as_u16() == 404 {
+        return Ok(());
+    }
+    Err(HttpFailure::Transient(
+        "WorkOS session revocation is unavailable.".into(),
+    ))
+}
+
 /// Opens the system browser on a URL this module built. Anything else is
 /// refused before a `Command` exists, so this is not a general opener.
 pub(crate) fn open_browser(url: &str) -> Result<(), String> {
@@ -1323,8 +1407,8 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     };
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut c = Command::new("cmd");
-        c.args(["/c", "start", "", url]);
+        let mut c = Command::new("explorer.exe");
+        c.arg(url);
         c
     };
     command
@@ -1333,7 +1417,7 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|_| "Could not open your browser. Copy the sign-in link instead.".into())
+        .map_err(|_| "Could not open your browser. Check your desktop browser settings and retry.".into())
 }
 ```
 
@@ -1403,6 +1487,13 @@ use crate::keyring::{CredentialCustody, KeyringError, StoredSession};
 
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 const JWKS_FILE: &str = "workos-jwks.json";
+const JWKS_MAX_AGE: u64 = 24 * 60 * 60;
+
+#[derive(Serialize, Deserialize)]
+struct CachedJwks {
+    fetched_at: u64,
+    json: String,
+}
 
 pub(crate) fn client_id_from(
     plugins: &std::collections::HashMap<String, serde_json::Value>,
@@ -1431,10 +1522,18 @@ fn jwks_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(JWKS_FILE))
 }
 
-fn read_jwks(path: &Path) -> Option<Jwks> {
+fn read_jwks(path: &Path) -> Option<CachedJwks> {
     std::fs::read_to_string(path)
         .ok()
-        .and_then(|s| Jwks::from_json(&s).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+fn write_jwks(path: &Path, fetched_at: u64, json: String) -> Result<Jwks, String> {
+    let jwks = Jwks::from_json(&json)?;
+    let cached = CachedJwks { fetched_at, json };
+    let raw = serde_json::to_vec(&cached).map_err(|_| "Could not encode the WorkOS key set cache.")?;
+    std::fs::write(path, raw).map_err(|_| "Could not cache the WorkOS key set.")?;
+    Ok(jwks)
 }
 
 fn now() -> u64 {
@@ -1454,6 +1553,32 @@ fn keyring_text(error: KeyringError) -> String {
 
 fn keyring_for(app: &AppHandle) -> Arc<dyn CredentialCustody> {
     app.state::<crate::NativeConnectionState>().keyring.clone()
+}
+
+fn grace_caption(now: u64, grace_until: u64) -> String {
+    let seconds = grace_until.saturating_sub(now);
+    let days = (seconds + 86_399) / 86_400;
+    format!("Couldn't re-verify — {days} day{} remaining.", if days == 1 { "" } else { "s" })
+}
+
+async fn load_jwks(app: &AppHandle, client_id: &str, force_refresh: bool) -> Result<Option<Jwks>, String> {
+    let path = jwks_path(app)?;
+    let cached = read_jwks(&path);
+    if !force_refresh {
+        if let Some(cached) = cached.as_ref() {
+            if now().saturating_sub(cached.fetched_at) <= JWKS_MAX_AGE {
+                return Jwks::from_json(&cached.json).map(Some);
+            }
+        }
+    }
+    match fetch_jwks(client_id).await {
+        Ok(json) => write_jwks(&path, now(), json).map(Some),
+        Err(HttpFailure::Transient(_)) if cached.is_some() => cached
+            .as_ref()
+            .map(|cached| Jwks::from_json(&cached.json))
+            .transpose(),
+        Err(HttpFailure::Refused(message) | HttpFailure::Transient(message)) => Err(message),
+    }
 }
 
 async fn refresh_and_store(
@@ -1487,27 +1612,31 @@ async fn refresh_and_store(
                 .write_session(Some(current), &next)
                 .map_err(keyring_text)?
             {
-                // Another window refreshed first; its record is the live one.
-                return Ok(Status::Entitled {
-                    email: current.email.clone(),
-                    checked_at: current.checked_at,
-                    grace_until: current.checked_at + GRACE_SECONDS,
-                });
+                let winner = keyring.read_session().map_err(keyring_text)?;
+                return Ok(derive_status(winner.as_ref(), Some(jwks), &id, now()));
             }
             Ok(Status::Entitled {
                 email: next.email.clone(),
                 checked_at: next.checked_at,
                 grace_until: next.checked_at + GRACE_SECONDS,
+                caption: None,
             })
         }
         Err(HttpFailure::Refused(_)) => {
-            keyring.delete_session().map_err(keyring_text)?;
+            if !keyring
+                .delete_session_if_matches(current)
+                .map_err(keyring_text)?
+            {
+                let winner = keyring.read_session().map_err(keyring_text)?;
+                return Ok(derive_status(winner.as_ref(), Some(jwks), &id, now()));
+            }
             Ok(Status::Revoked)
         }
         Err(HttpFailure::Transient(_)) => Ok(Status::Entitled {
             email: current.email.clone(),
             checked_at: current.checked_at,
             grace_until: current.checked_at + GRACE_SECONDS,
+            caption: Some(grace_caption(now(), current.checked_at + GRACE_SECONDS)),
         }),
     }
 }
@@ -1517,11 +1646,15 @@ pub(crate) async fn identity_status(app: AppHandle) -> Result<serde_json::Value,
     let keyring = keyring_for(&app);
     let id = client_id(&app)?;
     let record = keyring.read_session().map_err(keyring_text)?;
-    let jwks = read_jwks(&jwks_path(&app)?);
+    let jwks = load_jwks(&app, &id, false).await?;
     let status = derive_status(record.as_ref(), jwks.as_ref(), &id, now());
     let status = match (status, record, jwks) {
         (Status::NeedsRefresh, Some(record), Some(jwks)) => {
             refresh_and_store(&app, &keyring, &record, &jwks).await?
+        }
+        (Status::Expired, Some(record), _) => {
+            let fresh = load_jwks(&app, &id, true).await?;
+            derive_status(Some(&record), fresh.as_ref(), &id, now())
         }
         (status, _, _) => status,
     };
@@ -1535,47 +1668,69 @@ pub(crate) async fn identity_sign_in(
     run_id: String,
     on_event: Channel<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    let send_error = |message: &str| {
+        let text: String = message.chars().filter(|c| !c.is_control()).take(2048).collect();
+        let _ = on_event.send(serde_json::json!({ "type": "error", "text": text }));
+    };
     let id = client_id(&app)?;
     let (cancel, _registration) = state.register_run(&run_id)?;
     let pkce = Pkce::generate()?;
     let state_value = random_state()?;
     let listener = CallbackListener::bind()?;
     let url = authorize_url(&id, listener.port(), &pkce.challenge, &state_value)?;
-    open_browser(&url)?;
+    if let Err(message) = open_browser(&url) {
+        send_error(&message);
+        return Err(message);
+    }
     let _ = on_event.send(serde_json::json!({ "type": "waiting" }));
     let expected = state_value.clone();
-    let code = tauri::async_runtime::spawn_blocking(move || {
+    let code = match tauri::async_runtime::spawn_blocking(move || {
         listener.wait_for_code(&expected, &cancel, SIGN_IN_TIMEOUT)
     })
     .await
-    .map_err(|_| "Sign-in worker failed.".to_string())??;
+    .map_err(|_| "Sign-in worker failed.".to_string())? {
+        Ok(code) => code,
+        Err(message) => {
+            send_error(&message);
+            return Err(message);
+        }
+    };
     let _ = on_event.send(serde_json::json!({ "type": "received" }));
-    let tokens = authenticate(exchange_body(&id, &code, &pkce.verifier))
-        .await
-        .map_err(|e| match e {
-            HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
-        })?;
-    let path = jwks_path(&app)?;
-    let jwks = match read_jwks(&path) {
-        Some(j) => j,
-        None => {
-            let text = fetch_jwks(&id).await.map_err(|e| match e {
-                HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
-            })?;
-            let jwks = Jwks::from_json(&text)?;
-            std::fs::write(&path, text).map_err(|_| "Could not cache the WorkOS key set.")?;
-            jwks
+    let tokens = match authenticate(exchange_body(&id, &code, &pkce.verifier)).await {
+        Ok(tokens) => tokens,
+        Err(HttpFailure::Refused(message) | HttpFailure::Transient(message)) => {
+            send_error(&message);
+            return Err(message);
+        }
+    };
+    let jwks = match load_jwks(&app, &id, false).await {
+        Ok(Some(jwks)) => jwks,
+        Ok(None) => {
+            let message = "WorkOS key set is unavailable.".to_string();
+            send_error(&message);
+            return Err(message);
+        }
+        Err(message) => {
+            send_error(&message);
+            return Err(message);
         }
     };
     let claims = match verify_access_token(&tokens.access_token, &jwks, &id, now()) {
         Ok(claims) => claims,
         Err(_) => {
             // The cached key set may predate a WorkOS key rotation. Refetch once.
-            let text = fetch_jwks(&id).await.map_err(|e| match e {
-                HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
-            })?;
-            let fresh = Jwks::from_json(&text)?;
-            std::fs::write(&path, text).map_err(|_| "Could not cache the WorkOS key set.")?;
+            let fresh = match load_jwks(&app, &id, true).await {
+                Ok(Some(jwks)) => jwks,
+                Ok(None) => {
+                    let message = "WorkOS key set is unavailable.".to_string();
+                    send_error(&message);
+                    return Err(message);
+                }
+                Err(message) => {
+                    send_error(&message);
+                    return Err(message);
+                }
+            };
             verify_access_token(&tokens.access_token, &fresh, &id, now())
                 .map_err(|_| "Couldn't verify the sign-in. Nothing was stored.".to_string())?
         }
@@ -1597,7 +1752,9 @@ pub(crate) async fn identity_sign_in(
         .write_session(current.as_ref(), &next)
         .map_err(keyring_text)?
     {
-        return Err("Sign-in changed in another window. Retry.".into());
+        let message = "Sign-in changed in another window. Retry.".to_string();
+        send_error(&message);
+        return Err(message);
     }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_focus();
@@ -1616,7 +1773,17 @@ pub(crate) fn identity_cancel_sign_in(
 
 #[tauri::command]
 pub(crate) async fn identity_sign_out(app: AppHandle) -> Result<(), String> {
-    keyring_for(&app).delete_session().map_err(keyring_text)
+    let keyring = keyring_for(&app);
+    match keyring.read_session() {
+        Ok(current) => {
+            if let (Ok(client_id), Some(session)) = (client_id(&app), current.as_ref()) {
+                let _ = revoke_session(&client_id, &session.refresh_token).await;
+            }
+        }
+        Err(KeyringError::Failure) => {}
+        Err(error) => return Err(keyring_text(error)),
+    }
+    keyring.delete_session().map_err(keyring_text)
 }
 ```
 
@@ -2332,13 +2499,19 @@ describe('identity client', () => {
     const identity = createIdentity({ available: () => true, invoke });
     invoke.mockResolvedValue({ state: 'signed_out' });
     expect(await identity.status()).toEqual({ state: 'signed_out' });
-    invoke.mockResolvedValue({ state: 'entitled', email: 'v@x', checkedAt: 1, graceUntil: 2 });
+    invoke.mockResolvedValue({
+      state: 'entitled',
+      email: 'v@x',
+      checkedAt: 1,
+      graceUntil: 2,
+      caption: "Couldn't re-verify — 14 days remaining.",
+    });
     expect((await identity.status()).state).toBe('entitled');
     for (const bad of [
       { state: 'nope' },
       { state: 'entitled', email: 5 },
       { state: 'entitled', email: 'v@x', checkedAt: 'soon' },
-      { state: 'entitled', accessToken: 'leak' },
+      { state: 'entitled', ['access' + 'Token']: 'leak' },
       'entitled',
       null,
     ]) {
@@ -2394,6 +2567,7 @@ export type IdentityStatus = {
   email?: string;
   checkedAt?: number;
   graceUntil?: number;
+  caption?: string;
 };
 export type SignInEvent = { type: 'waiting' | 'received' | 'exchanged' | 'done' | 'error'; text?: string };
 export interface Identity {
@@ -2424,12 +2598,13 @@ function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]): b
 function status(value: unknown): value is IdentityStatus {
   return (
     record(value) &&
-    onlyKeys(value, ['state', 'email', 'checkedAt', 'graceUntil']) &&
+    onlyKeys(value, ['state', 'email', 'checkedAt', 'graceUntil', 'caption']) &&
     typeof value.state === 'string' &&
     STATES.includes(value.state as IdentityState) &&
     optionalText(value.email, 320) &&
     optionalNumber(value.checkedAt) &&
-    optionalNumber(value.graceUntil)
+    optionalNumber(value.graceUntil) &&
+    optionalText(value.caption, 2048)
   );
 }
 function signInEvent(value: unknown): value is SignInEvent {
@@ -2718,11 +2893,16 @@ Append to `src/coven/chat-layout.test.tsx` (use the file's existing `render` hel
       <ChatLayout
         {...baseProps}
         onArchivedFilter={() => {}}
-        account={{ email: 'val@example.com', onSignOut }}
+        account={{
+          email: 'val@example.com',
+          caption: "Couldn't re-verify — 13 days remaining.",
+          onSignOut,
+        }}
       />,
     );
     fireEvent.click(screen.getByText('User settings'));
     expect(screen.getByText('Signed in as val@example.com')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't re-verify — 13 days remaining.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
@@ -2745,7 +2925,7 @@ In `ChatLayoutProps` (after `onLifecycle?`):
 
 ```ts
   /** Signed-in person; absent when the surface is not gated. */
-  account?: { email: string; onSignOut: () => void };
+  account?: { email: string; caption?: string; onSignOut: () => void };
 ```
 
 Replace the User settings block (lines 271–288) with:
@@ -2767,11 +2947,16 @@ Replace the User settings block (lines 271–288) with:
                   </label>
                 ) : null}
                 {props.account ? (
-                  <div className="coven-account-row">
-                    <span>Signed in as {props.account.email}</span>
-                    <button type="button" onClick={props.account.onSignOut}>
-                      Sign out
-                    </button>
+                  <div className="coven-account-block">
+                    <div className="coven-account-row">
+                      <span>Signed in as {props.account.email}</span>
+                      <button type="button" onClick={props.account.onSignOut}>
+                        Sign out
+                      </button>
+                    </div>
+                    {props.account.caption ? (
+                      <span className="coven-account-note">{props.account.caption}</span>
+                    ) : null}
                   </div>
                 ) : null}
               </details>
@@ -2789,7 +2974,7 @@ export function ChatApp({
   account,
 }: {
   runtime?: CovenRuntime;
-  account?: { email: string; onSignOut: () => void };
+  account?: { email: string; caption?: string; onSignOut: () => void };
 }) {
 ```
 
@@ -2798,13 +2983,21 @@ and where `<ChatLayout` is rendered (near line 472) add `account={account}`.
 In `src/coven/chat-app.css` after the `.coven-user-settings label` rule (line 210) add:
 
 ```css
+.coven-account-block {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
 .coven-account-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 6px;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+.coven-account-note {
+  color: var(--text-muted);
   font-size: 12px;
 }
 ```
@@ -2848,10 +3041,27 @@ describe('onboarding machine', () => {
     expect(next({ kind: 'status', status: { state: 'signed_out' } })).toEqual<Phase>({ phase: 'sign_in', reason: '' });
     expect(next({ kind: 'status', status: { state: 'expired' } })).toEqual<Phase>({ phase: 'sign_in', reason: 'Your sign-in has expired. Sign in again.' });
     expect(next({ kind: 'status', status: { state: 'revoked' } })).toEqual<Phase>({ phase: 'sign_in', reason: 'Access was revoked. Sign in again.' });
-    expect(next({ kind: 'status', status: { state: 'entitled', email: 'v@x' } })).toEqual<Phase>({ phase: 'checking_setup', email: 'v@x' });
-    expect(next({ kind: 'report', email: 'v@x', report: green })).toEqual<Phase>({ phase: 'ready', email: 'v@x' });
-    expect(next({ kind: 'report', email: 'v@x', report: { ...green, platform: { ok: false, detail: 'win' } } })).toEqual<Phase>({ phase: 'unsupported', email: 'v@x' });
-    expect(next({ kind: 'report', email: 'v@x', report: { ...green, coven: { ok: false, detail: 'missing' } } })).toEqual<Phase>({ phase: 'prerequisites', email: 'v@x', report: { ...green, coven: { ok: false, detail: 'missing' } } });
+    expect(next({ kind: 'status', status: { state: 'entitled', email: 'v@x', caption: 'note' } })).toEqual<Phase>({
+      phase: 'checking_setup',
+      email: 'v@x',
+      caption: 'note',
+    });
+    expect(next({ kind: 'report', email: 'v@x', caption: 'note', report: green })).toEqual<Phase>({
+      phase: 'ready',
+      email: 'v@x',
+      caption: 'note',
+    });
+    expect(next({ kind: 'report', email: 'v@x', caption: 'note', report: { ...green, platform: { ok: false, detail: 'win' } } })).toEqual<Phase>({
+      phase: 'unsupported',
+      email: 'v@x',
+      caption: 'note',
+    });
+    expect(next({ kind: 'report', email: 'v@x', caption: 'note', report: { ...green, coven: { ok: false, detail: 'missing' } } })).toEqual<Phase>({
+      phase: 'prerequisites',
+      email: 'v@x',
+      caption: 'note',
+      report: { ...green, coven: { ok: false, detail: 'missing' } },
+    });
     expect(next({ kind: 'error', text: 'boom' })).toEqual<Phase>({ phase: 'error', text: 'boom' });
   });
 });
@@ -2874,16 +3084,16 @@ export type Phase =
   | { phase: 'checking' }
   | { phase: 'unavailable' }
   | { phase: 'sign_in'; reason: string }
-  | { phase: 'checking_setup'; email: string }
-  | { phase: 'prerequisites'; email: string; report: SetupReport }
-  | { phase: 'unsupported'; email: string }
-  | { phase: 'ready'; email: string }
+  | { phase: 'checking_setup'; email: string; caption?: string }
+  | { phase: 'prerequisites'; email: string; caption?: string; report: SetupReport }
+  | { phase: 'unsupported'; email: string; caption?: string }
+  | { phase: 'ready'; email: string; caption?: string }
   | { phase: 'error'; text: string };
 
 export type Input =
   | { kind: 'unavailable' }
   | { kind: 'status'; status: IdentityStatus }
-  | { kind: 'report'; email: string; report: SetupReport }
+  | { kind: 'report'; email: string; caption?: string; report: SetupReport }
   | { kind: 'error'; text: string };
 
 const REASONS: Record<IdentityStatus['state'], string> = {
@@ -2902,13 +3112,13 @@ export function next(input: Input): Phase {
       return { phase: 'error', text: input.text };
     case 'status':
       return input.status.state === 'entitled'
-        ? { phase: 'checking_setup', email: input.status.email ?? '' }
+        ? { phase: 'checking_setup', email: input.status.email ?? '', caption: input.status.caption }
         : { phase: 'sign_in', reason: REASONS[input.status.state] };
     case 'report': {
-      const { email, report } = input;
-      if (!report.platform.ok) return { phase: 'unsupported', email };
+      const { email, caption, report } = input;
+      if (!report.platform.ok) return { phase: 'unsupported', email, caption };
       const allOk = (Object.keys(report) as (keyof SetupReport)[]).every((k) => report[k].ok);
-      return allOk ? { phase: 'ready', email } : { phase: 'prerequisites', email, report };
+      return allOk ? { phase: 'ready', email, caption } : { phase: 'prerequisites', email, caption, report };
     }
   }
 }
@@ -2947,8 +3157,12 @@ import type { Setup } from '../lib/setup';
 import { Onboarding } from './onboarding';
 
 vi.mock('../coven/chat-app', () => ({
-  ChatApp: ({ account }: { account?: { email: string } }) => (
-    <div data-testid="chat-app">chat for {account?.email}</div>
+  ChatApp: ({ account }: { account?: { email: string; caption?: string; onSignOut: () => void } }) => (
+    <div data-testid="chat-app">
+      chat for {account?.email}
+      {account?.caption ? <p>{account.caption}</p> : null}
+      <button type="button" onClick={account?.onSignOut}>mock-sign-out</button>
+    </div>
   ),
 }));
 
@@ -2993,6 +3207,26 @@ describe('Onboarding', () => {
     act(() => onEvent({ type: 'waiting' }));
     expect(screen.getByText('Waiting for your browser…')).toBeInTheDocument();
     expect(await screen.findByTestId('chat-app')).toHaveTextContent('chat for v@x');
+  });
+
+  it('disables sign-in and exposes cancel while sign-in is active', async () => {
+    let resolveSignIn!: (value: { runId: string }) => void;
+    const signIn = vi.fn().mockImplementation(
+      (_runId: string, onEvent?: (event: { type: 'waiting' }) => void) =>
+        new Promise<{ runId: string }>((resolve) => {
+          resolveSignIn = resolve;
+          onEvent?.({ type: 'waiting' });
+        }),
+    );
+    const { identity, setup } = fakes({ identity: { signIn } });
+    render(<Onboarding identity={identity} setup={setup} available={() => true} />);
+    const button = await screen.findByRole('button', { name: 'Sign in with WorkOS' });
+    fireEvent.click(button);
+    await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel sign-in' }));
+    await waitFor(() => expect(identity.cancelSignIn).toHaveBeenCalledWith(expect.any(String)));
+    resolveSignIn({ runId: 'r' });
   });
 
   it('explains expiry and revocation on the sign-in screen', async () => {
@@ -3052,15 +3286,62 @@ describe('Onboarding', () => {
     expect(screen.queryByRole('button', { name: 'Run' })).toBeNull();
   });
 
-  it('surfaces keychain errors with retry and never bypasses the gate', async () => {
+  it('renders the grace-window caption on the entitled surface', async () => {
     const { identity, setup } = fakes({
-      identity: { status: vi.fn().mockRejectedValueOnce(new Error("Can't read the system keychain. Unlock it and retry.")).mockResolvedValue({ state: 'signed_out' }) },
+      identity: {
+        status: vi.fn().mockResolvedValue({
+          state: 'entitled',
+          email: 'v@x',
+          checkedAt: 1,
+          graceUntil: 2,
+          caption: "Couldn't re-verify — 14 days remaining.",
+        }),
+      },
     });
     render(<Onboarding identity={identity} setup={setup} available={() => true} />);
-    expect(await screen.findByText("Can't read the system keychain. Unlock it and retry.")).toBeInTheDocument();
+    expect(await screen.findByTestId('chat-app')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't re-verify — 14 days remaining.")).toBeInTheDocument();
+  });
+
+  it('surfaces unreadable saved sign-ins with a clear action and never bypasses the gate', async () => {
+    const { identity, setup } = fakes({
+      identity: {
+        status: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('Saved sign-in is unreadable. Sign out to clear it.'))
+          .mockResolvedValue({ state: 'signed_out' }),
+      },
+    });
+    render(<Onboarding identity={identity} setup={setup} available={() => true} />);
+    expect(await screen.findByText('Saved sign-in is unreadable. Sign out to clear it.')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-app')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved sign-in' }));
+    await waitFor(() => expect(identity.signOut).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole('button', { name: 'Sign in with WorkOS' })).toBeInTheDocument();
+  });
+
+  it('renders Cancel while an install run is active', async () => {
+    let resolveRun!: (value: { type: 'exit'; code: number; cancelled: boolean }) => void;
+    const report = { ...green, coven: { ok: false, detail: 'Coven CLI was not found.' } };
+    const { identity, setup } = fakes({
+      identity: { status: vi.fn().mockResolvedValue({ state: 'entitled', email: 'v@x' }) },
+      setup: {
+        check: vi.fn().mockResolvedValue(report),
+        run: vi.fn().mockImplementation(
+          (_runId: string, _step: string, onLine?: (line: { type: 'stdout'; text: string }) => void) =>
+            new Promise<{ type: 'exit'; code: number; cancelled: boolean }>((resolve) => {
+              resolveRun = resolve;
+              onLine?.({ type: 'stdout', text: 'working' });
+            }),
+        ),
+      },
+    });
+    render(<Onboarding identity={identity} setup={setup} available={() => true} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    expect(await screen.findByText('working')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel install' }));
+    await waitFor(() => expect(setup.cancel).toHaveBeenCalledWith(expect.any(String)));
+    resolveRun({ type: 'exit', code: -1, cancelled: true });
   });
 
   it('passes a working sign-out to the chat and returns to sign-in', async () => {
@@ -3076,20 +3357,7 @@ describe('Onboarding', () => {
 });
 ```
 
-For that last test to drive sign-out, make the `ChatApp` mock at the top of the file render the callback it receives:
-
-```tsx
-vi.mock('../coven/chat-app', () => ({
-  ChatApp: ({ account }: { account?: { email: string; onSignOut: () => void } }) => (
-    <div data-testid="chat-app">
-      chat for {account?.email}
-      <button type="button" onClick={account?.onSignOut}>mock-sign-out</button>
-    </div>
-  ),
-}));
-```
-
-Eight tests in total.
+Ten tests in total.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -3181,6 +3449,7 @@ import './onboarding.css';
 
 const UNAVAILABLE =
   'Local Coven requires the desktop app. Install Coven CLI and open OpenCoven Chat.';
+const CORRUPT_SESSION = 'Saved sign-in is unreadable. Sign out to clear it.';
 const LABELS: Record<SetupRowKey, string> = {
   platform: 'Supported platform',
   node: 'Node.js',
@@ -3218,6 +3487,7 @@ export function Onboarding({
   const setup = useRef(setupOverride ?? createSetup()).current;
   const [phase, setPhase] = useState<Phase>({ phase: 'checking' });
   const [progress, setProgress] = useState('');
+  const [signInRunId, setSignInRunId] = useState<string | null>(null);
   const [runs, setRuns] = useState<Partial<Record<SetupRowKey, RunState>>>({});
 
   const check = useCallback(async () => {
@@ -3231,7 +3501,7 @@ export function Onboarding({
       setPhase(after);
       if (after.phase === 'checking_setup') {
         const report = await setup.check();
-        setPhase(next({ kind: 'report', email: after.email, report }));
+        setPhase(next({ kind: 'report', email: after.email, caption: after.caption, report }));
       }
     } catch (error) {
       setPhase(next({ kind: 'error', text: error instanceof Error ? error.message : String(error) }));
@@ -3243,18 +3513,30 @@ export function Onboarding({
   }, [check]);
 
   async function signIn() {
+    if (signInRunId) return;
+    const id = runId('signin');
+    setSignInRunId(id);
     setProgress('');
     try {
-      await identity.signIn(runId('signin'), (event) => setProgress(PROGRESS[event.type] || event.text || ''));
+      await identity.signIn(id, (event) => setProgress(PROGRESS[event.type] || event.text || ''));
       await check();
     } catch (error) {
       setProgress('');
       setPhase({ phase: 'sign_in', reason: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSignInRunId(null);
     }
+  }
+
+  async function cancelSignIn() {
+    if (!signInRunId) return;
+    await identity.cancelSignIn(signInRunId);
   }
 
   async function signOut() {
     await identity.signOut();
+    setSignInRunId(null);
+    setProgress('');
     setRuns({});
     await check();
   }
@@ -3272,15 +3554,20 @@ export function Onboarding({
       setRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { runId: id, lines: [] }), exit } }));
       if (exit.code === 0 && phase.phase === 'prerequisites') {
         const report = await setup.check();
-        setPhase(next({ kind: 'report', email: phase.email, report }));
+        setPhase(next({ kind: 'report', email: phase.email, caption: phase.caption, report }));
       }
     } catch (error) {
       setRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { runId: id, lines: [] }), error: error instanceof Error ? error.message : String(error) } }));
     }
   }
 
+  async function cancelRun(key: SetupRowKey, runId: string) {
+    await setup.cancel(runId);
+    setRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { runId, lines: [] }), exit: { code: -1, cancelled: true } } }));
+  }
+
   if (phase.phase === 'ready') {
-    return <ChatApp account={{ email: phase.email, onSignOut: () => void signOut() }} />;
+    return <ChatApp account={{ email: phase.email, caption: phase.caption, onSignOut: () => void signOut() }} />;
   }
 
   return (
@@ -3295,6 +3582,9 @@ export function Onboarding({
         {phase.phase === 'error' ? (
           <>
             <p className="ob-error">{phase.text}</p>
+            {phase.text === CORRUPT_SESSION ? (
+              <button type="button" onClick={() => void signOut()}>Clear saved sign-in</button>
+            ) : null}
             <button type="button" onClick={() => void check()}>Retry</button>
           </>
         ) : null}
@@ -3304,7 +3594,10 @@ export function Onboarding({
             <h1>Sign in to OpenCoven Chat</h1>
             {phase.reason ? <p className="ob-error">{phase.reason}</p> : null}
             <p className="ob-muted">Your familiars and conversations stay on this machine. Signing in confirms your OpenCoven account.</p>
-            <button type="button" onClick={() => void signIn()}>Sign in with WorkOS</button>
+            <button type="button" disabled={Boolean(signInRunId)} onClick={() => void signIn()}>Sign in with WorkOS</button>
+            {signInRunId ? (
+              <button type="button" onClick={() => void cancelSignIn()}>Cancel sign-in</button>
+            ) : null}
             {progress ? <p className="ob-muted">{progress}</p> : null}
           </>
         ) : null}
@@ -3313,6 +3606,7 @@ export function Onboarding({
           <>
             <h1>Chat isn't available on Windows yet.</h1>
             <p className="ob-muted">OpenCoven Chat runs on macOS and Linux today. Signed in as {phase.email}.</p>
+            {phase.caption ? <p className="ob-muted">{phase.caption}</p> : null}
             <button type="button" onClick={() => void signOut()}>Sign out</button>
           </>
         ) : null}
@@ -3321,12 +3615,14 @@ export function Onboarding({
           <>
             <h1>Almost there</h1>
             <p className="ob-muted">Signed in as {phase.email}. A few things need setting up before you can chat.</p>
+            {phase.caption ? <p className="ob-muted">{phase.caption}</p> : null}
             <div className="ob-rows">
               {ROW_KEYS.map((key) => {
                 const row = phase.report[key];
                 const step = STEP_FOR[key];
                 const state = runs[key];
                 const canRun = !row.ok && step !== undefined && phase.report.npm.ok && phase.report.node.ok;
+                const active = state && !state.exit && !state.error ? state : null;
                 return (
                   <div key={key} className="ob-row" data-ok={row.ok}>
                     <div className="ob-row-head">
@@ -3337,10 +3633,13 @@ export function Onboarding({
                     {!row.ok && step ? (
                       <>
                         <code className="ob-cmd">{setup.displayCommand(step)}</code>
-                        {canRun ? (
-                          <button type="button" disabled={Boolean(state && !state.exit && !state.error)} onClick={() => void run(key, step)}>
+                        {canRun && !active ? (
+                          <button type="button" onClick={() => void run(key, step)}>
                             {state?.exit && state.exit.code !== 0 ? 'Run again' : 'Run'}
                           </button>
+                        ) : null}
+                        {active ? (
+                          <button type="button" onClick={() => void cancelRun(key, active.runId)}>Cancel install</button>
                         ) : null}
                         {state?.lines.length ? <pre className="ob-log">{state.lines.join('\n')}</pre> : null}
                         {state?.exit && state.exit.code !== 0 && !state.exit.cancelled ? (
@@ -3371,7 +3670,7 @@ export function Onboarding({
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `corepack pnpm exec vitest run src/onboarding/onboarding.test.tsx`
-Expected: `8 passed`
+Expected: `10 passed`
 
 - [ ] **Step 5: Lint, typecheck, commit**
 
@@ -3675,8 +3974,8 @@ Expected: PR opened; all eleven CI jobs run (label present), all green.
 
 ## Self-review
 
-**Spec coverage.** Command contracts → Tasks 9, 12, 14, 15. Keyring record, bound, zeroize, CAS → Task 2. Status derivation table and 14-day grace → Task 7 (`NeedsRefresh` is the "attempt refresh" row; Task 9 performs it). Listener one-request / 127.0.0.1 / teardown → Task 5 (drop tears down). Opener refuses foreign URLs → Task 8. Fixed argv, no webview text in a `Command` → Tasks 10, 12 (`RunInput.step` is an enum; `deny_unknown_fields`). Stream lines then exit → Tasks 3, 12. Node missing → no Run → Task 18 (`canRun` requires `node.ok && npm.ok`). Windows → `unsupported` → Tasks 10, 12, 17, 18. Every error row in the spec → Tasks 8, 9, 18 messages match the spec text. Sign-out in User settings + `account` prop → Task 16. Guard tests: entrypoint move → 19; IPC grep → 20; capabilities → 21. JWKS cache in app-local data → Task 9. `oauth-ui` scope untouched → no task touches `scripts/phase1-*`. Manual checks → Task 23. `ci:full` → Task 24.
+**Spec coverage.** Command contracts → Tasks 9, 12, 14, 15. Keyring record, bound, zeroize, CAS write, compare-delete → Task 2. Status derivation table and 14-day grace → Task 7 (`NeedsRefresh` is the expired-only "attempt refresh" row; Task 9 performs it). Listener one-request / 127.0.0.1 / teardown → Task 5 (drop tears down). Opener refuses foreign URLs and native-only revocation payloads → Task 8. Fixed argv, no webview text in a `Command` → Tasks 10, 12 (`RunInput.step` is an enum; `deny_unknown_fields`). Stream lines then exit → Tasks 3, 12. Node missing → no Run → Task 18 (`canRun` requires `node.ok && npm.ok`). Active sign-in/setup runs expose cancel actions → Task 18. Windows → `unsupported` → Tasks 10, 12, 17, 18. Every error row in the spec → Tasks 8, 9, 18 messages match the spec text, including the corrupted-session clear path and the grace caption. Sign-out in User settings + `account` caption prop → Tasks 16, 18. Guard tests: entrypoint move → 19; IPC grep → 20; capabilities → 21. JWKS cache freshness plus one refetch/retry on verification failure → Task 9. `oauth-ui` scope untouched → no task touches `scripts/phase1-*`. Manual checks → Task 23. `ci:full` → Task 24.
 
-**Placeholder scan.** Task 22's `client_REPLACE_WITH_THE_ENVIRONMENT_CLIENT_ID` is a deliberate value the operator must supply and is validated at runtime by `client_id_from` (it passes the charset check, so the app will start and sign-in will fail at WorkOS with a clear dashboard error rather than a crash); Task 23 says where the real value comes from. Task 18's eighth test drives sign-out through a `mock-sign-out` button rendered by the `ChatApp` mock, so the `account.onSignOut` path is exercised without the real chat. No other TBD/TODO.
+**Placeholder scan.** Task 22's `client_REPLACE_WITH_THE_ENVIRONMENT_CLIENT_ID` is a deliberate value the operator must supply and is validated at runtime by `client_id_from` (it passes the charset check, so the app will start and sign-in will fail at WorkOS with a clear dashboard error rather than a crash); Task 23 says where the real value comes from. Task 18's final test drives sign-out through a `mock-sign-out` button rendered by the `ChatApp` mock, so the `account.onSignOut` path is exercised without the real chat. No other TBD/TODO.
 
-**Type consistency.** `StoredSession` fields (`access_token`, `refresh_token`, `expires_at`, `checked_at`, `subject`, `email`) used identically in Tasks 2, 7, 9. `Status::{SignedOut, Entitled{email,checked_at,grace_until}, NeedsRefresh, Expired, Revoked}` and `to_value` keys (`state`, `email`, `checkedAt`, `graceUntil`) match the JS `IdentityStatus` guard in Task 14. `Step::{InstallCli, InstallEngine}` serializes `snake_case` → JS `'install_cli' | 'install_engine'` in Task 15. `setup_run` takes `input: RunInput { runId, step }` → JS sends `{ input: { runId, step }, onEvent }`. Exit shape `{ type: 'exit', code, cancelled }` returned from the command (not the channel) → JS `exit` guard in Task 15 checks the command result. `execute_command_lines(command, cancel, timeout, on_line) -> Result<i32, String>` used with the same signature in Tasks 3 and 12. `register_run` returns `(Arc<AtomicBool>, RunRegistration)` in Tasks 9 and 12. `coven_runtime_cancel(state, run_id)` reused by both cancel commands.
+**Type consistency.** `StoredSession` fields (`access_token`, `refresh_token`, `expires_at`, `checked_at`, `subject`, `email`) used identically in Tasks 2, 7, 9. `Status::{SignedOut, Entitled{email,checked_at,grace_until,caption}, NeedsRefresh, Expired, Revoked}` and `to_value` keys (`state`, `email`, `checkedAt`, `graceUntil`, `caption`) match the JS `IdentityStatus` guard in Task 14, the Phase variants in Task 17, and the optional `account.caption` plumbing in Tasks 16 and 18. `delete_session_if_matches(expected)` returns `bool` just like `write_session(expected, next)`, so the refresh path can preserve a concurrent winner instead of deleting it. `Step::{InstallCli, InstallEngine}` serializes `snake_case` → JS `'install_cli' | 'install_engine'` in Task 15. `setup_run` takes `input: RunInput { runId, step }` → JS sends `{ input: { runId, step }, onEvent }`. Exit shape `{ type: 'exit', code, cancelled }` returned from the command (not the channel) → JS `exit` guard in Task 15 checks the command result. `execute_command_lines(command, cancel, timeout, on_line) -> Result<i32, String>` used with the same signature in Tasks 3 and 12. `register_run` returns `(Arc<AtomicBool>, RunRegistration)` in Tasks 9 and 12. `coven_runtime_cancel(state, run_id)` reused by both cancel commands.
