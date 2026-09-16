@@ -1,5 +1,38 @@
 # Phase 1 real-authority conformance
 
+## Bounded quota retry categories
+
+Protected [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092)
+used Chat #311 at `157fb3206b9b90f24049aa2043bae534d2b9a709` and SDK #293 at
+`3459dcaad0877bbef2a25da24fbd521879ef020e`. Windows failed with `access-denied`,
+root `harness-execution-aggregate`, scope `checkouts`, operation
+`directory-enumeration-depth-3-plus`, and repeat `persistent`. Linux and macOS
+records passed identity, timing, privacy, schema, and all 197 ordered assertions.
+Windows emitted no record, and no accepted aggregate exists. This earlier quota
+failure does not establish that the Cave build home repair passed isolation.
+
+The legacy `persistent` label means the repeat threw a non-missing exception.
+It does not prove a second access denial. The bounded diagnostic now preserves
+the initial category and reports the repeat as `persistent-<category>`, using
+only the existing fixed exception categories. For example, first-attempt access
+denial followed by an I/O failure reports `access-denied` with `persistent-io`;
+two access denials report `access-denied` with `persistent-access-denied`.
+Legacy `persistent` remains accepted by the context normalizer.
+
+Run the portable classification and non-recovery checks with:
+
+```sh
+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-quota-diagnostics.test.ps1
+```
+
+The regression matrix covers every fixed repeat category, rejects private text,
+preserves the first failure, and requires one whole-pass attempt for each
+non-recoverable result. The change adds no retries and changes no quotas,
+permissions, or recovery predicates. Native Windows fixtures require the refined
+labels; their execution remains a delivery gate. Reviewed producer binding,
+actual-merge SDK rebinding, both scope rotations, and fresh protected validation
+remain required before claiming acceptance or identifying the failing checkout.
+
 ## Cave build home isolation checkpoint
 
 Protected run `35138402347` failed on Windows with
@@ -2020,7 +2053,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,934 | `5bb78a9ea0a333bf010728e075721f2482afa4bb5674702551943f5dd0a1c087` |
+| `.github/workflows/client-v1-conformance.yml` | 178,086 | `3c2f0d5423533b7b2c6d601e9f91a250064704bceeb4e53090ebecc935cacb09` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2045,11 +2078,11 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 396,176 | `6f7d0712e8f0b04d5c3fdff77a3cb975cc96a2f5c2bd5e565b43277b7085c030` |
+| `scripts/windows-job-supervisor.cs` | 397,084 | `ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669` |
 | `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 38,067 | `97fdb3b08aca19ceb31e6affb5e211cada9a860ccceae26df03816507d981492` |
-| `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
-| `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 39,744 | `f22177fd3b079a29333627f9a37c55a0a288010062685ffc9b08392f7b65b97d` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 14,789 | `a6fccce4e1e41b06c655bc1a70bf870ba115f0848ee647777d2606294483cd1f` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 24,200 | `22f3baa7272f0bf7f03e44b3dec98398a96e64a8b507ce5b11925bd777d58a31` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
@@ -2914,7 +2947,7 @@ validation, attestation, and aggregation were skipped.
 `ReadBoundedDirectorySnapshot` materializes a bounded snapshot. On access denial,
 `ReadDirectorySnapshotOperation` performs one fresh, complete snapshot read under the
 existing quota-reader identity. A successful repeat supplies the measurement; a missing
-directory is classified separately. Any other repeat exception produces `persistent`,
+directory is classified separately. In that historical producer, any other repeat exception produced `persistent`,
 while the initial access-denied category is preserved. An injected access denial followed
 by an I/O exception now exercises that distinction through the production snapshot seam.
 Thus the log does not prove two identical ACL failures, a particular checkout, a denied

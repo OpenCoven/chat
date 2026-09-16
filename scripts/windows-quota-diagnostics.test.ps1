@@ -154,6 +154,26 @@ foreach ($errorCase in $cases) {
   $classifiedContext = $constructor.Invoke([object[]]@($null, $null, $errorCase[0]))
   if ($classify.Invoke($null, [object[]]@($classifiedContext)) -cne $errorCase[1]) { throw 'Context changed an existing error category.' }
 }
+$classifyPersistentRepeat = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyPersistentQuotaRepeat', $flags)
+$normalizeRepeat = [OpenCoven.WindowsJobSupervisor].GetMethod('NormalizeQuotaRepeat', $flags)
+if ($null -eq $classifyPersistentRepeat -or $null -eq $normalizeRepeat) { throw 'Missing bounded retry classifier.' }
+foreach ($retryCase in $cases) {
+  $repeatValue = $classifyPersistentRepeat.Invoke($null, [object[]]@($retryCase[0]))
+  if ($repeatValue -cne ('persistent-' + $retryCase[1])) { throw 'Retry category was lost.' }
+  $retryContext = $boundedConstructor.Invoke([object[]]@(
+    $null, 'directory-enumeration-depth-3-plus', 'checkouts', $repeatValue,
+    [UnauthorizedAccessException]::new('private-first-attempt')
+  ))
+  if ($contextType.GetProperty('Repeat', $instanceFlags).GetValue($retryContext) -cne $repeatValue -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($retryContext) -cne 'access-denied' -or
+      $retryContext.ToString().Contains('private-') -or $retryContext.ToString().Contains('secret-path')) {
+    throw 'Retry context lost classification, first error, or privacy.'
+  }
+}
+foreach ($privateRepeat in @('persistent-secret-path', 'persistent-C:\private', 'persistent-io; secret-path')) {
+  if ($normalizeRepeat.Invoke($null, [object[]]@($privateRepeat)) -cne 'none') { throw 'Unbounded retry text escaped sanitization.' }
+}
+Write-Host 'Fixed retry categories preserve first failure and reject private text.'
 Write-Host 'Root and operation sanitization and first-failure preservation passed.'
 
 $classifyScope = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyQuotaScope', $flags)
@@ -382,10 +402,10 @@ if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1) {
 [OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
 foreach ($repeatCase in @(
     @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'readable', 'TransientCalls'),
-    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent', 'PersistentCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent-access-denied', 'PersistentCalls'),
     @([OpenCoven.Tests.QuotaRepeatProbe]::MissingFileRead, 'missing', 'MissingFileCalls'),
     @([OpenCoven.Tests.QuotaRepeatProbe]::MissingDirectoryRead, 'missing', 'MissingDirectoryCalls'),
-    @([OpenCoven.Tests.QuotaRepeatProbe]::ChangedErrorRead, 'persistent', 'ChangedErrorCalls'))) {
+    @([OpenCoven.Tests.QuotaRepeatProbe]::ChangedErrorRead, 'persistent-io', 'ChangedErrorCalls'))) {
   $caught = $null
   try {
     $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0], $true, [Type]::Missing)) | Out-Null
@@ -431,10 +451,10 @@ try {
 if ($null -eq $changedSnapshotError -or
     [OpenCoven.Tests.QuotaRepeatProbe]::ChangedSnapshotCalls -ne 2 -or
     $classify.Invoke($null, [object[]]@($changedSnapshotError)) -cne 'access-denied' -or
-    $changedSnapshotError.GetType().GetProperty('Repeat', [Reflection.BindingFlags]'NonPublic,Instance').GetValue($changedSnapshotError) -cne 'persistent') {
+    $changedSnapshotError.GetType().GetProperty('Repeat', [Reflection.BindingFlags]'NonPublic,Instance').GetValue($changedSnapshotError) -cne 'persistent-io') {
   throw 'Changed snapshot retry did not retain the initial category and bounded persistent outcome.'
 }
-Write-Host 'Persistent snapshot retry can represent a changed error, not a second access denial.'
+Write-Host 'Snapshot retry distinguishes changed I/O failure from repeated access denial.'
 
 $snapshotRoot = Join-Path $PSScriptRoot ('.quota-readable-' + [guid]::NewGuid().ToString('N'))
 try {
@@ -519,10 +539,14 @@ foreach ($overLimit in @($false, $true)) {
     throw 'Whole-pass recovery discarded the replacement measurement or its byte breach.'
   }
 }
-foreach ($nonRecoverable in @(
+$nonRecoverableCases = @(
     @([IO.IOException]::new('private-io'), 'missing'),
     @([UnauthorizedAccessException]::new('private-denial'), 'persistent'),
-    @([UnauthorizedAccessException]::new('private-denial'), 'readable'))) {
+    @([UnauthorizedAccessException]::new('private-denial'), 'readable'))
+foreach ($retryCase in $cases) {
+  $nonRecoverableCases += ,@([UnauthorizedAccessException]::new('private-denial'), ('persistent-' + $retryCase[1]))
+}
+foreach ($nonRecoverable in $nonRecoverableCases) {
   $failure = $boundedConstructor.Invoke([object[]]@(
     $null, 'directory-enumeration-depth-3-plus', $null, $nonRecoverable[1], $nonRecoverable[0]
   ))

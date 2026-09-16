@@ -1,6 +1,30 @@
 # Delivery roadmap and consolidation audit
 
-## Current delivery and consolidation checkpoint, 2026-09-16 (Chat #305)
+## Current protected-validation checkpoint, 2026-09-16 (Chat #311)
+
+Chat [#311](https://github.com/OpenCoven/chat/pull/311) landed at
+`157fb3206b9b90f24049aa2043bae534d2b9a709`. SDK
+[#293](https://github.com/OpenCoven/sdk/pull/293) rebound that producer at
+`3459dcaad0877bbef2a25da24fbd521879ef020e`; both validator scopes were rotated.
+Protected [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092)
+failed on Windows during quota enumeration. Linux and macOS passed all 197 ordered
+assertions and record checks. No Windows record or accepted aggregate exists.
+The earlier quota failure leaves the Cave build home isolation repair unproven.
+
+The next diagnostic distinguishes a repeated access denial from a changed I/O
+failure while preserving first-failure reporting and fail-closed behavior. See
+[bounded quota retry categories](phase1-conformance.md#bounded-quota-retry-categories).
+Native Windows verification, reviewed producer delivery, SDK rebinding, both
+scope rotations, and a fresh protected run remain open.
+
+Custody integration [#313](https://github.com/OpenCoven/chat/pull/313) replaces the
+stale binding in #307 and must land before its replacement can be closed. Preserve
+active worktrees and the running Chat app. WorkOS #303, parked draft #86, the
+managed HPKE iterator authority gap, and Project 9 reconciliation remain separate
+open work. Historical inventories below are dated snapshots, not current deletion
+authority. Publication remains disabled, and consolidation remains incomplete.
+
+## Historical delivery and consolidation checkpoint, 2026-09-16 (Chat #305)
 
 Chat [#305](https://github.com/OpenCoven/chat/pull/305) landed at
 `1f69306293f8caf873e0a2d6459a5c402e77600a`, followed by SDK

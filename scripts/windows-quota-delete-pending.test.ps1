@@ -122,19 +122,17 @@ function Get-QuotaObservation([string] $Path) {
       $property.GetValue($cause)
     }
     $result = $values -join ':'
-    if ($result -cnotin @(
-        'access-denied:directory-attributes:persistent',
-        'access-denied:directory-attributes:readable',
-        'access-denied:directory-attributes:missing',
-        'access-denied:directory-enumeration-root:persistent',
-        'access-denied:directory-enumeration-root:readable',
-        'access-denied:directory-enumeration-root:missing',
-        'io:directory-attributes:persistent',
-        'io:directory-attributes:readable',
-        'io:directory-attributes:missing',
-        'io:directory-enumeration-root:persistent',
-        'io:directory-enumeration-root:readable',
-        'io:directory-enumeration-root:missing')) {
+    $allowedRepeats = @(
+      'readable', 'missing', 'persistent', 'persistent-entry-bound',
+      'persistent-access-denied', 'persistent-arithmetic-overflow',
+      'persistent-io', 'persistent-io-file-not-found', 'persistent-io-path-not-found',
+      'persistent-io-sharing-violation', 'persistent-io-lock-violation',
+      'persistent-io-name-too-long', 'persistent-io-invalid-directory',
+      'persistent-io-delete-pending', 'persistent-unexpected'
+    )
+    if ($values[0] -cnotin @('access-denied', 'io') -or
+        $values[1] -cnotin @('directory-attributes', 'directory-enumeration-root') -or
+        $values[2] -cnotin $allowedRepeats) {
       throw 'Unexpected bounded quota classification.'
     }
     return $result
@@ -158,8 +156,8 @@ try {
   $pendingAttributes = Get-AttributeObservation $pendingPath
   $pendingQuota = Get-QuotaObservation $pendingPath
   Write-Host "Delete-pending fixture: attributes=$pendingAttributes; quota=$pendingQuota."
-  if ($pendingAttributes -ceq 'access-denied' -and $pendingQuota -ceq 'access-denied:directory-attributes:persistent') {
-    Write-Host 'Delete-pending fixture reproduced the managed quota signature; protected-run cause remains unproven.'
+  if ($pendingAttributes -ceq 'access-denied' -and $pendingQuota -ceq 'access-denied:directory-attributes:persistent-access-denied') {
+    Write-Host 'Delete-pending fixture reproduced the legacy first-error signature with a repeated access denial; protected-run cause remains unproven.'
   } else {
     Write-Host 'Delete-pending fixture did not reproduce the protected signature; deletion hypothesis remains inconclusive.'
   }
@@ -173,7 +171,7 @@ try {
   $deniedAttributes = Get-AttributeObservation $deniedPath
   $deniedQuota = Get-QuotaObservation $deniedPath
   Write-Host "ACL-denied fixture: attributes=$deniedAttributes; quota=$deniedQuota."
-  if ($deniedQuota -cnotin @('access-denied:directory-attributes:persistent', 'access-denied:directory-enumeration-root:persistent')) {
+  if ($deniedQuota -cnotin @('access-denied:directory-attributes:persistent-access-denied', 'access-denied:directory-enumeration-root:persistent-access-denied')) {
     throw 'Explicit directory-read denial did not reject quota traversal.'
   }
   $security.Dispose()

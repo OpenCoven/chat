@@ -8271,9 +8271,9 @@ namespace OpenCoven
                     {
                         repeat = "missing";
                     }
-                    catch
+                    catch (Exception repeatError)
                     {
-                        repeat = "persistent";
+                        repeat = ClassifyPersistentQuotaRepeat(repeatError);
                     }
                 }
                 else if (repeatDiagnostic)
@@ -8870,6 +8870,18 @@ namespace OpenCoven
                 case "readable":
                 case "missing":
                 case "persistent":
+                case "persistent-entry-bound":
+                case "persistent-access-denied":
+                case "persistent-arithmetic-overflow":
+                case "persistent-io":
+                case "persistent-io-file-not-found":
+                case "persistent-io-path-not-found":
+                case "persistent-io-sharing-violation":
+                case "persistent-io-lock-violation":
+                case "persistent-io-name-too-long":
+                case "persistent-io-invalid-directory":
+                case "persistent-io-delete-pending":
+                case "persistent-unexpected":
                     return repeat;
                 default: return "none";
             }
@@ -8890,10 +8902,15 @@ namespace OpenCoven
             {
                 return "missing";
             }
-            catch
+            catch (Exception repeatError)
             {
-                return "persistent";
+                return ClassifyPersistentQuotaRepeat(repeatError);
             }
+        }
+
+        private static string ClassifyPersistentQuotaRepeat(Exception error)
+        {
+            return NormalizeQuotaRepeat("persistent-" + ClassifyQuotaMonitorError(error));
         }
 
         private static T ReadQuotaOperation<T>(string operation, Func<T> read, bool repeatDiagnostic = false, Func<T> repeatRead = null)
