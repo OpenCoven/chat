@@ -424,16 +424,20 @@ $openFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static')
 if ($null -eq $openFailure) { throw 'Bounded residual open role classifier is absent.' }
 foreach ($role in @('ancestor', 'profile-root', 'child')) {
-  $failure = $openFailure.Invoke($null, [object[]]@(-1073741790, 5, $role, 2))
-  $category = [string]$classify.Invoke($null, [object[]]@($failure))
-  if (-not $category.Contains("op=relative-open") -or
-      -not $category.Contains("role=$role") -or
-      -not $category.Contains('ntstatus=c0000022')) {
-    throw "Residual open failure lost its bounded role: $role."
+  foreach ($deleteAccess in @($false, $true)) {
+    $purpose = if ($deleteAccess) { 'deletion' } else { 'enumeration' }
+    $failure = $openFailure.Invoke($null, [object[]]@(-1073741790, 5, $role, 2, $deleteAccess))
+    $category = [string]$classify.Invoke($null, [object[]]@($failure))
+    if (-not $category.Contains('op=relative-open') -or
+        -not $category.Contains("role=$role") -or
+        -not $category.Contains("purpose=$purpose") -or
+        -not $category.Contains('ntstatus=c0000022')) {
+      throw "Residual open failure lost its bounded role or purpose: $role/$purpose."
+    }
   }
 }
 $invalidRole = $null
-try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canary', 2)) } catch { $invalidRole = $_.Exception }
+try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canary', 2, $true)) } catch { $invalidRole = $_.Exception }
 if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-canary')) {
   throw 'Residual open classifier accepted or exposed an arbitrary role.'
 }
@@ -644,8 +648,14 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
     } catch { $failure = $_.Exception }
     switch ($case) {
       'persistent' { Assert-ResidualFailure $failure 'residual=win32-32' }
-      'denied' { Assert-ResidualFailure $failure 'residual=win32-5' }
-      'list-denied-directory' { Assert-ResidualFailure $failure 'residual=win32-5' }
+      'denied' {
+        Assert-ResidualFailure $failure 'residual=win32-5'
+        Assert-ResidualFailure $failure 'role=child;purpose=deletion'
+      }
+      'list-denied-directory' {
+        Assert-ResidualFailure $failure 'residual=win32-5'
+        Assert-ResidualFailure $failure 'role=child;purpose=enumeration'
+      }
       'readonly' { Assert-ResidualFailure $failure 'read-only file' }
       'readonly-hardlink' { Assert-ResidualFailure $failure 'read-only file' }
       'registration-mismatch' { Assert-ResidualFailure $failure 'registration is not bound' }

@@ -3402,14 +3402,14 @@ namespace OpenCoven
         }
 
         private static CleanupDeleteException ProfileResidualOpenError(
-            int status, int nativeError, string role, int depth)
+            int status, int nativeError, string role, int depth, bool deleteAccess)
         {
             if (role != "ancestor" && role != "profile-root" && role != "child")
                 throw new InvalidOperationException("Residual open role is invalid.");
             CleanupDeleteException native = ProfileResidualNativeError(nativeError, "relative-open", "entry", depth);
             return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT open failed.",
                 native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture) +
-                ";role=" + role);
+                ";role=" + role + ";purpose=" + (deleteAccess ? "deletion" : "enumeration"));
         }
 
         private static uint ProfileResidualOpenAccess(bool deleteAccess)
@@ -3454,7 +3454,7 @@ namespace OpenCoven
                 if (handle != null) handle.Dispose();
                 if (status == unchecked((int)0xc0000034) || status == unchecked((int)0xc000000f))
                     return null; // The single named entry is absent in the retained parent.
-                throw ProfileResidualOpenError(status, unchecked((int)ProfileNtStatusToDosError(status)), role, depth);
+                throw ProfileResidualOpenError(status, unchecked((int)ProfileNtStatusToDosError(status)), role, depth, deleteAccess);
             }
             finally
             {
