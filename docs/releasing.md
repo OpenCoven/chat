@@ -89,7 +89,19 @@ Run through this in order. Every step is runnable as written.
    shasum -a 256 -c SHA256SUMS
    ```
 
-10. **Announce** the release per the usual OpenCoven channels.
+10. **Publish the release notes.** The workflow writes a fixed body — a line
+    naming the version and the `shasum` command — and reads nothing from this
+    repository. The human-written notes live in `docs/release-notes/` and have
+    to be applied deliberately:
+
+    ```bash
+    gh release edit v0.0.1 --notes-file docs/release-notes/v0.0.1.md
+    ```
+
+    Do this even for a pre-release. The generated body does not say what
+    changed, and the Releases page is where people look first.
+
+11. **Announce** the release per the usual OpenCoven channels.
 
 ---
 
