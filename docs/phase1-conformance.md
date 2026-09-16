@@ -1,22 +1,20 @@
 # Phase 1 real-authority conformance
 
-Residual-scope follow-up: CI `35072204299` identified the failed child open as
-`access=delete-metadata`. Installation round-trip and quarantine passed again.
-The traversal now reports only `cleanup-grant-ancestor`, `cleanup-grant-subtree`
-or `other`, using exact known components already encountered. An ancestor match
-does not identify the grant directory itself. No additional filesystem access
-or permission changes are made. Native subtree attribution remains pending.
+Windows owner-cleanup follow-up: [CI 35074960956](https://github.com/OpenCoven/chat/actions/runs/35074960956)
+passed ten jobs, including packaged Phase 1 and all 18 native residual cases.
+Installation round-trip and quarantine passed, but outer profile cleanup failed
+with `access=delete-metadata;scope=cleanup-grant-ancestor`. This identifies an
+exact `.coven` or `.coven/chat` prefix, not a particular leaf or sole creator.
+The later profile lifecycle and application fixtures were not reached.
 
-
-Current Windows follow-up: CI `35009678815` passed ten jobs, including packaged
-Phase 1 and all 18 native residual cases. The restricted installation round-trip
-and quarantine passed, but outer profile cleanup failed at child-relative open
-with `ntstatus=c0000022`. The subsequent profile lifecycle fixture was not reached.
-A bounded follow-up records `access=delete-metadata` or `access=directory-list`
-at the existing failed open, separating its two access requests without another
-probe or private path output. Native confirmation remains required; Chat landing,
-SDK rebinding, validator rotation and fresh protected acceptance remain pending.
-
+The cleanup-grant owner now consumes the validated marker by handle and attempts
+to remove its three empty private directories bottom-up. Each child is opened
+relative to a pinned parent and checked against its original file identity.
+Nonempty directories, competing pins and replacements stop pruning; the profile
+home is never removed. Once marker deletion commits, pruning failure does not
+make the consumed grant retryable. ACLs, privileges and production limits are
+unchanged. Native Windows regression execution and the full supervisor run are
+still required before landing, SDK rebinding and fresh protected validation.
 
 ## Executable diagnostic harness binding
 
