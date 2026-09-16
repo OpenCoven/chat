@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ChatLayout, type ChatLayoutProps } from './chat-layout';
+import { ChatLayout, type ChatLayoutProps, emptyThreadText } from './chat-layout';
 
 function layoutProps(): ChatLayoutProps {
   return {
@@ -23,6 +23,43 @@ function layoutProps(): ChatLayoutProps {
     onRefresh: vi.fn(),
   };
 }
+
+describe('empty transcript copy', () => {
+  it('names the three states without contradicting the heading', () => {
+    expect(emptyThreadText(false)).toContain('Connect to your local Coven CLI');
+    expect(emptyThreadText(false, 'Astra')).toContain('Connect to your local Coven CLI');
+    expect(emptyThreadText(true)).toContain('Select a familiar');
+    expect(emptyThreadText(true, 'Astra')).toContain('conversation with Astra');
+    expect(emptyThreadText(true, 'Astra')).not.toContain('Select a familiar');
+  });
+
+  it('does not tell the reader to select the familiar they already selected', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+      />,
+    );
+    expect(screen.getByText('Chat with Astra')).toBeInTheDocument();
+    expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
+  });
+
+  it('yields the transcript to the run indicator while a run is active', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+        busy
+      />,
+    );
+    expect(screen.queryByText('Chat with Astra')).not.toBeInTheDocument();
+    expect(screen.getByText(/Coven is running/)).toBeInTheDocument();
+  });
+});
 
 describe('production Familiars layout', () => {
   it('hides archived familiar rows until the settings filter is enabled', () => {

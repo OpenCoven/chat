@@ -1164,7 +1164,8 @@ fn send_local(
         }
         if crate::chat_canonical::head(data, &selected_familiar)? != input.session_id {
             return Err(
-                "The familiar's canonical Chat thread changed. Refresh before sending.".into(),
+                "This familiar's chat has changed since this view loaded. Reopen the familiar from the sidebar before sending."
+                    .into(),
             );
         }
     }
@@ -1730,7 +1731,7 @@ mod tests {
         assert!(
             send_local(&data, input(None, Some("f")), &cancel, &mut no_events)
                 .unwrap_err()
-                .contains("canonical Chat thread changed")
+                .contains("chat has changed since this view loaded")
         );
         crate::chat_lifecycle::change(&data, "owned", Lifecycle::Archived).unwrap();
         assert!(send_local(
@@ -1750,7 +1751,7 @@ mod tests {
             &mut no_events
         )
         .unwrap_err()
-        .contains("canonical Chat thread changed"));
+        .contains("chat has changed since this view loaded"));
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
         fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();

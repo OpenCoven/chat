@@ -342,7 +342,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         } catch (failure) {
           if (lifetime.current === life) {
             setError(
-              `Cannot refresh the familiar's canonical thread: ${errorText(failure)}. Refresh before sending again.`,
+              `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
             );
             setAvailable(false);
           }

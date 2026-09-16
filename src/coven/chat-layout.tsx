@@ -97,6 +97,19 @@ function useFocusReturn(
   }, [rail, open, opener, shell, panel]);
 }
 
+/**
+ * Copy for the empty transcript. The three states are distinct: a disconnected
+ * runtime, a connected runtime with no familiar chosen, and a chosen familiar
+ * whose thread has no messages yet. Keying only off `ready` used to show
+ * "Select a familiar" underneath a "Chat with <name>" heading, which told the
+ * reader to do something they had already done.
+ */
+export function emptyThreadText(ready: boolean, familiarName?: string) {
+  if (!ready) return 'Connect to your local Coven CLI to see real conversations here.';
+  if (!familiarName) return 'Select a familiar from the sidebar to start a conversation.';
+  return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
+}
+
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
@@ -453,14 +466,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ),
             )}
-            {!props.messages.length && !props.loading ? (
+            {!props.messages.length && !props.loading && !props.busy ? (
               <div className="fr-thread-empty">
                 <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={36} ring />
-                <span className="fr-thread-empty-title">{`Chat with ${name}`}</span>
+                <span className="fr-thread-empty-title">
+                  {familiar ? `Chat with ${name}` : 'No familiar selected'}
+                </span>
                 <span className="fr-empty-text">
-                  {props.ready
-                    ? 'Select a familiar to start a conversation with Coven.'
-                    : 'Connect to your local Coven CLI to see real conversations here.'}
+                  {emptyThreadText(props.ready, familiar?.name)}
                 </span>
               </div>
             ) : null}

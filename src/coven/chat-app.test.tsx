@@ -418,7 +418,9 @@ describe('canonical familiar controller', () => {
     draft('work');
     click('Send');
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Refresh before sending again'),
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Reopen the familiar before sending again',
+      ),
     );
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(api.send).toHaveBeenCalledOnce();
