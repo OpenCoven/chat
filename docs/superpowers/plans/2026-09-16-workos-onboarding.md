@@ -1589,7 +1589,7 @@ async fn refresh_and_store(
 ) -> Result<Status, String> {
     let id = client_id(app)?;
     match authenticate(refresh_body(&id, &current.refresh_token)).await {
-        Ok(tokens) => {
+        Ok(mut tokens) => {
             let claims = verify_access_token(&tokens.access_token, jwks, &id, now())?;
             // The email comes from the verified claim; the response body and
             // the stored record are fallbacks, in that order.
@@ -1601,8 +1601,8 @@ async fn refresh_and_store(
                 }
             });
             let next = StoredSession {
-                access_token: tokens.access_token,
-                refresh_token: tokens.refresh_token,
+                access_token: std::mem::take(&mut tokens.access_token),
+                refresh_token: std::mem::take(&mut tokens.refresh_token),
                 expires_at: claims.exp,
                 checked_at: now(),
                 subject: claims.sub,
@@ -1696,7 +1696,7 @@ pub(crate) async fn identity_sign_in(
         }
     };
     let _ = on_event.send(serde_json::json!({ "type": "received" }));
-    let tokens = match authenticate(exchange_body(&id, &code, &pkce.verifier)).await {
+    let mut tokens = match authenticate(exchange_body(&id, &code, &pkce.verifier)).await {
         Ok(tokens) => tokens,
         Err(HttpFailure::Refused(message) | HttpFailure::Transient(message)) => {
             send_error(&message);
@@ -1741,8 +1741,8 @@ pub(crate) async fn identity_sign_in(
     // The email comes from the verified claim; the response body is a fallback.
     let email = claims.email.clone().unwrap_or_else(|| tokens.email.clone());
     let next = StoredSession {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
+        access_token: std::mem::take(&mut tokens.access_token),
+        refresh_token: std::mem::take(&mut tokens.refresh_token),
         expires_at: claims.exp,
         checked_at: now(),
         subject: claims.sub,
