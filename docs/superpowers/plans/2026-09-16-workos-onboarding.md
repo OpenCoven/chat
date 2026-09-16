@@ -61,7 +61,7 @@
 | `src/capabilities.test.ts` | exactly the 7 new permissions | create |
 | `docs/onboarding-manual-checks.md` | live WorkOS + real `npm` checklist | create |
 
-Tasks 1–9 are native identity, 10–13 native setup, 14–17 JS clients, 18–23 onboarding surface and guards, 24–25 config and docs. Tasks 1–9 and 10–13 are independent of each other and may be executed in parallel by two workers.
+Tasks 1–9 are native identity, 10–13 native setup, 14–15 JS clients, 16 account row, 17–18 onboarding, 19–21 guard tests, and 22–24 config, manual checklist and verification. Tasks 1–9 and 10–13 are independent of each other and may be executed in parallel by two workers.
 
 ---
 
