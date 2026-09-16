@@ -3371,7 +3371,7 @@ export function Onboarding({
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `corepack pnpm exec vitest run src/onboarding/onboarding.test.tsx`
-Expected: `7 passed`
+Expected: `8 passed`
 
 - [ ] **Step 5: Lint, typecheck, commit**
 
