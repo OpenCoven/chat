@@ -422,7 +422,8 @@ if ($null -eq $mismatch -or -not $mismatch.Message.Contains('residual=win32-5') 
   throw 'Residual failure classification accepted a wrong status or exposed private exception text.'
 }
 $openFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
-  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static')
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static', $null,
+  [type[]]@([int], [int], [string], [int]), $null)
 if ($null -eq $openFailure) { throw 'Bounded residual open role classifier is absent.' }
 foreach ($role in @('ancestor', 'profile-root', 'child')) {
   $failure = $openFailure.Invoke($null, [object[]]@(-1073741790, 5, $role, 2))
@@ -437,6 +438,23 @@ $invalidRole = $null
 try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canary', 2)) } catch { $invalidRole = $_.Exception }
 if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-canary')) {
   throw 'Residual open classifier accepted or exposed an arbitrary role.'
+}
+$accessFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static', $null,
+  [type[]]@([int], [int], [string], [int], [string]), $null)
+if ($null -eq $accessFailure) { throw 'Bounded residual open access classifier is absent.' }
+foreach ($access in @('delete-metadata', 'directory-list')) {
+  $failure = $accessFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2, $access))
+  $category = [string]$classify.Invoke($null, [object[]]@($failure))
+  if (-not $category.Contains("access=$access") -or -not $category.Contains('role=child') -or
+      -not $category.Contains('ntstatus=c0000022')) {
+    throw 'Residual open failure lost its bounded access category.'
+  }
+}
+$invalidAccess = $null
+try { $accessFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2, 'private-access-canary')) } catch { $invalidAccess = $_.Exception }
+if ($null -eq $invalidAccess -or $invalidAccess.ToString().Contains('private-access-canary')) {
+  throw 'Residual open classifier accepted or exposed arbitrary access.'
 }
 $relativeOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'OpenProfileResidualRelative', [Reflection.BindingFlags]'NonPublic,Static')
