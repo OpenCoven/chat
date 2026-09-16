@@ -285,6 +285,15 @@ namespace OpenCoven.Tests
             throw new UnauthorizedAccessException("private-persistent");
         }
 
+        public static int ChangedSnapshotCalls;
+        public static Func<List<FileSystemInfo>> ChangedSnapshotRead { get { return ChangedSnapshot; } }
+        private static List<FileSystemInfo> ChangedSnapshot()
+        {
+            ChangedSnapshotCalls++;
+            if (ChangedSnapshotCalls == 1) throw new UnauthorizedAccessException("private-first-snapshot");
+            throw new IOException("private-second-snapshot");
+        }
+
         public static Func<List<FileSystemInfo>> TransientSnapshotRead
         {
             get { return TransientSnapshot; }
@@ -410,6 +419,23 @@ Write-Host 'Quota read repeat classification is bounded and remains fail-closed.
 
 $readSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadDirectorySnapshotOperation', $flags)
 if ($null -eq $readSnapshot) { throw 'Missing readable directory-snapshot recovery.' }
+$changedSnapshotError = $null
+try {
+  $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::ChangedSnapshotRead,
+    $true,
+    [Type]::Missing
+  )) | Out-Null
+} catch { $changedSnapshotError = $_.Exception.InnerException }
+if ($null -eq $changedSnapshotError -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::ChangedSnapshotCalls -ne 2 -or
+    $classify.Invoke($null, [object[]]@($changedSnapshotError)) -cne 'access-denied' -or
+    $changedSnapshotError.GetType().GetProperty('Repeat', [Reflection.BindingFlags]'NonPublic,Instance').GetValue($changedSnapshotError) -cne 'persistent') {
+  throw 'Changed snapshot retry did not retain the initial category and bounded persistent outcome.'
+}
+Write-Host 'Persistent snapshot retry can represent a changed error, not a second access denial.'
+
 $snapshotRoot = Join-Path $PSScriptRoot ('.quota-readable-' + [guid]::NewGuid().ToString('N'))
 try {
   [IO.Directory]::CreateDirectory($snapshotRoot) | Out-Null
