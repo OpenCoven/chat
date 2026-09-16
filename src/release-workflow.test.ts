@@ -75,6 +75,48 @@ describe('release workflow specification', () => {
     expect(workflow).not.toMatch(/^\s*pnpm exec tauri build/m);
   });
 
+  test('refuses to release without platform signing material', () => {
+    const verify = job('verify-tag', 'build');
+
+    // The gate belongs in verify-tag, not in build. Failing here costs seconds;
+    // failing in build costs four platform runners and burns the tag, which
+    // cannot be reused once a Release exists for it.
+    expect(verify).toContain('Require signing material');
+    expect(verify).toContain('Missing signing secrets in the release-signing environment');
+
+    // Every secret that a signed, notarized release actually needs. Dropping
+    // one from the workflow should fail this list, not ship unsigned.
+    for (const secret of [
+      'APPLE_CERTIFICATE',
+      'APPLE_CERTIFICATE_PASSWORD',
+      'APPLE_SIGNING_IDENTITY',
+      'APPLE_ID',
+      'APPLE_PASSWORD',
+      'APPLE_TEAM_ID',
+      'WINDOWS_CERTIFICATE',
+      'WINDOWS_CERTIFICATE_PASSWORD',
+    ]) {
+      expect(verify).toContain(secret);
+    }
+
+    // The gate runs before the tree is fetched, so a missing secret is not paid
+    // for with a checkout, an install and a test run.
+    expect(verify.indexOf('Require signing material')).toBeLessThan(
+      verify.indexOf('actions/checkout@'),
+    );
+
+    // The escape hatch is dispatch-only. `inputs` is empty on a tag push, so a
+    // production release cannot opt out of signing however it is triggered.
+    expect(workflow).toMatch(/workflow_dispatch:[\s\S]*?allow_unsigned:[\s\S]*?default: false/);
+    expect(verify).toContain(`ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
+
+    // Auto-update is opt-in, so the updater key must not be treated as
+    // mandatory; requiring it would block every release until § 4 is done.
+    // The name still appears in the comment explaining that exemption, so this
+    // checks for the secret actually being bound rather than merely mentioned.
+    expect(verify).not.toMatch(/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\./);
+  });
+
   test('documents conditional updates and the current storage boundary', () => {
     expect(releasingGuide).toContain('conditionally generates the updater manifest');
     expect(releasingGuide).toContain('leave `dry_run` at its default value of `true`');
