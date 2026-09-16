@@ -18,6 +18,7 @@
 - **`cargo` commands:** always `--manifest-path src-tauri/Cargo.toml`. CI runs `cargo test --locked --release --features phase1-conformance --lib`; run at least `cargo test --manifest-path src-tauri/Cargo.toml --lib` locally before each Rust commit, and `corepack pnpm cargo:fmt` + `corepack pnpm cargo:clippy`.
 - **JS commands:** `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm exec vitest run <file>`.
 - Work in the worktree you were given. Do not `cd` to the primary checkout.
+- **Staged code and `dead_code`.** `cargo:clippy` runs `-D warnings`, so an item with no caller yet is a hard error. Tasks 2–8 and 10–11 add items whose callers land in Task 9 (identity) or Task 12 (setup). On each such new item put `#[allow(dead_code)] // wired in Task 9` (or `Task 12`) — on NEW items only, never on existing code. Task 9 and Task 12 each end with a step that removes every `allow(dead_code)` they made live; after Task 12 the file set must contain none of these attributes (`grep -rn 'allow(dead_code)' src-tauri/src/identity.rs src-tauri/src/setup.rs src-tauri/src/keyring.rs src-tauri/src/coven_runtime.rs` → only pre-existing hits, if any). This mirrors the pattern `src-tauri/src/cave.rs` already uses for staged code.
 
 ## File structure
 
@@ -1432,15 +1433,22 @@ In `src-tauri/capabilities/default.json`, after `"allow-coven-runtime-cancel",` 
     "allow-identity-sign-out",
 ```
 
-- [ ] **Step 5: Build, test, lint**
+- [ ] **Step 5: Remove the staged-code allowances now that everything is wired**
+
+Every `#[allow(dead_code)]` added by Tasks 2 and 4–8 on items this task now calls (`StoredSession`, `read_session`, `write_session`, `delete_session`, `SESSION_ACCOUNT`, `MAX_SESSION_RECORD_BYTES`, `serialize_session`, `parse_stored_session`, `Pkce`, `random_state`, `authorize_url`, `CallbackListener`, `Claims`, `Jwks`, `verify_access_token`, `Status`, `derive_status`, `GRACE_SECONDS`, `exchange_body`, `refresh_body`, `TokenResponse`, `HttpFailure`, `authenticate`, `fetch_jwks`, `open_browser`) must be deleted, together with their `// wired in Task 9` comments. Then:
+
+Run: `grep -n 'allow(dead_code)' src-tauri/src/identity.rs src-tauri/src/keyring.rs`
+Expected: no output from `identity.rs`; `keyring.rs` shows only hits that pre-date Task 2 (compare with `git show 4d456ef:src-tauri/src/keyring.rs | grep -c 'allow(dead_code)'`).
+
+- [ ] **Step 6: Build, test, lint**
 
 Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
-Expected: clean; all tests pass, including `registers_only_the_managed_sdk_adapter_commands` (unchanged).
+Expected: clean; all tests pass, including `registers_only_the_managed_sdk_adapter_commands` (unchanged). If clippy reports `dead_code` on anything listed above, that item is not actually wired — fix the wiring, do not restore the allowance.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src-tauri/src/identity.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
+git add src-tauri/src/identity.rs src-tauri/src/keyring.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
 git commit -S -m "feat(native): identity commands for WorkOS sign-in, status and sign-out"
 ```
 
@@ -1879,15 +1887,22 @@ In `capabilities/default.json` after `"allow-identity-sign-out",` add:
     "allow-setup-cancel",
 ```
 
-- [ ] **Step 5: Build, test, lint**
+- [ ] **Step 5: Remove the staged-code allowances now that everything is wired**
+
+Delete every `#[allow(dead_code)] // wired in Task 12` added by Tasks 3, 10 and 11 (`execute_command_lines`, and in `setup.rs`: `Probe`, `Step`, `report_from`, `argv_for`, `display_command`, `find_tool`, `any_familiar_has_workspace`, `engine_installed`, `probe`, `run_step_with`, `RunInput`, `INSTALL_TIMEOUT`).
+
+Run: `grep -n 'allow(dead_code)' src-tauri/src/setup.rs src-tauri/src/coven_runtime.rs`
+Expected: no output from `setup.rs`; `coven_runtime.rs` shows only hits that pre-date Task 3 (compare with `git show 4d456ef:src-tauri/src/coven_runtime.rs | grep -c 'allow(dead_code)'`).
+
+- [ ] **Step 6: Build, test, lint**
 
 Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
-Expected: clean; all pass.
+Expected: clean; all pass. A `dead_code` report here means something is not wired — fix the wiring, do not restore the allowance.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src-tauri/src/setup.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
+git add src-tauri/src/setup.rs src-tauri/src/coven_runtime.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
 git commit -S -m "feat(native): setup commands with streamed, cancellable assisted install"
 ```
 
