@@ -741,9 +741,22 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
   return environment;
 }
 
-export function schemaV2CaveBuildEnvironment(environment = process.env) {
+export function schemaV2CaveBuildEnvironment(
+  environment = process.env,
+  platform = process.platform,
+) {
+  const pathApi = platform === 'win32' ? windowsPath : { resolve, isAbsolute };
+  const home = environment.HOME;
+  if (typeof home !== 'string' || home.includes('\0') || !pathApi.isAbsolute(home)) {
+    throw new Error('Cave build requires an absolute execution home.');
+  }
+  // Windows os.homedir() can select USERPROFILE instead of the isolated HOME.
+  // Keep native profile authority intact and explicitly isolate build-time state.
+  const covenHome = pathApi.resolve(home, '.coven');
   return {
     ...environment,
+    COVEN_HOME: covenHome,
+    COVEN_CAVE_HOME: pathApi.resolve(covenHome, 'cave'),
     NODE_OPTIONS: caveBuildNodeOptions,
     CIRCLE_NODE_TOTAL: caveBuildReportedCpuTotal,
     COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',

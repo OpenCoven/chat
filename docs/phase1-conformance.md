@@ -1,5 +1,28 @@
 # Phase 1 real-authority conformance
 
+## Cave build home isolation checkpoint
+
+Protected run `35138402347` failed on Windows with
+`phase1.stage.evidence-authority.isolation.operator.cave-home.changed`.
+Linux and macOS records independently passed identity, timing, schema, privacy,
+and all 197 ordered assertions. Windows had no accepted record; validation,
+attestation, and aggregation were skipped.
+
+The schema-v2 Cave build now receives explicit `COVEN_HOME` and `COVEN_CAVE_HOME`
+under the producer's owned execution `HOME`. Previously, these variables were
+absent. The pinned Cave resolver falls back to `os.homedir()`, which on Windows
+can resolve the retained staging `USERPROFILE` instead of execution `HOME`.
+A frozen-resolver reproduction demonstrates that routing gap. It does not yet
+prove which build operation changed the protected filesystem snapshot.
+
+The build override preserves `USERPROFILE`, the validated OS token-profile
+binding, resource limits, native cleanup authority, and the complete before/after
+operator fingerprint comparison. Missing or non-absolute execution homes fail
+with a bounded error. Native scenario homes remain separately token-profile-bound.
+Fresh protected validation is required before claiming the Windows failure fixed.
+
+Earlier diagnostic checkpoints below describe the preceding deliveries.
+
 ## Execution-root cleanup diagnostic checkpoint
 
 Protected [run 35125287541](https://github.com/OpenCoven/chat/actions/runs/35125287541)
@@ -191,8 +214,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `7dda439daa59ee350ff12cd195ff169b52e1085c`,
-tree `347c0b5300498d612f5411c1aee3372731ffc4f1`, including all 25 governed files
+The lock now selects reviewed source `b5e0fac1d56ee2188f839e7da8fbddd3a3c2b8c2`,
+tree `1642836d4bfaab3b54f93ef58aaabeb930af3d9e`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
@@ -1997,7 +2020,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,934 | `73f665797b6d21de149949ca532bb814ac114a3682cff14c004919d95e3be2bb` |
+| `.github/workflows/client-v1-conformance.yml` | 177,934 | `79ba921d0bb49c2e88ac5253928e44489462fc80b2ac98b53ab9ed13533fba87` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2010,7 +2033,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 233,186 | `2e5fe8808230ad318aa86408bbad2004dbe4fd1c074f88de11fc581b227e0a51` |
+| `scripts/phase1-schema-v2-producer.mjs` | 233,796 | `1d0c28f526c3e71256693da6ef26be6fe2327cb30e820960a4cf3761c4b8c4f6` |
 | `scripts/process-owned-artifact-root.mjs` | 13,061 | `103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

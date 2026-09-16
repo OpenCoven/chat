@@ -6143,18 +6143,27 @@ describe('Phase 1 real-authority conformance harness', () => {
       return;
     }
     expect(
-      schemaV2CaveBuildEnvironment({
-        PATH: '/safe/bin',
-        NODE_OPTIONS: '--require=/private/injection.cjs',
-        CIRCLE_NODE_TOTAL: '999',
-      }),
+      schemaV2CaveBuildEnvironment(
+        {
+          HOME: '/safe/home',
+          PATH: '/safe/bin',
+          NODE_OPTIONS: '--require=/private/injection.cjs',
+          CIRCLE_NODE_TOTAL: '999',
+        },
+        'linux',
+      ),
     ).toEqual({
+      HOME: '/safe/home',
+      COVEN_HOME: '/safe/home/.coven',
+      COVEN_CAVE_HOME: '/safe/home/.coven/cave',
       PATH: '/safe/bin',
       NODE_OPTIONS: '--max-old-space-size=6144',
       CIRCLE_NODE_TOTAL: '2',
       COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
     });
-    expect(schemaV2CaveBuildEnvironment()).toEqual(
+    expect(
+      schemaV2CaveBuildEnvironment({ HOME: resolve(projectRoot, 'cave-build-test-home') }),
+    ).toEqual(
       expect.objectContaining({
         NODE_OPTIONS: '--max-old-space-size=6144',
         CIRCLE_NODE_TOTAL: '2',
