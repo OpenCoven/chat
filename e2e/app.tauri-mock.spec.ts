@@ -442,6 +442,11 @@ test.describe('empty transcript states', () => {
     await expect(page.locator('.fr-inspector-kind')).toHaveText('No familiar selected');
     await expect(page.locator('.fr-inspector-name')).toHaveText('Coven CLI');
     await expect(page.locator('.fr-thread-empty img')).toHaveCount(0);
+    // Transcript and composer must blame the same obstacle.
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveAttribute(
+      'placeholder',
+      'Connect to your local Coven CLI to send a message.',
+    );
   });
 
   test('asks for a selection when the runtime is healthy and nothing is chosen', async ({
@@ -498,8 +503,11 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
   await expect(page.getByText(/Coven CLI is not installed/)).toBeVisible();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await expect(composer).toBeDisabled();
-  // With no CLI there is no familiar to address, so the field names no one.
-  await expect(composer).toHaveAttribute('placeholder', 'Select a familiar to send a message.');
+  // The field names the missing runtime, matching the transcript behind it.
+  await expect(composer).toHaveAttribute(
+    'placeholder',
+    'Connect to your local Coven CLI to send a message.',
+  );
   expect(await page.evaluate(() => window.__covenFixture.calls)).toEqual(['coven_runtime_status']);
 });
 
