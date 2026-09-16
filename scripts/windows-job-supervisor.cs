@@ -2002,6 +2002,7 @@ namespace OpenCoven
         private const uint STILL_ACTIVE = 259;
 
         private IntPtr jobHandle;
+        private uint? firstAssignedSession;
         private readonly string supervisedSid;
         private readonly string supervisedUserName;
         private readonly string supervisedQualifiedUserName;
@@ -7385,6 +7386,62 @@ namespace OpenCoven
             return result;
         }
 
+        private static string ReadAssignmentDiagnostic(Func<string> query)
+        {
+            try { return query(); }
+            catch { return "unavailable"; }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ProcessIdToSessionId(uint processId, out uint sessionId);
+
+        private static uint? ReadProcessSession(uint processId)
+        {
+            try
+            {
+                uint session;
+                return ProcessIdToSessionId(processId, out session) ? (uint?)session : null;
+            }
+            catch { return null; }
+        }
+
+        private static string CompareProcessSessions(uint? left, uint? right)
+        {
+            return !left.HasValue || !right.HasValue
+                ? "unavailable" : left.Value == right.Value ? "same" : "different";
+        }
+
+        private string CaptureAssignmentDiagnostic(PROCESS_INFORMATION process)
+        {
+            string active = ReadAssignmentDiagnostic(() =>
+            {
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+                if (!QueryInformationJobObject(jobHandle, JobObjectBasicAccountingInformation,
+                        out accounting, (uint)Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                        IntPtr.Zero)) return "unavailable";
+                return accounting.ActiveProcesses == 0 ? "zero" : "nonzero";
+            });
+            string any = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, IntPtr.Zero, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            string target = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, jobHandle, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            uint? childSession = ReadProcessSession(process.dwProcessId);
+            string supervisorSession = ReadAssignmentDiagnostic(() => CompareProcessSessions(
+                childSession, ReadProcessSession((uint)Process.GetCurrentProcess().Id)));
+            return "active=" + active + ";childAny=" + any + ";childTarget=" + target +
+                ";supervisorSession=" + supervisorSession + ";firstSession=" +
+                CompareProcessSessions(childSession, firstAssignedSession);
+        }
+
         private WindowsJobRunResult RunAsUserCore(
             WindowsIsolatedUser isolatedUser,
             string applicationName,
@@ -7559,10 +7616,15 @@ namespace OpenCoven
                 if (!AssignProcessToJobObject(jobHandle, process.hProcess))
                 {
                     int nativeError = Marshal.GetLastWin32Error();
+                    string diagnostic = "unavailable";
+                    try { diagnostic = CaptureAssignmentDiagnostic(process); }
+                    catch { }
                     TerminateProcess(process.hProcess, 1);
-                    throw new Win32Exception(
+                    Win32Exception failure = new Win32Exception(
                         nativeError,
                         "AssignProcessToJobObject failed.");
+                    failure.Data["OpenCoven.JobAssignment"] = diagnostic;
+                    throw failure;
                 }
                 bool assigned;
                 if (!IsProcessInJob(process.hProcess, jobHandle, out assigned) || !assigned)
@@ -7570,6 +7632,10 @@ namespace OpenCoven
                     TerminateJobObject(jobHandle, 1);
                     throw new InvalidOperationException(
                         "Suspended child did not enter the expected Job Object.");
+                }
+                if (!firstAssignedSession.HasValue)
+                {
+                    firstAssignedSession = ReadProcessSession(process.dwProcessId);
                 }
                 ProtectRootProcess(process.hProcess, isolatedUser.Sid);
 

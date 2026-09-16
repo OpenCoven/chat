@@ -217,3 +217,14 @@ test.each([
   expect(capture).toBeLessThan(block.indexOf(`${cleanup}(`));
   expect(block).toMatch(/new Win32Exception\(\s*nativeError,/u);
 });
+
+test('assignment diagnostics preserve the primary error and precede child teardown', () => {
+  const launch = source.slice(source.indexOf('private WindowsJobRunResult RunAsUserCore('));
+  const start = launch.indexOf('if (!AssignProcessToJobObject(jobHandle, process.hProcess))');
+  const block = launch.slice(start, launch.indexOf('\n                }', start));
+  const diagnostic = block.indexOf('CaptureAssignmentDiagnostic(process)');
+  expect(diagnostic).toBeGreaterThan(block.indexOf('Marshal.GetLastWin32Error()'));
+  expect(diagnostic).toBeLessThan(block.indexOf('TerminateProcess('));
+  expect(block).toContain('failure.Data["OpenCoven.JobAssignment"] = diagnostic;');
+  expect(block).toContain('throw failure;');
+});

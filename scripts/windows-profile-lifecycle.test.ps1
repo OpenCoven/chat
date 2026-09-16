@@ -2,6 +2,11 @@ param([switch]$PortableOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-ProfileLifecycleAssignmentDiagnostic([string]$Value) {
+  if ($Value -cmatch '\Aactive=(zero|nonzero|unavailable);childAny=(yes|no|unavailable);childTarget=(yes|no|unavailable);supervisorSession=(same|different|unavailable);firstSession=(same|different|unavailable)\z') { return $Value }
+  return 'unavailable'
+}
+
 function Get-ProfileLifecycleNativeOperation([string]$Message) {
   switch -CaseSensitive -Exact ($Message) {
     'AssignProcessToJobObject failed.' { return 'job-assignment' }
@@ -37,6 +42,16 @@ function Get-ProfileLifecycleChildFailure([int]$ExitCode, [string]$Stdout, [stri
 }
 
 if ($PortableOnly) {
+  foreach ($sample in @(
+    'active=zero;childAny=no;childTarget=no;supervisorSession=same;firstSession=same',
+    'active=nonzero;childAny=yes;childTarget=yes;supervisorSession=different;firstSession=different',
+    'active=unavailable;childAny=unavailable;childTarget=unavailable;supervisorSession=unavailable;firstSession=unavailable'
+  )) {
+    if ((Get-ProfileLifecycleAssignmentDiagnostic $sample) -cne $sample) { throw 'Valid assignment diagnostic rejected.' }
+  }
+  foreach ($sample in @('', 'private-provider-canary', 'active=zero;childAny=no;childTarget=no;supervisorSession=same;firstSession=same;private-provider-canary')) {
+    if ((Get-ProfileLifecycleAssignmentDiagnostic $sample) -cne 'unavailable') { throw 'Private assignment diagnostic escaped.' }
+  }
   foreach ($case in @(
     @('AssignProcessToJobObject failed.', 'job-assignment'),
     @('ResumeThread failed.', 'thread-resume'),
@@ -269,7 +284,8 @@ if (-not [string]::Equals($boundProfile,
     $cause = $_.Exception.GetBaseException()
     if ($cause -is [ComponentModel.Win32Exception]) {
       $operation = Get-ProfileLifecycleNativeOperation $cause.Message
-      throw ('Native profile lifecycle assertion failed: stage={0}; operation={1}; nativeCode={2}; hresult={3:X8}.' -f $stage, $operation, $cause.NativeErrorCode, $cause.HResult)
+      $assignment = Get-ProfileLifecycleAssignmentDiagnostic $cause.Data['OpenCoven.JobAssignment']
+      throw ('Native profile lifecycle assertion failed: stage={0}; operation={1}; nativeCode={2}; hresult={3:X8}; assignment={4}.' -f $stage, $operation, $cause.NativeErrorCode, $cause.HResult, $assignment)
     }
     if ($cause -is [Runtime.InteropServices.COMException]) {
       throw ('Native profile lifecycle assertion failed: stage={0}; hresult={1:X8}.' -f $stage, $cause.HResult)
