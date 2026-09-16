@@ -429,7 +429,10 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
   await page.goto('/');
   await expect(page.locator('.fr-shell')).toBeVisible();
   await expect(page.getByText(/Coven CLI is not installed/)).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Message Coven', exact: true })).toBeDisabled();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await expect(composer).toBeDisabled();
+  // With no CLI there is no familiar to address, so the field names no one.
+  await expect(composer).toHaveAttribute('placeholder', 'Select a familiar to send a message.');
   expect(await page.evaluate(() => window.__covenFixture.calls)).toEqual(['coven_runtime_status']);
 });
 

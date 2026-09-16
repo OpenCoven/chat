@@ -89,6 +89,9 @@ describe('composer copy', () => {
     });
     expect(composerCopy().placeholder).toBe('Select a familiar to send a message.');
     expect(composerCopy().label).toBe('Message');
+    // An archived chat still addresses its familiar, and `ready` is false
+    // there, so selection -- not `ready` -- decides the addressee.
+    expect(composerCopy('Lifecycle familiar').label).toBe('Message Lifecycle familiar');
   });
 
   it('does not offer to message the fallback name when nothing is selected', () => {
