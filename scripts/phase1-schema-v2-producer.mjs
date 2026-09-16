@@ -65,7 +65,11 @@ import {
   serializeValidatedSchemaV2PlatformEvidence,
   verifySchemaV2ProducerCheckout,
 } from './phase1-schema-v2-evidence.mjs';
-import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
+import {
+  createProcessOwnedArtifactRoot,
+  PROCESS_CLEANUP_FAILURE_CATEGORIES,
+  processCleanupFailureCategory,
+} from './process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultRetainedReport = resolve(
@@ -693,6 +697,9 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.coven-identity.failed',
   'phase1.stage.isolation.failed',
   'phase1.stage.execution-root-cleanup.failed',
+  ...PROCESS_CLEANUP_FAILURE_CATEGORIES.map(
+    (category) => `phase1.stage.execution-root-cleanup.${category}`,
+  ),
 ]);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
@@ -1608,6 +1615,9 @@ export function classifyCavePreAssertionFailure(output) {
 }
 
 export function schemaV2FailureDiagnostic(error, activeStage) {
+  if (activeStage === 'phase1.stage.execution-root-cleanup.failed') {
+    return `phase1.stage.execution-root-cleanup.${processCleanupFailureCategory(error)}`;
+  }
   if (
     error !== null &&
     typeof error === 'object' &&

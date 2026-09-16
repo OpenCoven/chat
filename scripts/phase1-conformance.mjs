@@ -60,7 +60,11 @@ import {
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
 } from './phase1-schema-v2-producer.mjs';
-import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
+import {
+  createProcessOwnedArtifactRoot,
+  PROCESS_CLEANUP_FAILURE_CATEGORIES,
+  processCleanupFailureCategory,
+} from './process-owned-artifact-root.mjs';
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
@@ -815,6 +819,9 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-validation.unknown',
   'phase1.stage.evidence-retention.failed',
   'phase1.stage.execution-root-cleanup.failed',
+  ...PROCESS_CLEANUP_FAILURE_CATEGORIES.map(
+    (category) => `phase1.stage.execution-root-cleanup.${category}`,
+  ),
   'phase1.cave-authority.timeout',
   'phase1.cave-authority.output-limit',
   'phase1.cave-authority.spawn',
@@ -6020,7 +6027,10 @@ export async function runPhase1Conformance(
     try {
       await executionRoot.cleanup();
     } catch (error) {
-      cleanupFailure = new Error('phase1.stage.execution-root-cleanup.failed', { cause: error });
+      cleanupFailure = new Error(
+        `phase1.stage.execution-root-cleanup.${processCleanupFailureCategory(error)}`,
+        { cause: error },
+      );
     }
   }
 
