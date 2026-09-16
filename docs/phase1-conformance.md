@@ -1817,20 +1817,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,278 | `d81ce2de40fc333d2d2ec00a2f9d62fdde8ff0c12ae22c89a3fbba770ff79c5c` |
+| `.github/workflows/client-v1-conformance.yml` | 175,278 | `21bcc0ddea3aeaae1021496f8e4b6464e424576db6b89daed4d259081f6fab36` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 220,276 | `f5f155d1aea1c3ae12ed35cd6832d0a77ea04363f282a486cce2dd9f9fed17d5` |
+| `scripts/phase1-conformance.mjs` | 218,262 | `e18e7f45b44738a4a100f76d6b8548dd9d8e1d84796131c71dc8dbde193083c4` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
 | `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 229,269 | `828af5cd21b0ee064b14cecd6cd17b23976b24c861327649424191cc40756211` |
+| `scripts/phase1-schema-v2-producer.mjs` | 231,308 | `12a38c8cf550584e1bc5ad74332f7a9a4f3c2a1cb57e6e5435f12fd147ec093a` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -2606,3 +2606,69 @@ classification. The frozen Rust consumer emits string codes, so this regression
 does not establish the protected Windows failure's cause. Neither correction
 changes request counts, timeouts, resource limits, or native-provider behavior.
 A verified source/SDK binding and fresh protected run remain required.
+### Finalization operation diagnostics
+
+Protected run [34928011200](https://github.com/OpenCoven/chat/actions/runs/34928011200)
+used Chat `6e051296`, SDK validator `129d4fd`, and Cave `ecdcdcf8a`.
+Windows emitted `phase1.stage.schema-v2-production.unclassified.error`.
+Linux and macOS jobs passed; validation, attestation, and aggregation were skipped.
+The error kind does not identify the original production operation.
+
+The producer and outer runner had separate native-stage allowlists. The producer
+recognized `native-preflight`, `pairing-recovery`, and `revocation-repair`, but the
+outer runner recognized none of them. Injecting each native-stage failure through
+`schemaV2NativeFailureDiagnostic`, `wrapInfrastructureFailure`, and the outer
+runner reproduces the exact `unclassified.error` fallback. Both layers now use
+the same immutable registry of fixed native-stage diagnostics. Regression coverage
+requires every registry entry to survive runner extraction and rejects arbitrary
+suffixes. The protected log cannot establish which of these operations failed.
+
+Failure injection into the actual producer orchestration reproduces one escape:
+`createExactCheckouts` fails, its exception receives `phase1.stage.checkouts.failed`,
+and `fillMissingAssertions` then throws while the catch block is unwinding.
+That second exception previously replaced the classified failure and reached the
+outer fallback as `unclassified.error`. This establishes a reachable diagnostic
+gap, not the origin of the protected run's exception.
+
+The finalization boundary now preserves the first infrastructure failure and
+attaches a second, bounded diagnostic under
+`phase1.stage.schema-v2-production.operation.<operation>`. The four operations are
+`failure-assertions`, `native-cleanup-assertions`, `required-assertions`, and
+`execution-cleanup-assertions`. Without an earlier failure, the operation diagnostic
+is public. With an earlier classified failure, that diagnostic keeps priority;
+both failures remain available in memory. Arbitrary operation names are rejected.
+Messages, stacks, paths, credentials, and raw subprocess output are not added to
+public diagnostics or evidence records.
+
+Run the portable injection coverage with:
+
+```sh
+corepack pnpm exec vitest run src/phase1-producer-operation-diagnostics.test.ts
+```
+
+### Independent residual cleanup investigation
+
+Run `34928011200` also reported accepted profile deletion followed by a surviving
+profile and `relative-open;kind=entry;depth=le4;ntstatus=c0000022;role=child`.
+The source has two child-open paths with that same label:
+
+| Path | Requested access | What remains unknown |
+| --- | --- | --- |
+| Initial child deletion handle | `DELETE`, `FILE_READ_ATTRIBUTES`, `READ_CONTROL`, `SYNCHRONIZE` | Entry type and which requested right was denied |
+| Ordinary-directory enumeration reopen | `FILE_LIST_DIRECTORY`, `FILE_READ_ATTRIBUTES`, `READ_CONTROL`, `SYNCHRONIZE` | Whether this reopen was reached |
+
+The second path runs only after the retained deletion handle identifies an ordinary
+directory. It retains the first handle, allows delete sharing on the enumeration
+handle, and verifies matching file identities before enumeration. Both paths disable
+cleanup-token privileges and fail on access denial. The log cannot distinguish
+these paths or identify a compatibility junction, ACL owner, or denied right.
+It does not establish a causal link to the earlier producer exception.
+
+The existing `windows-profile-residual-native.test.ps1` covers bounded role
+classification, denied deletion, read-denied files and junctions, denied ordinary
+directory enumeration, and external sentinels. The next native diagnostic should
+distinguish the fixed deletion/enumeration open purpose and verify both failure
+paths against those controls. This investigation changes no native cleanup code,
+ACLs, privileges, access masks, limits, or protected settings. Native Windows proof
+and a reviewed source/SDK binding remain required before another protected run can
+establish acceptance.

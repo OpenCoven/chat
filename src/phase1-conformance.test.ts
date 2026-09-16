@@ -2978,7 +2978,11 @@ describe('Phase 1 real-authority conformance harness', () => {
         '    infrastructureFailure ??= schemaV2',
         '      ? new Error(schemaV2FailureDiagnostic(error, activeStage), { cause: error })',
         '      : error;',
-        "    fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');",
+        '    runSchemaV2FinalizationOperation(',
+        "      'failure-assertions',",
+        "      () => fillMissingAssertions(results, 'failed', 'phase1.assertion.failed'),",
+        '      infrastructureFailure,',
+        '    );',
       ].join('\n'),
     );
   });
