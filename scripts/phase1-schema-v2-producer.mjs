@@ -112,6 +112,11 @@ const nativeLaunchPublicationFailures = new WeakMap();
 const nativeRpcFailureCategories = new WeakMap();
 const nativeInstallationResponseCategories = new Map([
   ['secure_store_unavailable', 'secure-store-unavailable'],
+  ['installation_lock_unavailable', 'lock-unavailable'],
+  ['installation_entry_unavailable', 'entry-unavailable'],
+  ['installation_read_unavailable', 'read-unavailable'],
+  ['installation_write_unavailable', 'write-unavailable'],
+  ['installation_persistence_unavailable', 'persistence-unavailable'],
   ['keychain_failure', 'keychain-failure'],
   ['credential_missing', 'credential-missing'],
 ]);
@@ -164,6 +169,11 @@ const schemaV2NativeFailureStages = new Set([
   'native-preflight-custody-proof',
   'native-preflight-installation-rpc',
   'native-preflight-installation-secure-store-unavailable',
+  'native-preflight-installation-lock-unavailable',
+  'native-preflight-installation-entry-unavailable',
+  'native-preflight-installation-read-unavailable',
+  'native-preflight-installation-write-unavailable',
+  'native-preflight-installation-persistence-unavailable',
   'native-preflight-installation-keychain-failure',
   'native-preflight-installation-credential-missing',
   'native-preflight-installation-response-rejected',

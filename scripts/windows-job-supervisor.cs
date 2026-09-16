@@ -157,6 +157,8 @@ namespace OpenCoven
 
         private readonly object quotaTokenSync = new object();
         private SafeAccessTokenHandle quotaToken;
+        private IntPtr ownedProfileHandle;
+        private Func<SafeAccessTokenHandle, IntPtr, bool> unloadProfile = UnloadUserProfile;
         private WindowsOwnedProfileApplication ownedApplication;
         private string password;
         private bool accountDisabled;
@@ -228,6 +230,21 @@ namespace OpenCoven
             string rootPath,
             Action<string, string> afterProfileCreated)
         {
+            return CreateCoreWithProfileHook(rootPath, afterProfileCreated, null);
+        }
+
+        private static WindowsIsolatedUser CreateCoreAfterProfileLoaded(
+            string rootPath,
+            Action<string, string> afterProfileLoaded)
+        {
+            return CreateCoreWithProfileHook(rootPath, null, afterProfileLoaded);
+        }
+
+        private static WindowsIsolatedUser CreateCoreWithProfileHook(
+            string rootPath,
+            Action<string, string> afterProfileCreated,
+            Action<string, string> afterProfileLoaded)
+        {
             if (String.IsNullOrWhiteSpace(rootPath) || !Path.IsPathRooted(rootPath))
             {
                 throw new ArgumentException(
@@ -247,6 +264,7 @@ namespace OpenCoven
             string ownedProfilePath = null;
             WindowsOwnedProfileApplication ownedApplication = null;
             SafeAccessTokenHandle validatedQuotaToken = null;
+            WindowsIsolatedUser created = null;
             try
             {
                 for (int attempt = 0; attempt < MaximumAccountCreationAttempts; attempt++)
@@ -311,6 +329,15 @@ namespace OpenCoven
                 string tempPath = Path.Combine(fullRoot, "temp");
                 string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                 string workspacePath = Path.Combine(fullRoot, "workspace");
+                // Own the token and profile before any loaded-hive initialization can fail.
+                created = new WindowsIsolatedUser(
+                    userName, passwordValue, sid, fullRoot, profilePath, tempPath,
+                    statusStagingPath, workspacePath, ownedProfilePath,
+                    validationSummary, validatedQuotaToken);
+                created.LoadOwnedProfile();
+                VerifyCreatedProfile(ownedProfilePath, validatedQuotaToken);
+                if (afterProfileLoaded != null)
+                    afterProfileLoaded(sid, ownedProfilePath);
                 Directory.CreateDirectory(fullRoot);
                 Directory.CreateDirectory(profilePath);
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
@@ -351,28 +378,29 @@ namespace OpenCoven
                     supervisor.Value);
 
                 ownedApplication = WindowsJobSupervisor.CreateOwnedProfileApplication(ownedProfilePath, sid);
+                created.ownedApplication = ownedApplication;
                 WindowsIdentity.RunImpersonated(validatedQuotaToken,
                     () => ownedApplication.ReadVerified(path => true));
-
-                WindowsIsolatedUser created = new WindowsIsolatedUser(
-                    userName,
-                    passwordValue,
-                    sid,
-                    fullRoot,
-                    profilePath,
-                    tempPath,
-                    statusStagingPath,
-                    workspacePath,
-                    ownedProfilePath,
-                    validationSummary,
-                    validatedQuotaToken);
-                created.ownedApplication = ownedApplication;
                 ownedApplication = null;
                 validatedQuotaToken = null;
                 return created;
             }
             catch (Exception original)
             {
+                if (created != null)
+                {
+                    try { created.Dispose(); }
+                    catch (Exception cleanup)
+                    {
+                        var failure = new InvalidOperationException(
+                            "Ephemeral local user cleanup failed during creation.",
+                            new AggregateException(original, cleanup));
+                        // Keep deferred cleanup ownership reachable by the trusted caller.
+                        failure.Data["WindowsIsolatedUserCleanupContext"] = created;
+                        throw failure;
+                    }
+                    throw;
+                }
                 List<Exception> cleanupFailures = new List<Exception>();
                 if (validatedQuotaToken != null)
                 {
@@ -442,6 +470,36 @@ namespace OpenCoven
                 }
                 throw;
             }
+        }
+
+        private void LoadOwnedProfile()
+        {
+            lock (quotaTokenSync)
+            {
+                ThrowIfDisposed();
+                PROFILEINFOW profile = new PROFILEINFOW();
+                profile.dwSize = (uint)Marshal.SizeOf(typeof(PROFILEINFOW));
+                profile.dwFlags = 1; // PI_NOUI. The caller is the privileged supervisor.
+                profile.lpUserName = UserName;
+                if (!LoadUserProfileW(quotaToken, ref profile))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be loaded.");
+                ownedProfileHandle = profile.hProfile;
+                if (ownedProfileHandle == IntPtr.Zero)
+                    throw new InvalidOperationException("Owned Windows profile handle is unavailable.");
+            }
+        }
+
+        private void UnloadOwnedProfile()
+        {
+            if (ownedProfileHandle == IntPtr.Zero) return;
+            if (!unloadProfile(quotaToken, ownedProfileHandle))
+                throw new InvalidOperationException(
+                    "Ephemeral Windows identity cleanup deferred: profile-unload.",
+                    new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be unloaded."));
+            // UnloadUserProfile closes hProfile. Never close it as an ordinary key handle.
+            ownedProfileHandle = IntPtr.Zero;
         }
 
         internal void ThrowIfDisposed()
@@ -1340,6 +1398,7 @@ namespace OpenCoven
             SafeAccessTokenHandle retiredQuotaToken;
             lock (quotaTokenSync)
             {
+                UnloadOwnedProfile();
                 disposed = true;
                 retiredQuotaToken = quotaToken;
                 quotaToken = null;
@@ -1662,6 +1721,27 @@ namespace OpenCoven
         private static extern int CreateProfile(
             string sid, string userName, [Out] StringBuilder profilePath, uint capacity);
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PROFILEINFOW
+        {
+            public uint dwSize;
+            public uint dwFlags;
+            public string lpUserName;
+            public string lpProfilePath;
+            public string lpDefaultPath;
+            public string lpServerName;
+            public string lpPolicyPath;
+            public IntPtr hProfile;
+        }
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LoadUserProfileW(SafeAccessTokenHandle token, ref PROFILEINFOW profile);
+
+        [DllImport("userenv.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnloadUserProfile(SafeAccessTokenHandle token, IntPtr profile);
+
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetUserProfileDirectoryW(
@@ -1810,6 +1890,7 @@ namespace OpenCoven
 
     public sealed class WindowsJobSupervisor : IDisposable
     {
+        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
@@ -1921,6 +2002,7 @@ namespace OpenCoven
         private const uint STILL_ACTIVE = 259;
 
         private IntPtr jobHandle;
+        private uint? firstAssignedSession;
         private readonly string supervisedSid;
         private readonly string supervisedUserName;
         private readonly string supervisedQualifiedUserName;
@@ -3112,17 +3194,29 @@ namespace OpenCoven
                 bool expectedPathExists,
                 bool actualPathExists,
                 Exception residualFailure)
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, false, residualFailure)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                bool hivesExist,
+                Exception residualFailure)
                 : base("Ephemeral Windows profile survived cleanup.", residualFailure)
             {
                 if ((deleteOutcome != "not-needed" &&
                     deleteOutcome != "accepted" &&
                     deleteOutcome != "not-found") ||
-                    (!registryExists && !expectedPathExists && !actualPathExists))
+                    (!registryExists && !expectedPathExists && !actualPathExists && !hivesExist))
                     throw new ArgumentException("Invalid profile cleanup diagnostic.");
                 Diagnostic = "profile-remained[delete=" + deleteOutcome +
                     ";registry=" + (registryExists ? "1" : "0") +
                     ";expected=" + (expectedPathExists ? "1" : "0") +
                     ";actual=" + (actualPathExists ? "1" : "0") +
+                    (hivesExist ? ";hive=1" : String.Empty) +
                     (residualFailure == null ? String.Empty :
                         ";residual=" + WindowsIsolatedUser.ClassifyCleanupError(residualFailure)) + "]";
             }
@@ -3176,11 +3270,12 @@ namespace OpenCoven
                 bool registered = registrationExists();
                 bool expected = expectedExists();
                 bool actual = actualExists();
-                if (!registered && !expected && !actual) return;
+                bool hives = hivesExist();
+                if (!registered && !expected && !actual && !hives) return;
                 if (elapsed() >= TimeSpan.FromSeconds(10))
-                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                 if (residualAuthorized && (deleteOutcome == "accepted" || deleteOutcome == "not-found") &&
-                    !registered && expected && !hivesExist())
+                    !registered && expected && !hives)
                 {
                     try
                     {
@@ -3192,12 +3287,12 @@ namespace OpenCoven
                     {
                         if (error is TimeoutException && lastSharingFailure != null &&
                             elapsed() >= TimeSpan.FromSeconds(10))
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, lastSharingFailure);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
                         Win32Exception native = error as Win32Exception;
                         bool sharing = native != null ? native.NativeErrorCode == ERROR_SHARING_VIOLATION :
                             error is IOException && error.HResult == unchecked((int)0x80070020);
                         if (!sharing)
-                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, error);
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, error);
                         lastSharingFailure = error;
                         pause();
                         continue;
@@ -3402,14 +3497,49 @@ namespace OpenCoven
         }
 
         private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth)
+        {
+            return ProfileResidualOpenError(status, nativeError, role, depth, null);
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
             int status, int nativeError, string role, int depth, bool deleteAccess)
         {
+            return ProfileResidualOpenError(status, nativeError, role, depth,
+                deleteAccess ? "delete-metadata" : "directory-list");
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth, string access)
+        {
+            if (access != null && access != "delete-metadata" && access != "directory-list")
+                throw new InvalidOperationException("Residual open access is invalid.");
             if (role != "ancestor" && role != "profile-root" && role != "child")
                 throw new InvalidOperationException("Residual open role is invalid.");
             CleanupDeleteException native = ProfileResidualNativeError(nativeError, "relative-open", "entry", depth);
             return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT open failed.",
                 native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture) +
-                ";role=" + role + ";purpose=" + (deleteAccess ? "deletion" : "enumeration"));
+                ";role=" + role + (access == null ? String.Empty :
+                    ";purpose=" + (access == "delete-metadata" ? "deletion" : "enumeration") +
+                    ";access=" + access));
+        }
+
+        private static string ProfileResidualScopeLabel(int state)
+        {
+            if (state < -1 || state > 3)
+                throw new InvalidOperationException("Residual scope state is invalid.");
+            return state == 3 ? "cleanup-grant-subtree" :
+                state == 1 || state == 2 ? "cleanup-grant-ancestor" : "other";
+        }
+
+        private static int ProfileResidualScopeStep(int state, string name)
+        {
+            ProfileResidualScopeLabel(state);
+            if (state == 3) return 3;
+            if (state == 0 && String.Equals(name, ".coven", StringComparison.Ordinal)) return 1;
+            if (state == 1 && String.Equals(name, "chat", StringComparison.Ordinal)) return 2;
+            if (state == 2 && String.Equals(name, "phase1-cleanup-grants-v1", StringComparison.Ordinal)) return 3;
+            return -1;
         }
 
         private static uint ProfileResidualOpenAccess(bool deleteAccess)
@@ -3424,6 +3554,14 @@ namespace OpenCoven
             SafeFileHandle parent, string name, bool deleteAccess, int depth, string role,
             bool shareDelete = false)
         {
+            return OpenProfileResidualRelativeCore(parent, name, deleteAccess, depth, role, shareDelete, -1);
+        }
+
+        private static SafeFileHandle OpenProfileResidualRelativeCore(
+            SafeFileHandle parent, string name, bool deleteAccess, int depth, string role,
+            bool shareDelete, int scopeState)
+        {
+            string scope = ProfileResidualScopeLabel(scopeState);
             ValidateProfileResidualName(name);
             if (deleteAccess && shareDelete)
                 throw new InvalidOperationException("Residual deletion handles must deny delete sharing.");
@@ -3454,7 +3592,11 @@ namespace OpenCoven
                 if (handle != null) handle.Dispose();
                 if (status == unchecked((int)0xc0000034) || status == unchecked((int)0xc000000f))
                     return null; // The single named entry is absent in the retained parent.
-                throw ProfileResidualOpenError(status, unchecked((int)ProfileNtStatusToDosError(status)), role, depth, deleteAccess);
+                CleanupDeleteException failure = ProfileResidualOpenError(status,
+                    unchecked((int)ProfileNtStatusToDosError(status)), role, depth,
+                    deleteAccess ? "delete-metadata" : "directory-list");
+                throw new CleanupDeleteException(failure.NativeErrorCode, failure.Message,
+                    failure.Context + ";scope=" + scope);
             }
             finally
             {
@@ -3530,7 +3672,7 @@ namespace OpenCoven
                         throw new InvalidOperationException("Profile residual root identity changed.");
                     ValidateProfileDirectorySecurity(root.DangerousGetHandle(), identity.Sid, false);
                     DeleteProfileResidualEntry(ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path),
-                        root, identity.Volume, timer, 0, ref entries);
+                        root, identity.Volume, timer, 0, ref entries, 0);
                 }
             }
             finally
@@ -3541,7 +3683,7 @@ namespace OpenCoven
 
         private static void DeleteProfileResidualEntry(
             SafeFileHandle parent, string name, SafeFileHandle handle,
-            uint volume, Stopwatch timer, int depth, ref int entries)
+            uint volume, Stopwatch timer, int depth, ref int entries, int scopeState)
         {
             RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
             IntPtr pointer = handle.DangerousGetHandle();
@@ -3554,7 +3696,7 @@ namespace OpenCoven
             if (!directory && (attributes.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
                 throw new InvalidOperationException("Residual read-only file cannot be removed without metadata mutation.");
             if (directory && !reparse)
-                DeleteProfileResidualDirectoryContents(parent, name, handle, volume, timer, depth, ref entries);
+                DeleteProfileResidualDirectoryContentsCore(parent, name, handle, volume, timer, depth, ref entries, scopeState);
             RequireProfileResidualBudget(timer.Elapsed, depth, entries);
             byte disposition = 1;
             if (!SetFileInformationByHandle(pointer, 4, ref disposition, 1))
@@ -3566,10 +3708,17 @@ namespace OpenCoven
             SafeFileHandle parent, string name, SafeFileHandle directory,
             uint volume, Stopwatch timer, int depth, ref int entries)
         {
+            DeleteProfileResidualDirectoryContentsCore(parent, name, directory, volume, timer, depth, ref entries, -1);
+        }
+
+        private static void DeleteProfileResidualDirectoryContentsCore(
+            SafeFileHandle parent, string name, SafeFileHandle directory,
+            uint volume, Stopwatch timer, int depth, ref int entries, int scopeState)
+        {
             // Keep the original DELETE handle (which denies delete sharing) alive while
             // reopening its single name through the retained parent for enumeration.
-            using (SafeFileHandle enumeration = OpenProfileResidualRelative(
-                parent, name, false, depth, depth == 0 ? "profile-root" : "child", true))
+            using (SafeFileHandle enumeration = OpenProfileResidualRelativeCore(
+                parent, name, false, depth, depth == 0 ? "profile-root" : "child", true, scopeState))
             {
                 if (enumeration == null)
                     throw new InvalidOperationException("Retained residual directory disappeared before enumeration.");
@@ -3600,10 +3749,11 @@ namespace OpenCoven
                         RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
                         if (childName == "." || childName == "..") continue;
                         RequireProfileResidualBudget(timer.Elapsed, depth + 1, entries);
-                        using (SafeFileHandle child = OpenProfileResidualRelative(directory, childName, true, depth + 1, "child"))
+                        int childScope = ProfileResidualScopeStep(scopeState, childName);
+                        using (SafeFileHandle child = OpenProfileResidualRelativeCore(directory, childName, true, depth + 1, "child", false, childScope))
                         {
                             if (child != null)
-                                DeleteProfileResidualEntry(directory, childName, child, volume, timer, depth + 1, ref entries);
+                                DeleteProfileResidualEntry(directory, childName, child, volume, timer, depth + 1, ref entries, childScope);
                         }
                     }
                 }
@@ -7245,6 +7395,62 @@ namespace OpenCoven
             return result;
         }
 
+        private static string ReadAssignmentDiagnostic(Func<string> query)
+        {
+            try { return query(); }
+            catch { return "unavailable"; }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ProcessIdToSessionId(uint processId, out uint sessionId);
+
+        private static uint? ReadProcessSession(uint processId)
+        {
+            try
+            {
+                uint session;
+                return ProcessIdToSessionId(processId, out session) ? (uint?)session : null;
+            }
+            catch { return null; }
+        }
+
+        private static string CompareProcessSessions(uint? left, uint? right)
+        {
+            return !left.HasValue || !right.HasValue
+                ? "unavailable" : left.Value == right.Value ? "same" : "different";
+        }
+
+        private string CaptureAssignmentDiagnostic(PROCESS_INFORMATION process)
+        {
+            string active = ReadAssignmentDiagnostic(() =>
+            {
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+                if (!QueryInformationJobObject(jobHandle, JobObjectBasicAccountingInformation,
+                        out accounting, (uint)Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                        IntPtr.Zero)) return "unavailable";
+                return accounting.ActiveProcesses == 0 ? "zero" : "nonzero";
+            });
+            string any = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, IntPtr.Zero, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            string target = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, jobHandle, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            uint? childSession = ReadProcessSession(process.dwProcessId);
+            string supervisorSession = ReadAssignmentDiagnostic(() => CompareProcessSessions(
+                childSession, ReadProcessSession((uint)Process.GetCurrentProcess().Id)));
+            return "active=" + active + ";childAny=" + any + ";childTarget=" + target +
+                ";supervisorSession=" + supervisorSession + ";firstSession=" +
+                CompareProcessSessions(childSession, firstAssignedSession);
+        }
+
         private WindowsJobRunResult RunAsUserCore(
             WindowsIsolatedUser isolatedUser,
             string applicationName,
@@ -7388,11 +7594,13 @@ namespace OpenCoven
                     commandLine.Append(arguments);
                 }
 
+                // Load the fresh child logon session; the supervisor separately owns
+                // its profile reference until terminal quarantine and explicit unload.
                 bool created = CreateProcessWithLogonW(
                     isolatedUser.UserName,
                     Environment.MachineName,
                     isolatedUser.Password,
-                    0,
+                    LOGON_WITH_PROFILE,
                     applicationName,
                     commandLine,
                     CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
@@ -7416,10 +7624,16 @@ namespace OpenCoven
 
                 if (!AssignProcessToJobObject(jobHandle, process.hProcess))
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
+                    string diagnostic = "unavailable";
+                    try { diagnostic = CaptureAssignmentDiagnostic(process); }
+                    catch { }
                     TerminateProcess(process.hProcess, 1);
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
+                    Win32Exception failure = new Win32Exception(
+                        nativeError,
                         "AssignProcessToJobObject failed.");
+                    failure.Data["OpenCoven.JobAssignment"] = diagnostic;
+                    throw failure;
                 }
                 bool assigned;
                 if (!IsProcessInJob(process.hProcess, jobHandle, out assigned) || !assigned)
@@ -7427,6 +7641,10 @@ namespace OpenCoven
                     TerminateJobObject(jobHandle, 1);
                     throw new InvalidOperationException(
                         "Suspended child did not enter the expected Job Object.");
+                }
+                if (!firstAssignedSession.HasValue)
+                {
+                    firstAssignedSession = ReadProcessSession(process.dwProcessId);
                 }
                 ProtectRootProcess(process.hProcess, isolatedUser.Sid);
 
@@ -7446,8 +7664,9 @@ namespace OpenCoven
                 uint resumeResult = ResumeThread(process.hThread);
                 if (resumeResult == UInt32.MaxValue)
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
                     TerminateJobObject(jobHandle, 1);
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "ResumeThread failed.");
+                    throw new Win32Exception(nativeError, "ResumeThread failed.");
                 }
                 if (StandardInput != null)
                 {
@@ -7467,9 +7686,10 @@ namespace OpenCoven
                     }
                     if (wait != WAIT_TIMEOUT)
                     {
+                        int nativeError = Marshal.GetLastWin32Error();
                         TerminateJobObject(jobHandle, 1);
                         throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
+                            nativeError,
                             "WaitForSingleObject failed.");
                     }
                     if (

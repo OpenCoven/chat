@@ -368,11 +368,12 @@ $instance = [Reflection.BindingFlags]'NonPublic,Instance'
 $register = [OpenCoven.WindowsIsolatedUser].GetMethod('RegisterTerminalQuarantine', $instance)
 $applicationField = [OpenCoven.WindowsIsolatedUser].GetField('ownedApplication', $instance)
 $quotaField = [OpenCoven.WindowsIsolatedUser].GetField('quotaToken', $instance)
+$unloadProfile = [OpenCoven.WindowsIsolatedUser].GetMethod('UnloadOwnedProfile', $instance)
 $deleteTree = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteDirectoryTree', $static)
 $residual = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOwnedProfileResidual', $static)
 $deleteCore = [OpenCoven.WindowsJobSupervisor].GetMethod('DeleteOperatingSystemProfileCore', $static)
 $classify = [OpenCoven.WindowsIsolatedUser].GetMethod('ClassifyCleanupError', $static)
-foreach ($seam in @($register, $applicationField, $quotaField, $deleteTree, $residual, $deleteCore, $classify)) {
+foreach ($seam in @($register, $applicationField, $quotaField, $unloadProfile, $deleteTree, $residual, $deleteCore, $classify)) {
   if ($null -eq $seam) { throw 'Native residual cleanup regression seam is missing.' }
 }
 function Test-ResidualPath([string]$Path) {
@@ -420,17 +421,30 @@ if ($null -eq $mismatch -or -not $mismatch.Message.Contains('residual=win32-5') 
     $mismatch.Message.Contains('injected-private-native-message')) {
   throw 'Residual failure classification accepted a wrong status or exposed private exception text.'
 }
+$legacyOpenFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static', $null,
+  [type[]]@([int], [int], [string], [int]), $null)
+if ($null -eq $legacyOpenFailure) { throw 'Legacy residual role classifier is absent.' }
+$legacyFailure = $legacyOpenFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2))
+$legacyCategory = [string]$classify.Invoke($null, [object[]]@($legacyFailure))
+if (-not $legacyCategory.Contains('role=child') -or
+    $legacyCategory.Contains('purpose=') -or $legacyCategory.Contains('access=')) {
+  throw 'Legacy residual role diagnostic changed its contract.'
+}
 $openFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
-  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static')
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static', $null,
+  [type[]]@([int], [int], [string], [int], [bool]), $null)
 if ($null -eq $openFailure) { throw 'Bounded residual open role classifier is absent.' }
 foreach ($role in @('ancestor', 'profile-root', 'child')) {
   foreach ($deleteAccess in @($false, $true)) {
     $purpose = if ($deleteAccess) { 'deletion' } else { 'enumeration' }
+    $access = if ($deleteAccess) { 'delete-metadata' } else { 'directory-list' }
     $failure = $openFailure.Invoke($null, [object[]]@(-1073741790, 5, $role, 2, $deleteAccess))
     $category = [string]$classify.Invoke($null, [object[]]@($failure))
     if (-not $category.Contains('op=relative-open') -or
         -not $category.Contains("role=$role") -or
         -not $category.Contains("purpose=$purpose") -or
+        -not $category.Contains("access=$access") -or
         -not $category.Contains('ntstatus=c0000022')) {
       throw "Residual open failure lost its bounded role or purpose: $role/$purpose."
     }
@@ -441,6 +455,48 @@ try { $openFailure.Invoke($null, [object[]]@(-1073741790, 5, 'private-path-canar
 if ($null -eq $invalidRole -or $invalidRole.ToString().Contains('private-path-canary')) {
   throw 'Residual open classifier accepted or exposed an arbitrary role.'
 }
+$accessFailure = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualOpenError', [Reflection.BindingFlags]'NonPublic,Static', $null,
+  [type[]]@([int], [int], [string], [int], [string]), $null)
+if ($null -eq $accessFailure) { throw 'Bounded residual open access classifier is absent.' }
+foreach ($access in @('delete-metadata', 'directory-list')) {
+  $purpose = if ($access -ceq 'delete-metadata') { 'deletion' } else { 'enumeration' }
+  $failure = $accessFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2, $access))
+  $category = [string]$classify.Invoke($null, [object[]]@($failure))
+  if (-not $category.Contains("access=$access") -or -not $category.Contains("purpose=$purpose") -or
+      -not $category.Contains('role=child') -or
+      -not $category.Contains('ntstatus=c0000022')) {
+    throw 'Residual open failure lost its bounded access category.'
+  }
+}
+$invalidAccess = $null
+try { $accessFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2, 'private-access-canary')) } catch { $invalidAccess = $_.Exception }
+if ($null -eq $invalidAccess -or $invalidAccess.ToString().Contains('private-access-canary')) {
+  throw 'Residual open classifier accepted or exposed arbitrary access.'
+}
+$scopeStep = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualScopeStep', [Reflection.BindingFlags]'NonPublic,Static')
+$scopeLabel = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualScopeLabel', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $scopeStep -or $null -eq $scopeLabel) { throw 'Residual scope classifier is absent.' }
+foreach ($case in @(
+  @(0, '.coven', 1, 'cleanup-grant-ancestor'),
+  @(1, 'chat', 2, 'cleanup-grant-ancestor'),
+  @(2, 'phase1-cleanup-grants-v1', 3, 'cleanup-grant-subtree'),
+  @(3, 'private-name-canary', 3, 'cleanup-grant-subtree'),
+  @(0, 'private-name-canary', -1, 'other'),
+  @(1, 'unrelated', -1, 'other'),
+  @(-1, 'phase1-cleanup-grants-v1', -1, 'other'),
+  @(0, '.COVEN', -1, 'other')
+)) {
+  $state = $scopeStep.Invoke($null, [object[]]@([int]$case[0], [string]$case[1]))
+  if ($state -ne $case[2] -or $scopeLabel.Invoke($null, [object[]]@($state)) -cne $case[3]) {
+    throw 'Residual scope path classification changed.'
+  }
+}
+$invalidScope = $null
+try { $scopeLabel.Invoke($null, [object[]]@(99)) } catch { $invalidScope = $_.Exception }
+if ($null -eq $invalidScope) { throw 'Residual scope accepted an invalid state.' }
 $relativeOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'OpenProfileResidualRelative', [Reflection.BindingFlags]'NonPublic,Static')
 $invalidSharing = $null
@@ -488,6 +544,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
   $external = $null
   $canary = $null
   $user = $null
+  $profileLifecycle = @{ Unloaded = $false }
   $job = $null
   $application = $null
   $held = $null
@@ -555,6 +612,8 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
         # Seed adversarial residuals through real userenv after successful quarantine and
         # actual pin/token release. Reuse the genuine captured identity in the production core.
         $application.Dispose()
+        $unloadProfile.Invoke($user, @()) | Out-Null
+        $profileLifecycle.Unloaded = $true
         $quotaField.GetValue($user).Dispose()
         [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $profile)
         if (-not (Test-ResidualPath $marker)) { throw 'Held residual seed unexpectedly disappeared.' }
@@ -650,11 +709,13 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       'persistent' { Assert-ResidualFailure $failure 'residual=win32-32' }
       'denied' {
         Assert-ResidualFailure $failure 'residual=win32-5'
-        Assert-ResidualFailure $failure 'role=child;purpose=deletion'
+        Assert-ResidualFailure $failure 'role=child;purpose=deletion;access=delete-metadata'
+        Assert-ResidualFailure $failure 'scope=other'
       }
       'list-denied-directory' {
         Assert-ResidualFailure $failure 'residual=win32-5'
-        Assert-ResidualFailure $failure 'role=child;purpose=enumeration'
+        Assert-ResidualFailure $failure 'role=child;purpose=enumeration;access=directory-list'
+        Assert-ResidualFailure $failure 'scope=other'
       }
       'readonly' { Assert-ResidualFailure $failure 'read-only file' }
       'readonly-hardlink' { Assert-ResidualFailure $failure 'read-only file' }
@@ -690,17 +751,19 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       { if ($null -ne $application) { $application.Dispose() } },
       {
         if ($null -ne $user) {
+          $unloadProfile.Invoke($user, @()) | Out-Null
+          $profileLifecycle.Unloaded = $true
           $token = $quotaField.GetValue($user)
           if ($null -ne $token) { $token.Dispose() }
         }
       },
       {
-        if ($null -ne $moved -and (Test-ResidualPath $profile)) {
+        if ($profileLifecycle.Unloaded -and $null -ne $moved -and (Test-ResidualPath $profile)) {
           if ($case -eq 'root-junction') { [IO.Directory]::Delete($profile) }
           else { [IO.Directory]::Delete($profile, $true) }
         }
       },
-      { if ($null -ne $moved) { [IO.Directory]::Move($moved, $profile) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $moved) { [IO.Directory]::Move($moved, $profile) } },
       {
         if ($null -ne $originalParentAcl -and (Test-ResidualPath $control)) {
           Set-Acl -LiteralPath $control -AclObject $originalParentAcl
@@ -723,11 +786,11 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       },
       # These identities never launch a producer. Manual teardown is fixture-only,
       # after closing its real pins and releasing/restoring every injected blocker.
-      { if ($null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $user.OperatingSystemProfilePath) } },
-      { if ($null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.OperatingSystemProfilePath)) | Out-Null } },
-      { if ($null -ne $moved -and (Test-ResidualPath $moved)) { $deleteTree.Invoke($null, [object[]]@([string]$moved)) | Out-Null } },
-      { if ($null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.RootPath)) | Out-Null } },
-      { if ($null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::RemoveAccount($user.UserName) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::Unregister($user.Sid, $user.OperatingSystemProfilePath) } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.OperatingSystemProfilePath)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $moved -and (Test-ResidualPath $moved)) { $deleteTree.Invoke($null, [object[]]@([string]$moved)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { $deleteTree.Invoke($null, [object[]]@([string]$user.RootPath)) | Out-Null } },
+      { if ($profileLifecycle.Unloaded -and $null -ne $user) { [OpenCoven.Tests.ProfileResidualNativeFixture]::RemoveAccount($user.UserName) } },
       { if ($null -ne $canary -and (Test-ResidualPath $canary)) { [IO.File]::SetAttributes($canary, [IO.FileAttributes]::Normal) } },
       { if ($null -ne $external -and (Test-ResidualPath $external)) { [IO.Directory]::Delete($external, $true) } }
     ))

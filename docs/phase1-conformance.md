@@ -1,5 +1,37 @@
 # Phase 1 real-authority conformance
 
+Windows owner-cleanup follow-up: [CI 35095826197](https://github.com/OpenCoven/chat/actions/runs/35095826197)
+passed ten jobs and failed in the second lifecycle child launch at
+`operation=job-assignment`, `nativeCode=5` (access denied). The target job had
+zero active processes. The child belonged to another job, not the target;
+its Windows session matched both the supervisor and first assigned child.
+All seven owner-cleanup tests, installation/quarantine, outer cleanup and the
+first child's credential/profile assertions passed. The application fixture
+was not reached. Protected acceptance remains open.
+
+The fixture reused one containment job across three logons. Other native
+callers, including the profile-owner/RPC probes, use independent job lifetimes;
+`RunAsUserCore` terminates and drains its job before returning. Each profile
+probe now receives a fresh job and matching nonce/name environment binding,
+while retaining the same isolated identity and owned profile. The first two
+jobs are disposed before the next launch; the final job remains available for
+terminal quarantine and unload-failure ownership assertions. All three child
+results still require zero exit and empty output, persistent credentials, and
+both profile comparisons. Final profile, account and hive absence checks remain.
+
+A portable regression executes the actual fixture control flow against a job
+implementation that rejects reuse. It failed on the second launch before the
+repair. Fresh Windows validation is still required. The observed categories
+exclude a session mismatch but do not establish the precise nested-job or
+termination-state constraint behind the access denial. Production supervisor
+behavior, ACLs, privileges, deadlines and resource limits are unchanged.
+
+The cleanup-grant owner consumes the validated marker by handle and prunes only
+its empty private directories with parent pins and original identity checks.
+Sibling grants, unrelated contents and replacements are preserved. Committed
+consumption remains final if pruning fails. Chat landing, SDK rebinding and
+fresh protected validation remain pending.
+
 ## Executable diagnostic harness binding
 
 [Protected run 34970370434](https://github.com/OpenCoven/chat/actions/runs/34970370434)
@@ -14,15 +46,128 @@ That harness imported its own older producer module, so the newer installation
 diagnostic classification was never executed. Workspace-module tests alone
 could not detect this stale executable binding.
 
-The lock now selects reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+Chat #296 selected reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
 tree `64b1e1812e9bfc729f2d7d148b224afe6f17f775`, as the executable harness.
 Its governed file and production-delta identities are refreshed together.
 The regression clones the selected Git revision, verifies its harness authority,
 and executes its native preflight diagnostic module in a child Node process.
 This checks the selected module, not the complete protected bootstrap.
 Frozen consumer, SDK candidate, Cave and Coven revisions remain unchanged.
-Landing this binding, rebinding the SDK validator, rotating both validator
-scopes and obtaining fresh protected results remain necessary.
+Chat #296 landed this binding as `047e8ad7f4a2ca5a9009217de3c3f5f32fd98ba6`.
+SDK #284 bound it at `e37b195c246d55a5929dc74f7e7d116b1fc6dfd0`; both validator
+scopes were rotated before protected run `34977202052`. Linux and macOS each
+passed all 197 ordered assertions and independent identity, timing and scan
+checks. Windows failed at
+`phase1.native-scenarios.native-preflight-installation-secure-store-unavailable`.
+Validation, attestation and aggregation were skipped. The diagnostic binding
+worked; the underlying Windows store failure remains unresolved.
+
+### Installation operation diagnostics
+
+Conformance builds classify unavailable installation operations as `lock`,
+`entry`, `read`, `write`, or `persistence`, each with an `-unavailable` suffix
+under `phase1.native-scenarios.native-preflight-installation-`. These fixed
+labels preserve retryability without exposing provider messages or credentials.
+Other error kinds and ordinary-build diagnostics are unchanged. Persistence
+still combines attribute read, policy rejection and Enterprise migration;
+it does not identify the underlying Windows API error.
+
+Fault-injection tests exercise creation and existing-ID reads; Windows tests
+also cover legacy UTF-16 rewrites. The Windows supervisor behavior suite runs
+empty custody, grant issuance, creation, stable reread and authorized cleanup
+inside a separate Job for its isolated user. Local syntax and mocked tests do
+not establish restricted Windows runtime success.
+
+Windows supervisor job `104433590803` failed with its child diagnostic hidden.
+Follow-up job `104446263997` preserved the primary category:
+`conformance_issue_native_custody_cleanup-failed`, with no secondary error.
+That failure precedes installation-ID creation. The fixture supplied the
+redirected profile, owned by the isolated user, where explicit cleanup homes
+require a trusted owner. It now uses the authoritative OS profile, matching
+protected production's `nativeScenarioHomes` selection. Follow-up Windows job
+`104456151454` failed during OS-profile cleanup after Windows accepted deletion.
+Its outer cleanup could hide a primary exception, so it does not establish
+whether the installation roundtrip passed.
+
+The fixture now runs installation last for this identity and uses production's
+`RunProducerAsUserAndQuarantine` path, which registers terminal quarantine for
+authorized profile-residual cleanup. It checks quarantine completion and emits
+a fixed success marker. The outer boundary preserves both primary and cleanup
+exceptions, including Job-disposal failures. Portable tests cover simultaneous failures; Windows runtime
+verification remains pending.
+
+Job `104468314603` preserved the primary failure:
+`app_installation_id-installation_write_unavailable`, with no native secondary
+error. Outer profile cleanup separately failed with child relative-open access
+denied (`ntstatus=c0000022`). No successful installation roundtrip is established.
+The fixture captures a read-only snapshot before native startup: whether the
+current user's registry hive is loaded and the maximum generic-credential
+persistence reported by `CredGetSessionTypes`. It emits only fixed categories
+when the roundtrip fails, alongside the unchanged primary category. These
+observations test the profile/session hypothesis; they do not change logon flags,
+load a profile, write credentials, or relax the original assertions.
+
+Job `104478918965` reported `hive=absent;persistence=session` alongside the
+same installation write failure. The native entry requires local-machine
+persistence. The current logon therefore lacks a prerequisite for that write;
+the separate profile-residual access denial remains unresolved.
+
+Hosted Windows job `104496796949` then observed `hive=present;persistence=session`
+and the same installation-write failure. Hive presence alone is insufficient;
+this result does not prove a repaired credential store or cleanup path. A
+read-only comparison now snapshots credential capability under the retained
+validated token through `RunQuotaRead` immediately before the existing child
+launch, then compares it with that child's fixed environment report on failure.
+Only allowlisted hive/persistence categories are published. Different capability
+between the two tokens would isolate a launch-session boundary; equal session-only
+capability leaves retained-logon/profile/policy behavior unresolved. No additional
+child, credential write, launch API, policy, or ACL change is introduced.
+
+Job `104506428191` compared the retained token and child directly: both saw the
+hive, but the retained token supported `enterprise` persistence while the child
+supported only `session`. The candidate now requests `LOGON_WITH_PROFILE` for
+each fresh child logon while retaining the supervisor's explicit profile reference
+through quarantine. This preserves fresh-logon account-disable rejection.
+Whether it restores native credential writes remains a hosted verification gate.
+
+Cleanup completion now requires both SID hives to be absent even when profile
+registration and paths have disappeared. A persistent hive reports fixed
+`hive=1` detail and fails within the existing ten-second observation budget;
+residual deletion never runs while a hive remains. Portable delayed/permanent
+hive tests cover both present and already-absent paths. The native lifecycle
+fixture launches three children against the owned profile, quarantines the last,
+and requires persistent credential capability and final hive/profile/account absence.
+No cleanup retry category or budget is expanded.
+
+The repair loads the verified profile explicitly during `WindowsIsolatedUser`
+creation and retains its hive handle with the validated token. Each child loads its own logon-session profile through `LOGON_WITH_PROFILE`. After terminal quarantine, disposal unloads the
+owned hive before closing the token or deleting profile/account state. Unload
+failure defers destructive cleanup and retains ownership for retry. Post-load
+initialization failures use that same cleanup path; if cleanup also fails, the
+trusted exception retains the cleanup owner alongside both errors. The native
+lifecycle fixture covers loaded-hive presence, persistent credential capability,
+unload failure/retry, post-load rollback, and final hive/profile/account absence.
+The residual-cleanup fixture also unloads the owned hive before directly
+retiring its token and seeding adversarial userenv residuals. This preserves
+the intended sharing-violation and denied-access controls under profile loading.
+If fixture unload fails, later teardown stages retain the owned identity and
+skip profile/account deletion while independently restoring injected blockers.
+Native Windows verification remains required; the immutable source binding is
+recorded below.
+
+The child and parent share the same allowlist, including existing fixed native
+cleanup-grant subtypes bound to the issuance command. Private response text,
+parser messages and extra output remain excluded. Cleanup/shutdown cannot
+replace a primary category. The portable regression exercises the actual home
+assignment, RPC decoder and primary/secondary exception pipeline. This fixture
+correction does not establish the protected installation failure's cause or
+relax the round-trip assertions.
+
+The lock now selects reviewed source `6e74fb60e44549b91aa75fb956eb63a85dc668fc`,
+tree `a1002364401a1788f8210a35b87d202711e67042`, including all 25 governed files
+and ten production deltas. The checkout regression exercises all five labels
+from that immutable revision. SDK rebinding, both scope rotations and fresh
+protected validation remain required; this binding alone is not acceptance.
 
 ## Cave rc.7 adoption in progress
 
@@ -1048,10 +1193,11 @@ non-inherited ACE granting the ephemeral SID only
 `JOB_OBJECT_QUERY | SYNCHRONIZE`; the Job owner remains the trusted runner
 identity, which retains the original full-access handle. Set/assign/terminate
 reopens and silent-breakaway mutation are denied. The supervisor launches the
-bootstrap with `CreateProcessWithLogonW` using zero logon flags and
+bootstrap with `CreateProcessWithLogonW` using `LOGON_WITH_PROFILE` and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
-membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-and profile-hive flags are not enabled. The outer process retains
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway remains disabled. The isolated-user object owns a separate profile
+reference until terminal quarantine and explicit unloading; bounded cleanup
+also requires the child-session hives to disappear. The outer process retains
 non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
@@ -1744,10 +1890,16 @@ exception text remain private.
 
 The restricted Windows producer still runs as the generated local user with the
 same explicit environment and suspended Job assignment, but
-`CreateProcessWithLogonW` no longer loads that user's registry hive. The OS
-profile remains created, pinned, token-verified, and deleted by the existing
-lifecycle. This removes an unnecessary asynchronous hive-unload dependency from
-the bounded profile-disappearance proof.
+`CreateProcessWithLogonW` now requests profile loading for each fresh child
+logon session.
+The isolated-user object explicitly loads the created, token-verified profile
+and retains the returned handle until quarantine completes. It unloads the hive
+before token retirement and profile deletion, preserving ownership on unload
+failure. Profile loading occurs during identity creation under the existing
+outer lifecycle/job budget; the production execution deadline is unchanged.
+The separate owned reference protects the profile during supervision. Cleanup
+still waits within its existing budget for any child-session unload to finish.
+Native credential and cleanup acceptance remain required.
 
 An isolated quota pass that observes only the exact
 `access-denied` followed by `repeat=missing` deletion race receives one complete
@@ -1817,7 +1969,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 175,318 | `966571170a0b74424b9290a02c28151e04abfa0fe6e51765dda177a6998842f6` |
+| `.github/workflows/client-v1-conformance.yml` | 177,934 | `bd8331c6d82e22b7618ee5beda8fd10fad4e022e794c8d762dc62cf3f27d5049` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1830,7 +1982,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 231,308 | `12a38c8cf550584e1bc5ad74332f7a9a4f3c2a1cb57e6e5435f12fd147ec093a` |
+| `scripts/phase1-schema-v2-producer.mjs` | 231,880 | `3da17a07b70ec3b2468072fd81f4023c7eead42e6496a953d7b862fe19abd4ec` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -1842,8 +1994,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 385,252 | `74530a36ad1884a7977e1ca63bf21a7123568f7faba61adf44612c7f47930b02` |
-| `scripts/windows-job-supervisor.test.ps1` | 187,195 | `77086f1da63d79b43e372a07a6a67d1ae1785801f77dc0ea050d4b80fe93f784` |
+| `scripts/windows-job-supervisor.cs` | 396,176 | `6f7d0712e8f0b04d5c3fdff77a3cb975cc96a2f5c2bd5e565b43277b7085c030` |
+| `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 38,067 | `97fdb3b08aca19ceb31e6affb5e211cada9a860ccceae26df03816507d981492` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
@@ -1851,8 +2003,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
-| `scripts/windows-profile-residual-policy.test.ps1` | 14,097 | `26485b24eb4bbafbf33390823c55c6b5d803681f784fda820fd7dbb24d149ccc` |
-| `scripts/windows-profile-residual-native.test.ps1` | 43,298 | `1ac16461c81c546b361460d003334f7da2494c5edc15426b6ebb92e74e271f92` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
+| `scripts/windows-profile-residual-native.test.ps1` | 47,303 | `66477e50c2d6c15bdb876102b388c686bce03db554c66ce76bd9b9538fb7a380` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -2711,12 +2863,14 @@ Native Windows verification remains required; portable tests cannot establish th
 results. No unchanged protected rerun is warranted. A future dispatch requires reviewed
 delivery, a reachable authority freeze, and the matching SDK binding first.
 
-### Residual-purpose source binding
+### Original residual-purpose source binding
 
-The harness selects signed source `4dc702d2538a3815a84e39cddec598ce058518f6`, tree
+PR #302 originally selected signed source `4dc702d2538a3815a84e39cddec598ce058518f6`, tree
 `f9ac551a29150e232c8e3ff8e8ddc0fa5cf8eefa`. The binding records the actual Git blobs and SHA-256
-digests of all 25 governed files and 10 production deltas. It retains the merged
-finalization diagnostics and adds only the residual-open purposes described above.
+digests of all 25 governed files and 10 production deltas. That source retained the merged
+finalization diagnostics and added only the residual-open purposes described above.
+The current integration also retains the access and scope diagnostics and the
+independent profile-probe job lifetimes described at the top of this document.
 Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
 Native Windows checks and an SDK binding to the eventual delivery remain required
 before protected conformance can establish acceptance.

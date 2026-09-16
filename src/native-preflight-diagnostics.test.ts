@@ -68,6 +68,11 @@ test.each([
   'installation-rpc',
   'installation-id',
   'installation-secure-store-unavailable',
+  'installation-lock-unavailable',
+  'installation-entry-unavailable',
+  'installation-read-unavailable',
+  'installation-write-unavailable',
+  'installation-persistence-unavailable',
   'installation-keychain-failure',
   'installation-credential-missing',
   'installation-response-rejected',
@@ -129,6 +134,11 @@ class InstallationChild extends EventEmitter {
 
 test.each([
   ['response', 'secure_store_unavailable', 'secure-store-unavailable'],
+  ['response', 'installation_lock_unavailable', 'lock-unavailable'],
+  ['response', 'installation_entry_unavailable', 'entry-unavailable'],
+  ['response', 'installation_read_unavailable', 'read-unavailable'],
+  ['response', 'installation_write_unavailable', 'write-unavailable'],
+  ['response', 'installation_persistence_unavailable', 'persistence-unavailable'],
   ['response', 'keychain_failure', 'keychain-failure'],
   ['response', 'credential_missing', 'credential-missing'],
   ['response', 'private-account-secret', 'response-rejected'],

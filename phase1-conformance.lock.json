@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "4dc702d2538a3815a84e39cddec598ce058518f6"
+    "revision": "6e74fb60e44549b91aa75fb956eb63a85dc668fc"
   },
   "harnessAuthority": {
-    "revision": "4dc702d2538a3815a84e39cddec598ce058518f6",
-    "tree": "f9ac551a29150e232c8e3ff8e8ddc0fa5cf8eefa",
+    "revision": "6e74fb60e44549b91aa75fb956eb63a85dc668fc",
+    "tree": "a1002364401a1788f8210a35b87d202711e67042",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "da04f5c2226346640ea25f186423df369815df31",
-        "sha256": "12a38c8cf550584e1bc5ad74332f7a9a4f3c2a1cb57e6e5435f12fd147ec093a"
+        "blob": "f9799f2a66bf5e182c72c49a8b325619d076bd70",
+        "sha256": "3da17a07b70ec3b2468072fd81f4023c7eead42e6496a953d7b862fe19abd4ec"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "7f80cf5811f310857cb24a58271dc6f005817807",
-        "sha256": "74530a36ad1884a7977e1ca63bf21a7123568f7faba61adf44612c7f47930b02"
+        "blob": "8e4098edace18b95813e7cd6610f3338fe5292b4",
+        "sha256": "6f7d0712e8f0b04d5c3fdff77a3cb975cc96a2f5c2bd5e565b43277b7085c030"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -141,13 +141,13 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "aeb0e438bc2eed017b6b5ae55d83e52c2eb3742a",
-        "sha256": "18e3fec615827b1ce416f875ac709b3ef8d5ec08f2d9ade3f7fa1cf65d03608b"
+        "blob": "742d13f7a75faa0c7f7064328d0c1f1d4877c6c4",
+        "sha256": "f21eb5af2925a6d721ba45f73f51718bb9f43c36f9230e03655210251df38911"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "99d624d3d1d73cba69205dd8c830614da225132e",
-        "sha256": "966571170a0b74424b9290a02c28151e04abfa0fe6e51765dda177a6998842f6"
+        "blob": "9db15bd6fa0f8f3baa660b551e68d83862bee09d",
+        "sha256": "bd8331c6d82e22b7618ee5beda8fd10fad4e022e794c8d762dc62cf3f27d5049"
       }
     ],
     "productionDeltas": [
@@ -173,8 +173,8 @@
       },
       {
         "path": "src-tauri/src/cleanup_grant.rs",
-        "blob": "6b8a0187eb7515db3c17bcc99cefe7880e78bd75",
-        "sha256": "2cd24a8055f69b2f146cdf8ab2e7e4b69e7b26be44578c27db5cc0960bb3c74b"
+        "blob": "20069473a430936117749fb04ee3349b4087cb93",
+        "sha256": "38be47c72bbd480da581e39641cb9ee67c77c283961b1801b20eb54c35a812fa"
       },
       {
         "path": "src-tauri/src/conformance.rs",
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "82537d3c70676b91588b1cb3da5571b0f06377f6",
-        "sha256": "a22ffe4e3b6a5eacb7ca09eb44fdd56981ae143d233893bf6a35081b6e47b03a"
+        "blob": "b235ab40e02265ea3e9fbaedf0a842e7fc627f4f",
+        "sha256": "ba9be1f65792ae988ff64ca1348fc9ec4438925e4f4822f3c2d3057eee5d0568"
       },
       {
         "path": "src-tauri/src/lib.rs",
