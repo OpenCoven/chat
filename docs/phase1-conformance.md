@@ -1,21 +1,30 @@
 # Phase 1 real-authority conformance
 
-Windows owner-cleanup follow-up: [CI 35086077537](https://github.com/OpenCoven/chat/actions/runs/35086077537)
-failed in the second lifecycle child launch at `operation=job-assignment`,
-`nativeCode=5` (access denied). The first child completed its credential and
-both profile-path assertions. All seven owner-cleanup tests and restricted
-installation/quarantine passed; outer cleanup completed. The application
-fixture was not reached. Protected acceptance remains open.
+Windows owner-cleanup follow-up: [CI 35095826197](https://github.com/OpenCoven/chat/actions/runs/35095826197)
+passed ten jobs and failed in the second lifecycle child launch at
+`operation=job-assignment`, `nativeCode=5` (access denied). The target job had
+zero active processes. The child belonged to another job, not the target;
+its Windows session matched both the supervisor and first assigned child.
+All seven owner-cleanup tests, installation/quarantine, outer cleanup and the
+first child's credential/profile assertions passed. The application fixture
+was not reached. Protected acceptance remains open.
 
-Native assignment errors are preserved before cleanup. The next bounded probe
-records target-job activity, child membership in any/target job, and session
-equality with the supervisor and first successfully recorded assigned-child
-session. If an earlier session query fails, a later successful assignment may
-establish that baseline. Only fixed categories are emitted; no process/session IDs or native message content.
-Failed diagnostic queries report unavailable and preserve the original error.
-These categories narrow the investigation but cannot establish an ancestor job
-or termination-state cause alone. All three launches reuse the same job;
-cleanup, assertions, ACLs, privileges and production limits remain unchanged.
+The fixture reused one containment job across three logons. Other native
+callers, including the profile-owner/RPC probes, use independent job lifetimes;
+`RunAsUserCore` terminates and drains its job before returning. Each profile
+probe now receives a fresh job and matching nonce/name environment binding,
+while retaining the same isolated identity and owned profile. The first two
+jobs are disposed before the next launch; the final job remains available for
+terminal quarantine and unload-failure ownership assertions. All three child
+results still require zero exit and empty output, persistent credentials, and
+both profile comparisons. Final profile, account and hive absence checks remain.
+
+A portable regression executes the actual fixture control flow against a job
+implementation that rejects reuse. It failed on the second launch before the
+repair. Fresh Windows validation is still required. The observed categories
+exclude a session mismatch but do not establish the precise nested-job or
+termination-state constraint behind the access denial. Production supervisor
+behavior, ACLs, privileges, deadlines and resource limits are unchanged.
 
 The cleanup-grant owner consumes the validated marker by handle and prunes only
 its empty private directories with parent pins and original identity checks.

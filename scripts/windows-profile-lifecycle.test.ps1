@@ -232,12 +232,6 @@ if (-not [string]::Equals($boundProfile,
 '@, [Text.UTF8Encoding]::new($false))
     $context.Environment.OPENCOVEN_PROFILE_FIXTURE_EXPECTED = $createdProfile
     $context.Environment.OPENCOVEN_WINDOWS_PROFILE_ROOT = 'C:\forged-profile'
-    $nonce = [Guid]::NewGuid().ToString('N')
-    $jobName = "Local\OpenCoven.Chat.Conformance.$nonce"
-    $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
-    $context.Environment.OPENCOVEN_WINDOWS_JOB_NAME = $jobName
-    $stage = 'child-job-create'
-    $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $context.User)
     $stage = 'retained-profile-capability'
     $retainedCapability = Read-NativeInstallationRetainedEnvironment $context.User
     $capabilityFailure = Get-ProfileLifecycleCapabilityFailure $retainedCapability
@@ -246,6 +240,19 @@ if (-not [string]::Equals($boundProfile,
       throw 'Retained profile token lacks persistent credential capability.'
     }
     foreach ($launchIndex in 0..2) {
+      # RunAsUser terminates and drains its containment job. Keep the retained
+      # profile, but give each child logon an independent job lifetime.
+      if ($null -ne $job) {
+        $stage = "child-job-close-$launchIndex"
+        $job.Dispose()
+        $job = $null
+      }
+      $nonce = [Guid]::NewGuid().ToString('N')
+      $jobName = "Local\OpenCoven.Chat.Conformance.$nonce"
+      $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
+      $context.Environment.OPENCOVEN_WINDOWS_JOB_NAME = $jobName
+      $stage = "child-job-create-$launchIndex"
+      $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $context.User)
       $stage = "child-launch-$launchIndex"
       if ($launchIndex -eq 2) {
         $result = $job.RunProducerAsUserAndQuarantine(
