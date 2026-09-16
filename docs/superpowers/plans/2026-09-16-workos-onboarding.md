@@ -15,10 +15,22 @@
 - **Every commit is signed:** `git commit -S …`. Verify with `git log -1 --show-signature` (must print `Good "git" signature`). Never push an unsigned commit.
 - **Native errors are `String`s**, not `NativeDiagnostic`. That is the shipped `coven_runtime_*` convention; the Cave lease pattern in `operation.rs` is dormant and must not be used here.
 - **No token, verifier or `state` value ever crosses IPC.** Task 22 adds a test that greps `src/**` and fails on any match.
-- **`cargo` commands:** always `--manifest-path src-tauri/Cargo.toml`. CI runs `cargo test --locked --release --features phase1-conformance --lib`; run at least `cargo test --manifest-path src-tauri/Cargo.toml --lib` locally before each Rust commit, and `corepack pnpm cargo:fmt` + `corepack pnpm cargo:clippy`.
+- **`cargo` commands:** always `--manifest-path src-tauri/Cargo.toml`. CI runs `cargo test --locked --release --features phase1-conformance --lib`; run at least `cargo test --manifest-path src-tauri/Cargo.toml --lib` locally before each Rust commit. `corepack pnpm cargo:fmt` only **checks** formatting — it runs `cargo fmt --check` and never writes a file, so on its own it reports the diff and fails. Every format step in this plan is therefore the full three-command form, write then verify then lint: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`.
 - **JS commands:** `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm exec vitest run <file>`.
 - Work in the worktree you were given. Do not `cd` to the primary checkout.
-- **Staged code and `dead_code`.** `cargo:clippy` runs `-D warnings`, so an item with no caller yet is a hard error. Tasks 2–8 and 10–11 add items whose callers land in Task 9 (identity) or Task 12 (setup). On each such new item put `#[allow(dead_code)] // wired in Task 9` (or `Task 12`) — on NEW items only, never on existing code. Task 9 and Task 12 each end with a step that removes every `allow(dead_code)` they made live; after Task 12 the file set must contain none of these attributes (`grep -rn 'allow(dead_code)' src-tauri/src/identity.rs src-tauri/src/setup.rs src-tauri/src/keyring.rs src-tauri/src/coven_runtime.rs` → only pre-existing hits, if any). This mirrors the pattern `src-tauri/src/cave.rs` already uses for staged code.
+- **Staged code and `dead_code`.** `cargo:clippy` runs `-D warnings`, so an item with no caller yet is a hard error. Tasks 2–8 and 10–11 add items whose callers land in Task 9 (identity) or Task 12 (setup). Stage them one of exactly two ways:
+  - **New files** (`identity.rs`, `setup.rs`) carry a single **file-level** allowance as the very first line of the file, before any `use`:
+
+    ```rust
+    // Every item below is reached only from the commands Task 9 registers;
+    // the allowance is deleted in Task 9 Step 5.
+    #![allow(dead_code)]
+    ```
+
+    `setup.rs` uses the same three lines with "Task 12 Step 5" in both places. No item inside those two files ever gets its own `#[allow(dead_code)]`.
+  - **Existing files** (`keyring.rs`, `coven_runtime.rs`) get **item-level** allowances instead: `#[allow(dead_code)] // wired in Task 9` (or `Task 12`) directly above the new item — on NEW items only, never on existing code.
+
+  Task 9 Step 5 deletes the three-line file-level block from `identity.rs`; Task 12 Step 5 deletes it from `setup.rs`. Each also removes the item-level allowances it made live. After Task 12, `grep -rn 'allow(dead_code)' src-tauri/src/identity.rs src-tauri/src/setup.rs src-tauri/src/keyring.rs src-tauri/src/coven_runtime.rs` must print nothing from `identity.rs` or `setup.rs`, and from the other two files only hits that pre-date this plan or that clippy still demands. This mirrors the pattern `src-tauri/src/cave.rs` already uses for staged code.
 
 ## File structure
 
@@ -210,7 +222,7 @@ Expected: `test result: ok. 1 passed`
 
 - [ ] **Step 5: Add the keyring accessors (read / CAS write / delete)**
 
-Inside the `impl NativeKeyring` block that begins at line 2037 (after `credential_entry_for_service`), add:
+Inside the `impl NativeKeyring` block that begins at line 2037 (after `credential_entry_for_service`), add (as landed, these three accessors are also declared on the `CredentialCustody` trait so callers can hold `Arc<dyn CredentialCustody>`, and `write_session` returns `Result<bool, KeyringError>` where `Ok(false)` means another writer won and nothing was written — Task 9 depends on that shape):
 
 ```rust
     fn session_entry(&self) -> Result<Entry, KeyringError> {
@@ -271,7 +283,7 @@ Inside the `impl NativeKeyring` block that begins at line 2037 (after `credentia
 
 - [ ] **Step 6: Build, format, lint**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib keyring::`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib keyring::`
 Expected: fmt clean, clippy `Finished` with no warnings, keyring tests pass.
 
 - [ ] **Step 7: Commit**
@@ -357,6 +369,7 @@ Insert immediately after the closing brace of `execute_command_bounded` (before 
 /// rather than stream JSON: every complete line (and a trailing partial line)
 /// reaches `on_line(is_stderr, text)`. Returns the exit code; a non-zero code
 /// is not an error here because the caller shows it to the person.
+#[allow(dead_code)] // wired in Task 12
 pub(crate) fn execute_command_lines(
     mut command: Command,
     cancel: &AtomicBool,
@@ -442,7 +455,7 @@ Expected: `test result: ok. 2 passed`
 
 - [ ] **Step 6: Format, lint, full native suite**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
 Expected: all clean; every existing test still passes.
 
 - [ ] **Step 7: Commit**
@@ -458,13 +471,17 @@ git commit -S -m "feat(native): expose runtime helpers and stream plain-text com
 
 **Files:**
 - Create: `src-tauri/src/identity.rs`
-- Modify: `src-tauri/src/lib.rs` (add `mod identity;` next to the other `mod` lines)
+- Modify: `src-tauri/src/lib.rs` (add `mod identity;` between `mod hpke_bound;` and `mod keyring;`)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `src-tauri/src/identity.rs` with only a tests module for now:
+Create `src-tauri/src/identity.rs` with only a tests module for now. The file starts with the file-level staging allowance from the Conventions section — three lines, before anything else:
 
 ```rust
+// Every item below is reached only from the commands Task 9 registers;
+// the allowance is deleted in Task 9 Step 5.
+#![allow(dead_code)]
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,7 +501,10 @@ mod tests {
     #[test]
     fn pkce_challenge_matches_the_rfc7636_appendix_b_vector() {
         let pkce = Pkce::from_verifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk".to_owned());
-        assert_eq!(pkce.challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        assert_eq!(
+            pkce.challenge,
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 
     #[test]
@@ -498,12 +518,15 @@ mod tests {
         assert!(url.contains("code_challenge=chal"));
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("state=st8"));
-        assert!(authorize_url("", 1, "c", "s").is_err(), "empty client id refused");
+        assert!(
+            authorize_url("", 1, "c", "s").is_err(),
+            "empty client id refused"
+        );
     }
 }
 ```
 
-Add `mod identity;` to `src-tauri/src/lib.rs` beside the existing `mod coven_runtime;` line.
+Add `mod identity;` to `src-tauri/src/lib.rs` between `mod hpke_bound;` and `mod keyring;` — the `mod` lines are alphabetical and must stay that way.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -512,7 +535,7 @@ Expected: compile errors — `Pkce`, `authorize_url` not found.
 
 - [ ] **Step 3: Implement**
 
-Add above the tests module in `identity.rs`:
+Add above the tests module in `identity.rs`, below the three-line `#![allow(dead_code)]` block that Step 1 put at the very top of the file (inner attributes must precede every `use`):
 
 ```rust
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -536,7 +559,10 @@ impl Pkce {
 
     pub(crate) fn from_verifier(verifier: String) -> Self {
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        Self { verifier, challenge }
+        Self {
+            verifier,
+            challenge,
+        }
     }
 }
 
@@ -552,7 +578,11 @@ pub(crate) fn authorize_url(
     challenge: &str,
     state: &str,
 ) -> Result<String, String> {
-    if client_id.is_empty() || !client_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+    if client_id.is_empty()
+        || !client_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
         return Err("WorkOS client id is not configured.".into());
     }
     let mut url = Url::parse(WORKOS_API).map_err(|_| "Invalid WorkOS API base.")?;
@@ -612,7 +642,9 @@ Append inside `mod tests`:
         let port = listener.port();
         let handle = std::thread::spawn(move || hit(port, "/callback?code=abc&state=xyz"));
         let cancel = AtomicBool::new(false);
-        let code = listener.wait_for_code("xyz", &cancel, Duration::from_secs(5)).unwrap();
+        let code = listener
+            .wait_for_code("xyz", &cancel, Duration::from_secs(5))
+            .unwrap();
         assert_eq!(code, "abc");
         let response = handle.join().unwrap();
         assert!(response.starts_with("HTTP/1.1 200"));
@@ -621,12 +653,18 @@ Append inside `mod tests`:
 
     #[test]
     fn listener_rejects_state_mismatch_and_missing_code() {
-        for path in ["/callback?code=abc&state=WRONG", "/callback?state=xyz", "/other?code=a&state=xyz"] {
+        for path in [
+            "/callback?code=abc&state=WRONG",
+            "/callback?state=xyz",
+            "/other?code=a&state=xyz",
+        ] {
             let listener = CallbackListener::bind().unwrap();
             let port = listener.port();
             let handle = std::thread::spawn(move || hit(port, path));
             let cancel = AtomicBool::new(false);
-            let error = listener.wait_for_code("xyz", &cancel, Duration::from_secs(5)).unwrap_err();
+            let error = listener
+                .wait_for_code("xyz", &cancel, Duration::from_secs(5))
+                .unwrap_err();
             assert_eq!(error, "Sign-in response was invalid. Try again.");
             assert!(handle.join().unwrap().starts_with("HTTP/1.1 400"));
         }
@@ -637,13 +675,17 @@ Append inside `mod tests`:
         let listener = CallbackListener::bind().unwrap();
         let cancel = AtomicBool::new(true);
         assert_eq!(
-            listener.wait_for_code("x", &cancel, Duration::from_secs(5)).unwrap_err(),
+            listener
+                .wait_for_code("x", &cancel, Duration::from_secs(5))
+                .unwrap_err(),
             "Sign-in cancelled."
         );
         let listener = CallbackListener::bind().unwrap();
         let cancel = AtomicBool::new(false);
         assert_eq!(
-            listener.wait_for_code("x", &cancel, Duration::from_millis(50)).unwrap_err(),
+            listener
+                .wait_for_code("x", &cancel, Duration::from_millis(50))
+                .unwrap_err(),
             "Sign-in timed out."
         );
     }
@@ -719,6 +761,11 @@ impl CallbackListener {
     }
 
     fn handle(mut stream: TcpStream, expected_state: &str) -> Result<String, String> {
+        // `bind` put the listener in non-blocking mode and on macOS an accepted
+        // socket inherits O_NONBLOCK, so the read below would return WouldBlock
+        // immediately and the code would be lost. Put this socket back into
+        // blocking mode before giving it a read timeout.
+        let _ = stream.set_nonblocking(false);
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut buffer = [0u8; 4096];
         let read = stream.read(&mut buffer).unwrap_or(0);
@@ -729,18 +776,21 @@ impl CallbackListener {
             .and_then(|line| line.split_whitespace().nth(1))
             .unwrap_or("");
         let parsed = Url::parse(&format!("http://127.0.0.1{target}")).ok();
-        let code = parsed.as_ref().filter(|u| u.path() == "/callback").and_then(|u| {
-            let mut code = None;
-            let mut state_ok = false;
-            for (key, value) in u.query_pairs() {
-                match &*key {
-                    "code" if !value.is_empty() => code = Some(value.into_owned()),
-                    "state" if value == expected_state => state_ok = true,
-                    _ => {}
+        let code = parsed
+            .as_ref()
+            .filter(|u| u.path() == "/callback")
+            .and_then(|u| {
+                let mut code = None;
+                let mut state_ok = false;
+                for (key, value) in u.query_pairs() {
+                    match &*key {
+                        "code" if !value.is_empty() => code = Some(value.into_owned()),
+                        "state" if value == expected_state => state_ok = true,
+                        _ => {}
+                    }
                 }
-            }
-            code.filter(|_| state_ok)
-        });
+                code.filter(|_| state_ok)
+            });
         let (status, body) = match &code {
             Some(_) => ("200 OK", CALLBACK_BODY),
             None => ("400 Bad Request", INVALID_BODY),
@@ -763,7 +813,7 @@ Expected: `test result: ok. 3 passed`
 
 - [ ] **Step 5: Format, lint, commit**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
 
 ```bash
 git add src-tauri/src/identity.rs
@@ -789,18 +839,22 @@ printf 'AQAB' > src-tauri/tests/fixtures/workos-test-key.e
 wc -c src-tauri/tests/fixtures/workos-test-key.*
 ```
 
-Expected: three files; `.e` is 4 bytes (`AQAB` is 65537), `.n` is ~342 bytes.
+Expected: three files; `.e` is 4 bytes (`AQAB` is 65537), `.n` is ~342 bytes. The `.pem` is a throwaway test-only private key that is committed on purpose — confirm GitHub push protection does not block the push over its `RSA PRIVATE KEY` block; if it does, the fixture needs an allowlist entry rather than a different key.
 
 - [ ] **Step 2: Write the failing tests**
 
 Append inside `mod tests`:
 
 ```rust
-    use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
     fn test_jwks() -> Jwks {
-        let n = include_str!("../tests/fixtures/workos-test-key.n").trim().to_owned();
-        let e = include_str!("../tests/fixtures/workos-test-key.e").trim().to_owned();
+        let n = include_str!("../tests/fixtures/workos-test-key.n")
+            .trim()
+            .to_owned();
+        let e = include_str!("../tests/fixtures/workos-test-key.e")
+            .trim()
+            .to_owned();
         Jwks::from_json(&serde_json::json!({
             "keys": [{ "kty": "RSA", "kid": "test-kid", "use": "sig", "alg": "RS256", "n": n, "e": e }]
         }).to_string()).unwrap()
@@ -834,16 +888,40 @@ Append inside `mod tests`:
     fn verify_rejects_bad_issuer_client_expiry_signature_and_kid() {
         let now = 1_800_000_000;
         let jwks = test_jwks();
-        let mut wrong_iss = good_claims(now); wrong_iss["iss"] = "https://evil.example".into();
-        assert!(verify_access_token(&sign(&wrong_iss, Some("test-kid")), &jwks, "client_123", now).is_err());
-        assert!(verify_access_token(&sign(&good_claims(now), Some("test-kid")), &jwks, "client_OTHER", now).is_err());
-        let mut expired = good_claims(now); expired["exp"] = (now - 1).into();
-        assert!(verify_access_token(&sign(&expired, Some("test-kid")), &jwks, "client_123", now).is_err());
-        assert!(verify_access_token(&sign(&good_claims(now), Some("unknown-kid")), &jwks, "client_123", now).is_err());
+        let mut wrong_iss = good_claims(now);
+        wrong_iss["iss"] = "https://evil.example".into();
+        assert!(
+            verify_access_token(&sign(&wrong_iss, Some("test-kid")), &jwks, "client_123", now)
+                .is_err()
+        );
+        assert!(verify_access_token(
+            &sign(&good_claims(now), Some("test-kid")),
+            &jwks,
+            "client_OTHER",
+            now
+        )
+        .is_err());
+        let mut expired = good_claims(now);
+        expired["exp"] = (now - 1).into();
+        assert!(
+            verify_access_token(&sign(&expired, Some("test-kid")), &jwks, "client_123", now)
+                .is_err()
+        );
+        assert!(verify_access_token(
+            &sign(&good_claims(now), Some("unknown-kid")),
+            &jwks,
+            "client_123",
+            now
+        )
+        .is_err());
         let token = sign(&good_claims(now), Some("test-kid"));
-        let mut tampered = token.clone(); tampered.replace_range(token.len() - 4.., "AAAA");
+        let mut tampered = token.clone();
+        tampered.replace_range(token.len() - 4.., "AAAA");
         assert!(verify_access_token(&tampered, &jwks, "client_123", now).is_err());
-        assert!(verify_access_token("eyJhbGciOiJub25lIn0.e30.", &jwks, "client_123", now).is_err(), "alg=none");
+        assert!(
+            verify_access_token("eyJhbGciOiJub25lIn0.e30.", &jwks, "client_123", now).is_err(),
+            "alg=none"
+        );
     }
 ```
 
@@ -876,7 +954,9 @@ pub(crate) struct Jwks(JwkSet);
 
 impl Jwks {
     pub(crate) fn from_json(json: &str) -> Result<Self, String> {
-        serde_json::from_str(json).map(Self).map_err(|_| "Key set is invalid.".into())
+        serde_json::from_str(json)
+            .map(Self)
+            .map_err(|_| "Key set is invalid.".into())
     }
 }
 
@@ -900,7 +980,8 @@ pub(crate) fn verify_access_token(
     validation.validate_aud = false;
     validation.validate_exp = false; // checked below against `now`
     validation.set_required_spec_claims(&["iss", "sub", "exp"]);
-    let data = decode::<Claims>(token, &key, &validation).map_err(|_| "Token signature or issuer is invalid.")?;
+    let data = decode::<Claims>(token, &key, &validation)
+        .map_err(|_| "Token signature or issuer is invalid.")?;
     let claims = data.claims;
     if claims.client_id.as_deref() != Some(client_id) {
         return Err("Token was issued for a different client.".into());
@@ -919,7 +1000,7 @@ Expected: `test result: ok. 2 passed`
 
 - [ ] **Step 6: Format, lint, commit**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
 
 ```bash
 git add src-tauri/tests/fixtures src-tauri/src/identity.rs
@@ -941,10 +1022,15 @@ Append inside `mod tests`:
     use crate::keyring::StoredSession;
 
     fn session(exp: u64, checked: u64, now: u64) -> StoredSession {
+        let mut claims = good_claims(now);
+        claims["exp"] = exp.into();
         StoredSession {
-            access_token: sign(&{ let mut c = good_claims(now); c["exp"] = exp.into(); c }, Some("test-kid")),
-            refresh_token: "rt".into(), expires_at: exp, checked_at: checked,
-            subject: "user_01H".into(), email: "val@example.com".into(),
+            access_token: sign(&claims, Some("test-kid")),
+            refresh_token: "rt".into(),
+            expires_at: exp,
+            checked_at: checked,
+            subject: "user_01H".into(),
+            email: "val@example.com".into(),
         }
     }
 
@@ -952,13 +1038,33 @@ Append inside `mod tests`:
     fn status_is_derived_from_record_clock_and_keys() {
         let now = 1_800_000_000;
         let jwks = test_jwks();
-        assert!(matches!(derive_status(None, Some(&jwks), "client_123", now), Status::SignedOut));
-        assert!(matches!(derive_status(Some(&session(now + 60, now, now)), None, "client_123", now), Status::Expired));
-        assert!(matches!(derive_status(Some(&session(now + 60, now, now)), Some(&jwks), "client_123", now), Status::Entitled { .. }));
+        assert!(matches!(
+            derive_status(None, Some(&jwks), "client_123", now),
+            Status::SignedOut
+        ));
+        assert!(matches!(
+            derive_status(Some(&session(now + 60, now, now)), None, "client_123", now),
+            Status::Expired
+        ));
+        assert!(matches!(
+            derive_status(Some(&session(now + 60, now, now)), Some(&jwks), "client_123", now),
+            Status::Entitled { .. }
+        ));
         // token expired, inside the 14-day grace: needs a refresh attempt
-        assert!(matches!(derive_status(Some(&session(now - 1, now - 60, now)), Some(&jwks), "client_123", now), Status::NeedsRefresh));
+        assert!(matches!(
+            derive_status(Some(&session(now - 1, now - 60, now)), Some(&jwks), "client_123", now),
+            Status::NeedsRefresh
+        ));
         // grace elapsed
-        assert!(matches!(derive_status(Some(&session(now - 1, now - GRACE_SECONDS - 1, now)), Some(&jwks), "client_123", now), Status::Expired));
+        assert!(matches!(
+            derive_status(
+                Some(&session(now - 1, now - GRACE_SECONDS - 1, now)),
+                Some(&jwks),
+                "client_123",
+                now
+            ),
+            Status::Expired
+        ));
     }
 ```
 
@@ -976,7 +1082,11 @@ pub(crate) const GRACE_SECONDS: u64 = 14 * 24 * 60 * 60;
 
 pub(crate) enum Status {
     SignedOut,
-    Entitled { email: String, checked_at: u64, grace_until: u64 },
+    Entitled {
+        email: String,
+        checked_at: u64,
+        grace_until: u64,
+    },
     /// Access token expired but the grace window is open; try a refresh grant.
     NeedsRefresh,
     Expired,
@@ -987,7 +1097,11 @@ impl Status {
     pub(crate) fn to_value(&self) -> serde_json::Value {
         match self {
             Status::SignedOut => serde_json::json!({ "state": "signed_out" }),
-            Status::Entitled { email, checked_at, grace_until } => serde_json::json!({
+            Status::Entitled {
+                email,
+                checked_at,
+                grace_until,
+            } => serde_json::json!({
                 "state": "entitled", "email": email, "checkedAt": checked_at, "graceUntil": grace_until
             }),
             Status::NeedsRefresh => serde_json::json!({ "state": "expired" }),
@@ -1003,16 +1117,26 @@ pub(crate) fn derive_status(
     client_id: &str,
     now: u64,
 ) -> Status {
-    let Some(record) = record else { return Status::SignedOut };
-    let Some(jwks) = jwks else { return Status::Expired };
+    let Some(record) = record else {
+        return Status::SignedOut;
+    };
+    let Some(jwks) = jwks else {
+        return Status::Expired;
+    };
     let grace_until = record.checked_at.saturating_add(GRACE_SECONDS);
     match verify_access_token(&record.access_token, jwks, client_id, now) {
-        Ok(_) => Status::Entitled { email: record.email.clone(), checked_at: record.checked_at, grace_until },
+        Ok(_) => Status::Entitled {
+            email: record.email.clone(),
+            checked_at: record.checked_at,
+            grace_until,
+        },
         Err(_) if now < grace_until => Status::NeedsRefresh,
         Err(_) => Status::Expired,
     }
 }
 ```
+
+Every `StoredSession` field stays `pub(crate)`: `derive_status` reads `access_token`, `email` and `checked_at` here, and Task 9 builds the struct literally, so narrowing any field breaks both call sites.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1072,7 +1196,7 @@ Add to `identity.rs`:
 ```rust
 use std::process::{Command, Stdio};
 
-const AUTHENTICATE_URL: &str = "https://api.workos.com/user_management/authenticate";
+const AUTHENTICATE_PATH: &str = "/user_management/authenticate";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn exchange_body(client_id: &str, code: &str, verifier: &str) -> serde_json::Value {
@@ -1110,19 +1234,24 @@ fn client() -> Result<reqwest::Client, HttpFailure> {
 }
 
 pub(crate) async fn authenticate(body: serde_json::Value) -> Result<TokenResponse, HttpFailure> {
+    let url = format!("{WORKOS_API}{AUTHENTICATE_PATH}");
     let response = client()?
-        .post(AUTHENTICATE_URL)
+        .post(&url)
         .json(&body)
         .send()
         .await
-        .map_err(|_| HttpFailure::Transient("Could not reach WorkOS. Check your connection and retry.".into()))?;
+        .map_err(|_| {
+            HttpFailure::Transient("Could not reach WorkOS. Check your connection and retry.".into())
+        })?;
     let status = response.status();
     let value: serde_json::Value = response
         .json()
         .await
         .map_err(|_| HttpFailure::Transient("WorkOS returned an unreadable response.".into()))?;
     if status.is_server_error() {
-        return Err(HttpFailure::Transient("WorkOS is unavailable right now. Retry shortly.".into()));
+        return Err(HttpFailure::Transient(
+            "WorkOS is unavailable right now. Retry shortly.".into(),
+        ));
     }
     if !status.is_success() {
         let detail: String = value
@@ -1136,11 +1265,22 @@ pub(crate) async fn authenticate(body: serde_json::Value) -> Result<TokenRespons
             .collect();
         return Err(HttpFailure::Refused(detail));
     }
-    let field = |name: &str| value.get(name).and_then(serde_json::Value::as_str).map(str::to_owned);
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
     Ok(TokenResponse {
-        access_token: field("access_token").ok_or_else(|| HttpFailure::Refused("WorkOS returned no access token.".into()))?,
-        refresh_token: field("refresh_token").ok_or_else(|| HttpFailure::Refused("WorkOS returned no refresh token.".into()))?,
-        email: value.pointer("/user/email").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
+        access_token: field("access_token")
+            .ok_or_else(|| HttpFailure::Refused("WorkOS returned no access token.".into()))?,
+        refresh_token: field("refresh_token")
+            .ok_or_else(|| HttpFailure::Refused("WorkOS returned no refresh token.".into()))?,
+        email: value
+            .pointer("/user/email")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
     })
 }
 
@@ -1152,7 +1292,9 @@ pub(crate) async fn fetch_jwks(client_id: &str) -> Result<String, HttpFailure> {
         .await
         .map_err(|_| HttpFailure::Transient("Could not fetch the WorkOS key set.".into()))?;
     if !response.status().is_success() {
-        return Err(HttpFailure::Transient("WorkOS key set is unavailable.".into()));
+        return Err(HttpFailure::Transient(
+            "WorkOS key set is unavailable.".into(),
+        ));
     }
     response
         .text()
@@ -1168,11 +1310,23 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
         return Err("Refusing to open a URL that is not the WorkOS sign-in page.".into());
     }
     #[cfg(target_os = "macos")]
-    let mut command = { let mut c = Command::new("open"); c.arg(url); c };
+    let mut command = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
     #[cfg(target_os = "linux")]
-    let mut command = { let mut c = Command::new("xdg-open"); c.arg(url); c };
+    let mut command = {
+        let mut c = Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
     #[cfg(target_os = "windows")]
-    let mut command = { let mut c = Command::new("cmd"); c.args(["/c", "start", "", url]); c };
+    let mut command = {
+        let mut c = Command::new("cmd");
+        c.args(["/c", "start", "", url]);
+        c
+    };
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1190,7 +1344,7 @@ Expected: all identity tests pass (opener test passes because the URL prefix che
 
 - [ ] **Step 5: Format, lint, commit**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
 
 ```bash
 git add src-tauri/src/identity.rs
@@ -1203,8 +1357,10 @@ git commit -S -m "feat(native): WorkOS token exchange, refresh, key set fetch an
 
 **Files:**
 - Modify: `src-tauri/src/identity.rs`
-- Modify: `src-tauri/src/lib.rs:262-290`
+- Modify: `src-tauri/src/lib.rs:55,262-290`
+- Modify: `src-tauri/build.rs:3` (`NATIVE_COMMANDS`)
 - Modify: `src-tauri/capabilities/default.json`
+- Modify: `src-tauri/gen/schemas/desktop-schema.json` (regenerated by `build.rs`)
 
 - [ ] **Step 1: Write the failing test (config reader is pure; commands are exercised in Task 24's manual checklist)**
 
@@ -1215,9 +1371,15 @@ Append inside `mod tests`:
     fn client_id_comes_from_plugins_workos_and_is_validated() {
         let mut plugins = std::collections::HashMap::new();
         assert!(client_id_from(&plugins).is_err());
-        plugins.insert("workos".to_owned(), serde_json::json!({ "clientId": "client_abc" }));
+        plugins.insert(
+            "workos".to_owned(),
+            serde_json::json!({ "clientId": "client_abc" }),
+        );
         assert_eq!(client_id_from(&plugins).unwrap(), "client_abc");
-        plugins.insert("workos".to_owned(), serde_json::json!({ "clientId": "client abc" }));
+        plugins.insert(
+            "workos".to_owned(),
+            serde_json::json!({ "clientId": "client abc" }),
+        );
         assert!(client_id_from(&plugins).is_err());
     }
 ```
@@ -1237,7 +1399,7 @@ use std::sync::Arc;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 use crate::coven_runtime::CovenRuntimeState;
-use crate::keyring::{KeyringError, NativeKeyring, StoredSession};
+use crate::keyring::{CredentialCustody, KeyringError, StoredSession};
 
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 const JWKS_FILE: &str = "workos-jwks.json";
@@ -1270,7 +1432,9 @@ fn jwks_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn read_jwks(path: &Path) -> Option<Jwks> {
-    std::fs::read_to_string(path).ok().and_then(|s| Jwks::from_json(&s).ok())
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| Jwks::from_json(&s).ok())
 }
 
 fn now() -> u64 {
@@ -1288,13 +1452,13 @@ fn keyring_text(error: KeyringError) -> String {
     }
 }
 
-fn keyring_for(app: &AppHandle) -> Arc<NativeKeyring> {
+fn keyring_for(app: &AppHandle) -> Arc<dyn CredentialCustody> {
     app.state::<crate::NativeConnectionState>().keyring.clone()
 }
 
 async fn refresh_and_store(
     app: &AppHandle,
-    keyring: &NativeKeyring,
+    keyring: &dyn CredentialCustody,
     current: &StoredSession,
     jwks: &Jwks,
 ) -> Result<Status, String> {
@@ -1302,16 +1466,39 @@ async fn refresh_and_store(
     match authenticate(refresh_body(&id, &current.refresh_token)).await {
         Ok(tokens) => {
             let claims = verify_access_token(&tokens.access_token, jwks, &id, now())?;
+            // The email comes from the verified claim; the response body and
+            // the stored record are fallbacks, in that order.
+            let email = claims.email.clone().unwrap_or_else(|| {
+                if tokens.email.is_empty() {
+                    current.email.clone()
+                } else {
+                    tokens.email.clone()
+                }
+            });
             let next = StoredSession {
                 access_token: tokens.access_token,
                 refresh_token: tokens.refresh_token,
                 expires_at: claims.exp,
                 checked_at: now(),
                 subject: claims.sub,
-                email: if tokens.email.is_empty() { current.email.clone() } else { tokens.email },
+                email,
             };
-            keyring.write_session(Some(current), &next).map_err(keyring_text)?;
-            Ok(Status::Entitled { email: next.email.clone(), checked_at: next.checked_at, grace_until: next.checked_at + GRACE_SECONDS })
+            if !keyring
+                .write_session(Some(current), &next)
+                .map_err(keyring_text)?
+            {
+                // Another window refreshed first; its record is the live one.
+                return Ok(Status::Entitled {
+                    email: current.email.clone(),
+                    checked_at: current.checked_at,
+                    grace_until: current.checked_at + GRACE_SECONDS,
+                });
+            }
+            Ok(Status::Entitled {
+                email: next.email.clone(),
+                checked_at: next.checked_at,
+                grace_until: next.checked_at + GRACE_SECONDS,
+            })
         }
         Err(HttpFailure::Refused(_)) => {
             keyring.delete_session().map_err(keyring_text)?;
@@ -1333,7 +1520,9 @@ pub(crate) async fn identity_status(app: AppHandle) -> Result<serde_json::Value,
     let jwks = read_jwks(&jwks_path(&app)?);
     let status = derive_status(record.as_ref(), jwks.as_ref(), &id, now());
     let status = match (status, record, jwks) {
-        (Status::NeedsRefresh, Some(record), Some(jwks)) => refresh_and_store(&app, &keyring, &record, &jwks).await?,
+        (Status::NeedsRefresh, Some(record), Some(jwks)) => {
+            refresh_and_store(&app, &keyring, &record, &jwks).await?
+        }
         (status, _, _) => status,
     };
     Ok(status.to_value())
@@ -1361,33 +1550,55 @@ pub(crate) async fn identity_sign_in(
     .await
     .map_err(|_| "Sign-in worker failed.".to_string())??;
     let _ = on_event.send(serde_json::json!({ "type": "received" }));
-    let tokens = authenticate(exchange_body(&id, &code, &pkce.verifier)).await.map_err(|e| match e {
-        HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
-    })?;
+    let tokens = authenticate(exchange_body(&id, &code, &pkce.verifier))
+        .await
+        .map_err(|e| match e {
+            HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
+        })?;
     let path = jwks_path(&app)?;
     let jwks = match read_jwks(&path) {
         Some(j) => j,
         None => {
-            let text = fetch_jwks(&id).await.map_err(|e| match e { HttpFailure::Refused(m) | HttpFailure::Transient(m) => m })?;
+            let text = fetch_jwks(&id).await.map_err(|e| match e {
+                HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
+            })?;
             let jwks = Jwks::from_json(&text)?;
             std::fs::write(&path, text).map_err(|_| "Could not cache the WorkOS key set.")?;
             jwks
         }
     };
-    let claims = verify_access_token(&tokens.access_token, &jwks, &id, now())
-        .map_err(|_| "Couldn't verify the sign-in. Nothing was stored.".to_string())?;
+    let claims = match verify_access_token(&tokens.access_token, &jwks, &id, now()) {
+        Ok(claims) => claims,
+        Err(_) => {
+            // The cached key set may predate a WorkOS key rotation. Refetch once.
+            let text = fetch_jwks(&id).await.map_err(|e| match e {
+                HttpFailure::Refused(m) | HttpFailure::Transient(m) => m,
+            })?;
+            let fresh = Jwks::from_json(&text)?;
+            std::fs::write(&path, text).map_err(|_| "Could not cache the WorkOS key set.")?;
+            verify_access_token(&tokens.access_token, &fresh, &id, now())
+                .map_err(|_| "Couldn't verify the sign-in. Nothing was stored.".to_string())?
+        }
+    };
     let _ = on_event.send(serde_json::json!({ "type": "exchanged" }));
     let keyring = keyring_for(&app);
     let current = keyring.read_session().map_err(keyring_text)?;
+    // The email comes from the verified claim; the response body is a fallback.
+    let email = claims.email.clone().unwrap_or_else(|| tokens.email.clone());
     let next = StoredSession {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         expires_at: claims.exp,
         checked_at: now(),
         subject: claims.sub,
-        email: tokens.email,
+        email,
     };
-    keyring.write_session(current.as_ref(), &next).map_err(keyring_text)?;
+    if !keyring
+        .write_session(current.as_ref(), &next)
+        .map_err(keyring_text)?
+    {
+        return Err("Sign-in changed in another window. Retry.".into());
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_focus();
     }
@@ -1409,7 +1620,9 @@ pub(crate) async fn identity_sign_out(app: AppHandle) -> Result<(), String> {
 }
 ```
 
-`NativeConnectionState.keyring` must be reachable: in `src-tauri/src/lib.rs`, find the `keyring:` field of `struct NativeConnectionState` and make it `pub(crate) keyring: Arc<NativeKeyring>` (it is already an `Arc`; only the visibility changes).
+`identity_sign_in` holds the runtime's single run slot for up to ten minutes. That is acceptable for v1 because onboarding gates the chat surface: nothing else can start a run while sign-in is pending. If sign-in ever becomes available from inside the chat, give identity its own registry.
+
+In `src-tauri/src/lib.rs`, the `keyring` field of `struct NativeConnectionState` (line 55, `keyring: Arc<dyn CredentialCustody>`) becomes `pub(crate) keyring: Arc<dyn CredentialCustody>` — visibility only.
 
 - [ ] **Step 4: Register the commands**
 
@@ -1433,22 +1646,66 @@ In `src-tauri/capabilities/default.json`, after `"allow-coven-runtime-cancel",` 
     "allow-identity-sign-out",
 ```
 
+In `src-tauri/build.rs`, `NATIVE_COMMANDS` (line 3) is the list the build script uses to keep the generated ACL schema in step with the handler; a command that is missing from it has no permission in the schema and the capability above is rejected at startup. After `"coven_runtime_cancel",` add the four names in handler order:
+
+```rust
+    "identity_status",
+    "identity_sign_in",
+    "identity_cancel_sign_in",
+    "identity_sign_out",
+```
+
+Then regenerate the schema the build script writes:
+
+Run: `cargo check --manifest-path src-tauri/Cargo.toml --locked --all-targets`
+Expected: `Finished`; `src-tauri/gen/schemas/desktop-schema.json` is rewritten with the four new `allow-identity-*` permissions. That file is tracked in git, so it belongs in this task's commit.
+
 - [ ] **Step 5: Remove the staged-code allowances now that everything is wired**
 
-Every `#[allow(dead_code)]` added by Tasks 2 and 4–8 on items this task now calls (`StoredSession`, `read_session`, `write_session`, `delete_session`, `SESSION_ACCOUNT`, `MAX_SESSION_RECORD_BYTES`, `serialize_session`, `parse_stored_session`, `Pkce`, `random_state`, `authorize_url`, `CallbackListener`, `Claims`, `Jwks`, `verify_access_token`, `Status`, `derive_status`, `GRACE_SECONDS`, `exchange_body`, `refresh_body`, `TokenResponse`, `HttpFailure`, `authenticate`, `fetch_jwks`, `open_browser`) must be deleted, together with their `// wired in Task 9` comments. Then:
+Delete the file-level staging block at the top of `identity.rs` — the two `//` comment lines and the `#![allow(dead_code)]` line Task 4 Step 1 put there. Every item in the file is now reached from the four commands above (`Pkce`, `random_state`, `authorize_url`, `CallbackListener`, `Claims`, `Jwks`, `verify_access_token`, `Status`, `derive_status`, `GRACE_SECONDS`, `exchange_body`, `refresh_body`, `TokenResponse`, `HttpFailure`, `authenticate`, `fetch_jwks`, `open_browser`), so nothing replaces it.
 
-Run: `grep -n 'allow(dead_code)' src-tauri/src/identity.rs src-tauri/src/keyring.rs`
-Expected: no output from `identity.rs`; `keyring.rs` shows only hits that pre-date Task 2 (compare with `git show 4d456ef:src-tauri/src/keyring.rs | grep -c 'allow(dead_code)'`).
+`keyring.rs` is an existing file and keeps item-level allowances only on `session_entry`, `serialize_session`, `parse_stored_session` and the two constants (`SESSION_ACCOUNT`, `MAX_SESSION_RECORD_BYTES`), and only if clippy still requires them after this wiring; remove any that clippy no longer needs, together with their `// wired in Task 9` comments. `StoredSession`, `read_session`, `write_session` and `delete_session` are all called from here, so their allowances go.
 
-- [ ] **Step 6: Build, test, lint**
+Run: `grep -n 'allow(dead_code)' src-tauri/src/identity.rs`
+Expected: no output.
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
+- [ ] **Step 6: Consolidate the module's imports**
+
+`identity.rs` grew one `use` block per task. Collapse them into a single head at the top of the file, above the first `const`:
+
+```rust
+use std::io::{Read as _, Write as _};
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use jsonwebtoken::{decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
+use url::Url;
+
+use crate::coven_runtime::CovenRuntimeState;
+use crate::keyring::{CredentialCustody, KeyringError, StoredSession};
+```
+
+`NativeKeyring` is deliberately absent: nothing in this module names the concrete type any more.
+
+Then drop the imports in `mod tests` that `use super::*;` already supplies: `use std::net::TcpStream;`, `use std::sync::atomic::AtomicBool;` and `use std::time::Duration;` (added in Task 5) and `use crate::keyring::StoredSession;` (added in Task 7). Two lines stay: `use std::io::{Read, Write};`, because the parent imports those traits anonymously as `_` and the tests call `read_to_string`/`write!` by name, and `use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};` — trim that one to `use jsonwebtoken::{encode, EncodingKey, Header};` since `Algorithm` now comes from the parent.
+
+- [ ] **Step 7: Build, test, lint**
+
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
 Expected: clean; all tests pass, including `registers_only_the_managed_sdk_adapter_commands` (unchanged). If clippy reports `dead_code` on anything listed above, that item is not actually wired — fix the wiring, do not restore the allowance.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src-tauri/src/identity.rs src-tauri/src/keyring.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
+git add src-tauri/src/identity.rs src-tauri/src/keyring.rs src-tauri/src/lib.rs src-tauri/build.rs src-tauri/capabilities/default.json src-tauri/gen/schemas/desktop-schema.json
 git commit -S -m "feat(native): identity commands for WorkOS sign-in, status and sign-out"
 ```
 
@@ -1458,13 +1715,17 @@ git commit -S -m "feat(native): identity commands for WorkOS sign-in, status and
 
 **Files:**
 - Create: `src-tauri/src/setup.rs`
-- Modify: `src-tauri/src/lib.rs` (add `mod setup;`)
+- Modify: `src-tauri/src/lib.rs` (add `mod setup;` between `mod operation;` and `mod transport;`)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `src-tauri/src/setup.rs`:
+Create `src-tauri/src/setup.rs`. The file starts with the file-level staging allowance from the Conventions section — three lines, before anything else:
 
 ```rust
+// Every item below is reached only from the commands Task 12 registers;
+// the allowance is deleted in Task 12 Step 5.
+#![allow(dead_code)]
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1489,39 +1750,72 @@ mod tests {
 
         let report = report_from(&probe(false, false, false, false, false), false);
         assert_eq!(report["platform"]["ok"], false);
-        assert_eq!(report["platform"]["detail"], "Chat isn't available on Windows yet.");
-        assert_eq!(report["node"]["detail"], "Node.js was not found on this machine.");
-        assert_eq!(report["coven"]["detail"], "Coven CLI was not found in ~/.local/bin, ~/.cargo/bin, Homebrew, /usr/local or PATH.");
-        assert_eq!(report["engine"]["detail"], "The Coven engine is not installed.");
-        assert_eq!(report["familiar"]["detail"], "No familiar has a dedicated project workspace yet.");
+        assert_eq!(
+            report["platform"]["detail"],
+            "Chat isn't available on Windows yet."
+        );
+        assert_eq!(
+            report["node"]["detail"],
+            "Node.js was not found on this machine."
+        );
+        assert_eq!(
+            report["coven"]["detail"],
+            "Coven CLI was not found in ~/.local/bin, ~/.cargo/bin, Homebrew, /usr/local or PATH."
+        );
+        assert_eq!(
+            report["engine"]["detail"],
+            "The Coven engine is not installed."
+        );
+        assert_eq!(
+            report["familiar"]["detail"],
+            "No familiar has a dedicated project workspace yet."
+        );
     }
 
     #[test]
     fn install_steps_are_exactly_two_fixed_argv_vectors() {
         assert_eq!(
-            argv_for(Step::InstallCli, Path::new("/usr/local/bin/npm"), Path::new("/Users/me")),
-            ("/usr/local/bin/npm".to_owned(), vec!["install".to_owned(), "-g".to_owned(), "--prefix".to_owned(), "/Users/me/.local".to_owned(), "@opencoven/cli".to_owned()])
+            argv_for(
+                Step::InstallCli,
+                Path::new("/usr/local/bin/npm"),
+                Path::new("/Users/me")
+            ),
+            (
+                "/usr/local/bin/npm".to_owned(),
+                vec![
+                    "install".to_owned(),
+                    "-g".to_owned(),
+                    "--prefix".to_owned(),
+                    "/Users/me/.local".to_owned(),
+                    "@opencoven/cli".to_owned(),
+                ]
+            )
         );
         assert_eq!(
-            argv_for(Step::InstallEngine, Path::new("/Users/me/.local/bin/coven"), Path::new("/Users/me")),
-            ("/Users/me/.local/bin/coven".to_owned(), vec!["engine".to_owned(), "install".to_owned()])
+            argv_for(
+                Step::InstallEngine,
+                Path::new("/Users/me/.local/bin/coven"),
+                Path::new("/Users/me")
+            ),
+            (
+                "/Users/me/.local/bin/coven".to_owned(),
+                vec!["engine".to_owned(), "install".to_owned()]
+            )
         );
-        assert_eq!(display_command(Step::InstallCli), "npm install -g --prefix ~/.local @opencoven/cli");
-        assert_eq!(display_command(Step::InstallEngine), "coven engine install");
     }
 }
 ```
 
-Add `mod setup;` to `lib.rs`.
+Add `mod setup;` to `lib.rs`, between `mod operation;` and `mod transport;` — the `mod` lines are alphabetical and must stay that way.
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml --lib setup::`
-Expected: compile errors — `Probe`, `report_from`, `Step`, `argv_for`, `display_command` not found.
+Expected: compile errors — `Probe`, `report_from`, `Step`, `argv_for` not found.
 
 - [ ] **Step 3: Implement the pure parts**
 
-Add above the tests module:
+Add above the tests module, below the three-line `#![allow(dead_code)]` block that Step 1 put at the very top of the file (inner attributes must precede every `use`):
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -1587,14 +1881,9 @@ pub(crate) fn argv_for(step: Step, tool: &Path, home: &Path) -> (String, Vec<Str
     };
     (program, args)
 }
-
-pub(crate) fn display_command(step: Step) -> &'static str {
-    match step {
-        Step::InstallCli => "npm install -g --prefix ~/.local @opencoven/cli",
-        Step::InstallEngine => "coven engine install",
-    }
-}
 ```
+
+There is deliberately no Rust helper that renders a step as a human-readable command line. The JS client owns that (Task 15's `displayCommand`) and is the only place the string is shown, so a second copy in Rust would be an unwired duplicate.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1632,12 +1921,14 @@ Append inside `mod tests`:
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(find_tool("fake-tool", &root), Some(tool));
         assert_eq!(find_tool("definitely-missing-tool-xyz", &root), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn familiar_needs_an_absolute_non_root_non_home_workspace() {
         let home = Path::new("/Users/me");
-        let ok = |ws: &str| any_familiar_has_workspace(&json!([{ "id": "f", "workspace": ws }]), home);
+        let ok =
+            |ws: &str| any_familiar_has_workspace(&json!([{ "id": "f", "workspace": ws }]), home);
         assert!(ok("/Users/me/projects/app"));
         assert!(!ok("/Users/me"));
         assert!(!ok("/"));
@@ -1657,9 +1948,7 @@ Expected: compile errors — `find_tool`, `any_familiar_has_workspace` not found
 Add to `setup.rs`:
 
 ```rust
-use crate::coven_runtime::{cli_json, home, resolve_cli, run_process};
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use crate::coven_runtime::{cli_json, home, resolve_cli};
 
 fn executable(path: &Path) -> bool {
     #[cfg(unix)]
@@ -1673,8 +1962,9 @@ fn executable(path: &Path) -> bool {
     }
 }
 
-/// Same directories `coven_runtime::run_process` puts on PATH, in the same
-/// order, so a tool the app can find here is a tool a run can find later.
+/// The same directories `coven_runtime::run_process` puts on PATH, in the same
+/// order, so a tool found here is a tool a later run can find too. This module
+/// mirrors that search order; it never calls `run_process` itself.
 pub(crate) fn find_tool(name: &str, home: &Path) -> Option<PathBuf> {
     let mut candidates = vec![
         home.join(".local/bin"),
@@ -1685,7 +1975,10 @@ pub(crate) fn find_tool(name: &str, home: &Path) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).filter(|p| p.is_absolute()));
     }
-    candidates.into_iter().map(|dir| dir.join(name)).find(|p| executable(p))
+    candidates
+        .into_iter()
+        .map(|dir| dir.join(name))
+        .find(|p| executable(p))
 }
 
 pub(crate) fn any_familiar_has_workspace(familiars: &Value, home: &Path) -> bool {
@@ -1699,27 +1992,19 @@ pub(crate) fn any_familiar_has_workspace(familiars: &Value, home: &Path) -> bool
     })
 }
 
-fn engine_installed(cancel: &AtomicBool) -> bool {
-    run_process(
-        &["engine".into(), "status".into(), "--json".into()],
-        None,
-        cancel,
-        Duration::from_secs(20),
-        None,
-    )
-    .ok()
-    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-    .and_then(|v| v.get("installed").and_then(Value::as_bool))
-    .unwrap_or(false)
+fn engine_installed() -> bool {
+    cli_json(&["engine", "status", "--json"])
+        .ok()
+        .and_then(|v| v.get("installed").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 pub(crate) fn probe() -> Result<Probe, String> {
     let home_dir = home()?;
     let coven = resolve_cli().ok();
-    let cancel = AtomicBool::new(false);
     let (engine, familiar) = if coven.is_some() {
         (
-            engine_installed(&cancel),
+            engine_installed(),
             cli_json(&["familiars", "--json"])
                 .map(|v| any_familiar_has_workspace(&v, &home_dir))
                 .unwrap_or(false),
@@ -1737,8 +2022,6 @@ pub(crate) fn probe() -> Result<Probe, String> {
 }
 ```
 
-Check the engine status field name against the existing status code at `coven_runtime.rs:572-604` (it parses `coven engine status --json`); if that code reads a key other than `installed`, use the same key here.
-
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml --lib setup::`
@@ -1746,7 +2029,7 @@ Expected: `test result: ok. 4 passed`
 
 - [ ] **Step 5: Format, lint, commit**
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy`
 
 ```bash
 git add src-tauri/src/setup.rs
@@ -1760,7 +2043,9 @@ git commit -S -m "feat(native): detect Node, npm, Coven, engine and a usable fam
 **Files:**
 - Modify: `src-tauri/src/setup.rs`
 - Modify: `src-tauri/src/lib.rs` `generate_handler!`
+- Modify: `src-tauri/build.rs:3` (`NATIVE_COMMANDS`)
 - Modify: `src-tauri/capabilities/default.json`
+- Modify: `src-tauri/gen/schemas/desktop-schema.json` (regenerated by `build.rs`)
 
 - [ ] **Step 1: Write the failing test (streaming through the real helper with a fake tool)**
 
@@ -1773,15 +2058,30 @@ Append inside `mod tests`:
         let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&root).unwrap();
         let fake = root.join("npm");
-        std::fs::write(&fake, "#!/bin/sh\necho installing \"$@\"\necho warn >&2\nexit 7\n").unwrap();
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho installing \"$@\"\necho warn >&2\nexit 7\n",
+        )
+        .unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let cancel = AtomicBool::new(false);
         let mut events = Vec::new();
-        let code = run_step_with(Step::InstallCli, &fake, &root, &cancel, &mut |v| { events.push(v); Ok(()) }).unwrap();
+        let code = run_step_with(Step::InstallCli, &fake, &root, &cancel, &mut |v| {
+            events.push(v);
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(code, 7);
-        assert!(events.iter().any(|e| e["type"] == "stdout" && e["text"].as_str().unwrap().starts_with("installing install -g --prefix")));
-        assert!(events.iter().any(|e| e["type"] == "stderr" && e["text"] == "warn"));
+        assert!(events.iter().any(|e| e["type"] == "stdout"
+            && e["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("installing install -g --prefix")));
+        assert!(events
+            .iter()
+            .any(|e| e["type"] == "stderr" && e["text"] == "warn"));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 ```
 
@@ -1796,6 +2096,8 @@ Add to `setup.rs`:
 
 ```rust
 use std::process::Command;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 use tauri::{ipc::Channel, State};
 
 use crate::coven_runtime::{execute_command_lines, CovenRuntimeState};
@@ -1818,7 +2120,27 @@ pub(crate) fn run_step_with(
 ) -> Result<i32, String> {
     let (program, args) = argv_for(step, tool, home);
     let mut command = Command::new(program);
-    command.args(args).current_dir(home).env("NO_COLOR", "1");
+    // `npm install -g` shells out to node, and `coven engine install` shells
+    // out to the CLI's own helpers. An inherited PATH is not enough when the
+    // app is launched from Finder, so prepend the same directories `find_tool`
+    // searches, in the same order.
+    let mut path = vec![
+        home.join(".local/bin"),
+        home.join(".cargo/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.extend(std::env::split_paths(&existing));
+    }
+    command
+        .args(args)
+        .current_dir(home)
+        .env("NO_COLOR", "1")
+        .env(
+            "PATH",
+            std::env::join_paths(path).map_err(|_| "Invalid executable search path.")?,
+        );
     execute_command_lines(command, cancel, INSTALL_TIMEOUT, &mut |is_stderr, text| {
         on_event(json!({ "type": if is_stderr { "stderr" } else { "stdout" }, "text": text }))
     })
@@ -1843,26 +2165,37 @@ pub(crate) async fn setup_run(
     let (cancel, registration) = state.register_run(&input.run_id)?;
     let home_dir = home()?;
     let tool = match input.step {
-        Step::InstallCli => find_tool("npm", &home_dir).ok_or("npm was not found on this machine.")?,
+        Step::InstallCli => {
+            find_tool("npm", &home_dir).ok_or("npm was not found on this machine.")?
+        }
         Step::InstallEngine => resolve_cli()?,
     };
     let step = input.step;
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _registration = registration;
-        let mut emit = |value: Value| on_event.send(value).map_err(|_| "Setup output channel closed.".to_string());
+        let mut emit = |value: Value| {
+            on_event
+                .send(value)
+                .map_err(|_| "Setup output channel closed.".to_string())
+        };
         run_step_with(step, &tool, &home_dir, &cancel, &mut emit)
     })
     .await
     .map_err(|_| "Setup worker failed.".to_string())?;
     match result {
         Ok(code) => Ok(json!({ "type": "exit", "code": code, "cancelled": false })),
-        Err(message) if message == "Coven run cancelled." => Ok(json!({ "type": "exit", "code": -1, "cancelled": true })),
+        Err(message) if message == "Coven run cancelled." => {
+            Ok(json!({ "type": "exit", "code": -1, "cancelled": true }))
+        }
         Err(message) => Err(message),
     }
 }
 
 #[tauri::command]
-pub(crate) fn setup_cancel(state: State<'_, CovenRuntimeState>, run_id: String) -> Result<(), String> {
+pub(crate) fn setup_cancel(
+    state: State<'_, CovenRuntimeState>,
+    run_id: String,
+) -> Result<(), String> {
     crate::coven_runtime::coven_runtime_cancel(state, run_id)
 }
 ```
@@ -1887,22 +2220,56 @@ In `capabilities/default.json` after `"allow-identity-sign-out",` add:
     "allow-setup-cancel",
 ```
 
+In `src-tauri/build.rs`, `NATIVE_COMMANDS` (line 3) is the list the build script uses to keep the generated ACL schema in step with the handler; a command that is missing from it has no permission in the schema and the capability above is rejected at startup. After the four `identity_*` names Task 9 added, add the three setup names in handler order:
+
+```rust
+    "setup_check",
+    "setup_run",
+    "setup_cancel",
+```
+
+Then regenerate the schema the build script writes:
+
+Run: `cargo check --manifest-path src-tauri/Cargo.toml --locked --all-targets`
+Expected: `Finished`; `src-tauri/gen/schemas/desktop-schema.json` is rewritten with the three new `allow-setup-*` permissions. That file is tracked in git, so it belongs in this task's commit.
+
 - [ ] **Step 5: Remove the staged-code allowances now that everything is wired**
 
-Delete every `#[allow(dead_code)] // wired in Task 12` added by Tasks 3, 10 and 11 (`execute_command_lines`, and in `setup.rs`: `Probe`, `Step`, `report_from`, `argv_for`, `display_command`, `find_tool`, `any_familiar_has_workspace`, `engine_installed`, `probe`, `run_step_with`, `RunInput`, `INSTALL_TIMEOUT`).
+Delete the file-level staging block at the top of `setup.rs` — the two `//` comment lines and the `#![allow(dead_code)]` line Task 10 Step 1 put there. Every item in the file is now reached from the three commands above (`Probe`, `Step`, `report_from`, `argv_for`, `find_tool`, `any_familiar_has_workspace`, `engine_installed`, `probe`, `run_step_with`, `RunInput`, `INSTALL_TIMEOUT`), so nothing replaces it.
 
-Run: `grep -n 'allow(dead_code)' src-tauri/src/setup.rs src-tauri/src/coven_runtime.rs`
-Expected: no output from `setup.rs`; `coven_runtime.rs` shows only hits that pre-date Task 3 (compare with `git show 4d456ef:src-tauri/src/coven_runtime.rs | grep -c 'allow(dead_code)'`).
+`coven_runtime.rs` is an existing file: delete the item-level `#[allow(dead_code)] // wired in Task 12` that Task 3 put above `execute_command_lines`, which this task now calls.
 
-- [ ] **Step 6: Build, test, lint**
+Run: `grep -n 'allow(dead_code)' src-tauri/src/setup.rs`
+Expected: no output.
 
-Run: `corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
+- [ ] **Step 6: Consolidate the module's imports**
+
+`setup.rs` grew one `use` block per task. Collapse them into a single head at the top of the file, above the first item:
+
+```rust
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+use tauri::{ipc::Channel, State};
+
+use crate::coven_runtime::{cli_json, execute_command_lines, home, resolve_cli, CovenRuntimeState};
+```
+
+`run_process` is deliberately absent: `engine_installed` goes through `cli_json`, and nothing else in the module calls it. `mod tests` needs no `use` beyond its `use super::*;` and the function-local `use std::os::unix::fs::PermissionsExt;` inside each of the two `#[cfg(unix)]` tests.
+
+- [ ] **Step 7: Build, test, lint**
+
+Run: `cargo fmt --manifest-path src-tauri/Cargo.toml --all && corepack pnpm cargo:fmt && corepack pnpm cargo:clippy && cargo test --manifest-path src-tauri/Cargo.toml --lib`
 Expected: clean; all pass. A `dead_code` report here means something is not wired — fix the wiring, do not restore the allowance.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src-tauri/src/setup.rs src-tauri/src/coven_runtime.rs src-tauri/src/lib.rs src-tauri/capabilities/default.json
+git add src-tauri/src/setup.rs src-tauri/src/coven_runtime.rs src-tauri/src/lib.rs src-tauri/build.rs src-tauri/capabilities/default.json src-tauri/gen/schemas/desktop-schema.json
 git commit -S -m "feat(native): setup commands with streamed, cancellable assisted install"
 ```
 
@@ -1915,11 +2282,16 @@ git commit -S -m "feat(native): setup commands with streamed, cancellable assist
 - [ ] **Step 1: Run the CI command**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml --locked --release --features phase1-conformance --lib`
-Expected: `test result: ok.` with every test passing (previously 215; now more).
+Expected: `test result: ok.` with every test passing.
+
+`--locked` is deliberate and is the point of this checkpoint: it fails the build if `Cargo.lock` would have to change, which catches a dependency edit that Task 1's `cargo fetch` resolved but never committed.
 
 - [ ] **Step 2: Run the Windows cross-check the `Rust` CI job performs**
 
-Run: `corepack pnpm cargo:check:windows-gnu` (requires `rustup target add x86_64-pc-windows-gnu`; if the target is absent, note it in the PR and let the `ci:full` job cover it).
+Run: `corepack pnpm cargo:check:windows-gnu` — the script already exists in `package.json`, so nothing needs adding.
+
+It needs three things on the machine: the `x86_64-pc-windows-gnu` target (`rustup target add x86_64-pc-windows-gnu`), a mingw-w64 toolchain, and `cmake` on PATH — `aws-lc-sys` builds from source for that target and invokes cmake, which it does not do for the host targets Task 1 describes. If any of the three is missing, do not try to install a toolchain here: note it in the PR and let the `ci:full` job cover it.
+
 Expected: `Finished` with no errors — the `cfg!(unix)` branches must still compile on Windows.
 
 No commit; this is a checkpoint.
