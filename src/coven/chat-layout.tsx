@@ -115,7 +115,17 @@ export function emptyThreadText(connected: boolean, familiarName?: string) {
   return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
 }
 
-export function composerCopy(familiarName?: string) {
+/**
+ * Composer copy, decided the same way as `emptyThreadText` so the two cannot
+ * disagree: a missing CLI is not fixed by choosing a familiar, and choosing one
+ * is not fixed by reconnecting.
+ *
+ * `connected`, never `ready` -- `ready` is false for an archived chat that
+ * still has a familiar to address, which would drop the name from the field.
+ */
+export function composerCopy(connected: boolean, familiarName?: string) {
+  if (!connected)
+    return { label: 'Message', placeholder: 'Connect to your local Coven CLI to send a message.' };
   if (!familiarName)
     return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
   return { label: `Message ${familiarName}`, placeholder: `Message ${familiarName}` };
@@ -180,7 +190,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
-  const composer = composerCopy(familiar?.name);
+  const composer = composerCopy(props.connected, familiar?.name);
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
   const transcriptRef = useRef<HTMLDivElement>(null);

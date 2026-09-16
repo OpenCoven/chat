@@ -94,21 +94,52 @@ describe('top bar identity', () => {
 
 describe('composer copy', () => {
   it('names the addressee only when there is one', () => {
-    expect(composerCopy('Astra')).toEqual({
+    expect(composerCopy(true, 'Astra')).toEqual({
       label: 'Message Astra',
       placeholder: 'Message Astra',
     });
-    expect(composerCopy().placeholder).toBe('Select a familiar to send a message.');
-    expect(composerCopy().label).toBe('Message');
+    expect(composerCopy(true).placeholder).toBe('Select a familiar to send a message.');
+    expect(composerCopy(true).label).toBe('Message');
+    // A missing CLI is not fixed by choosing a familiar.
+    expect(composerCopy(false).placeholder).toBe(
+      'Connect to your local Coven CLI to send a message.',
+    );
+    expect(composerCopy(false, 'Astra').placeholder).toBe(
+      'Connect to your local Coven CLI to send a message.',
+    );
     // An archived chat still addresses its familiar, and `ready` is false
     // there, so selection -- not `ready` -- decides the addressee.
-    expect(composerCopy('Lifecycle familiar').label).toBe('Message Lifecycle familiar');
+    expect(composerCopy(true, 'Lifecycle familiar').label).toBe('Message Lifecycle familiar');
   });
 
   it('does not offer to message the fallback name when nothing is selected', () => {
-    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    render(
+      <ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} connected ready />,
+    );
     expect(screen.queryByPlaceholderText('Message Coven')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
+  });
+
+  it('names the missing runtime rather than a selection when the CLI is down', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} />);
+    expect(
+      screen.getByPlaceholderText('Connect to your local Coven CLI to send a message.'),
+    ).toBeInTheDocument();
+  });
+
+  it('agrees with the transcript in every empty state', () => {
+    // The two helpers decide on the same inputs, so the field and the
+    // transcript can no longer name different obstacles.
+    for (const connected of [true, false]) {
+      for (const name of [undefined, 'Astra']) {
+        const transcript = emptyThreadText(connected, name);
+        const field = composerCopy(connected, name).placeholder;
+        const blamesRuntime = (text: string) => text.includes('Coven CLI');
+        const blamesSelection = (text: string) => text.includes('Select a familiar');
+        expect(blamesRuntime(field)).toBe(blamesRuntime(transcript));
+        expect(blamesSelection(field)).toBe(blamesSelection(transcript));
+      }
+    }
   });
 
   it('addresses the selected familiar', () => {
@@ -117,6 +148,7 @@ describe('composer copy', () => {
         {...layoutProps()}
         familiars={[{ id: 'f', name: 'Astra' }]}
         familiarId="f"
+        connected
         ready
       />,
     );
@@ -269,10 +301,15 @@ describe('production Familiars layout', () => {
   });
 
   it('tells a ready user without a familiar that one must be selected, matching the disabled composer', () => {
-    render(<ChatLayout {...layoutProps()} ready />);
+    // `connected` is what makes this the healthy/no-selection state. Rendering
+    // `ready` alone left the assertion below satisfied by the inspector's
+    // unrelated prose while the composer named the runtime instead.
+    render(<ChatLayout {...layoutProps()} connected ready />);
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/select a familiar/i).length).toBeGreaterThan(0);
+    // The name promises the composer specifically, so assert it directly.
+    expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
   });
 
   it('shows real messages, filters conversations and renders honest access', () => {
