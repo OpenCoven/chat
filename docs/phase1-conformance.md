@@ -2874,3 +2874,21 @@ independent profile-probe job lifetimes described at the top of this document.
 Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
 Native Windows checks and an SDK binding to the eventual delivery remain required
 before protected conformance can establish acceptance.
+
+
+### Cancelling superseded pull-request Windows CI
+
+The ordinary `Windows supervisor behavior` job uses `!cancelled()` together
+with its existing Rust-success, docs-only, main-push and `ci:full` gates. This
+lets a superseded pull-request run stop instead of retaining a Windows runner
+through `always()`. Main concurrency still completes each merge, and independent
+conformance scan, keychain cleanup and artifact-retention steps keep their
+existing conditions. The job name, 20-minute limit, and supervisor containment
+are unchanged.
+
+A cancelled run is not cleanup or conformance acceptance evidence. Its replacement
+must pass all required checks. Issue #306 tracks this change and the remaining
+hosted supersession/replacement validation. The motivating old-head run
+`35117564510` was cancelled while its Windows job continued to completion; the
+replacement run `35118809575` subsequently passed all eleven jobs. That history
+does not validate the new cancellation guard.
