@@ -84,6 +84,11 @@ const expectedBehaviorAuthority = {
   tree: '946390fb4481fdc7ae8e19170aafa4be6ff8cab4',
   files: [
     {
+      path: 'scripts/owned-temp-directory.mjs',
+      blob: 'fe9b011c8e6ac4f741f052dc15c7405bad390165',
+      sha256: '95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b',
+    },
+    {
       path: 'scripts/phase1-conformance.mjs',
       blob: 'c0954efeaa51edaddb843b27414e48e54a575981',
       sha256: 'fd90e35308ea6b8dd0488cb874d00d7ad40aa16b33e38b46a9a76c3ea13d5056',
