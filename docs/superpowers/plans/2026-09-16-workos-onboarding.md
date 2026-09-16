@@ -135,10 +135,10 @@ Append inside the existing `#[cfg(test)] mod tests { … }` at the end of `keyri
         assert_eq!(parsed.subject, "user_01H");
         assert_eq!(parsed.expires_at, 1_800_000_000);
 
-        let huge = StoredSession {
-            access_token: "a".repeat(5000),
-            ..record
-        };
+        // `StoredSession` implements Drop, so struct-update syntax cannot
+        // move out of `record`; clone and overwrite instead.
+        let mut huge = record.clone();
+        huge.access_token = "a".repeat(5000);
         assert!(matches!(serialize_session(&huge), Err(KeyringError::Failure)));
         assert!(matches!(
             parse_stored_session(b"{not json"),
@@ -385,7 +385,7 @@ pub(crate) fn execute_command_lines(
     let mut total = 0usize;
     let mut ended = 0;
     let mut status = None;
-    let mut flush = |is_stderr: bool, buffer: &mut Vec<u8>, on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>| -> Result<(), String> {
+    let flush = |is_stderr: bool, buffer: &mut Vec<u8>, on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>| -> Result<(), String> {
         while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
             let line: Vec<u8> = buffer.drain(..=end).collect();
             let text = String::from_utf8_lossy(&line[..line.len() - 1]);
