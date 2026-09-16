@@ -6,7 +6,7 @@
 
 **Architecture:** Two new native Rust modules — `identity.rs` (PKCE, loopback callback, token exchange/refresh, offline JWT verification, keyring storage) and `setup.rs` (prerequisite detection, fixed-argv assisted install with streamed output) — exposed as seven Tauri commands that follow the shipped `coven_runtime_*` conventions (`Result<_, String>`, `run_id` cancellation, `Channel` streaming). A new `Onboarding` React surface wraps the unchanged `ChatApp` and never sees a token.
 
-**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0`; `reqwest` gains `rustls`.
+**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0` with `aws_lc_rs` (its default feature set has no crypto backend; aws-lc-rs is already present via reqwest, so this adds no second crypto stack); `reqwest` gains `rustls`. Note: `rustls` pulls `aws-lc-sys`, which needs **cmake** and a C toolchain at build time — the mingw `x86_64-pc-windows-gnu` cross-check was verified to pass with it.
 
 ---
 
@@ -23,7 +23,7 @@
 
 | File | Responsibility | Status |
 | --- | --- | --- |
-| `src-tauri/Cargo.toml` | add `jsonwebtoken`, enable TLS on `reqwest` | modify |
+| `src-tauri/Cargo.toml` | add `jsonwebtoken` (`aws_lc_rs` backend), enable TLS on `reqwest` (`rustls`) | modify |
 | `src-tauri/Cargo.lock` | lockfile for the above | modify |
 | `src-tauri/tauri.conf.json` | `plugins.workos.clientId` (public) | modify |
 | `src-tauri/src/keyring.rs` | `workos-session-v1` record: read / write (CAS) / delete | modify (append) |
@@ -64,7 +64,7 @@ Change line 38 and add one line after it:
 
 ```toml
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
-jsonwebtoken = "=11.1.0"
+jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 ```
 
 - [ ] **Step 2: Update the lockfile (this is the only time `--locked` is omitted)**
