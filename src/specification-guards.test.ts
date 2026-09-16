@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 
 type CapabilityFile = {
   $schema?: string;
@@ -1238,6 +1239,81 @@ describe('Phase 1 specification guards', () => {
     // main still verifies every merge to completion.
     expect(workflow).toContain('cancel-in-progress: ${' + "{ github.ref_name != 'main' }}");
   });
+
+  it('cancels superseded Windows supervision without dropping its eligibility gates', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const job = workflow.split('\n  windows-supervisor-behavior:\n')[1];
+    expect(job).toBeDefined();
+    const condition = job?.match(/\n {4}if: >-\n([\s\S]*?)\n {4}timeout-minutes:/)?.[1];
+    expect(condition?.trim()).toBe(
+      "!cancelled() && needs.rust.result == 'success'\n" +
+        "      && needs.changes.outputs.docs_only != 'true'\n" +
+        "      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')\n" +
+        "      || contains(github.event.pull_request.labels.*.name, 'ci:full'))",
+    );
+    // Cancellation must not remove the independent conformance cleanup steps.
+    expect(workflow).toContain(
+      "if: always() && hashFiles('test-results/phase1-conformance/report.json') != ''",
+    );
+    expect(workflow).toContain(
+      "if: always() && steps.secret-scan.outcome == 'success' && steps.phase1-keychain-cleanup.outcome == 'success'",
+    );
+    expect(workflow.match(/^ {8}if: always\(\)$/gm)).toHaveLength(2);
+  });
+
+  it.each([
+    ['labelled PR', 'success', false, false, 'pull_request', 'refs/pull/308/merge', true, true],
+    ['failed Rust', 'failure', false, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['skipped Rust', 'skipped', false, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    [
+      'cancelled Rust',
+      'cancelled',
+      false,
+      false,
+      'pull_request',
+      'refs/pull/308/merge',
+      true,
+      false,
+    ],
+    ['cancelled PR', 'success', true, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['docs-only PR', 'success', false, true, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['unlabelled PR', 'success', false, false, 'pull_request', 'refs/pull/308/merge', false, false],
+    ['main push', 'success', false, false, 'push', 'refs/heads/main', false, true],
+    ['main with failed Rust', 'failure', false, false, 'push', 'refs/heads/main', false, false],
+    ['cancelled main', 'success', true, false, 'push', 'refs/heads/main', false, false],
+    ['feature push', 'success', false, false, 'push', 'refs/heads/feature', false, false],
+  ] as const)(
+    'evaluates Windows supervision eligibility for %s',
+    (_name, rust, cancelled, docsOnly, eventName, ref, full, expected) => {
+      const workflow = readText('.github/workflows/ci.yml');
+      const job = workflow.split('\n  windows-supervisor-behavior:\n')[1];
+      const condition = job?.match(/\n {4}if: >-\n([\s\S]*?)\n {4}timeout-minutes:/)?.[1];
+      expect(condition).toBeDefined();
+      if (!condition) throw new Error('Missing Windows supervision condition');
+      // Evaluate this boolean/string subset, not GitHub cancellation scheduling.
+      // The exact-expression guard above prevents unsupported syntax drifting in.
+      const expression = condition.replace(
+        'github.event.pull_request.labels.*.name',
+        'github.event.pull_request.labels.map(label => label.name)',
+      );
+      const result: unknown = runInNewContext(
+        expression,
+        {
+          always: () => true,
+          cancelled: () => cancelled,
+          contains: (values: string[], value: string) => values.includes(value),
+          needs: { rust: { result: rust }, changes: { outputs: { docs_only: String(docsOnly) } } },
+          github: {
+            event_name: eventName,
+            ref,
+            event: { pull_request: { labels: full ? [{ name: 'ci:full' }] : [] } },
+          },
+        },
+        { timeout: 1000 },
+      );
+      expect(result).toBe(expected);
+    },
+  );
 
   it('reads counterpart repositories with a token that does not depend on their visibility', () => {
     // The default GITHUB_TOKEN is scoped to this repository, so it can only

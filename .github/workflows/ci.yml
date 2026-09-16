@@ -680,7 +680,7 @@ jobs:
     # Windows bills at twice the Linux rate, and this job needs the artifact
     # `rust` produces, so it follows the same gate.
     if: >-
-      always() && needs.rust.result == 'success'
+      !cancelled() && needs.rust.result == 'success'
       && needs.changes.outputs.docs_only != 'true'
       && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
       || contains(github.event.pull_request.labels.*.name, 'ci:full'))

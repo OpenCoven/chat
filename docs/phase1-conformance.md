@@ -163,8 +163,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `2dd79ec1505d9c12051552109244067b35813357`,
-tree `5187dc5f385bb07f2a5c2f637ffe58898741017b`, including all 25 governed files
+The lock now selects reviewed source `ffa954c2678bd933d7057d526b5fc4ed67a16f32`,
+tree `3d667c7d816fe3fac088b6865b46756a84581beb`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
@@ -2874,3 +2874,21 @@ independent profile-probe job lifetimes described at the top of this document.
 Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
 Native Windows checks and an SDK binding to the eventual delivery remain required
 before protected conformance can establish acceptance.
+
+
+### Cancelling superseded pull-request Windows CI
+
+The ordinary `Windows supervisor behavior` job uses `!cancelled()` together
+with its existing Rust-success, docs-only, main-push and `ci:full` gates. This
+lets a superseded pull-request run stop instead of retaining a Windows runner
+through `always()`. Main concurrency still completes each merge, and independent
+conformance scan, keychain cleanup and artifact-retention steps keep their
+existing conditions. The job name, 20-minute limit, and supervisor containment
+are unchanged.
+
+A cancelled run is not cleanup or conformance acceptance evidence. Its replacement
+must pass all required checks. Issue #306 tracks this change and the remaining
+hosted supersession/replacement validation. The motivating old-head run
+`35117564510` was cancelled while its Windows job continued to completion; the
+replacement run `35118809575` subsequently passed all eleven jobs. That history
+does not validate the new cancellation guard.
