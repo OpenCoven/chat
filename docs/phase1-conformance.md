@@ -2710,3 +2710,13 @@ no names or paths and do not change ACLs, privileges, access masks, sharing, or 
 Native Windows verification remains required; portable tests cannot establish those ACL
 results. No unchanged protected rerun is warranted. A future dispatch requires reviewed
 delivery, a reachable authority freeze, and the matching SDK binding first.
+
+### Residual-purpose source binding
+
+The harness selects signed source `4dc702d2538a3815a84e39cddec598ce058518f6`, tree
+`f9ac551a29150e232c8e3ff8e8ddc0fa5cf8eefa`. The binding records the actual Git blobs and SHA-256
+digests of all 25 governed files and 10 production deltas. It retains the merged
+finalization diagnostics and adds only the residual-open purposes described above.
+Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
+Native Windows checks and an SDK binding to the eventual delivery remain required
+before protected conformance can establish acceptance.
