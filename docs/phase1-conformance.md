@@ -1997,7 +1997,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,934 | `73f665797b6d21de149949ca532bb814ac114a3682cff14c004919d95e3be2bb` |
+| `.github/workflows/client-v1-conformance.yml` | 177,934 | `fb80c8c010c061c358a87507b98a2f29c3485e8ee02d2f52f4708742b5c4a0c8` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2010,7 +2010,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 233,186 | `2e5fe8808230ad318aa86408bbad2004dbe4fd1c074f88de11fc581b227e0a51` |
+| `scripts/phase1-schema-v2-producer.mjs` | 233,304 | `afe3509fc333b32b7af9a6de443db480ce7c1362aee82712713faa4c042fd3bc` |
 | `scripts/process-owned-artifact-root.mjs` | 13,061 | `103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
@@ -2764,6 +2764,32 @@ proves a diagnostic-loss bug, not which stage failed in the protected run.
 Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
 
+
+### Unsupported custody installation
+
+`secure_store_unavailable` covered two unrelated causes on the installation
+preflight. `KeyringError::Unavailable` is returned both by a secure store that
+is genuinely unavailable and by `CredentialCustody::installation_id`'s default
+trait body, which a custody implementation reaches only by never overriding it.
+`InstallationStage::classify` already rewrites `Unavailable` into
+`installation_lock_unavailable`, `installation_entry_unavailable`,
+`installation_read_unavailable`, `installation_write_unavailable` and
+`installation_persistence_unavailable`, so those five stages were already
+distinguishable; the default trait body was the remaining unclassified path.
+
+It now returns the fixed code `installation_custody_unsupported`, published as
+`phase1.native-scenarios.native-preflight-installation-custody-unsupported`.
+The outer launcher derives its native-stage allowlist from the producer
+registry, so the identifier survives extraction without a second edit. Only the
+fixed identifier is published: no message, stack, path, credential or
+subprocess output is added.
+
+Protected run
+[35100084575](https://github.com/OpenCoven/chat/actions/runs/35100084575)
+reported `native-preflight-installation-secure-store-unavailable` on Windows
+while Linux and macOS passed. This change does not repair that failure and does
+not establish its cause; it separates the two causes so the next protected run
+attributes it.
 
 ### Unexpected installation RPC failures
 

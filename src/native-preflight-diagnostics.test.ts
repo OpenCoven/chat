@@ -68,6 +68,7 @@ test.each([
   'installation-rpc',
   'installation-id',
   'installation-secure-store-unavailable',
+  'installation-custody-unsupported',
   'installation-lock-unavailable',
   'installation-entry-unavailable',
   'installation-read-unavailable',
