@@ -2020,7 +2020,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,934 | `79ba921d0bb49c2e88ac5253928e44489462fc80b2ac98b53ab9ed13533fba87` |
+| `.github/workflows/client-v1-conformance.yml` | 180,234 | `a22c99529f760247a6590c3ca4f9b205a9ac003a0536bf7a711b5a99df9c6574` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2787,6 +2787,27 @@ proves a diagnostic-loss bug, not which stage failed in the protected run.
 Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
 
+
+### Dispatching a protected run against a specific merged revision
+
+`workflow_dispatch` previously validated whatever `main` pointed at when the
+run started. The cross-repository contract requires the evidence producer to be
+a merge whose tree equals its reviewed second parent's tree, so a binding names
+one exact merge; any later commit to `main` — conformance-related or not —
+leaves that binding unable to describe the tip. Protected runs were therefore
+only usable inside the window between a binding landing and the next merge.
+
+The optional `producer_revision` input names the commit to validate. The
+`resolve-producer-revision` job requires an exact lowercase 40-hex commit that
+exists in this repository and is an **ancestor of the dispatch ref**, then
+publishes it for the supervisor build, the Windows bootstrap and the Unix
+workspace checkout. Omitting it keeps the previous behaviour of validating the
+dispatch ref tip.
+
+The ancestry requirement is what keeps this from widening the trust boundary:
+an unmerged branch, an unrelated commit, or a revision from a fork is refused,
+so a protected run still only ever validates reviewed history that reached
+`main`. What changes is that it no longer has to be the newest such history.
 
 ### Unexpected installation RPC failures
 

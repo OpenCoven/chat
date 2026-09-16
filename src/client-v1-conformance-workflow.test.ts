@@ -35,6 +35,8 @@ const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
 const githubRepositoryExpression = '${' + '{ github.repository }}';
 const githubShaExpression = '${' + '{ github.sha }}';
+const resolvedProducerExpression = '${' + "{ steps['resolve'].outputs.revision }}";
+const producerRevisionExpression = '${' + "{ needs['producer-revision'].outputs.revision }}";
 const expressionOpening = '${' + '{';
 const uploadedSupervisorArtifactIdExpression =
   '${' + "{ steps['upload-supervisor'].outputs['artifact-id'] }}";
@@ -247,7 +249,25 @@ function verifyExactMainRefConstraint(label: string, job: string): void {
   }
 }
 
+function verifyResolvedProducerRevision(job: string, workflow: string): void {
+  if (
+    !job.includes('git merge-base --is-ancestor "$requested" "$OPENCOVEN_DISPATCH_SHA"') ||
+    !job.includes('OPENCOVEN_DISPATCH_SHA: ' + githubShaExpression) ||
+    !job.includes('revision: ' + resolvedProducerExpression)
+  ) {
+    throw new Error('producer revision job does not verify ancestry of the dispatch ref');
+  }
+  if (
+    workflow.includes(
+      'ref: ' + githubShaExpression.replace('github.sha', 'inputs.producer_revision'),
+    )
+  ) {
+    throw new Error('producer revision input is checked out without verification');
+  }
+}
+
 function verifyHardenedWorkflowGraph(workflow: string): void {
+  const producerRevision = workflowJob(workflow, 'producer-revision');
   const windowsSupervisor = workflowJob(workflow, 'windows-supervisor');
   const producer = workflowJob(workflow, 'platform-conformance');
   const validation = workflowJob(workflow, 'validate-conformance-artifacts');
@@ -255,6 +275,7 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
   const aggregate = workflowJob(workflow, 'aggregate-conformance');
 
   for (const [label, job] of [
+    ['producer revision', producerRevision],
     ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
@@ -264,7 +285,10 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
     verifyExactMainRefConstraint(label, job);
   }
 
+  verifyResolvedProducerRevision(producerRevision, workflow);
+
   for (const [label, job] of [
+    ['producer revision', producerRevision],
     ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
@@ -466,7 +490,9 @@ describe('client-v1 conformance workflow bootstrap', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const unixProducerCommand = readFileSync(unixProducerCommandPath, 'utf8');
 
-    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(3);
+    // four full checkouts: producer-revision resolution, the supervisor build,
+    // the Windows bootstrap workspace and the Unix workspace.
+    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(4);
     expect(workflow).toContain('scripts/executable-resolution.mjs');
     expect(workflow).toContain('resolveExecutableInvocation');
     expect(workflow).toContain("      GIT_CONFIG_COUNT: '1'");
@@ -530,10 +556,10 @@ describe('client-v1 conformance workflow bootstrap', () => {
 
     expect(workflow).toContain('  windows-supervisor:');
     expect(workflow).toContain(
-      "  windows-supervisor:\n    name: build-windows-supervisor\n    if: github.ref == 'refs/heads/main'",
+      "  windows-supervisor:\n    name: build-windows-supervisor\n    if: github.ref == 'refs/heads/main'\n    needs: producer-revision",
     );
     expect(workflow).toContain('    runs-on: macos-latest');
-    expect(workflow).toContain('    needs: windows-supervisor');
+    expect(workflow).toContain('    needs: [producer-revision, windows-supervisor]');
     expect(workflow).toContain('        run: bash scripts/phase1-windows-supervisor-build.sh');
     expect(workflow).toContain('          name: phase1-process-supervisor-win32-x64');
     expect(workflow).toContain(`artifact_id: ${uploadedSupervisorArtifactIdExpression}`);
@@ -1025,7 +1051,7 @@ ${source.slice(start, end)}
       `OPENCOVEN_VALIDATOR_REVISION_INPUT: ${validatorInputExpression}`,
     );
     expect(environment).toContain(`OPENCOVEN_CHAT_REPOSITORY: ${githubRepositoryExpression}`);
-    expect(environment).toContain(`OPENCOVEN_CHAT_SHA: ${githubShaExpression}`);
+    expect(environment).toContain(`OPENCOVEN_CHAT_SHA: ${producerRevisionExpression}`);
     expect(runBody).not.toContain(validatorInputExpression);
     expect(runBody).not.toContain(expressionOpening);
     expect(runBody).not.toMatch(/\$\{\{\s*inputs\./u);
