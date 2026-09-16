@@ -166,10 +166,28 @@ wiring before the next real tag push.
 
 All signing secrets live in the GitHub deployment **environment**
 `release-signing`. Configure them under **Settings → Environments →
-release-signing**. When a platform signing secret is absent, the workflow still
-runs and produces a clearly-marked **unsigned** build for that platform rather
-than failing. `TAG_ALLOWED_SIGNERS` is optional because GitHub API verification
-is always required; when present, it adds an independent local SSH check.
+release-signing**.
+
+**A missing platform signing secret fails the release.** The `verify-tag` job
+refuses to continue when any of the eight Apple and Windows secrets below is
+absent, before the tag is checked out and long before the platform builds
+start. This used to be a warning, and a warning is the wrong shape for it: the
+default outcome of a missing secret was a *published* unsigned release and a
+yellow annotation nobody reads. An unsigned `.app` will not open past
+Gatekeeper, an unsigned `.msi` is flagged by SmartScreen, and the tag cannot be
+reused to correct it — `verify-tag` refuses to replace an existing Release, so
+the version is spent.
+
+To build deliberately unsigned artifacts — rehearsing the pipeline before the
+certificates exist, for instance — dispatch the workflow manually with
+`allow_unsigned=true`. That switch is dispatch-only: the `inputs` context does
+not exist on a tag push, so the production path cannot reach it.
+
+Two secrets are exempt, for different reasons. `TAURI_SIGNING_PRIVATE_KEY` is
+not required because auto-update is opt-in and currently disabled (§ 4), so its
+absence is the expected state rather than an omission. `TAG_ALLOWED_SIGNERS` is
+optional because GitHub API verification is always required; when present, it
+adds an independent local SSH check.
 
 | Secret | Purpose | Environment |
 | ------ | ------- | ----------- |
