@@ -1,5 +1,61 @@
+param([switch]$PortableOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+function Get-ProfileLifecycleCapabilityFailure([string]$Capability) {
+  if ($Capability -cmatch '\Ahive=present;persistence=(local|enterprise)\z') { return $null }
+  if ($Capability -cmatch '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z') {
+    return "retained-profile-capability;hive=$($Matches[1]);persistence=$($Matches[2])"
+  }
+  return 'retained-profile-capability;capability=unclassified'
+}
+
+function Get-ProfileLifecycleChildFailure([int]$ExitCode, [string]$Stdout, [string]$Stderr) {
+  if ($ExitCode -eq 0 -and $Stdout -ceq '' -and $Stderr -ceq '') { return $null }
+  $category = switch ($ExitCode) {
+    0 { 'child-unexpected-output'; break }
+    21 { 'child-credential-capability'; break }
+    22 { 'child-expected-profile-mismatch'; break }
+    23 { 'child-bound-profile-mismatch'; break }
+    24 { 'child-profile-query'; break }
+    25 { 'child-probe-setup'; break }
+    default { 'child-exit-unclassified' }
+  }
+  $stdoutState = if ($Stdout -ceq '') { 'empty' } else { 'nonempty' }
+  $stderrState = if ($Stderr -ceq '') { 'empty' } else { 'nonempty' }
+  return "$category;stdout=$stdoutState;stderr=$stderrState"
+}
+
+if ($PortableOnly) {
+  foreach ($capability in @('hive=present;persistence=local', 'hive=present;persistence=enterprise')) {
+    if ($null -ne (Get-ProfileLifecycleCapabilityFailure $capability)) { throw 'Valid capability rejected.' }
+  }
+  foreach ($case in @(
+    @('hive=absent;persistence=enterprise', 'retained-profile-capability;hive=absent;persistence=enterprise'),
+    @('hive=present;persistence=session', 'retained-profile-capability;hive=present;persistence=session'),
+    @('private-provider-canary', 'retained-profile-capability;capability=unclassified'),
+    @('hive=present;persistence=enterprise;private-provider-canary', 'retained-profile-capability;capability=unclassified')
+  )) {
+    if ((Get-ProfileLifecycleCapabilityFailure $case[0]) -cne $case[1]) { throw 'Capability classification changed.' }
+  }
+  if ($null -ne (Get-ProfileLifecycleChildFailure 0 '' '')) { throw 'Successful child rejected.' }
+  foreach ($case in @(
+    @(21, 'child-credential-capability'), @(22, 'child-expected-profile-mismatch'),
+    @(23, 'child-bound-profile-mismatch'), @(24, 'child-profile-query'),
+    @(25, 'child-probe-setup'), @(1, 'child-exit-unclassified'), @(999, 'child-exit-unclassified')
+  )) {
+    if ((Get-ProfileLifecycleChildFailure $case[0] '' '') -cne "$($case[1]);stdout=empty;stderr=empty") {
+      throw 'Child failure classification changed.'
+    }
+  }
+  foreach ($output in @(@('private-stdout-canary', ''), @('', 'private-stderr-canary'))) {
+    $failure = Get-ProfileLifecycleChildFailure 0 $output[0] $output[1]
+    $expected = if ($output[0] -cne '') { 'child-unexpected-output;stdout=nonempty;stderr=empty' } else { 'child-unexpected-output;stdout=empty;stderr=nonempty' }
+    if ($failure -cne $expected) { throw 'Private child output classification changed.' }
+  }
+  Write-Host 'Portable profile lifecycle classification passed.'
+  return
+}
 if (-not $IsWindows) { throw 'Profile lifecycle fixture requires native Windows.' }
 
 Add-Type -TypeDefinition @'
@@ -95,10 +151,11 @@ function Assert-ProfileFixtureMissing([string]$Path) {
     $stage = 'duplicate-rejection'
     [OpenCoven.Tests.ProfileLifecycleFixture]::RequireAlreadyExists(
       $context.User.Sid, $context.User.UserName)
-    $stage = 'child-profile-agreement'
+    $stage = 'child-probe-write'
     $childProbe = Join-Path $context.User.RootPath 'profile-agreement.ps1'
     [IO.File]::WriteAllText($childProbe, @'
 $ErrorActionPreference = 'Stop'
+try {
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -129,11 +186,14 @@ public static class ChildProfileFixture {
     }
 }
 "@
-[ChildProfileFixture]::RequirePersistentCredentials()
-if (-not [string]::Equals([ChildProfileFixture]::Read(),
-    $env:OPENCOVEN_PROFILE_FIXTURE_EXPECTED, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
-if (-not [string]::Equals([ChildProfileFixture]::Read(),
-    $env:OPENCOVEN_WINDOWS_PROFILE_ROOT, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
+} catch { exit 25 }
+try { [ChildProfileFixture]::RequirePersistentCredentials() } catch { exit 21 }
+try { $expectedProfile = [ChildProfileFixture]::Read() } catch { exit 24 }
+if (-not [string]::Equals($expectedProfile,
+    $env:OPENCOVEN_PROFILE_FIXTURE_EXPECTED, [StringComparison]::OrdinalIgnoreCase)) { exit 22 }
+try { $boundProfile = [ChildProfileFixture]::Read() } catch { exit 24 }
+if (-not [string]::Equals($boundProfile,
+    $env:OPENCOVEN_WINDOWS_PROFILE_ROOT, [StringComparison]::OrdinalIgnoreCase)) { exit 23 }
 '@, [Text.UTF8Encoding]::new($false))
     $context.Environment.OPENCOVEN_PROFILE_FIXTURE_EXPECTED = $createdProfile
     $context.Environment.OPENCOVEN_WINDOWS_PROFILE_ROOT = 'C:\forged-profile'
@@ -141,12 +201,17 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
     $jobName = "Local\OpenCoven.Chat.Conformance.$nonce"
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NONCE = $nonce
     $context.Environment.OPENCOVEN_WINDOWS_JOB_NAME = $jobName
+    $stage = 'child-job-create'
     $job = [OpenCoven.WindowsJobSupervisor]::Create($jobName, $context.User)
+    $stage = 'retained-profile-capability'
     $retainedCapability = Read-NativeInstallationRetainedEnvironment $context.User
-    if ($retainedCapability -cnotmatch '\Ahive=present;persistence=(local|enterprise)\z') {
+    $capabilityFailure = Get-ProfileLifecycleCapabilityFailure $retainedCapability
+    if ($null -ne $capabilityFailure) {
+      $stage = $capabilityFailure
       throw 'Retained profile token lacks persistent credential capability.'
     }
     foreach ($launchIndex in 0..2) {
+      $stage = "child-launch-$launchIndex"
       if ($launchIndex -eq 2) {
         $result = $job.RunProducerAsUserAndQuarantine(
           $context.User, $trustedPwsh,
@@ -158,10 +223,13 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
           "-NoLogo -NoProfile -NonInteractive -File `"$childProbe`"",
           $context.User.RootPath, $context.Environment, [TimeSpan]::FromSeconds(30), 1MB, 1MB)
       }
-      if ($result.ExitCode -ne 0 -or $result.Stdout -ne '' -or $result.Stderr -ne '') {
+      $childFailure = Get-ProfileLifecycleChildFailure $result.ExitCode $result.Stdout $result.Stderr
+      if ($null -ne $childFailure) {
+        $stage = "child-result-$launchIndex;$childFailure"
         throw 'Child launch after explicit profile creation failed.'
       }
     }
+    $stage = 'child-quarantine'
     if (-not $job.IsQuarantineComplete) { throw 'Profile lifecycle quarantine incomplete.' }
     $stage = 'unload-failure-retains-ownership'
     $unloadField = [OpenCoven.WindowsIsolatedUser].GetField('unloadProfile', [Reflection.BindingFlags]'NonPublic,Instance')
@@ -179,6 +247,9 @@ if (-not [string]::Equals([ChildProfileFixture]::Read(),
     } finally { $unloadField.SetValue($context.User, $originalUnload) }
   } catch {
     $cause = $_.Exception.GetBaseException()
+    if ($cause -is [ComponentModel.Win32Exception]) {
+      throw ('Native profile lifecycle assertion failed: stage={0}; nativeCode={1}; hresult={2:X8}.' -f $stage, $cause.NativeErrorCode, $cause.HResult)
+    }
     if ($cause -is [Runtime.InteropServices.COMException]) {
       throw ('Native profile lifecycle assertion failed: stage={0}; hresult={1:X8}.' -f $stage, $cause.HResult)
     }

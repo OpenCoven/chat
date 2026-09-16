@@ -1,20 +1,27 @@
 # Phase 1 real-authority conformance
 
-Windows owner-cleanup follow-up: [CI 35074960956](https://github.com/OpenCoven/chat/actions/runs/35074960956)
-passed ten jobs, including packaged Phase 1 and all 18 native residual cases.
-Installation round-trip and quarantine passed, but outer profile cleanup failed
-with `access=delete-metadata;scope=cleanup-grant-ancestor`. This identifies an
-exact `.coven` or `.coven/chat` prefix, not a particular leaf or sole creator.
-The later profile lifecycle and application fixtures were not reached.
+Windows owner-cleanup follow-up: [CI 35078784942](https://github.com/OpenCoven/chat/actions/runs/35078784942)
+passed ten jobs, including packaged Phase 1 and native residual cleanup. All
+seven native owner-cleanup tests passed. Restricted installation and quarantine
+passed, and outer cleanup completed: execution reached the later profile
+lifecycle fixture. That fixture failed at `stage=child-profile-agreement`;
+the application fixture was not reached. Protected acceptance remains open.
 
-The cleanup-grant owner now consumes the validated marker by handle and attempts
+The cleanup-grant owner consumes the validated marker by handle and attempts
 to remove its three empty private directories bottom-up. Each child is opened
 relative to a pinned parent and checked against its original file identity.
 Nonempty directories, competing pins and replacements stop pruning; the profile
 home is never removed. Once marker deletion commits, pruning failure does not
-make the consumed grant retryable. ACLs, privileges and production limits are
-unchanged. Native Windows regression execution and the full supervisor run are
-still required before landing, SDK rebinding and fresh protected validation.
+make the consumed grant retryable. Native coverage verifies these boundaries.
+
+The lifecycle failure stage covered probe setup, retained credential capability,
+three child launches and both profile comparisons. The fixture now distinguishes
+those stages and maps child exit codes to fixed capability, query, setup or
+expected/bound-profile categories. Child output is classified only as empty or
+nonempty. Native results are required to identify the failing assertion; no
+profile-path mismatch is established yet. Assertions, ACLs, privileges and
+production limits are unchanged. Chat landing, SDK rebinding and fresh protected
+validation remain pending.
 
 ## Executable diagnostic harness binding
 

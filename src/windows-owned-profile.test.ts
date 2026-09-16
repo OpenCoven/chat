@@ -43,6 +43,11 @@ test('residual cleanup runs in a separately bounded native CI job', () => {
 
 test.skipIf(!pwshAvailable).each([
   {
+    name: 'classifies native lifecycle failures without private child output',
+    args: ['scripts/windows-profile-lifecycle.test.ps1', '-PortableOnly'],
+    output: 'Portable profile lifecycle classification passed.',
+  },
+  {
     name: 'executes portable production residual policy',
     args: ['scripts/windows-profile-residual-policy.test.ps1'],
     output: 'Portable production residual policy passed:',
