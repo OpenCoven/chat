@@ -163,8 +163,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `6e74fb60e44549b91aa75fb956eb63a85dc668fc`,
-tree `a1002364401a1788f8210a35b87d202711e67042`, including all 25 governed files
+The lock now selects reviewed source `2dd79ec1505d9c12051552109244067b35813357`,
+tree `5187dc5f385bb07f2a5c2f637ffe58898741017b`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
@@ -1969,20 +1969,20 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,934 | `bd8331c6d82e22b7618ee5beda8fd10fad4e022e794c8d762dc62cf3f27d5049` |
+| `.github/workflows/client-v1-conformance.yml` | 177,934 | `5a43c25032b4eb040c1f3e378dc6456b1ef4e5bdeb36d5c58f71d8ec9d43c3d9` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
-| `scripts/phase1-conformance.mjs` | 218,262 | `e18e7f45b44738a4a100f76d6b8548dd9d8e1d84796131c71dc8dbde193083c4` |
+| `scripts/phase1-conformance.mjs` | 219,211 | `daaa5fb660765b9d6c21bea4e4a3c9ebf1a92f14f052b7ed96593f579c7534ad` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
-| `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
+| `scripts/phase1-evidence-runtime.mjs` | 6,572 | `b09a0d20abc7ebbc6289c57c985fd42b8a4b5d196895bc035b8fca40281d9315` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 231,880 | `3da17a07b70ec3b2468072fd81f4023c7eead42e6496a953d7b862fe19abd4ec` |
+| `scripts/phase1-schema-v2-producer.mjs` | 232,829 | `9b2b295170d37f45b5d860fd8cd82c65ab6538caa7cd8d599ce19c8680643174` |
 | `scripts/process-owned-artifact-root.mjs` | 11,788 | `426c2c8e36dc3bffddb35a565c07a60998b010660f6248ebc4264d9c4b502624` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

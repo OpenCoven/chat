@@ -68,7 +68,7 @@ describe('Phase 1 evidence runtime isolation', () => {
         nativeAfterSha256: 'a'.repeat(64),
         opaqueIds: ['1'.repeat(32), '2'.repeat(32), '3'.repeat(32), '4'.repeat(32)],
       }),
-    ).toThrow(/operator state/iu);
+    ).toThrow(/isolation\.operator\.cave-home\.changed/u);
     expect(() =>
       buildIsolationEvidence({
         operatorBefore: before,
@@ -77,7 +77,7 @@ describe('Phase 1 evidence runtime isolation', () => {
         nativeAfterSha256: 'b'.repeat(64),
         opaqueIds: ['1'.repeat(32), '2'.repeat(32), '3'.repeat(32), '4'.repeat(32)],
       }),
-    ).toThrow(/native credential state/iu);
+    ).toThrow(/isolation\.native-credential-store\.changed/u);
   });
 
   test('rejects duplicate or non-opaque isolation identifiers', () => {
