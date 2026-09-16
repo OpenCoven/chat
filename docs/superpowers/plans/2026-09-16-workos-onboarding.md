@@ -23,7 +23,7 @@
 
 | File | Responsibility | Status |
 | --- | --- | --- |
-| `src-tauri/Cargo.toml` | add `jsonwebtoken` (`aws_lc_rs` backend), enable TLS on `reqwest` (`rustls`) | modify |
+| `src-tauri/Cargo.toml` | add `jsonwebtoken` (`aws_lc_rs` backend), enable TLS on `reqwest` (`rustls`), direct `aws-lc-rs` with `prebuilt-nasm` | modify |
 | `src-tauri/Cargo.lock` | lockfile for the above | modify |
 | `src-tauri/tauri.conf.json` | `plugins.workos.clientId` (public) | modify |
 | `src-tauri/src/keyring.rs` | `workos-session-v1` record: read / write (CAS) / delete | modify (append) |
@@ -58,14 +58,31 @@ Tasks 1–9 are native identity, 10–13 native setup, 14–17 JS clients, 18–
 - Modify: `src-tauri/Cargo.toml:38`
 - Modify: `src-tauri/Cargo.lock`
 
-- [ ] **Step 1: Enable TLS on reqwest and add jsonwebtoken**
+- [ ] **Step 1: Enable TLS on reqwest, add jsonwebtoken, pin the NASM coupling**
 
-Change line 38 and add one line after it:
+`[dependencies]` is strictly alphabetical; keep it that way. Three edits:
+
+Immediately after `async-trait = "=0.1.89"`:
+
+```toml
+# Direct so the Windows build does not depend on rustls happening to enable
+# prebuilt-nasm: aws-lc-sys refuses to build on Windows without NASM otherwise.
+aws-lc-rs = { version = "=1.18.1", features = ["prebuilt-nasm"] }
+```
+
+Between `image = …` and `keyring-core = "=1.0.0"`:
+
+```toml
+jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
+```
+
+The existing reqwest line becomes:
 
 ```toml
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
-jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 ```
+
+Why `aws_lc_rs` and not `rust_crypto`: reqwest's rustls already brings aws-lc-rs (one provider), and `rust_crypto` would pull the `rsa` crate, which carries an unresolved timing advisory (RUSTSEC-2023-0071). Why the direct aws-lc-rs dependency: without `prebuilt-nasm`, aws-lc-sys panics on Windows ("NASM command not found"); today rustls enables it as a side effect, and nothing in CI builds the MSVC target before a signed tag. cmake is **not** required despite appearing in the lockfile — aws-lc-sys ships pregenerated bindings for every target this repo builds and never invokes the cmake binary; `ring` and `quinn` are lockfile-only and do not compile.
 
 - [ ] **Step 2: Update the lockfile (this is the only time `--locked` is omitted)**
 
@@ -81,7 +98,12 @@ Expected: `Finished` with no errors.
 
 ```bash
 git add src-tauri/Cargo.toml src-tauri/Cargo.lock
-git commit -S -m "build(native): enable TLS on reqwest and add jsonwebtoken for WorkOS"
+git commit -S -m "build(native): TLS for reqwest and a JWT verifier for WorkOS sign-in"
+```
+
+Write a full body: the reqwest feature name, why `aws_lc_rs`, why the direct `aws-lc-rs` pin, and that cmake is not invoked. Reasoned commit bodies are this repo's convention.
+
+```bash
 ```
 
 ---
@@ -3257,6 +3279,10 @@ gh pr create --base main --label ci:full \
 ```
 
 Expected: PR opened; all eleven CI jobs run (label present), all green.
+
+- [ ] **Step 4: Flag the conformance-lock repin in the PR description**
+
+`phase1-conformance.lock.json` pins `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` under `harnessAuthority.productionDeltas`; both blobs now differ. No test fails on this (the digest loop covers `scripts/*` only; the manifest entries are only asserted to exist), but `CONTRIBUTING.md` §"two-stage pin" expects a follow-up pin once the merge commit is reachable. Add one sentence to the PR body so a maintainer schedules stage two rather than discovering the drift later.
 
 ---
 
