@@ -6161,7 +6161,9 @@ describe('Phase 1 real-authority conformance harness', () => {
       CIRCLE_NODE_TOTAL: '2',
       COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
     });
-    expect(schemaV2CaveBuildEnvironment()).toEqual(
+    expect(
+      schemaV2CaveBuildEnvironment({ HOME: resolve(projectRoot, 'cave-build-test-home') }),
+    ).toEqual(
       expect.objectContaining({
         NODE_OPTIONS: '--max-old-space-size=6144',
         CIRCLE_NODE_TOTAL: '2',
