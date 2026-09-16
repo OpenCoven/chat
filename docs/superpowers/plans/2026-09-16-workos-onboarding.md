@@ -6,7 +6,7 @@
 
 **Architecture:** Two new native Rust modules — `identity.rs` (PKCE, loopback callback, token exchange/refresh, offline JWT verification, keyring storage) and `setup.rs` (prerequisite detection, fixed-argv assisted install with streamed output) — exposed as seven Tauri commands that follow the shipped `coven_runtime_*` conventions (`Result<_, String>`, `run_id` cancellation, `Channel` streaming). A new `Onboarding` React surface wraps the unchanged `ChatApp` and never sees a token.
 
-**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0`; `reqwest` gains `rustls-tls`.
+**Tech Stack:** Tauri 2.11 (Rust 1.95, pinned deps with `=`), React 19 + TypeScript, Vitest + Testing Library, Biome. New crates: `jsonwebtoken =11.1.0`; `reqwest` gains `rustls`.
 
 ---
 
@@ -63,7 +63,7 @@ Tasks 1–9 are native identity, 10–13 native setup, 14–17 JS clients, 18–
 Change line 38 and add one line after it:
 
 ```toml
-reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
 jsonwebtoken = "=11.1.0"
 ```
 
