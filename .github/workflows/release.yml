@@ -24,6 +24,14 @@ on:
         required: false
         default: true
         type: boolean
+      # The only way to get an unsigned build. Deliberately dispatch-only: the
+      # `inputs` context is empty on a tag push, so the production path cannot
+      # reach this switch no matter what anyone types.
+      allow_unsigned:
+        description: 'Continue when platform signing secrets are missing (produces UNSIGNED artifacts)'
+        required: false
+        default: false
+        type: boolean
 
 # Nothing here needs write access by default. The single job that publishes the
 # release asks for `contents: write` explicitly; every other job is read-only.
@@ -134,6 +142,68 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "Verified remote tag ${tag} at ${target_sha} (prerelease=${prerelease}, dry_run=${dry_run})."
+
+      # An unsigned release is not a release. macOS refuses to open an unsigned,
+      # un-notarized .app without a Gatekeeper override, and Windows SmartScreen
+      # flags the installer. Neither is a thing to find out after the tag is
+      # pushed: `verify-tag` refuses to replace an existing Release, so the
+      # version is spent and the fix is a new one.
+      #
+      # This used to be a `::warning::` inside the build job, which meant the
+      # default outcome of a missing secret was a published, unsigned release
+      # and a yellow annotation nobody reads. Absence is now refused here --
+      # before the tag is checked out and long before four platform builds start
+      # -- so the cost of a missing secret is seconds, not ninety minutes a
+      # runner and a burnt version number.
+      #
+      # TAURI_SIGNING_PRIVATE_KEY is deliberately absent from this list. Auto-
+      # update is opt-in and currently disabled (docs/releasing.md § 4), so its
+      # absence is the expected state rather than an omission, and the build job
+      # still reports it as a notice.
+      - name: Require signing material
+        shell: bash
+        env:
+          # Empty on a tag push: the `inputs` context does not exist for that
+          # event, so this cannot be set from the production path.
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          # Names only. The values are masked, and a missing secret is
+          # identified perfectly well by what it is called.
+          missing=()
+          for name in \
+            APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+            WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "All platform signing secrets are present; this release will be signed and notarized."
+            exit 0
+          fi
+
+          if [ "${ALLOW_UNSIGNED:-}" = "true" ]; then
+            echo "::warning::allow_unsigned was requested. Missing: ${missing[*]}. Every artifact from this run is UNSIGNED and must not be handed to users."
+            exit 0
+          fi
+
+          echo "::error::Missing signing secrets in the release-signing environment: ${missing[*]}"
+          echo "Configure them under Settings -> Environments -> release-signing (docs/releasing.md § 3)."
+          echo "To build deliberately unsigned artifacts, dispatch this workflow with allow_unsigned=true."
+          exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -348,6 +418,12 @@ jobs:
       # Whether this build will be signed is decided entirely by which secrets
       # are present. The result is surfaced so the artifacts and the job log say
       # plainly when a build is unsigned.
+      #
+      # `verify-tag` has already refused to get this far with a signing secret
+      # missing, so the unsigned branches below are only reachable on a
+      # deliberate allow_unsigned dispatch. They are kept because that path
+      # still exists and an unsigned artifact should still say so in its own
+      # job log, not only in the gate that permitted it.
       - id: signing
         name: Determine signing availability
         shell: bash
@@ -367,10 +443,10 @@ jobs:
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
           echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
-            echo "::warning::APPLE_CERTIFICATE is not set; producing an UNSIGNED, un-notarized macOS build."
+            echo "::warning::APPLE_CERTIFICATE is not set; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
-            echo "::warning::WINDOWS_CERTIFICATE is not set; producing an UNSIGNED Windows build."
+            echo "::warning::WINDOWS_CERTIFICATE is not set; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and disabled for v0.0.1 (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."

@@ -211,6 +211,9 @@ const schemaV2NativeFailureStages = new Set([
   'missing-keychain',
   'isolation-proof',
 ]);
+export const SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS = Object.freeze(
+  [...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+);
 const boundedSpawnErrorCodes = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM'];
 const cargoBuildFailureCategories = [
   'timeout',
@@ -405,7 +408,18 @@ const cleanupCustodyFailureCategories = [
   'proof',
   'unknown',
 ];
+export const SCHEMA_V2_FINALIZATION_OPERATIONS = Object.freeze([
+  'failure-assertions',
+  'native-cleanup-assertions',
+  'required-assertions',
+  'execution-cleanup-assertions',
+]);
+const finalizationOperationSet = new Set(SCHEMA_V2_FINALIZATION_OPERATIONS);
+const finalizationDiagnostic = (operation) =>
+  `phase1.stage.schema-v2-production.operation.${operation}`;
 const publicFailureDiagnosticSet = new Set([
+  ...SCHEMA_V2_FINALIZATION_OPERATIONS.map(finalizationDiagnostic),
+  'phase1.stage.schema-v2-production.operation.invalid',
   ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
   'phase1.stage.invocation.windows-executable-path',
   'phase1.stage.invocation.windows-path-extensions',
@@ -653,7 +667,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.cave-authority.assertion.multiple',
   'phase1.cave-authority.assertion.unknown',
   'phase1.stage.native-scenarios.failed',
-  ...[...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+  ...SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS,
   ...pairingFailureCategories.map((category) => `phase1.native-scenarios.pairing.${category}`),
   ...launchFailureCategories.map((category) => `phase1.native-scenarios.launch.${category}`),
   ...NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
@@ -1781,6 +1795,28 @@ export function schemaV2FailureDiagnostic(error, activeStage) {
     return classifyCargoBuildFailureDiagnostic(activeStage.slice(0, -'.failed'.length), error);
   }
   return activeStage;
+}
+
+// Bookkeeping can fail while unwinding an already classified production error.
+// Preserve that first failure and keep only fixed operation IDs public; private
+// causes remain attached in memory, never copied into the retained report.
+export function runSchemaV2FinalizationOperation(operation, action, primaryFailure) {
+  if (!finalizationOperationSet.has(operation)) {
+    throw new Error('phase1.stage.schema-v2-production.operation.invalid');
+  }
+  try {
+    return action();
+  } catch (cause) {
+    const diagnostic = finalizationDiagnostic(operation);
+    const failure = new Error(diagnostic, { cause });
+    if (primaryFailure !== undefined) {
+      throw new AggregateError(
+        [primaryFailure, failure],
+        schemaV2FailureDiagnostic(primaryFailure, diagnostic),
+      );
+    }
+    throw failure;
+  }
 }
 
 export function runSchemaV2PreflightStage(stage, action) {
@@ -6330,7 +6366,11 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     infrastructureFailure ??= schemaV2
       ? new Error(schemaV2FailureDiagnostic(error, activeStage), { cause: error })
       : error;
-    fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');
+    runSchemaV2FinalizationOperation(
+      'failure-assertions',
+      () => fillMissingAssertions(results, 'failed', 'phase1.assertion.failed'),
+      infrastructureFailure,
+    );
   }
 
   if (macosKeychainSession !== undefined) {
@@ -6342,31 +6382,43 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
             cause: error,
           })
         : error;
-      for (const [id, assertion] of results) {
-        if (assertion.status === 'passed') {
-          results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
-        }
-      }
+      runSchemaV2FinalizationOperation(
+        'native-cleanup-assertions',
+        () => {
+          for (const [id, assertion] of results) {
+            if (assertion.status === 'passed') {
+              results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
+            }
+          }
+        },
+        infrastructureFailure,
+      );
     }
   }
 
-  if (!results.has('phase1.native.missing-keychain-trust')) {
-    addAssertion(
-      results,
-      'phase1.native.missing-keychain-trust',
-      'blocked',
-      'phase1.producer.native-trust-fixture-unavailable',
-    );
-  }
-  if (!results.has('phase1.compat.api-major-min-client')) {
-    addAssertion(
-      results,
-      'phase1.compat.api-major-min-client',
-      'failed',
-      'phase1.assertion.failed',
-    );
-  }
-  fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');
+  runSchemaV2FinalizationOperation(
+    'required-assertions',
+    () => {
+      if (!results.has('phase1.native.missing-keychain-trust')) {
+        addAssertion(
+          results,
+          'phase1.native.missing-keychain-trust',
+          'blocked',
+          'phase1.producer.native-trust-fixture-unavailable',
+        );
+      }
+      if (!results.has('phase1.compat.api-major-min-client')) {
+        addAssertion(
+          results,
+          'phase1.compat.api-major-min-client',
+          'failed',
+          'phase1.assertion.failed',
+        );
+      }
+      fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');
+    },
+    infrastructureFailure,
+  );
 
   try {
     await executionRoot.cleanup();
@@ -6376,11 +6428,17 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
           cause: error,
         })
       : error;
-    for (const [id, assertion] of results) {
-      if (assertion.status === 'passed') {
-        results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
-      }
-    }
+    runSchemaV2FinalizationOperation(
+      'execution-cleanup-assertions',
+      () => {
+        for (const [id, assertion] of results) {
+          if (assertion.status === 'passed') {
+            results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
+          }
+        }
+      },
+      infrastructureFailure,
+    );
   }
 
   const report = await runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
