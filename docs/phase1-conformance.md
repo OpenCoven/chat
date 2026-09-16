@@ -1,5 +1,13 @@
 # Phase 1 real-authority conformance
 
+Residual-scope follow-up: CI `35072204299` identified the failed child open as
+`access=delete-metadata`. Installation round-trip and quarantine passed again.
+The traversal now reports only `cleanup-grant-ancestor`, `cleanup-grant-subtree`
+or `other`, using exact known components already encountered. An ancestor match
+does not identify the grant directory itself. No additional filesystem access
+or permission changes are made. Native subtree attribution remains pending.
+
+
 Current Windows follow-up: CI `35009678815` passed ten jobs, including packaged
 Phase 1 and all 18 native residual cases. The restricted installation round-trip
 and quarantine passed, but outer profile cleanup failed at child-relative open
@@ -1947,7 +1955,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 176,490 | `ef5c3a83aaed184ebdcd1cb7ac9e671bdbf8642bf5797517a42d19bb6b511088` |
+| `.github/workflows/client-v1-conformance.yml` | 176,982 | `244fa0f3d4c9739d9ba551d734769323e254107f8c5e234b7410087ace7999a5` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1972,7 +1980,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 390,540 | `1c848996b8b65ba928d2e09a71d2f4948403ca14d8d5af61916bcf64eefd053e` |
+| `scripts/windows-job-supervisor.cs` | 392,556 | `a4b18ddf435131350603414c37b8e4dfc9da73550a7d1c564d917b415141247c` |
 | `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
@@ -1982,7 +1990,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
-| `scripts/windows-profile-residual-native.test.ps1` | 44,601 | `de8dfa11dae48ebc56c21ebd11b3fd541e5133d2c6589df5c56c0c59869be1f1` |
+| `scripts/windows-profile-residual-native.test.ps1` | 45,800 | `2a31d97fcb0eb04a6e479eb738ba718693509e2099a9c32b278ef8f911a6adb3` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |

@@ -456,6 +456,29 @@ try { $accessFailure.Invoke($null, [object[]]@(-1073741790, 5, 'child', 2, 'priv
 if ($null -eq $invalidAccess -or $invalidAccess.ToString().Contains('private-access-canary')) {
   throw 'Residual open classifier accepted or exposed arbitrary access.'
 }
+$scopeStep = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualScopeStep', [Reflection.BindingFlags]'NonPublic,Static')
+$scopeLabel = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ProfileResidualScopeLabel', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $scopeStep -or $null -eq $scopeLabel) { throw 'Residual scope classifier is absent.' }
+foreach ($case in @(
+  @(0, '.coven', 1, 'cleanup-grant-ancestor'),
+  @(1, 'chat', 2, 'cleanup-grant-ancestor'),
+  @(2, 'phase1-cleanup-grants-v1', 3, 'cleanup-grant-subtree'),
+  @(3, 'private-name-canary', 3, 'cleanup-grant-subtree'),
+  @(0, 'private-name-canary', -1, 'other'),
+  @(1, 'unrelated', -1, 'other'),
+  @(-1, 'phase1-cleanup-grants-v1', -1, 'other'),
+  @(0, '.COVEN', -1, 'other')
+)) {
+  $state = $scopeStep.Invoke($null, [object[]]@([int]$case[0], [string]$case[1]))
+  if ($state -ne $case[2] -or $scopeLabel.Invoke($null, [object[]]@($state)) -cne $case[3]) {
+    throw 'Residual scope path classification changed.'
+  }
+}
+$invalidScope = $null
+try { $scopeLabel.Invoke($null, [object[]]@(99)) } catch { $invalidScope = $_.Exception }
+if ($null -eq $invalidScope) { throw 'Residual scope accepted an invalid state.' }
 $relativeOpen = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'OpenProfileResidualRelative', [Reflection.BindingFlags]'NonPublic,Static')
 $invalidSharing = $null
