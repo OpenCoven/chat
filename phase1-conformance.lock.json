@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "e34141fe32105972bb6db0a12c5520fb44915bdf"
+    "revision": "c93d20d4092f3540a8bffe29c59f6dc851ae3190"
   },
   "harnessAuthority": {
-    "revision": "e34141fe32105972bb6db0a12c5520fb44915bdf",
-    "tree": "7fd3ab1ac3638cfc9d56bca3a945d9dd6fba73d5",
+    "revision": "c93d20d4092f3540a8bffe29c59f6dc851ae3190",
+    "tree": "1615c00040ff31793c97f8c00819632829312685",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -141,8 +141,8 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "464820d196689b68e32bdd910075b8df7b91132f",
-        "sha256": "653493224b2dc93109a1df101535e6511f63f59ad8edf4d971c153988f8c77f5"
+        "blob": "742d13f7a75faa0c7f7064328d0c1f1d4877c6c4",
+        "sha256": "f21eb5af2925a6d721ba45f73f51718bb9f43c36f9230e03655210251df38911"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
@@ -173,8 +173,8 @@
       },
       {
         "path": "src-tauri/src/cleanup_grant.rs",
-        "blob": "6b8a0187eb7515db3c17bcc99cefe7880e78bd75",
-        "sha256": "2cd24a8055f69b2f146cdf8ab2e7e4b69e7b26be44578c27db5cc0960bb3c74b"
+        "blob": "20069473a430936117749fb04ee3349b4087cb93",
+        "sha256": "38be47c72bbd480da581e39641cb9ee67c77c283961b1801b20eb54c35a812fa"
       },
       {
         "path": "src-tauri/src/conformance.rs",
