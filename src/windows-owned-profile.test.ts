@@ -201,3 +201,19 @@ test.skipIf(!pwshAvailable)(
   },
   30_000,
 );
+
+// Cleanup invokes native APIs too, so capture the failing API's error first.
+test.each([
+  ['if (!AssignProcessToJobObject(jobHandle, process.hProcess))', 'TerminateProcess'],
+  ['if (resumeResult == UInt32.MaxValue)', 'TerminateJobObject'],
+  ['if (wait != WAIT_TIMEOUT)', 'TerminateJobObject'],
+])('preserves native error before cleanup: %s', (condition, cleanup) => {
+  const launch = source.slice(source.indexOf('private WindowsJobRunResult RunAsUserCore('));
+  const start = launch.indexOf(condition);
+  expect(start).toBeGreaterThan(-1);
+  const block = launch.slice(start, launch.indexOf('\n                }', start));
+  const capture = block.indexOf('int nativeError = Marshal.GetLastWin32Error();');
+  expect(capture).toBeGreaterThan(-1);
+  expect(capture).toBeLessThan(block.indexOf(`${cleanup}(`));
+  expect(block).toMatch(/new Win32Exception\(\s*nativeError,/u);
+});

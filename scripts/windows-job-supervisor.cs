@@ -7558,9 +7558,10 @@ namespace OpenCoven
 
                 if (!AssignProcessToJobObject(jobHandle, process.hProcess))
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
                     TerminateProcess(process.hProcess, 1);
                     throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
+                        nativeError,
                         "AssignProcessToJobObject failed.");
                 }
                 bool assigned;
@@ -7588,8 +7589,9 @@ namespace OpenCoven
                 uint resumeResult = ResumeThread(process.hThread);
                 if (resumeResult == UInt32.MaxValue)
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
                     TerminateJobObject(jobHandle, 1);
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "ResumeThread failed.");
+                    throw new Win32Exception(nativeError, "ResumeThread failed.");
                 }
                 if (StandardInput != null)
                 {
@@ -7609,9 +7611,10 @@ namespace OpenCoven
                     }
                     if (wait != WAIT_TIMEOUT)
                     {
+                        int nativeError = Marshal.GetLastWin32Error();
                         TerminateJobObject(jobHandle, 1);
                         throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
+                            nativeError,
                             "WaitForSingleObject failed.");
                     }
                     if (

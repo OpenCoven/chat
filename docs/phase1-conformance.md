@@ -1,27 +1,25 @@
 # Phase 1 real-authority conformance
 
-Windows owner-cleanup follow-up: [CI 35078784942](https://github.com/OpenCoven/chat/actions/runs/35078784942)
-passed ten jobs, including packaged Phase 1 and native residual cleanup. All
-seven native owner-cleanup tests passed. Restricted installation and quarantine
-passed, and outer cleanup completed: execution reached the later profile
-lifecycle fixture. That fixture failed at `stage=child-profile-agreement`;
-the application fixture was not reached. Protected acceptance remains open.
+Windows owner-cleanup follow-up: [CI 35082772603](https://github.com/OpenCoven/chat/actions/runs/35082772603)
+failed in the second lifecycle child launch: `stage=child-launch-1`,
+`nativeCode=0`, `hresult=80004005`. The first child launch completed its
+credential and both profile-path assertions. All seven native owner-cleanup
+tests and restricted installation/quarantine passed; outer cleanup completed.
+The application fixture was not reached. Protected acceptance remains open.
 
-The cleanup-grant owner consumes the validated marker by handle and attempts
-to remove its three empty private directories bottom-up. Each child is opened
-relative to a pinned parent and checked against its original file identity.
-Nonempty directories, competing pins and replacements stop pruning; the profile
-home is never removed. Once marker deletion commits, pruning failure does not
-make the consumed grant retryable. Native coverage verifies these boundaries.
+Three native failure paths read their error after cleanup invoked another
+Windows API: job assignment, thread resume and process wait. They now capture
+the original error before cleanup. The lifecycle fixture maps exact known
+messages to fixed operation labels and suppresses all other message content.
+Native execution must establish the failing API and original error; repeated-job
+termination state is a hypothesis, not a confirmed cause. Job reuse, cleanup,
+all assertions, ACLs, privileges and production limits remain unchanged.
 
-The lifecycle failure stage covered probe setup, retained credential capability,
-three child launches and both profile comparisons. The fixture now distinguishes
-those stages and maps child exit codes to fixed capability, query, setup or
-expected/bound-profile categories. Child output is classified only as empty or
-nonempty. Native results are required to identify the failing assertion; no
-profile-path mismatch is established yet. Assertions, ACLs, privileges and
-production limits are unchanged. Chat landing, SDK rebinding and fresh protected
-validation remain pending.
+The cleanup-grant owner consumes the validated marker by handle and prunes only
+its empty private directories with parent pins and original identity checks.
+Sibling grants, unrelated contents and replacements are preserved. Committed
+consumption remains final if pruning fails. Chat landing, SDK rebinding and
+fresh protected validation remain pending.
 
 ## Executable diagnostic harness binding
 
@@ -1960,7 +1958,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 176,982 | `244fa0f3d4c9739d9ba551d734769323e254107f8c5e234b7410087ace7999a5` |
+| `.github/workflows/client-v1-conformance.yml` | 177,026 | `3f92f44956a0bc43262198156d55a7b0b04a188c64faaa629c39fafd0f83b9b8` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1985,7 +1983,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 392,556 | `a4b18ddf435131350603414c37b8e4dfc9da73550a7d1c564d917b415141247c` |
+| `scripts/windows-job-supervisor.cs` | 392,713 | `1145968197bfed648b38e3bfbf83bdec0541b8ae43b490a60b69e0d37925df53` |
 | `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |

@@ -2,6 +2,16 @@ param([switch]$PortableOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-ProfileLifecycleNativeOperation([string]$Message) {
+  switch -CaseSensitive -Exact ($Message) {
+    'AssignProcessToJobObject failed.' { return 'job-assignment' }
+    'ResumeThread failed.' { return 'thread-resume' }
+    'WaitForSingleObject failed.' { return 'process-wait' }
+    'CreateProcessWithLogonW failed.' { return 'process-create' }
+    default { return 'unclassified' }
+  }
+}
+
 function Get-ProfileLifecycleCapabilityFailure([string]$Capability) {
   if ($Capability -cmatch '\Ahive=present;persistence=(local|enterprise)\z') { return $null }
   if ($Capability -cmatch '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z') {
@@ -27,6 +37,16 @@ function Get-ProfileLifecycleChildFailure([int]$ExitCode, [string]$Stdout, [stri
 }
 
 if ($PortableOnly) {
+  foreach ($case in @(
+    @('AssignProcessToJobObject failed.', 'job-assignment'),
+    @('ResumeThread failed.', 'thread-resume'),
+    @('WaitForSingleObject failed.', 'process-wait'),
+    @('CreateProcessWithLogonW failed.', 'process-create'),
+    @('private-provider-canary', 'unclassified'),
+    @('AssignProcessToJobObject failed. private-provider-canary', 'unclassified')
+  )) {
+    if ((Get-ProfileLifecycleNativeOperation $case[0]) -cne $case[1]) { throw 'Native operation classification changed.' }
+  }
   foreach ($capability in @('hive=present;persistence=local', 'hive=present;persistence=enterprise')) {
     if ($null -ne (Get-ProfileLifecycleCapabilityFailure $capability)) { throw 'Valid capability rejected.' }
   }
@@ -248,7 +268,8 @@ if (-not [string]::Equals($boundProfile,
   } catch {
     $cause = $_.Exception.GetBaseException()
     if ($cause -is [ComponentModel.Win32Exception]) {
-      throw ('Native profile lifecycle assertion failed: stage={0}; nativeCode={1}; hresult={2:X8}.' -f $stage, $cause.NativeErrorCode, $cause.HResult)
+      $operation = Get-ProfileLifecycleNativeOperation $cause.Message
+      throw ('Native profile lifecycle assertion failed: stage={0}; operation={1}; nativeCode={2}; hresult={3:X8}.' -f $stage, $operation, $cause.NativeErrorCode, $cause.HResult)
     }
     if ($cause -is [Runtime.InteropServices.COMException]) {
       throw ('Native profile lifecycle assertion failed: stage={0}; hresult={1:X8}.' -f $stage, $cause.HResult)
