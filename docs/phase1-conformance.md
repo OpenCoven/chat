@@ -1969,7 +1969,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 177,886 | `ecb7330046e9cd909af4adfa6163985306b87fbcbf7b0eec27997c06d6f7593b` |
+| `.github/workflows/client-v1-conformance.yml` | 177,934 | `bd8331c6d82e22b7618ee5beda8fd10fad4e022e794c8d762dc62cf3f27d5049` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
@@ -1994,9 +1994,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 395,736 | `49f10864dd618ce81f3823bca5317e51248c3124d13d6859082dbd2e8d0bd7b2` |
+| `scripts/windows-job-supervisor.cs` | 396,176 | `6f7d0712e8f0b04d5c3fdff77a3cb975cc96a2f5c2bd5e565b43277b7085c030` |
 | `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
-| `scripts/windows-quota-diagnostics.test.ps1` | 36,772 | `2fbd9a5a275b75de302f655b191f43e558dd5b6cc63864948beb40b8af89534e` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 38,067 | `97fdb3b08aca19ceb31e6affb5e211cada9a860ccceae26df03816507d981492` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,775 | `605b57608bf4ef2939759d32df6ac1685027bdd864aaaab44dac15ab90de51ec` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,186 | `7b926d3f663eee69790ce01945efd83d14e332df876423eab7f6c44622824253` |
 | `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
@@ -2004,7 +2004,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
-| `scripts/windows-profile-residual-native.test.ps1` | 45,800 | `2a31d97fcb0eb04a6e479eb738ba718693509e2099a9c32b278ef8f911a6adb3` |
+| `scripts/windows-profile-residual-native.test.ps1` | 47,303 | `66477e50c2d6c15bdb876102b388c686bce03db554c66ce76bd9b9538fb7a380` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
@@ -2824,3 +2824,53 @@ paths against those controls. This investigation changes no native cleanup code,
 ACLs, privileges, access masks, limits, or protected settings. Native Windows proof
 and a reviewed source/SDK binding remain required before another protected run can
 establish acceptance.
+
+## Quota enumeration and residual open purposes
+
+Protected run [34945048615](https://github.com/OpenCoven/chat/actions/runs/34945048615)
+failed Windows quota monitoring with `access-denied`, root `harness-execution-aggregate`,
+scope `checkouts`, operation `directory-enumeration-depth-3-plus`, and repeat `persistent`.
+No producer-stage diagnostic or Windows record was emitted. Linux and macOS passed;
+validation, attestation, and aggregation were skipped.
+
+`MeasureDirectoryBytes` traverses ordinary directories and skips observed reparse points.
+`ReadBoundedDirectorySnapshot` materializes a bounded snapshot. On access denial,
+`ReadDirectorySnapshotOperation` performs one fresh, complete snapshot read under the
+existing quota-reader identity. A successful repeat supplies the measurement; a missing
+directory is classified separately. Any other repeat exception produces `persistent`,
+while the initial access-denied category is preserved. An injected access denial followed
+by an I/O exception now exercises that distinction through the production snapshot seam.
+Thus the log does not prove two identical ACL failures, a particular checkout, a denied
+right, or a causal connection to profile cleanup. Quota limits and fail-closed behavior
+remain unchanged.
+
+Cleanup separately reported `relative-open;kind=entry;depth=le4;ntstatus=c0000022;role=child`.
+Both the initial deletion open and ordinary-directory enumeration reopen previously used
+that label. Residual-open diagnostics now append a fixed purpose derived from the same
+boolean that selects native access rights:
+
+- `purpose=deletion`: requests DELETE plus metadata, security-read, and synchronization
+  rights; denies delete sharing.
+- `purpose=enumeration`: requests LIST_DIRECTORY plus the same metadata rights. The child
+  enumeration reopen retains the deletion handle, permits delete sharing, and verifies
+  directory identity before enumeration.
+
+Portable injection covers both purposes for every bounded role and rejects private role
+text. Native denial controls require deletion purpose for denied deletion and enumeration
+purpose for an ordinary directory whose list access is denied. These diagnostics disclose
+no names or paths and do not change ACLs, privileges, access masks, sharing, or retries.
+Native Windows verification remains required; portable tests cannot establish those ACL
+results. No unchanged protected rerun is warranted. A future dispatch requires reviewed
+delivery, a reachable authority freeze, and the matching SDK binding first.
+
+### Original residual-purpose source binding
+
+PR #302 originally selected signed source `4dc702d2538a3815a84e39cddec598ce058518f6`, tree
+`f9ac551a29150e232c8e3ff8e8ddc0fa5cf8eefa`. The binding records the actual Git blobs and SHA-256
+digests of all 25 governed files and 10 production deltas. That source retained the merged
+finalization diagnostics and added only the residual-open purposes described above.
+The current integration also retains the access and scope diagnostics and the
+independent profile-probe job lifetimes described at the top of this document.
+Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
+Native Windows checks and an SDK binding to the eventual delivery remain required
+before protected conformance can establish acceptance.

@@ -3503,6 +3503,13 @@ namespace OpenCoven
         }
 
         private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth, bool deleteAccess)
+        {
+            return ProfileResidualOpenError(status, nativeError, role, depth,
+                deleteAccess ? "delete-metadata" : "directory-list");
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
             int status, int nativeError, string role, int depth, string access)
         {
             if (access != null && access != "delete-metadata" && access != "directory-list")
@@ -3512,7 +3519,9 @@ namespace OpenCoven
             CleanupDeleteException native = ProfileResidualNativeError(nativeError, "relative-open", "entry", depth);
             return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT open failed.",
                 native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture) +
-                ";role=" + role + (access == null ? String.Empty : ";access=" + access));
+                ";role=" + role + (access == null ? String.Empty :
+                    ";purpose=" + (access == "delete-metadata" ? "deletion" : "enumeration") +
+                    ";access=" + access));
         }
 
         private static string ProfileResidualScopeLabel(int state)
