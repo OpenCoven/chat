@@ -424,6 +424,73 @@ test('keeps cancellation available after switching to another familiar', async (
   ).toEqual({ height: 390, x: 0, y: 0 });
 });
 
+// The empty transcript is the surface that told a reader to "select a familiar"
+// under a "Chat with Astra" heading, on top of a live run. Each state below is
+// reached through the real app: driving ChatLayout with synthetic props once
+// "verified" a combination (`ready` without a selection) that cannot occur.
+test.describe('empty transcript states', () => {
+  test('names the missing runtime rather than a familiar choice', async ({ page }) => {
+    await installRuntimeFixture(page, false);
+    await page.goto('/');
+    await expect(
+      page.getByText('Connect to your local Coven CLI to see real conversations here.'),
+    ).toBeVisible();
+    // Top bar, transcript and inspector must agree. Each of these used to read
+    // "Coven" -- a portrait and a name for a familiar that does not exist.
+    await expect(page.locator('.fr-thread-empty-title')).toHaveText('No familiar selected');
+    await expect(page.getByRole('button', { name: 'No familiar selected' })).toBeDisabled();
+    await expect(page.locator('.fr-inspector-kind')).toHaveText('No familiar selected');
+    await expect(page.locator('.fr-inspector-name')).toHaveText('Coven CLI');
+    await expect(page.locator('.fr-thread-empty img')).toHaveCount(0);
+  });
+
+  test('asks for a selection when the runtime is healthy and nothing is chosen', async ({
+    page,
+  }) => {
+    await installRuntimeFixture(page, true, 'unused', 0);
+    await page.goto('/');
+    await expect(
+      page.getByText('Select a familiar from the sidebar to start a conversation.'),
+    ).toBeVisible();
+    // The regression this guards: `ready` is false here because nothing is
+    // selected, so keying the copy on it claimed a healthy CLI was unreachable.
+    await expect(page.getByText(/Connect to your local Coven CLI/)).toHaveCount(0);
+  });
+
+  test('keeps the inspector header on one line with no familiar to portray', async ({ page }) => {
+    await installRuntimeFixture(page, true, 'unused', 0);
+    await page.goto('/');
+    const name = page.locator('.fr-inspector-name');
+    await expect(name).toBeVisible();
+    // .fr-inspector-head is a 22px/1fr/auto grid. Dropping the avatar without
+    // keeping its slot pushed this text into 22px, wrapping it over the close
+    // icon -- a break every unit test passed straight through.
+    const box = await name.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.height).toBeLessThan(24);
+  });
+
+  test('greets a selected familiar without contradicting its own heading', async ({ page }) => {
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    await expect(page.getByText('Chat with Local familiar')).toBeVisible();
+    await expect(page.getByText(/start of your conversation with Local familiar/)).toBeVisible();
+    await expect(page.getByText(/Select a familiar/)).toHaveCount(0);
+  });
+
+  test('never shows the empty state beside a running indicator', async ({ page }) => {
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    await composer.fill('Start a run');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    await expect(page.locator('.fr-thread-empty')).toHaveCount(0);
+    await page.evaluate(() => window.__covenFixture.finish?.());
+  });
+});
+
 test('missing CLI shows actionable setup in the same interface', async ({ page }) => {
   await installRuntimeFixture(page, false);
   await page.goto('/');
