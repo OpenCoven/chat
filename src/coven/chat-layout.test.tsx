@@ -301,10 +301,15 @@ describe('production Familiars layout', () => {
   });
 
   it('tells a ready user without a familiar that one must be selected, matching the disabled composer', () => {
-    render(<ChatLayout {...layoutProps()} ready />);
+    // `connected` is what makes this the healthy/no-selection state. Rendering
+    // `ready` alone left the assertion below satisfied by the inspector's
+    // unrelated prose while the composer named the runtime instead.
+    render(<ChatLayout {...layoutProps()} connected ready />);
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/select a familiar/i).length).toBeGreaterThan(0);
+    // The name promises the composer specifically, so assert it directly.
+    expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
   });
 
   it('shows real messages, filters conversations and renders honest access', () => {
