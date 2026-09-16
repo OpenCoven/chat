@@ -165,7 +165,9 @@ export function buildIsolationEvidence({
     const after = operatorAfter?.[id];
     if (
       before === undefined ||
+      before === null ||
       after === undefined ||
+      after === null ||
       !digestPattern.test(before.sha256 ?? '') ||
       !digestPattern.test(after.sha256 ?? '')
     ) {

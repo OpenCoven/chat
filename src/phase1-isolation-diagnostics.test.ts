@@ -79,6 +79,13 @@ for (const id of ids) {
       },
     });
     cases.push({
+      name: `${id} null ${side}`,
+      category: `operator.${id}.invalid`,
+      mutate: (v) => {
+        Reflect.set(v[side], id, null);
+      },
+    });
+    cases.push({
       name: `${id} invalid ${side} digest`,
       category: `operator.${id}.invalid`,
       mutate: (v) => {
