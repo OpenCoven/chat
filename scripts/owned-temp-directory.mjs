@@ -167,23 +167,41 @@ function assertOwnedRootStillMatches(context) {
   }
 }
 
+const cleanupFailureCategories = new WeakMap();
+
+export function ownedTempCleanupFailureCategory(error) {
+  return cleanupFailureCategories.get(error) ?? 'unknown';
+}
+
+function cleanupOperation(category, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    if ((typeof error === 'object' && error !== null) || typeof error === 'function') {
+      cleanupFailureCategories.set(error, category);
+    }
+    throw error;
+  }
+}
+
 function removePathWithoutFollowingSymlinks(path) {
-  const stats = lstatIfExists(path);
+  const stats = cleanupOperation('entry-stat', () => lstatIfExists(path));
 
   if (stats === undefined) {
     return;
   }
 
   if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    unlinkSync(path);
+    cleanupOperation('leaf-remove', () => unlinkSync(path));
     return;
   }
 
-  for (const entry of readdirSync(path)) {
+  const entries = cleanupOperation('directory-enumerate', () => readdirSync(path));
+  for (const entry of entries) {
     removePathWithoutFollowingSymlinks(resolve(path, entry));
   }
 
-  rmdirSync(path);
+  cleanupOperation('directory-remove', () => rmdirSync(path));
 }
 
 export function createOwnedTempDirectory({ prefix, childSegments = [] } = {}) {
@@ -197,32 +215,34 @@ export function createOwnedShortTempDirectory({ prefix, childSegments = [] } = {
 }
 
 export function cleanupOwnedTempRoot(context) {
-  assertOwnedRootStillMatches(context);
+  cleanupOperation('root-precondition', () => assertOwnedRootStillMatches(context));
 
   const deletingRoot = resolve(
     context.parentPath,
     `${basename(context.rootPath)}.deleting-${process.pid}-${randomUUID()}`,
   );
 
-  renameSync(context.rootPath, deletingRoot);
+  cleanupOperation('root-rename', () => renameSync(context.rootPath, deletingRoot));
 
-  const renamedStats = lstatSync(deletingRoot);
+  cleanupOperation('root-postrename', () => {
+    const renamedStats = lstatSync(deletingRoot);
 
-  if (renamedStats.isSymbolicLink()) {
-    throw new Error(`Owned temp cleanup root must not be a symlink: ${deletingRoot}`);
-  }
+    if (renamedStats.isSymbolicLink()) {
+      throw new Error(`Owned temp cleanup root must not be a symlink: ${deletingRoot}`);
+    }
 
-  if (!renamedStats.isDirectory()) {
-    throw new Error(`Owned temp cleanup root must be a directory: ${deletingRoot}`);
-  }
+    if (!renamedStats.isDirectory()) {
+      throw new Error(`Owned temp cleanup root must be a directory: ${deletingRoot}`);
+    }
 
-  if (renamedStats.dev !== context.rootDevice || renamedStats.ino !== context.rootInode) {
-    throw new Error(`Owned temp cleanup root changed identity after rename: ${deletingRoot}`);
-  }
+    if (renamedStats.dev !== context.rootDevice || renamedStats.ino !== context.rootInode) {
+      throw new Error(`Owned temp cleanup root changed identity after rename: ${deletingRoot}`);
+    }
 
-  // The rename moved a directory; confirm it is still ours before the
-  // recursive delete, which is the only irreversible step in this file.
-  assertOwnershipStamp(deletingRoot, context, 'after rename');
+    // The rename moved a directory; confirm it is still ours before the
+    // recursive delete, which is the only irreversible step in this file.
+    assertOwnershipStamp(deletingRoot, context, 'after rename');
+  });
 
   removePathWithoutFollowingSymlinks(deletingRoot);
 }

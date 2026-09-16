@@ -1,6 +1,44 @@
 # Delivery roadmap and consolidation audit
 
-## Current delivery and consolidation checkpoint, 2026-09-16
+## Current delivery and consolidation checkpoint, 2026-09-16 (Chat #305)
+
+Chat [#305](https://github.com/OpenCoven/chat/pull/305) landed at
+`1f69306293f8caf873e0a2d6459a5c402e77600a`, followed by SDK
+[#291](https://github.com/OpenCoven/sdk/pull/291) at
+`404c2bf898330cff10e0402646e83e6e65d17869`. Both validator scopes were
+rotated and read back at that SDK merge. Protected
+[run 35125287541](https://github.com/OpenCoven/chat/actions/runs/35125287541)
+failed on Windows at `phase1.stage.execution-root-cleanup.failed`. Linux and
+macOS records independently passed identity, timing, privacy and all 197 ordered
+assertions each. Windows emitted no record; downstream validation, aggregation
+and attestation were skipped. Cleanup failure prevents later isolation validation,
+so this result does not establish that the preceding isolation failure is repaired.
+
+The cleanup diagnostic follow-up distinguishes fourteen fixed categories at the
+actual operation boundaries. It retains private causes, primary-failure precedence,
+child termination order and grace periods, root identity/stamp checks, and symlink
+and missing-entry behavior. It does not change permissions, limits, dependencies,
+or acceptance criteria. Signed source binding, reviewed delivery, SDK rebinding,
+scope rotation and fresh protected validation remain required.
+
+Chat [#308](https://github.com/OpenCoven/chat/pull/308) addresses superseded
+Windows CI. Its old running Windows job was cancelled after the replacement push;
+the replacement released the queue and is awaiting terminal success in
+[run 35127584766](https://github.com/OpenCoven/chat/actions/runs/35127584766).
+Issue [#306](https://github.com/OpenCoven/chat/issues/306) remains open until
+that exact head passes and lands. Concurrent custody-diagnostic PR #307 requires
+sequential integration and a refreshed binding; its older binding must not land.
+
+The worktree inventory currently contains eleven Chat and three SDK trees.
+Preserve active, dirty, locked and ownership-uncertain trees, including the running
+Chat #297 app. No retirement follows from age, cleanliness or a merged PR alone.
+Chat #86 remains a parked draft requiring feature and vendor-artifact reconciliation;
+WorkOS #303 remains active. The managed HPKE iterator authority gap and Project 9
+tracking refresh remain open. Candidate and counterpart identities remain frozen,
+publication remains disabled, and no accepted aggregate exists. Consolidation is
+incomplete; preserve this chat and active worktrees.
+
+## Historical delivery and consolidation checkpoint, 2026-09-16 (Chat #297)
 
 GitHub issues and repository roadmaps hold current ownership, blockers, and evidence. Original acceptance criteria and historical records below remain preserved.
 
