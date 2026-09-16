@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ChatLayout, type ChatLayoutProps, emptyThreadText } from './chat-layout';
+import { ChatLayout, type ChatLayoutProps, composerCopy, emptyThreadText } from './chat-layout';
 
 function layoutProps(): ChatLayoutProps {
   return {
@@ -58,6 +58,55 @@ describe('empty transcript copy', () => {
     );
     expect(screen.queryByText('Chat with Astra')).not.toBeInTheDocument();
     expect(screen.getByText(/Coven is running/)).toBeInTheDocument();
+  });
+});
+
+describe('top bar identity', () => {
+  it('shows no familiar identity when none is selected', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    expect(screen.queryByText('Coven')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'No familiar selected' })).toBeDisabled();
+  });
+
+  it('names the selected familiar and opens its card', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+      />,
+    );
+    expect(screen.getByRole('button', { name: "Open Astra's familiar card" })).toBeEnabled();
+  });
+});
+
+describe('composer copy', () => {
+  it('names the addressee only when there is one', () => {
+    expect(composerCopy('Astra')).toEqual({
+      label: 'Message Astra',
+      placeholder: 'Message Astra',
+    });
+    expect(composerCopy().placeholder).toBe('Select a familiar to send a message.');
+    expect(composerCopy().label).toBe('Message');
+  });
+
+  it('does not offer to message the fallback name when nothing is selected', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    expect(screen.queryByPlaceholderText('Message Coven')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
+  });
+
+  it('addresses the selected familiar', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        ready
+      />,
+    );
+    expect(screen.getByPlaceholderText('Message Astra')).toBeInTheDocument();
   });
 });
 

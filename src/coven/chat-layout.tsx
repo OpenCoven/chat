@@ -110,6 +110,18 @@ export function emptyThreadText(ready: boolean, familiarName?: string) {
   return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
 }
 
+/**
+ * Composer copy. With no familiar chosen there is no addressee, but `name`
+ * falls back to "Coven", which rendered "Message Coven" above a send that can
+ * only fail with "Select a familiar before sending a message." Name the
+ * missing step instead of inviting the failing one.
+ */
+export function composerCopy(familiarName?: string) {
+  if (!familiarName)
+    return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
+  return { label: `Message ${familiarName}`, placeholder: `Message ${familiarName}` };
+}
+
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
@@ -169,6 +181,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
+  const composer = composerCopy(familiar?.name);
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -336,15 +349,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                 onClick={openSidebar}
               />
             ) : null}
-            <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={24} />
+            {familiar ? (
+              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={24} />
+            ) : null}
             <button
               type="button"
               className="fr-thread-title coven-familiar-card-trigger"
               disabled={!familiar}
               onClick={showFamiliarCard}
-              aria-label={`Open ${name}'s familiar card`}
+              aria-label={familiar ? `Open ${name}'s familiar card` : 'No familiar selected'}
             >
-              {name}
+              {familiar ? name : 'No familiar selected'}
             </button>
           </div>
           {session && props.onLifecycle && (
@@ -468,7 +483,9 @@ export function ChatLayout(props: ChatLayoutProps) {
             )}
             {!props.messages.length && !props.loading && !props.busy ? (
               <div className="fr-thread-empty">
-                <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={36} ring />
+                {familiar ? (
+                  <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
+                ) : null}
                 <span className="fr-thread-empty-title">
                   {familiar ? `Chat with ${name}` : 'No familiar selected'}
                 </span>
@@ -509,8 +526,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                 attachmentIcon="plus"
                 value={props.draft}
                 onValueChange={props.onDraft}
-                label={`Message ${name}`}
-                placeholder={`Message ${name}`}
+                label={composer.label}
+                placeholder={composer.placeholder}
                 onSend={props.onSend}
                 running={props.busy && !composerDisabled}
                 onStop={props.onCancel}
@@ -568,11 +585,18 @@ export function ChatLayout(props: ChatLayoutProps) {
             onClick={() => setInspector(false)}
             aria-label="Close inspector"
           >
-            <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} ring />
+            {familiar ? (
+              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} ring />
+            ) : (
+              // .fr-inspector-head is a 3-column grid whose first column is a
+              // fixed 22px avatar slot; leaving it empty shifts the name into
+              // 22px and wraps it over the close icon.
+              <span className="fr-inspector-mark" aria-hidden="true" />
+            )}
             <span className="fr-inspector-who">
-              <span className="fr-inspector-name">{name}</span>
+              <span className="fr-inspector-name">{familiar ? name : 'Coven CLI'}</span>
               <span className="fr-inspector-kind">
-                {familiar ? 'Coven familiar' : 'Local Coven CLI'}
+                {familiar ? 'Coven familiar' : 'No familiar selected'}
               </span>
             </span>
             <Icon name="sidebar-simple" size={15} />
