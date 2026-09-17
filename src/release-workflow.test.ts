@@ -93,6 +93,12 @@ describe('release workflow specification', () => {
     expect(build).toContain(`path: \${{ env.STAGE_DIR }}/**`);
     expect(build).toContain('Get-ChildItem -Path "$env:STAGE_DIR/*"');
 
+    // macOS runners ship bash 3.2, so `shopt -s globstar` (bash 4.0+) aborts
+    // the step under `set -e`. This surfaced only once the macOS build got far
+    // enough to stage at all, and nothing here needs `**`.
+    expect(build).toMatch(/shopt -s nullglob$/m);
+    expect(build).not.toMatch(/shopt -s [^\n]*globstar/);
+
     // No step may reach back into the frontend output directory.
     for (const forbidden of [
       'mkdir -p dist',

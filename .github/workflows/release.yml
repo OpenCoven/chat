@@ -584,7 +584,10 @@ jobs:
           set -euo pipefail
           bundle_root="src-tauri/target/${{ matrix.target }}/release/bundle"
           mkdir -p "${STAGE_DIR}"
-          shopt -s nullglob globstar
+          # macOS runners ship bash 3.2, which has no `globstar` -- enabling it
+          # aborts the step under `set -e`. Nothing here globs with `**`, so
+          # `nullglob` alone is what these single-level patterns actually need.
+          shopt -s nullglob
           copied=0
           for f in \
             "${bundle_root}"/dmg/*.dmg \
