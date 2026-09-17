@@ -55,6 +55,12 @@ describe('release workflow specification', () => {
     expect(build).toContain('lipo -archs');
     expect(build).toContain(`dpkg-deb --field "\${deb}" Version`);
     expect(build).toContain('dpkg-deb --contents');
+    // The original awk form could never pass: inside an awk regex literal the
+    // unescaped `/` in `[^/[:space:]]` ends the literal, so awk died on a
+    // syntax error and `!` read that as "no payload" for every .deb. Staging
+    // failed earlier for so long that nothing ever reached the assertion.
+    expect(build).not.toContain(String.raw`awk '/\.\/usr`);
+    expect(build).toContain(String.raw`grep -qE '[[:space:]]\./usr/bin/[^[:space:]]'`);
     expect(build).toContain('minimum_size=$((1024 * 1024))');
     expect(build).toContain('certificateThumbprint');
     expect(build).toContain('Get-AuthenticodeSignature');
@@ -92,6 +98,12 @@ describe('release workflow specification', () => {
     expect(build).toContain(`cd "\${STAGE_DIR}"`);
     expect(build).toContain(`path: \${{ env.STAGE_DIR }}/**`);
     expect(build).toContain('Get-ChildItem -Path "$env:STAGE_DIR/*"');
+
+    // macOS runners ship bash 3.2, so `shopt -s globstar` (bash 4.0+) aborts
+    // the step under `set -e`. This surfaced only once the macOS build got far
+    // enough to stage at all, and nothing here needs `**`.
+    expect(build).toMatch(/shopt -s nullglob$/m);
+    expect(build).not.toMatch(/shopt -s [^\n]*globstar/);
 
     // No step may reach back into the frontend output directory.
     for (const forbidden of [

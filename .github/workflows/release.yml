@@ -584,7 +584,10 @@ jobs:
           set -euo pipefail
           bundle_root="src-tauri/target/${{ matrix.target }}/release/bundle"
           mkdir -p "${STAGE_DIR}"
-          shopt -s nullglob globstar
+          # macOS runners ship bash 3.2, which has no `globstar` -- enabling it
+          # aborts the step under `set -e`. Nothing here globs with `**`, so
+          # `nullglob` alone is what these single-level patterns actually need.
+          shopt -s nullglob
           copied=0
           for f in \
             "${bundle_root}"/dmg/*.dmg \
@@ -740,9 +743,20 @@ jobs:
                   echo "::error::${deb} reports version ${package_version}, expected ${EXPECTED_VERSION}."
                   exit 1
                 }
-                if ! dpkg-deb --contents "${deb}" |
-                  awk '/\.\/usr\/bin\/[^/[:space:]]+/ { found = 1 } END { exit(found ? 0 : 1) }'; then
+                # The previous awk form could never pass: inside an awk regex
+                # literal the unescaped `/` in `[^/[:space:]]` terminates the
+                # literal early, so awk aborted on a syntax error and the `!`
+                # turned that into "no payload" for every .deb ever built.
+                # Nothing reached this assertion until staging was fixed, so it
+                # went unnoticed. grep needs no such escaping. Requiring a
+                # character after `./usr/bin/` keeps the bare directory entry
+                # from satisfying it, and the product name contains a space, so
+                # only the first path component is matched on.
+                deb_contents=$(dpkg-deb --contents "${deb}")
+                if ! printf '%s\n' "${deb_contents}" |
+                  grep -qE '[[:space:]]\./usr/bin/[^[:space:]]'; then
                   echo "::error::${deb} contains no executable payload under /usr/bin."
+                  printf '%s\n' "${deb_contents}"
                   exit 1
                 fi
                 echo "  ok: ${deb} version and /usr/bin payload"
