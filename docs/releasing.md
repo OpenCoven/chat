@@ -160,6 +160,24 @@ generates and verifies checksums, and then stops without creating or modifying
 a GitHub Release. Use this path to validate workflow changes and signing-secret
 wiring before the next real tag push.
 
+**Dispatch runs the workflow from the branch you select, not from the tag.**
+The build still checks out the tag's commit, so a workflow fix on `main` can be
+rehearsed against a tag that predates it. Select `main` unless you are
+deliberately testing an older pipeline.
+
+`allow_unsigned=true` additionally skips notarization and Authenticode. That
+makes it the right switch for rehearsing the pipeline before certificates
+exist, and the wrong one for judging whether signing works: a green
+`allow_unsigned` run leaves the signing and notarization steps completely
+unexercised. Once the secrets are configured, rehearse once more *without* it
+before a real release.
+
+> The pipeline was first proven end to end on 2026-09-17 (four platform builds,
+> six installers, checksums verified, `publish` executed). Getting there took
+> four fixes to latent failures that no rehearsal had ever reached, each hidden
+> behind the one before it. `src/release-workflow.test.ts` guards them; run it
+> when you change this workflow.
+
 ---
 
 ## 3. Required secrets
@@ -401,11 +419,11 @@ gh api repos/OpenCoven/chat/branches/main/protection \
   --jq '{checks: .required_status_checks.contexts, signed: .required_signatures.enabled}'
 ```
 
-> **Still missing: required signed commits.** `required_signatures` is
-> `false`. The release pipeline verifies the *tag* signature and refuses an
-> unsigned one, but nothing yet enforces that the commits under that tag are
-> signed. Enable **Require signed commits** to close the gap between "the tag
-> is signed" and "the history it points at is."
+> **Required signed commits are now enabled.** `required_signatures` is
+> `true`, so the gap between "the tag is signed" and "the history it points at
+> is" is closed: the pipeline verifies the *tag* signature, and protection
+> refuses unsigned commits underneath it. Every `git commit` for this
+> repository needs `-S`.
 
 These rules are the guarantee the release pipeline assumes: that what is tagged
 on `main` has passed CI and is composed of non-rewritten history.
