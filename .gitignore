@@ -2,6 +2,7 @@
 .artifacts/
 node_modules/
 dist/
+release-staging/
 coverage/
 playwright-report/
 test-results/
