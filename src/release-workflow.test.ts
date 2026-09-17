@@ -62,7 +62,9 @@ describe('release workflow specification', () => {
     expect(build).not.toContain(String.raw`awk '/\.\/usr`);
     // The `./` prefix must stay optional: dpkg-deb on ubuntu-22.04 lists
     // `usr/bin/opencoven-chat` with no leading `./`.
-    expect(build).toContain(String.raw`grep -qE '[[:space:]](\./)?usr/bin/[^[:space:]]'`);
+    expect(build).toContain(
+      String.raw`grep -qE '^-[rwxsStT-]{2}x.*[[:space:]](\./)?usr/bin/[^[:space:]]'`,
+    );
     expect(build).toContain('minimum_size=$((1024 * 1024))');
     expect(build).toContain('certificateThumbprint');
     expect(build).toContain('Get-AuthenticodeSignature');

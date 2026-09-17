@@ -755,10 +755,14 @@ jobs:
                 # is optional: dpkg-deb on the ubuntu-22.04 runner lists
                 # `usr/bin/opencoven-chat` with no leading `./`, and assuming
                 # the dotted form is what made the previous two versions of
-                # this check reject a perfectly good package.
+                # this check reject a perfectly good package. The leading
+                # `^-...x` requires a regular file with the owner execute bit,
+                # so the assertion proves what its message claims: a
+                # non-executable file or a symlink under usr/bin no longer
+                # satisfies it.
                 deb_contents=$(dpkg-deb --contents "${deb}")
                 if ! printf '%s\n' "${deb_contents}" |
-                  grep -qE '[[:space:]](\./)?usr/bin/[^[:space:]]'; then
+                  grep -qE '^-[rwxsStT-]{2}x.*[[:space:]](\./)?usr/bin/[^[:space:]]'; then
                   echo "::error::${deb} contains no executable payload under /usr/bin."
                   printf '%s\n' "${deb_contents}"
                   exit 1
