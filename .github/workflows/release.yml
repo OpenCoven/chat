@@ -749,12 +749,20 @@ jobs:
                 # turned that into "no payload" for every .deb ever built.
                 # Nothing reached this assertion until staging was fixed, so it
                 # went unnoticed. grep needs no such escaping. Requiring a
-                # character after `./usr/bin/` keeps the bare directory entry
-                # from satisfying it, and the product name contains a space, so
-                # only the first path component is matched on.
+                # character after `usr/bin/` keeps the bare directory entry from
+                # satisfying it, and the product name may contain a space, so
+                # only the first path component is matched on. The `./` prefix
+                # is optional: dpkg-deb on the ubuntu-22.04 runner lists
+                # `usr/bin/opencoven-chat` with no leading `./`, and assuming
+                # the dotted form is what made the previous two versions of
+                # this check reject a perfectly good package. The leading
+                # `^-...x` requires a regular file with the owner execute bit,
+                # so the assertion proves what its message claims: a
+                # non-executable file or a symlink under usr/bin no longer
+                # satisfies it.
                 deb_contents=$(dpkg-deb --contents "${deb}")
                 if ! printf '%s\n' "${deb_contents}" |
-                  grep -qE '[[:space:]]\./usr/bin/[^[:space:]]'; then
+                  grep -qE '^-[rwxsStT-]{2}x.*[[:space:]](\./)?usr/bin/[^[:space:]]'; then
                   echo "::error::${deb} contains no executable payload under /usr/bin."
                   printf '%s\n' "${deb_contents}"
                   exit 1
