@@ -165,12 +165,17 @@ The build still checks out the tag's commit, so a workflow fix on `main` can be
 rehearsed against a tag that predates it. Select `main` unless you are
 deliberately testing an older pipeline.
 
-`allow_unsigned=true` additionally skips notarization and Authenticode. That
-makes it the right switch for rehearsing the pipeline before certificates
-exist, and the wrong one for judging whether signing works: a green
-`allow_unsigned` run leaves the signing and notarization steps completely
-unexercised. Once the secrets are configured, rehearse once more *without* it
-before a real release.
+`allow_unsigned=true` does not itself skip signing: it only lets the run
+continue past the gate when platform secrets are *missing*. With all eight
+present the switch is a no-op and the Apple and Authenticode paths run
+normally.
+
+The distinction matters when rehearsing before the certificates exist. On such
+a run, each platform whose secrets are absent builds unsigned — no
+notarization, no Authenticode — so a green result says nothing about whether
+signing works. Those paths stay unexercised until a run has the material. Once
+the secrets are configured, rehearse once more *without* the switch before a
+real release.
 
 > The pipeline was first proven end to end on 2026-09-17 (four platform builds,
 > six installers, checksums verified, `publish` executed). Getting there took
@@ -420,10 +425,13 @@ gh api repos/OpenCoven/chat/branches/main/protection \
 ```
 
 > **Required signed commits are now enabled.** `required_signatures` is
-> `true`, so the gap between "the tag is signed" and "the history it points at
-> is" is closed: the pipeline verifies the *tag* signature, and protection
-> refuses unsigned commits underneath it. Every `git commit` for this
-> repository needs `-S`.
+> `true`, so every `git commit` for this repository needs `-S`.
+>
+> This narrows the gap between "the tag is signed" and "the history it points
+> at is" — it does not close it. Protection governs commits pushed to `main`
+> from now on; it does not retroactively validate ancestors already in the
+> history, and the pipeline still verifies only the tag object. A signed tag
+> can therefore still point at a history containing older unsigned commits.
 
 These rules are the guarantee the release pipeline assumes: that what is tagged
 on `main` has passed CI and is composed of non-rewritten history.
