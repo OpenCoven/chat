@@ -75,6 +75,64 @@ describe('release workflow specification', () => {
     expect(workflow).not.toMatch(/^\s*pnpm exec tauri build/m);
   });
 
+  test('stages installers outside the frontend build output', () => {
+    const build = job('build', 'publish');
+
+    // `dist/` is Vite's output directory (tauri.conf.json beforeBuildCommand
+    // `pnpm build`, frontendDist `../dist`), so it already holds index.html and
+    // assets/ by the time bundling ends. Staging installers on top of it made
+    // the 1 MiB size floor reject the 399-byte index.html, and uploaded the web
+    // assets as release artifacts where they collided across platforms in the
+    // publish job's duplicate-name check. Both only ever surfaced in a real
+    // pipeline run, which is why they are asserted here.
+    expect(build).toContain('STAGE_DIR: release-staging');
+    expect(build).toContain(`mkdir -p "\${STAGE_DIR}"`);
+    expect(build).toContain(`cp -v "\${f}" "\${STAGE_DIR}/"`);
+    expect(build).toContain(`for artifact in "\${STAGE_DIR}"/*; do`);
+    expect(build).toContain(`cd "\${STAGE_DIR}"`);
+    expect(build).toContain(`path: \${{ env.STAGE_DIR }}/**`);
+    expect(build).toContain('Get-ChildItem -Path "$env:STAGE_DIR/*"');
+
+    // No step may reach back into the frontend output directory.
+    for (const forbidden of [
+      'mkdir -p dist',
+      `cp -v "\${f}" dist/`,
+      'for artifact in dist/*',
+      'cd dist',
+      'path: dist/**',
+      "Get-ChildItem -Path 'dist/*'",
+    ]) {
+      expect(build).not.toContain(forbidden);
+    }
+  });
+
+  test('never hands Tauri incomplete Apple credentials', () => {
+    const build = job('build', 'publish');
+
+    // A missing secret arrives as the empty string rather than an unset
+    // variable, and Tauri reads a defined APPLE_CERTIFICATE as "sign this" --
+    // then runs `security import` with an empty -P and dies. The unsigned
+    // rehearsal that allow_unsigned promises depends on these being removed.
+    expect(build).toContain(`MACOS_SIGNED: \${{ steps.signing.outputs.macos_signed }}`);
+    expect(build).toMatch(
+      /if \[ "\$\{RUNNER_OS\}" = "macOS" \] && \[ "\$\{MACOS_SIGNED\}" != "true" \]; then\s+unset APPLE_CERTIFICATE/,
+    );
+
+    // "Signed" has to mean every credential the signing path consumes. Deciding
+    // it from the certificate alone let a partial environment claim signed=true
+    // under allow_unsigned, skip the unsets, and fail the bundle anyway.
+    for (const secret of [
+      'APPLE_CERTIFICATE_PASSWORD',
+      'APPLE_SIGNING_IDENTITY',
+      'APPLE_ID',
+      'APPLE_PASSWORD',
+      'APPLE_TEAM_ID',
+    ]) {
+      expect(build).toMatch(new RegExp(`\\[ -n "\\$\\{${secret}:-\\}" \\]`));
+    }
+    expect(build).toMatch(/\[ -n "\$\{WINDOWS_CERTIFICATE_PASSWORD:-\}" \]/);
+  });
+
   test('refuses to release without platform signing material', () => {
     const verify = job('verify-tag', 'build');
 

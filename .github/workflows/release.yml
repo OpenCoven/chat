@@ -437,24 +437,42 @@ jobs:
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           macos_signed=false
           windows_signed=false
           updater_signed=false
-          [ -n "${APPLE_CERTIFICATE:-}" ] && macos_signed=true
-          [ -n "${WINDOWS_CERTIFICATE:-}" ] && windows_signed=true
+          # "Signed" must mean every credential the signing path consumes, not
+          # just the certificate. The verify-tag gate demands all eight on the
+          # production path, but allow_unsigned bypasses that gate -- and a
+          # partial set there used to report signed=true, skip the unsets in
+          # `Build installers`, and fail the bundle with the very error the
+          # unsigned rehearsal exists to avoid.
+          if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] &&
+             [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ -n "${APPLE_ID:-}" ] &&
+             [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            macos_signed=true
+          fi
+          if [ -n "${WINDOWS_CERTIFICATE:-}" ] && [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; then
+            windows_signed=true
+          fi
           [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && updater_signed=true
           echo "macos_signed=${macos_signed}"     >> "$GITHUB_OUTPUT"
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
           echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
-            echo "::warning::APPLE_CERTIFICATE is not set; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
+            echo "::warning::Apple signing material is absent or incomplete; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
-            echo "::warning::WINDOWS_CERTIFICATE is not set; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
+            echo "::warning::Windows signing material is absent or incomplete; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and disabled for v0.0.1 (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
