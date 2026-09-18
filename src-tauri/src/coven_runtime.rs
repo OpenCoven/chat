@@ -1059,23 +1059,36 @@ fn replay_turns(events: &[Value]) -> Vec<(&'static str, String)> {
     turns
 }
 
+const TRUNCATION_MARKER: &str = " …[truncated by Coven Chat]";
+
+/// Truncate to `limit` bytes *including* the marker, so a truncated message
+/// never exceeds the cap it is being held to and never borrows replay budget
+/// from the turns that follow it.
 fn truncate_utf8(text: &str, limit: usize) -> String {
     if text.len() <= limit {
         return text.to_owned();
     }
-    let mut end = limit;
-    while !text.is_char_boundary(end) {
+    let mut end = limit.saturating_sub(TRUNCATION_MARKER.len());
+    while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{} …[truncated by Coven Chat]", &text[..end])
+    format!("{}{TRUNCATION_MARKER}", &text[..end])
 }
 
 /// Build the prompt for a replayed turn: the newest turns that fit in
 /// `REPLAY_LIMIT`, oldest first, followed by the user's latest message.
-fn build_replay(prompt: &str, turns: &[(&str, String)]) -> Option<Replay> {
+///
+/// `history_truncated` is the capped/missing/deleted-lineage flag from
+/// `read_captured_history`. Turns can be dropped before they ever reach the
+/// byte budget here, so the notice must report those too.
+fn build_replay(
+    prompt: &str,
+    turns: &[(&str, String)],
+    history_truncated: bool,
+) -> Option<Replay> {
     let mut selected = Vec::new();
     let mut used = 0;
-    let mut omitted = false;
+    let mut omitted = history_truncated;
     for (role, text) in turns.iter().rev() {
         let label = if *role == "user" { "User" } else { "Assistant" };
         let line = format!(
@@ -1393,7 +1406,9 @@ fn send_local(
     let replay = match &resumed {
         Some(session) if REPLAY_HARNESSES.contains(&harness.as_str()) => {
             read_captured_history(data, session, get_session)?
-                .and_then(|(events, _)| build_replay(&input.prompt, &replay_turns(&events)))
+                .and_then(|(events, partial)| {
+                    build_replay(&input.prompt, &replay_turns(&events), partial)
+                })
         }
         _ => None,
     };
@@ -2133,7 +2148,7 @@ mod tests {
                 ("assistant", "Second answer".to_string()),
             ]
         );
-        let replay = build_replay("Latest question", &turns).unwrap();
+        let replay = build_replay("Latest question", &turns, false).unwrap();
         assert_eq!(replay.replayed, 4);
         assert!(!replay.omitted);
         assert!(replay.prompt.ends_with("Latest message:\nLatest question"));
@@ -2142,8 +2157,8 @@ mod tests {
         assert!(first < second);
         assert!(!replay.prompt.contains("Bash(ls)"));
         assert!(!replay.prompt.contains("omitted"));
-        assert!(build_replay("Latest question", &[]).is_none());
-        assert!(build_replay("", &turns)
+        assert!(build_replay("Latest question", &[], false).is_none());
+        assert!(build_replay("", &turns, false)
             .unwrap()
             .prompt
             .ends_with("Latest message:\nRead the attached text files."));
@@ -2151,6 +2166,43 @@ mod tests {
             replay_notice(&replay),
             "Coven Code can't reopen this chat's earlier turns on its own, so Chat replayed the last 4 turns into this message."
         );
+    }
+
+    #[test]
+    fn engine_replay_truncation_stays_inside_the_message_cap() {
+        for text in [
+            "x".repeat(REPLAY_MESSAGE_LIMIT * 2),
+            "é".repeat(REPLAY_MESSAGE_LIMIT),
+            "🜲".repeat(REPLAY_MESSAGE_LIMIT),
+        ] {
+            let truncated = truncate_utf8(&text, REPLAY_MESSAGE_LIMIT);
+            assert!(
+                truncated.len() <= REPLAY_MESSAGE_LIMIT,
+                "{} exceeded the cap",
+                truncated.len()
+            );
+            assert!(truncated.ends_with(TRUNCATION_MARKER));
+        }
+    }
+
+    #[test]
+    fn engine_replay_reports_history_dropped_before_the_byte_budget() {
+        let turns: Vec<(&str, String)> = vec![
+            ("user", "only surviving question".to_owned()),
+            ("assistant", "only surviving answer".to_owned()),
+        ];
+        // Everything left fits, so the budget alone would report nothing missing.
+        let complete = build_replay("now", &turns, false).unwrap();
+        assert!(!complete.omitted);
+        assert!(!complete.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(!replay_notice(&complete).ends_with("Older turns were left out."));
+
+        // Capped, missing or deleted lineage must still be disclosed.
+        let partial = build_replay("now", &turns, true).unwrap();
+        assert!(partial.omitted);
+        assert_eq!(partial.replayed, complete.replayed);
+        assert!(partial.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(replay_notice(&partial).ends_with("Older turns were left out."));
     }
 
     #[test]
@@ -2164,7 +2216,7 @@ mod tests {
                 )
             })
             .collect();
-        let replay = build_replay("now", &turns).unwrap();
+        let replay = build_replay("now", &turns, false).unwrap();
         assert!(replay.omitted);
         assert!(replay.replayed >= 1 && replay.replayed < turns.len());
         assert!(
