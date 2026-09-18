@@ -1216,11 +1216,7 @@ fn truncate_utf8(text: &str, limit: usize) -> String {
 /// `history_truncated` is the capped/missing/deleted-lineage flag from
 /// `read_captured_history`. Turns can be dropped before they ever reach the
 /// byte budget here, so the notice must report those too.
-fn build_replay(
-    prompt: &str,
-    turns: &[(&str, String)],
-    history_truncated: bool,
-) -> Option<Replay> {
+fn build_replay(prompt: &str, turns: &[(&str, String)], history_truncated: bool) -> Option<Replay> {
     let mut selected = Vec::new();
     let mut used = 0;
     let mut omitted = history_truncated;
@@ -1540,10 +1536,9 @@ fn send_local(
     // history replayed into this turn; the saved input stays the user's text.
     let replay = match &resumed {
         Some(session) if REPLAY_HARNESSES.contains(&harness.as_str()) => {
-            read_captured_history(data, session, get_session)?
-                .and_then(|(events, partial)| {
-                    build_replay(&input.prompt, &replay_turns(&events), partial)
-                })
+            read_captured_history(data, session, get_session)?.and_then(|(events, partial)| {
+                build_replay(&input.prompt, &replay_turns(&events), partial)
+            })
         }
         _ => None,
     };
