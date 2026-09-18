@@ -47,8 +47,12 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
           : 'Coven reported a failed run. Inspect the session with the Coven CLI for details.';
     }
     const importedSystem = event.type === 'system' && event.source === 'cave-import';
+    // Chat's own disclosure that a turn carried replayed history (see
+    // `replay_notice` in the Rust backend); it renders as a plain notice line.
+    const replayNotice =
+      event.type === 'system' && event.subtype === 'notice' && event.source === 'chat-replay';
     if (
-      (event.type !== 'user' && event.type !== 'assistant' && !importedSystem) ||
+      (event.type !== 'user' && event.type !== 'assistant' && !importedSystem && !replayNotice) ||
       !record(event.message)
     )
       continue;
@@ -78,7 +82,7 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     if (text || attachments.length)
       messages.push({
         id: String(index),
-        role: event.type,
+        role: replayNotice ? 'notice' : event.type,
         text,
         ...(attachments.length ? { attachments } : {}),
       });
