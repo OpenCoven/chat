@@ -561,27 +561,32 @@ describe('compact viewports', () => {
     };
   }
 
-  it.each([300, 360])('keeps both rail tabs independent at width %i', (width) => {
+  it.each([300, 360])('rail tabs yield to the scrim at width %i', (width) => {
     const restore = mockViewport(width);
     try {
       const { container } = render(<ChatLayout {...layoutProps()} ready />);
       const shell = container.querySelector('.coven-chat');
-      const left = screen.getByRole('button', { name: 'Show familiars' });
+      expect(screen.getByRole('button', { name: 'Show familiars' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toBeVisible();
+
+      // With a drawer open the scrim owns the surface. A reserved tab left on
+      // top of it would swallow the click that dismisses the drawer.
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'open');
+      expect(screen.queryByRole('button', { name: 'Show inspector' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
       const right = screen.getByRole('button', { name: 'Show inspector' });
-      expect(left).toBeVisible();
       expect(right).toBeVisible();
-      left.focus();
-      fireEvent.click(left);
-      expect(right).toBeVisible();
-      expect(right.closest('[inert]')).toBeNull();
+
       right.focus();
       fireEvent.click(right);
       expect(shell).toHaveAttribute('data-sidebar', 'closed');
       expect(shell).toHaveAttribute('data-inspector', 'open');
-      expect(left).toBeVisible();
       screen.getByRole('button', { name: 'Close inspector' }).focus();
       fireEvent.keyDown(window, { key: 'Escape' });
-      expect(right).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toHaveFocus();
     } finally {
       restore();
     }
@@ -605,7 +610,10 @@ describe('compact viewports', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
 
+      // Switching rails goes through the scrim rather than tab-to-tab, so the
+      // dismiss target is never covered.
       fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
       expect(inspector).not.toHaveAttribute('aria-hidden');

@@ -272,7 +272,9 @@ export function ChatLayout(props: ChatLayoutProps) {
       <button
         type="button"
         className="coven-rail-tab coven-rail-tab--left"
-        hidden={sidebar}
+        // While the scrim is up it owns the surface; a reserved tab sitting
+        // over it would swallow the dismiss click.
+        hidden={sidebar || scrim}
         aria-label="Show familiars"
         aria-controls="coven-familiars-sidebar"
         aria-expanded={false}
@@ -289,7 +291,7 @@ export function ChatLayout(props: ChatLayoutProps) {
       <button
         type="button"
         className="coven-rail-tab coven-rail-tab--right"
-        hidden={inspector}
+        hidden={inspector || scrim}
         aria-label="Show inspector"
         aria-controls="coven-familiar-inspector"
         aria-expanded={false}
