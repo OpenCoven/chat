@@ -17,6 +17,48 @@ applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
 The application frame stays within the window and does not scroll globally.
 Conversation history, rails, and long drafts scroll inside their own regions,
 so a long reply or a short window does not push the composer off the page.
+
+Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
+**Cmd/Ctrl+Shift+\\**. These shortcuts work while composing without changing
+your text. Rail buttons include shortcut hints; modal dialogs and input-method
+composition do not trigger the shortcuts.
+
+Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
+selected familiar's name on the right. Click anywhere along a tab to reopen
+its rail. The tabs reserve their own space instead of covering chat content,
+with opaque smoky surfaces, subtle depth, and visible keyboard focus.
+
+Use **Add context** in the composer to clarify which familiar or project you
+mean. Search by name, identity, or full path (`@` filters familiars; `#` filters
+workspaces). Suggestions come from known familiars and the selected familiar's
+declared read/write project access,
+with full identities and paths to distinguish similar names. Selection inserts
+visible reference text at your cursor; it does not switch the recipient,
+delegate work, or grant file access.
+
+You can also type **`@name`** or **`#project`** directly in your message for
+inline suggestions. Use the arrow keys to choose and **Tab** to confirm, or
+**Escape** to dismiss. The optional `@{name` / `#{project` opening-brace syntax
+works too. Completed references use `@{Name}` or `#{project}` with the full
+identity or path alongside them, so similarly named choices remain unambiguous.
+Projects come from the local project registry and stored direct/group grants
+used by Cave, not inferred familiar directories or chat history. Read-only and
+write access are labeled separately; only the selected familiar's granted
+projects appear. This reads local metadata without requiring Cave to run,
+importing conversations, or modifying permissions. Without a configured
+registry/grants, no project access is assumed. Use **Refresh Coven** after
+changing grants. Email addresses and URL fragments remain ordinary text.
+
+The composer shows the reported chat project, or the familiar workspace when
+no chat project has been reported. This is observed context, not a workspace
+switch or permission grant. The reference picker opens above the app on modern
+desktop webviews so long paths do not push the composer out of view.
+
+Connection diagnostics are collapsed during normal use. Run status and Stop
+stay beside the composer; **Jump to latest** returns to new output after you
+scroll back. Replies and the composer share a responsive reading column up to
+1200px wide (36% wider than the previous 880px limit), while
+the application frame remains stationary.
 The window can shrink to 480×520: above 1100px every rail stays in the grid,
 below it the inspector folds into a drawer, and at 760px or less both rails
 become drawers that open one at a time.
@@ -59,10 +101,9 @@ saved import files are not automatically deleted or submitted to a model.
 Only app-owned history can become a familiar's canonical Chat thread.
 
 **Archive chat** keeps the saved history and hides the familiar from the active list.
-Open **User settings** at the bottom of the sidebar and enable **Show archived chats**,
-then choose **Restore chat** to return it to the active list. Archived
-chats cannot send until restored.
-Archive state survives refreshes and app restarts.
+This interface only shows active familiar chats: it has no User settings or
+archived-chat browser. Archived history is preserved, and archive state survives
+refreshes and app restarts.
 
 **Delete chat** requires confirmation and is strictly app-local: it removes the
 saved Chat transcript and that chat's local draft. It does
@@ -91,6 +132,34 @@ Unsent attachments stay in the current window. Failed or cancelled sends keep
 them available for retry or removal; successful sends retain filename/size
 metadata in history. Native staging is private and bounded to 64 MiB of
 retained files; originals are never modified.
+
+Sending clears the submitted text and attachment cards immediately. You can
+compose the next message while the familiar responds. A failed or cancelled
+send restores its attachments and restores its text only if you have not
+edited the new draft; later edits are never overwritten.
+
+## Live voice calls
+
+The initial connector uses OpenAI GPT-Live with client delegation to the
+selected familiar's existing Coven conversation. Set `OPENAI_API_KEY` in the
+environment that launches the desktop app, then restart it. The key stays in
+the native process; API access and billing are separate from a ChatGPT
+subscription. ElevenLabs is not included in this initial connector.
+
+Starting a call requires explicit consent and microphone permission. OpenAI
+receives the call audio and the familiar's returned answers; existing chat
+history is not automatically uploaded. Captions remain in memory and the app
+does not record audio. `store: false` is requested, but this is not a guarantee
+of zero provider retention. Calls include mute, end, and a ten-minute duration
+limit; starting a session itself can incur provider usage.
+
+Spoken requests use the same canonical Coven chat, without sending or clearing
+your typed draft or queued attachments. The familiar cannot be switched,
+archived, or deleted during a call. Ending a call stops microphone capture
+and cancels any request owned by that call, not unrelated typed work. A
+supported WebRTC/microphone-capable desktop webview and GPT-Live API access
+are required. Actual provider connectivity and audio quality require a
+configured key and a live call; mocked coverage is not a substitute.
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.

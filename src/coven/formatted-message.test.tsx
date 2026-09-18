@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { FormattedMessage } from './formatted-message';
 
 test('renders headings, emphasis, lists, quotes, and fenced code as formatted text', () => {
@@ -106,4 +106,51 @@ test('leaves ordinary prose, parenthesised asides, and code untouched when no to
   expect(container.querySelector('p')).toHaveTextContent(
     'Check the tooling (GitHub org, hosting) and run(x) twice.',
   );
+});
+
+test('crossed-tools calls have concise, independently expandable native argument details', () => {
+  const args = '  echo "<script>alert(1)</script>" && printf \'[link](https://example.com)\'  ';
+  const { container } = render(
+    <FormattedMessage text={`Before.⚒ Bash(${args})⚒\uFE0F Read(src/app.ts)After.`} />,
+  );
+  expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  const summary = screen.getByLabelText('Bash tool arguments');
+  const details = summary.parentElement;
+  expect(summary.tagName).toBe('SUMMARY');
+  expect(details?.tagName).toBe('DETAILS');
+  expect(details).not.toHaveAttribute('open');
+  expect(summary.querySelector('.coven-tool-args')?.textContent).toBe(args);
+  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(args);
+  expect(screen.getByLabelText('Bash raw arguments')).not.toBeVisible();
+
+  fireEvent.click(summary);
+  expect(details).toHaveAttribute('open');
+  expect(screen.getByLabelText('Bash raw arguments')).toBeVisible();
+  expect(screen.getByLabelText('Read tool arguments').parentElement).not.toHaveAttribute('open');
+  expect(container.querySelector('script, a')).toBeNull();
+  fireEvent.click(summary);
+  expect(details).not.toHaveAttribute('open');
+  expect(Array.from(container.querySelectorAll('p'), (node) => node.textContent)).toEqual([
+    'Before.',
+    'After.',
+  ]);
+});
+
+test('raw details retain multiline, empty, and truncated arguments without formatting them', () => {
+  const args = ' \tfirst\nsecond  ';
+  render(<FormattedMessage text={`⚒ Edit(${args})✳ Read()✶ Bash(echo "unfinished`} />);
+  expect(screen.getByLabelText('Edit raw arguments').textContent).toBe(args);
+  expect(screen.getByLabelText('Read raw arguments').textContent).toBe('');
+  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe('echo "unfinished');
+});
+
+test('keeps crossed-tools examples inside fenced code out of activity rows', () => {
+  const { container } = render(
+    <FormattedMessage text={'```sh\n⚒ Bash(echo "example")\n```\n\n⚒ Read(real.ts)'} />,
+  );
+  expect(container.querySelector('pre code.language-sh')).toHaveTextContent(
+    '⚒ Bash(echo "example")',
+  );
+  expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  expect(screen.getByLabelText('Read tool arguments')).toBeInTheDocument();
 });

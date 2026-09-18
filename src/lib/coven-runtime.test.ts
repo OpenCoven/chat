@@ -10,6 +10,28 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 describe('Coven runtime', () => {
+  it('validates declared read/write project metadata without inferring access', async () => {
+    const entry = { id: 'nova', name: 'nova', displayName: 'Nova' };
+    const projects = [
+      { name: 'chat', path: '/projects/chat', access: 'write' },
+      { name: 'reference', path: '/projects/reference', access: 'read' },
+    ];
+    const invoke = vi.fn().mockResolvedValue([{ ...entry, projectAccess: projects }]);
+    const runtime = createCovenRuntime({ available: () => true, invoke });
+    expect(await runtime.listFamiliars()).toEqual([{ ...entry, projectAccess: projects }]);
+    for (const projectAccess of [
+      null,
+      'all',
+      [{ name: 'chat', path: '/projects/chat', access: 'admin' }],
+      [{ name: 'chat', path: 42, access: 'read' }],
+      [{ name: '', path: '/projects/chat', access: 'read' }],
+      Array.from({ length: 1025 }, () => projects[0]),
+    ]) {
+      invoke.mockResolvedValue([{ ...entry, projectAccess }]);
+      await expect(runtime.listFamiliars()).rejects.toThrow('invalid native result');
+    }
+  });
+
   it('requires unique familiar-owned canonical heads and rejects standalone/import metadata', async () => {
     const head = {
       id: 'one',

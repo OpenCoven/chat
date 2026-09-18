@@ -21,6 +21,9 @@ use crate::coven::{CovenHealth, NativeCovenHealth};
 #[path = "chat_attachments.rs"]
 mod attachments;
 
+#[path = "familiar_projects.rs"]
+mod familiar_projects;
+
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
@@ -612,9 +615,14 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
         let familiars = value
             .as_array()
             .ok_or("Coven returned invalid familiars.")?;
+        let projects = familiar_projects::ProjectAccess::load()?;
         familiars
             .iter()
-            .map(|f| normalize_familiar(f, crate::familiar_avatar::read_avatar))
+            .map(|f| {
+                let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
+                familiar["projectAccess"] = projects.for_familiar(string(f, "id")?)?;
+                Ok(familiar)
+            })
             .collect::<Result<Vec<_>, String>>()
             .map(Value::Array)
     })

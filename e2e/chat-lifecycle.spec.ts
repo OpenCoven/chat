@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('archives and restores across reload, confirms app-local delete, and never lists tombstones', async ({
-  page,
-}) => {
+test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const session = {
       id: 'lifecycle-owned',
@@ -18,6 +16,8 @@ test('archives and restores across reload, confirms app-local delete, and never 
         async invoke(command: string, args: { id?: string; lifecycle?: string } = {}) {
           const state = localStorage.getItem('fixture-lifecycle') ?? 'active';
           switch (command) {
+            case 'coven_voice_status':
+              return { provider: 'openai', configured: false, model: 'gpt-live-1' };
             case 'coven_runtime_status':
               return { available: true, version: 'fixture' };
             case 'coven_runtime_familiars':
@@ -54,25 +54,30 @@ test('archives and restores across reload, confirms app-local delete, and never 
     });
   });
   await page.goto('/');
+});
+
+test('keeps archived chats hidden across reload without a user settings entry', async ({
+  page,
+}) => {
   await expect(page.getByText('Retained local history.')).toBeVisible();
-  const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
-  await expect(archived).not.toBeVisible();
+  await expect(page.getByText('User settings', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Show archived chats' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^(Active|Archived)$/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Archive chat', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Lifecycle familiar', exact: true })).toHaveCount(
     0,
   );
   await page.reload();
-  await expect(archived).not.toBeVisible();
-  await page.getByText('User settings', { exact: true }).click();
-  await archived.check();
-  await page.getByRole('button', { name: 'Lifecycle familiar', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Message Lifecycle familiar' })).toBeDisabled();
-  await expect(page.getByText('Retained local history.')).toBeVisible();
-  await page.getByRole('button', { name: 'Restore chat' }).click();
-  await archived.uncheck();
-  await page.getByRole('button', { name: 'Lifecycle familiar', exact: true }).click();
-  await page.reload();
+  await expect(page.getByRole('button', { name: 'Refresh Coven' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Lifecycle familiar', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText('User settings', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Show archived chats' })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBe('archived');
+});
+
+test('confirms app-local delete and never lists tombstones', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Message Lifecycle familiar' })).toBeEnabled();
   await expect(page.getByText('Retained local history.')).toBeVisible();
   await page.getByRole('button', { name: 'Delete chat', exact: true }).click();
@@ -84,7 +89,7 @@ test('archives and restores across reload, confirms app-local delete, and never 
   await expect(dialog.getByRole('button', { name: 'Delete from Chat' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBe('active');
+  expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBeNull();
   await page.getByRole('button', { name: 'Delete chat', exact: true }).click();
   await dialog.getByRole('button', { name: 'Delete from Chat' }).click();
   await expect(page.getByText('Retained local history.')).toHaveCount(0);
@@ -94,8 +99,6 @@ test('archives and restores across reload, confirms app-local delete, and never 
   await expect(page.getByText('Retained local history.')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Lifecycle familiar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete chat', exact: true })).toHaveCount(0);
-  await expect(archived).not.toBeVisible();
-  await page.getByText('User settings', { exact: true }).click();
-  await archived.check();
-  await expect(page.getByText('No archived familiars.')).toBeVisible();
+  await expect(page.getByText('User settings', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Show archived chats' })).toHaveCount(0);
 });
