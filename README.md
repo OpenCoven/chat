@@ -58,6 +58,14 @@ runtime import command, and Cave history does not appear in Chat. Previously
 saved import files are not automatically deleted or submitted to a model.
 Only app-owned history can become a familiar's canonical Chat thread.
 
+Claude Code and Codex threads continue from the harness's own session store.
+The bundled Coven Code engine cannot reopen a thread's earlier turns that way,
+so when you continue a Coven Code chat, Chat replays the most recent turns from
+its saved transcript into the new run (the newest turns first, up to 24 KiB,
+each message capped at 4 KiB) and adds a notice to the thread saying how many
+turns were replayed and whether older ones were left out. The saved transcript
+keeps only your original message, not the replayed prompt.
+
 **Archive chat** keeps the saved history and hides the familiar from the active list.
 Open **User settings** at the bottom of the sidebar and enable **Show archived chats**,
 then choose **Restore chat** to return it to the active list. Archived
