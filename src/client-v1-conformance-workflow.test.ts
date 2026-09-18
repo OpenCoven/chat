@@ -1,11 +1,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ts from 'typescript';
-import { describe, expect, test } from 'vitest';
+import { afterAll, describe, expect, test } from 'vitest';
 import { decodeWindowsSupervisorSource } from '../scripts/windows-supervisor-source.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -678,6 +679,136 @@ ${childBootstrap.slice(validationStart, validationEnd)}
       expect(authorityFetch).not.toContain(`'refs/opencoven/${tag}'`);
     },
   );
+});
+
+function producerRevisionScript(workflow: string): string {
+  const job = workflowJob(workflow, 'producer-revision');
+  const marker = '        run: |\n';
+  const start = job.indexOf(marker);
+  if (start < 0) {
+    throw new Error('producer-revision job does not define a resolve script');
+  }
+  const lines: string[] = [];
+  for (const line of job.slice(start + marker.length).split('\n')) {
+    if (line.trim() !== '' && !line.startsWith('          ')) break;
+    lines.push(line.slice(10));
+  }
+  return lines.join('\n');
+}
+
+type ResolveOutcome = { status: number; revision: string; stderr: string };
+
+function runProducerResolve(
+  script: string,
+  repository: string,
+  dispatchSha: string,
+  requested: string | undefined,
+): ResolveOutcome {
+  const outputPath = resolve(repository, 'github-output');
+  writeFileSync(outputPath, '');
+  const result = spawnSync('bash', ['-c', script], {
+    cwd: repository,
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: {
+      ...process.env,
+      GITHUB_OUTPUT: outputPath,
+      OPENCOVEN_DISPATCH_SHA: dispatchSha,
+      ...(requested === undefined ? {} : { OPENCOVEN_PRODUCER_REVISION_INPUT: requested }),
+    },
+  });
+  const emitted = readFileSync(outputPath, 'utf8');
+  const match = /^revision=([0-9a-f]{40})$/mu.exec(emitted);
+  return {
+    status: result.status ?? -1,
+    revision: match?.[1] ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+describe('producer revision ancestry gate', () => {
+  const script = producerRevisionScript(readFileSync(workflowPath, 'utf8'));
+  const repository = mkdtempSync(resolve(tmpdir(), 'opencoven-producer-ref-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', args, {
+      cwd: repository,
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Conformance',
+        GIT_AUTHOR_EMAIL: 'conformance@example.invalid',
+        GIT_COMMITTER_NAME: 'Conformance',
+        GIT_COMMITTER_EMAIL: 'conformance@example.invalid',
+      },
+    }).trim();
+
+  git('init', '--quiet', '--initial-branch=main', '.');
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'base');
+  const merged = git('rev-parse', 'HEAD');
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'tip');
+  const tip = git('rev-parse', 'HEAD');
+  git('checkout', '--quiet', '-b', 'unmerged', merged);
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'unmerged');
+  const unmerged = git('rev-parse', 'HEAD');
+  git('checkout', '--quiet', 'main');
+
+  afterAll(() => {
+    rmSync(repository, { force: true, recursive: true });
+  });
+
+  test('defaults to the dispatch tip when no revision is requested', () => {
+    const outcome = runProducerResolve(script, repository, tip, undefined);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(tip);
+  });
+
+  test('accepts an exact merged ancestor of the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, tip, merged);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(merged);
+  });
+
+  test('accepts the dispatch tip named explicitly', () => {
+    const outcome = runProducerResolve(script, repository, tip, tip);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(tip);
+  });
+
+  test('refuses a commit that is not merged into the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, tip, unmerged);
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('only merged revisions may be validated');
+  });
+
+  test('refuses a descendant of the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, merged, tip);
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('only merged revisions may be validated');
+  });
+
+  test.each([
+    ['an abbreviated revision', (value: string) => value.slice(0, 12)],
+    // Fixed rather than derived: an all-digit fixture SHA would upper-case to
+    // itself and silently stop exercising the lowercase rule.
+    ['an uppercase revision', () => 'ABCDEF' + '0'.repeat(34)],
+    ['a ref name rather than a commit', () => 'main'],
+    ['an empty revision', () => ' '],
+  ])('refuses %s', (_label, transform) => {
+    const outcome = runProducerResolve(script, repository, tip, transform(merged));
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('exact lowercase 40-hex commit');
+  });
+
+  test('refuses a well-formed revision that is absent from the repository', () => {
+    const outcome = runProducerResolve(script, repository, tip, 'b'.repeat(40));
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('not a commit in this repository');
+  });
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
