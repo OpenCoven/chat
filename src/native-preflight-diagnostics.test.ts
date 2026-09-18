@@ -68,6 +68,7 @@ test.each([
   'installation-rpc',
   'installation-id',
   'installation-secure-store-unavailable',
+  'installation-custody-unsupported',
   'installation-lock-unavailable',
   'installation-entry-unavailable',
   'installation-read-unavailable',
@@ -134,6 +135,7 @@ class InstallationChild extends EventEmitter {
 
 test.each([
   ['response', 'secure_store_unavailable', 'secure-store-unavailable'],
+  ['response', 'installation_custody_unsupported', 'custody-unsupported'],
   ['response', 'installation_lock_unavailable', 'lock-unavailable'],
   ['response', 'installation_entry_unavailable', 'entry-unavailable'],
   ['response', 'installation_read_unavailable', 'read-unavailable'],

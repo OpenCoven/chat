@@ -88,6 +88,8 @@ pub(crate) enum KeyringError {
     Unavailable,
     #[cfg(feature = "phase1-conformance")]
     InstallationUnavailable(InstallationStage),
+    #[cfg(feature = "phase1-conformance")]
+    CustodyInstallationUnsupported,
     Failure,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRejected,
@@ -168,6 +170,10 @@ impl KeyringError {
                 },
                 true,
             ),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CustodyInstallationUnsupported => {
+                NativeDiagnostic::new("installation_custody_unsupported", true)
+            }
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
@@ -358,8 +364,13 @@ pub(crate) enum CredentialSlot {
 }
 
 pub(crate) trait CredentialCustody: Send + Sync {
+    // A custody implementation that does not override this is a distinct
+    // condition from an unavailable secure store; keep them separable.
     fn installation_id(&self) -> Result<String, KeyringError> {
-        Err(KeyringError::Unavailable)
+        #[cfg(feature = "phase1-conformance")]
+        return Err(KeyringError::CustodyInstallationUnsupported);
+        #[cfg(not(feature = "phase1-conformance"))]
+        return Err(KeyringError::Unavailable);
     }
 
     /// `Ok(None)` when no session is stored. An unreadable record is an
@@ -2548,6 +2559,63 @@ mod tests {
                 KeyringError::Failure
             ));
         }
+    }
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn unsupported_custody_installation_is_distinct_from_an_unavailable_store() {
+        // A custody type that does not override installation_id must not be
+        // reported as an unavailable secure store; the two are separate causes.
+        struct BareCustody;
+        impl super::CredentialCustody for BareCustody {
+            fn read(&self, _: &str, _: &str) -> Result<super::Credential, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn read_for_pairing_update(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Result<super::CredentialSlot, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn store_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: Option<&super::Credential>,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn replace_stale_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn delete_if_matches(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+        }
+        let error = super::CredentialCustody::installation_id(&BareCustody)
+            .expect_err("the default custody implementation must fail");
+        assert!(matches!(
+            error,
+            KeyringError::CustodyInstallationUnsupported
+        ));
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code, "installation_custody_unsupported");
+        assert_ne!(diagnostic.code, KeyringError::Unavailable.diagnostic().code);
+        assert!(diagnostic.retryable);
     }
     #[cfg(unix)]
     use super::{
