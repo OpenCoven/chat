@@ -305,7 +305,19 @@ impl Drop for StoredSession {
 }
 
 #[allow(dead_code)]
+/// The one field invariant for a stored session. Reads and writes share it so
+/// a write cannot persist a record that every later read rejects.
+fn session_fields_are_complete(session: &StoredSession) -> bool {
+    !session.access_token.is_empty()
+        && !session.refresh_token.is_empty()
+        && !session.subject.is_empty()
+        && !session.email.is_empty()
+}
+
 fn serialize_session(session: &StoredSession) -> Result<Zeroizing<Vec<u8>>, KeyringError> {
+    if !session_fields_are_complete(session) {
+        return Err(KeyringError::Failure);
+    }
     let bytes = Zeroizing::new(serde_json::to_vec(session).map_err(|_| KeyringError::Failure)?);
     if bytes.len() > MAX_SESSION_RECORD_BYTES {
         return Err(KeyringError::Failure);
@@ -319,11 +331,7 @@ fn parse_stored_session(raw: &[u8]) -> Result<StoredSession, KeyringError> {
         return Err(KeyringError::Failure);
     }
     let session: StoredSession = serde_json::from_slice(raw).map_err(|_| KeyringError::Failure)?;
-    if session.access_token.is_empty()
-        || session.refresh_token.is_empty()
-        || session.subject.is_empty()
-        || session.email.is_empty()
-    {
+    if !session_fields_are_complete(&session) {
         return Err(KeyringError::Failure);
     }
     Ok(session)
@@ -374,6 +382,16 @@ pub(crate) trait CredentialCustody: Send + Sync {
         Err(KeyringError::Unavailable)
     }
 
+    /// Compare-and-delete. `Ok(false)` means the stored record is not the one
+    /// the caller read, so a stale sign-out cannot remove a newer session.
+    #[allow(dead_code)]
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        let _ = expected;
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Unconditional removal, for explicit force-cleanup paths only. Prefer
+    /// `delete_session_if_matches` wherever the caller has read the record.
     #[allow(dead_code)]
     fn delete_session(&self) -> Result<(), KeyringError> {
         Err(KeyringError::Unavailable)
@@ -2150,8 +2168,12 @@ impl CredentialCustody for NativeKeyring {
         match entry.get_secret() {
             Ok(bytes) => {
                 let bytes = Zeroizing::new(bytes);
+                // Parse first. Migrating persistence rewrites the entry, and an
+                // unreadable record must surface as an error with its bytes
+                // left alone rather than being migrated on the way out.
+                let session = parse_stored_session(bytes.as_slice())?;
                 ensure_windows_local_persistence(&entry, bytes.as_slice())?;
-                parse_stored_session(bytes.as_slice()).map(Some)
+                Ok(Some(session))
             }
             Err(KeyringBackendError::NoEntry) => Ok(None),
             Err(error) => Err(map_keyring_error(error)),
@@ -2183,6 +2205,29 @@ impl CredentialCustody for NativeKeyring {
         entry.set_secret(&bytes).map_err(map_keyring_error)?;
         ensure_windows_local_persistence(&entry, &bytes)?;
         Ok(true)
+    }
+
+    /// Compare-and-delete. `Ok(false)` means the stored record changed after
+    /// the caller read it, so a stale sign-out or cleanup cannot remove the
+    /// session a concurrent refresh just wrote.
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Zeroizing::new(bytes),
+            Err(KeyringBackendError::NoEntry) => return Ok(false),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = serialize_session(expected)?;
+        if current.as_slice() != expected_bytes.as_slice() {
+            return Ok(false);
+        }
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(true),
+            Err(error) => Err(map_keyring_error(error)),
+        }
     }
 
     fn delete_session(&self) -> Result<(), KeyringError> {
@@ -3501,6 +3546,42 @@ mod tests {
             parse_stored_session(empty),
             Err(KeyringError::Failure)
         ));
+    }
+
+    #[test]
+    fn a_write_cannot_persist_a_record_that_every_read_would_reject() {
+        let complete = StoredSession {
+            access_token: "a".repeat(10),
+            refresh_token: "r".repeat(10),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        assert!(serialize_session(&complete).is_ok());
+
+        // Each field the read path requires must also stop the write path,
+        // otherwise a record can be stored that can never be read back.
+        for blank in [
+            |s: &mut StoredSession| s.access_token.clear(),
+            |s: &mut StoredSession| s.refresh_token.clear(),
+            |s: &mut StoredSession| s.subject.clear(),
+            |s: &mut StoredSession| s.email.clear(),
+        ] {
+            let mut record = StoredSession {
+                access_token: complete.access_token.clone(),
+                refresh_token: complete.refresh_token.clone(),
+                expires_at: complete.expires_at,
+                checked_at: complete.checked_at,
+                subject: complete.subject.clone(),
+                email: complete.email.clone(),
+            };
+            blank(&mut record);
+            assert!(
+                matches!(serialize_session(&record), Err(KeyringError::Failure)),
+                "an incomplete record was accepted for writing"
+            );
+        }
     }
 
     #[cfg(feature = "phase1-conformance")]
