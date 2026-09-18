@@ -615,12 +615,23 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
         let familiars = value
             .as_array()
             .ok_or("Coven returned invalid familiars.")?;
-        let projects = familiar_projects::ProjectAccess::load()?;
+        // Project access is optional metadata read from Cave's files. A store
+        // that is unreadable, malformed, or newer than this build must cost
+        // the suggestions, never the familiar list itself.
+        let projects = match familiar_projects::ProjectAccess::load() {
+            Ok(projects) => projects,
+            Err(error) => {
+                eprintln!("Coven Chat: project access unavailable ({error}).");
+                familiar_projects::ProjectAccess::default()
+            }
+        };
         familiars
             .iter()
             .map(|f| {
                 let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
-                familiar["projectAccess"] = projects.for_familiar(string(f, "id")?)?;
+                familiar["projectAccess"] = projects
+                    .for_familiar(string(f, "id")?)
+                    .unwrap_or_else(|_| Value::Array(Vec::new()));
                 Ok(familiar)
             })
             .collect::<Result<Vec<_>, String>>()

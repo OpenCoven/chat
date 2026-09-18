@@ -70,9 +70,12 @@ function selectCanonical(
   previous: Navigation,
   familiars: readonly CovenFamiliar[],
   sessions: readonly CovenSession[],
+  archived: boolean,
 ): Navigation {
   const eligible = familiars.filter(
-    (familiar) => !sessions.find((session) => session.familiarId === familiar.id)?.archived,
+    (familiar) =>
+      Boolean(sessions.find((session) => session.familiarId === familiar.id)?.archived) ===
+      archived,
   );
   const familiarId = eligible.some((item) => item.id === previous.familiarId)
     ? previous.familiarId
@@ -111,6 +114,8 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
   const voiceActiveRef = useRef(false);
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
+  const [archived, setArchived] = useState(false);
+  const archivedRef = useRef(false);
   const [changingLifecycle, setChangingLifecycle] = useState(false);
   const lifecyclePending = useRef<symbol | null>(null);
   const [attachments, setAttachments] = useState<Record<string, ChatAttachment[]>>({});
@@ -166,7 +171,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         setSessions(nextSessions);
         setAvailable(true);
         setStatus(`Coven ${health.version ?? 'CLI'} · local sessions`);
-        navigate(selectCanonical(navigationRef.current, nextFamiliars, nextSessions));
+        navigate(
+          selectCanonical(navigationRef.current, nextFamiliars, nextSessions, archivedRef.current),
+        );
       } catch (failure) {
         if (lifetime.current === life) {
           setError(errorText(failure));
@@ -369,7 +376,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           const nextSessions = await runtime.listSessions();
           if (lifetime.current === life) {
             setSessions(nextSessions);
-            navigate(selectCanonical(navigationRef.current, familiars, nextSessions));
+            navigate(
+              selectCanonical(navigationRef.current, familiars, nextSessions, archivedRef.current),
+            );
           }
         } catch (failure) {
           if (lifetime.current === life) {
@@ -488,7 +497,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         ),
       );
       setEvents([]);
-      navigate(selectCanonical({ ...latest, drafts }, familiars, nextSessions));
+      navigate(
+        selectCanonical({ ...latest, drafts }, familiars, nextSessions, archivedRef.current),
+      );
     } catch (failure) {
       if (lifetime.current === life) setError(errorText(failure));
     } finally {
@@ -505,6 +516,13 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
 
   return (
     <ChatLayout
+      archivedFilter={archived}
+      onArchivedFilter={(value) => {
+        if (lifecyclePending.current) return;
+        archivedRef.current = value;
+        setArchived(value);
+        navigate(selectCanonical(navigationRef.current, familiars, sessions, value));
+      }}
       selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
       readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
       lifecycleBusy={changingLifecycle}
@@ -568,7 +586,12 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         if (lifecyclePending.current || voiceActiveRef.current) return;
         setError('');
         navigate(
-          selectCanonical({ ...navigationRef.current, familiarId: id }, familiars, sessions),
+          selectCanonical(
+            { ...navigationRef.current, familiarId: id },
+            familiars,
+            sessions,
+            archivedRef.current,
+          ),
         );
       }}
       onDraft={(value) => {

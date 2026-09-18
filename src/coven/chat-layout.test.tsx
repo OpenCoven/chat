@@ -268,11 +268,40 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'Archived familiar' })).not.toBeInTheDocument();
   });
 
-  it('does not offer user settings or an archived-chat view', () => {
-    render(<ChatLayout {...layoutProps()} />);
+  it('offers the archived-chat view only when the host can change it', () => {
+    const { unmount } = render(<ChatLayout {...layoutProps()} />);
     expect(screen.queryByText('User settings')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Show archived chats' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Archived chats' })).not.toBeInTheDocument();
+    unmount();
+
+    const onArchivedFilter = vi.fn();
+    render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
+    const toggle = screen.getByRole('checkbox', { name: 'Show archived chats' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(onArchivedFilter).toHaveBeenCalledWith(true);
+  });
+
+  it('reaches archived chats so they can be restored', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: [
+        { id: 'live', name: 'Active familiar' },
+        { id: 'gone', name: 'Archived familiar' },
+      ],
+      sessions: [
+        { id: 's1', familiarId: 'live', title: 'Active familiar' },
+        { id: 's2', familiarId: 'gone', title: 'Archived familiar', archived: true },
+      ],
+    };
+    const { unmount } = render(<ChatLayout {...props} />);
+    expect(screen.queryByRole('button', { name: 'Archived familiar' })).not.toBeInTheDocument();
+    unmount();
+
+    // Archiving must not strand a chat: the archived view is the route back.
+    render(<ChatLayout {...props} archivedFilter onArchivedFilter={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Archived familiar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Active familiar' })).not.toBeInTheDocument();
   });
 
   it('shows one row per familiar rather than one row per ledger session', () => {

@@ -63,6 +63,8 @@ export type ChatLayoutProps = Readonly<{
   connected: boolean;
   readOnly?: boolean;
   selectedArchived?: boolean;
+  archivedFilter?: boolean;
+  onArchivedFilter?: (archived: boolean) => void;
   lifecycleBusy?: boolean;
   /** Runtime unavailable: archive/restore/delete must not mutate stale state. */
   lifecycleLocked?: boolean;
@@ -240,7 +242,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   const agents = props.familiars.filter(
     (item) =>
       item.name.toLowerCase().includes(query.toLowerCase()) &&
-      !props.sessions.some((session) => session.familiarId === item.id && session.archived),
+      props.sessions.some((session) => session.familiarId === item.id && session.archived) ===
+        Boolean(props.archivedFilter),
   );
   return (
     <div
@@ -367,10 +370,30 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <span className="fr-empty-text">
                   {query
                     ? 'No matching familiars.'
-                    : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
+                    : props.archivedFilter
+                      ? 'No archived familiars.'
+                      : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
                 </span>
               </div>
             ) : null}
+          </div>
+          <div className="fr-sidebar-foot coven-user-settings">
+            {props.onArchivedFilter ? (
+              <details>
+                <summary>User settings</summary>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(props.archivedFilter)}
+                    disabled={props.lifecycleBusy}
+                    onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
+                  />
+                  Show archived chats
+                </label>
+              </details>
+            ) : (
+              'Coven CLI'
+            )}
           </div>
         </div>
       </aside>

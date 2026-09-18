@@ -138,29 +138,6 @@ compose the next message while the familiar responds. A failed or cancelled
 send restores its attachments and restores its text only if you have not
 edited the new draft; later edits are never overwritten.
 
-## Live voice calls
-
-The initial connector uses OpenAI GPT-Live with client delegation to the
-selected familiar's existing Coven conversation. Set `OPENAI_API_KEY` in the
-environment that launches the desktop app, then restart it. The key stays in
-the native process; API access and billing are separate from a ChatGPT
-subscription. ElevenLabs is not included in this initial connector.
-
-Starting a call requires explicit consent and microphone permission. OpenAI
-receives the call audio and the familiar's returned answers; existing chat
-history is not automatically uploaded. Captions remain in memory and the app
-does not record audio. `store: false` is requested, but this is not a guarantee
-of zero provider retention. Calls include mute, end, and a ten-minute duration
-limit; starting a session itself can incur provider usage.
-
-Spoken requests use the same canonical Coven chat, without sending or clearing
-your typed draft or queued attachments. The familiar cannot be switched,
-archived, or deleted during a call. Ending a call stops microphone capture
-and cancels any request owned by that call, not unrelated typed work. A
-supported WebRTC/microphone-capable desktop webview and GPT-Live API access
-are required. Actual provider connectivity and audio quality require a
-configured key and a live call; mocked coverage is not a substitute.
-
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
 Raw HTML is disabled and remote Markdown images are not fetched automatically.

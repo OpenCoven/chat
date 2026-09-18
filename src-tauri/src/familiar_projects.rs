@@ -107,6 +107,7 @@ impl Sources {
     }
 }
 
+#[derive(Default)]
 pub(super) struct ProjectAccess {
     projects: BTreeMap<String, Project>,
     permissions: Permissions,
@@ -206,10 +207,15 @@ impl ProjectAccess {
                     existing.insert(root, project);
                 }
                 Ok(_) => {}
+                // Fail closed for this project only. Project access is optional
+                // metadata, so one unreadable root must not remove every
+                // familiar from the list.
                 Err(error)
                     if matches!(
                         error.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                        io::ErrorKind::NotFound
+                            | io::ErrorKind::NotADirectory
+                            | io::ErrorKind::PermissionDenied
                     ) => {}
                 Err(error) => {
                     return Err(format!("Cannot inspect Cave project directory: {error}"))
@@ -298,7 +304,10 @@ fn normalize_path(value: &str, home: &Path) -> Option<PathBuf> {
             component => normalized.push(component),
         }
     }
-    Some(normalized)
+    // `..` can pop past the root: "/../../tmp" walks down to an empty buffer
+    // and then pushes "tmp", which would be resolved against the process
+    // working directory instead of being rejected.
+    normalized.is_absolute().then_some(normalized)
 }
 
 fn timestamp(project: &Project) -> Option<i64> {
@@ -391,7 +400,15 @@ fn read_store<T: DeserializeOwned>(
 ) -> Result<Option<T>, String> {
     let file = match open_metadata(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        // `Unsupported` is the no-follow reader declining to read at all on
+        // this platform. That is an absent store, not a broken one; failing
+        // here would take every familiar down with it.
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::Unsupported
+            ) =>
+        {
             return match legacy {
                 Some(legacy) => read_store(legacy, None),
                 None => Ok(None),
@@ -618,6 +635,60 @@ mod tests {
     }
 
     #[test]
+    fn parent_traversal_clamps_at_the_root_and_stays_absolute() {
+        let home = Path::new("/home/val");
+        // `PathBuf::pop` is a no-op once the buffer is the root, so surplus
+        // `..` segments are absorbed rather than producing a relative path
+        // that would later resolve against the working directory.
+        for (value, expected) in [
+            ("/../../tmp", "/tmp"),
+            ("/..", "/"),
+            ("/a/../../tmp", "/tmp"),
+            ("/a/../b", "/b"),
+        ] {
+            let normalized = normalize_path(value, home).expect("absolute input stays absolute");
+            assert_eq!(normalized, PathBuf::from(expected), "{value}");
+            assert!(normalized.is_absolute(), "{value} became relative");
+        }
+        assert_eq!(normalize_path("relative/path", home), None);
+    }
+
+    #[test]
+    fn one_unreadable_project_root_does_not_hide_the_others() {
+        let f = Fixture::new();
+        let readable = f.project("readable");
+        let denied = f.project("denied");
+        // Make the parent unsearchable so stat on the child is PermissionDenied
+        // rather than NotFound.
+        let cage = f.0.join("cage");
+        fs::create_dir_all(cage.join("inner")).unwrap();
+        let mut blocked = denied.clone();
+        blocked["id"] = json!("blocked");
+        blocked["root"] = json!(cage.join("inner"));
+        fs::set_permissions(&cage, fs::Permissions::from_mode(0o000)).unwrap();
+
+        f.write(
+            json!([readable, blocked]),
+            json!({"version":2,"projectGrants":[
+                {"familiarId":"sage","projectId":"readable"},
+                {"familiarId":"sage","projectId":"blocked"}
+            ]}),
+        );
+        let access = f.load().expect("an unreadable root must not fail the load");
+        let entries = access.for_familiar("sage").unwrap();
+        let names: HashSet<String> = entries
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert!(names.contains("Project readable"));
+        assert!(!names.iter().any(|name| name.contains("blocked")));
+
+        fs::set_permissions(&cage, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
     fn malformed_invalid_access_versions_and_ambiguous_ids_fail() {
         let f = Fixture::new();
         for key in ["name", "root"] {
@@ -662,7 +733,7 @@ mod tests {
         fs::set_permissions(&f.0, fs::Permissions::from_mode(0o500)).unwrap();
         f.load().unwrap();
         assert_eq!(fs::read(f.sources().permissions).unwrap(), before);
-        fs::set_permissions(f.sources().permissions, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(f.sources().permissions, fs::Permissions::from_mode(0o0)).unwrap();
         if unsafe { libc::geteuid() } != 0 {
             assert!(f.load().is_err());
         }
